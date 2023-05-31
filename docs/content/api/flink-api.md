@@ -142,3 +142,102 @@ public class ReadFromTable {
     }
 }
 ```
+
+## Cdc ingestion Table
+
+Paimon supports ingest data into Paimon tables with schema evolution.
+- You can use Java API to write cdc records into Paimon Tables.
+- You can write records to Paimon's partial-update table with adding columns dynamically.
+
+Here is an example to use `CdcSinkBuilder` API:
+
+```java
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.sink.cdc.CdcRecord;
+import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+
+import java.util.List;
+import java.util.Optional;
+
+public class WriteCdcToTable {
+
+    public static void writeTo() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        // create a Cdc DataStream
+        DataStream<String> dataStream =
+                env.fromElements(
+                        "INSERT INTO T VALUES (1, 1)",
+                        "INSERT INTO T VALUES (2, 2)",
+                        "ALTER TABLE T ADD (c INT)",
+                        "INSERT INTO T VALUES (3, 3, 3)",
+                        "INSERT INTO T VALUES (4, 4, 4)");
+
+        CdcSinkBuilder<String> builder = new CdcSinkBuilder<>();
+        builder.withInput(dataStream);
+        builder.withTable(createTableIfNotExists());
+        builder.withParserFactory(new EventParserFactory());
+        builder.build();
+
+        env.execute();
+    }
+
+    private static Table createTableIfNotExists() throws Exception {
+        CatalogContext context = CatalogContext.create(new Path("..."));
+        Catalog catalog = CatalogFactory.createCatalog(context);
+
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.primaryKey("a");
+        schemaBuilder.column("a", DataTypes.INT());
+        schemaBuilder.column("b", DataTypes.INT());
+        Schema schema = schemaBuilder.build();
+        Identifier identifier = Identifier.create("my_db", "T");
+        try {
+            catalog.createTable(identifier, schema, false);
+        } catch (Catalog.TableAlreadyExistException e) {
+            // do something
+        }
+        return catalog.getTable(identifier);
+    }
+
+    private static class EventParserFactory implements EventParser.Factory<String> {
+
+        @Override
+        public EventParser<String> create() {
+            return new EventParser<String>() {
+
+                private String event;
+
+                @Override
+                public void setRawEvent(String rawEvent) {
+                    event = rawEvent;
+                }
+
+                @Override
+                public List<DataField> parseSchemaChange() {
+                    // parse from ADD (c INT)
+                    return ...;
+                }
+
+                @Override
+                public List<CdcRecord> parseRecords() {
+                    // parse from VALUES (1, 1)
+                    return ...;
+                }
+            };
+        }
+    }
+}
+```

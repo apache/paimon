@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
@@ -115,7 +114,6 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
-    @VisibleForTesting
     public Catalog catalog() {
         return catalog;
     }

@@ -68,6 +68,47 @@ For streaming queries, `partial-update` merge engine must be used together with 
 Partial cannot receive `DELETE` messages because the behavior cannot be defined. You can configure `partial-update.ignore-delete` to ignore `DELETE` messages.
 {{< /hint >}}
 
+#### Sequence Group
+
+A sequence-field may not solve the disorder problem of partial-update tables with multiple stream updates, because
+the sequence-field may be overwritten by the latest data of another stream during multi-stream update.
+
+So we introduce sequence group mechanism for partial-update tables. It can solve:
+
+1. Disorder during multi-stream update. Each stream defines its own sequence-groups.
+2. A true partial-update, not just a non-null update.
+
+See example:
+
+```sql
+CREATE TABLE T (
+    k INT,
+    a INT,
+    b INT,
+    g_1 INT,
+    c INT,
+    d INT,
+    g_2 INT,
+    PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+    'merge-engine'='partial-update',
+    'fields.g_1.sequence-group'='a,b',
+    'fields.g_2.sequence-group'='c,d'
+);
+
+INSERT INTO T VALUES (1, 1, 1, 1, 1, 1, 1);
+
+-- g_2 is null, c, d should not be updated
+INSERT INTO T VALUES (1, 2, 2, 2, 2, 2, CAST(NULL AS INT));
+
+SELECT * FROM T; -- output 1, 2, 2, 2, 1, 1, 1
+
+-- g_1 is smaller, a, b should not be updated
+INSERT INTO T VALUES (1, 3, 3, 1, 3, 3, 3);
+
+SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
+```
+
 ### Aggregation
 
 {{< hint info >}}

@@ -41,27 +41,26 @@ import java.util.List;
  * <p>Useful for committing snapshots containing records. For example snapshots produced by table
  * store writers.
  */
-public class RestoreAndFailCommittableStateManager
-        implements CommittableStateManager<ManifestCommittable> {
+public class RestoreAndFailCommittableStateManager<GlobalCommitT>
+        implements CommittableStateManager<GlobalCommitT> {
 
     private static final long serialVersionUID = 1L;
 
     /** The committable's serializer. */
-    private final SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
+    private final SerializableSupplier<SimpleVersionedSerializer<GlobalCommitT>>
             committableSerializer;
 
-    /** ManifestCommittable state of this job. Used to filter out previous successful commits. */
-    private ListState<ManifestCommittable> streamingCommitterState;
+    /** GlobalCommitT state of this job. Used to filter out previous successful commits. */
+    private ListState<GlobalCommitT> streamingCommitterState;
 
     public RestoreAndFailCommittableStateManager(
-            SerializableSupplier<SimpleVersionedSerializer<ManifestCommittable>>
-                    committableSerializer) {
+            SerializableSupplier<SimpleVersionedSerializer<GlobalCommitT>> committableSerializer) {
         this.committableSerializer = committableSerializer;
     }
 
     @Override
     public void initializeState(
-            StateInitializationContext context, Committer<?, ManifestCommittable> committer)
+            StateInitializationContext context, Committer<?, GlobalCommitT> committer)
             throws Exception {
         streamingCommitterState =
                 new SimpleVersionedListState<>(
@@ -71,14 +70,13 @@ public class RestoreAndFailCommittableStateManager
                                                 "streaming_committer_raw_states",
                                                 BytePrimitiveArraySerializer.INSTANCE)),
                         committableSerializer.get());
-        List<ManifestCommittable> restored = new ArrayList<>();
+        List<GlobalCommitT> restored = new ArrayList<>();
         streamingCommitterState.get().forEach(restored::add);
         streamingCommitterState.clear();
         recover(restored, committer);
     }
 
-    private void recover(
-            List<ManifestCommittable> committables, Committer<?, ManifestCommittable> committer)
+    private void recover(List<GlobalCommitT> committables, Committer<?, GlobalCommitT> committer)
             throws Exception {
         committables = committer.filterRecoveredCommittables(committables);
         if (!committables.isEmpty()) {
@@ -92,7 +90,7 @@ public class RestoreAndFailCommittableStateManager
     }
 
     @Override
-    public void snapshotState(StateSnapshotContext context, List<ManifestCommittable> committables)
+    public void snapshotState(StateSnapshotContext context, List<GlobalCommitT> committables)
             throws Exception {
         streamingCommitterState.update(committables);
     }

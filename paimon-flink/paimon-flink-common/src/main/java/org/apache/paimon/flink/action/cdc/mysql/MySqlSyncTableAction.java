@@ -20,13 +20,12 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncTableSinkBuilder;
-import org.apache.paimon.options.CatalogOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -86,19 +85,17 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *       are supported.
  * </ul>
  */
-public class MySqlSyncTableAction implements Action {
+public class MySqlSyncTableAction extends ActionBase {
 
     private final Configuration mySqlConfig;
-    private final String warehouse;
     private final String database;
     private final String table;
     private final List<String> partitionKeys;
     private final List<String> primaryKeys;
     private final List<String> computedColumnArgs;
-    private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
-    MySqlSyncTableAction(
+    public MySqlSyncTableAction(
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
@@ -119,7 +116,7 @@ public class MySqlSyncTableAction implements Action {
                 tableConfig);
     }
 
-    MySqlSyncTableAction(
+    public MySqlSyncTableAction(
             Map<String, String> mySqlConfig,
             String warehouse,
             String database,
@@ -129,23 +126,19 @@ public class MySqlSyncTableAction implements Action {
             List<String> computedColumnArgs,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
+        super(warehouse, catalogConfig);
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
-        this.warehouse = warehouse;
         this.database = database;
         this.table = table;
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
         this.computedColumnArgs = computedColumnArgs;
-        this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
         MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
 
-        Catalog catalog =
-                FlinkCatalogFactory.createPaimonCatalog(
-                        Options.fromMap(catalogConfig).set(CatalogOptions.WAREHOUSE, warehouse));
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {
@@ -191,8 +184,8 @@ public class MySqlSyncTableAction implements Action {
         EventParser.Factory<String> parserFactory =
                 () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, computedColumns);
 
-        FlinkCdcSyncTableSinkBuilder<String> sinkBuilder =
-                new FlinkCdcSyncTableSinkBuilder<String>()
+        CdcSinkBuilder<String> sinkBuilder =
+                new CdcSinkBuilder<String>()
                         .withInput(
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
@@ -391,6 +384,6 @@ public class MySqlSyncTableAction implements Action {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
-        env.execute(String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
+        execute(env, String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
     }
 }

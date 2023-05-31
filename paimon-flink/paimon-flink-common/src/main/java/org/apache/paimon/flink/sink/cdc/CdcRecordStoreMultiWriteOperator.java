@@ -26,6 +26,7 @@ import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StateUtils;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -41,6 +42,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
+import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 
 /**
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
@@ -65,7 +67,9 @@ public class CdcRecordStoreMultiWriteOperator
     public CdcRecordStoreMultiWriteOperator(
             Catalog.Loader catalogLoader,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            String initialCommitUser) {
+            String initialCommitUser,
+            Options options) {
+        super(options);
         this.catalogLoader = catalogLoader;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
@@ -95,8 +99,8 @@ public class CdcRecordStoreMultiWriteOperator
     public void processElement(StreamRecord<CdcMultiplexRecord> element) throws Exception {
         CdcMultiplexRecord record = element.getValue();
 
-        String databaseName = record.getDatabaseName();
-        String tableName = record.getTableName();
+        String databaseName = record.databaseName();
+        String tableName = record.tableName();
         Identifier tableId = Identifier.create(databaseName, tableName);
 
         table = tables.get(tableId);
@@ -122,13 +126,15 @@ public class CdcRecordStoreMultiWriteOperator
                                         table,
                                         commitUser,
                                         state,
-                                        getContainingTask().getEnvironment().getIOManager()));
+                                        getContainingTask().getEnvironment().getIOManager(),
+                                        memoryPool));
 
-        Optional<GenericRow> optionalConverted = record.toGenericRow(table.schema().fields());
+        Optional<GenericRow> optionalConverted =
+                toGenericRow(record.record(), table.schema().fields());
         if (!optionalConverted.isPresent()) {
             while (true) {
                 table = table.copyWithLatestSchema();
-                optionalConverted = record.toGenericRow(table.schema().fields());
+                optionalConverted = toGenericRow(record.record(), table.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;
                 }

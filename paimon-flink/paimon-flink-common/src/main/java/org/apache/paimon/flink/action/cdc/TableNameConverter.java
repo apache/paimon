@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc;
 
 import java.io.Serializable;
 
@@ -29,11 +29,11 @@ public class TableNameConverter implements Serializable {
     private final String prefix;
     private final String suffix;
 
-    TableNameConverter(boolean caseSensitive) {
+    public TableNameConverter(boolean caseSensitive) {
         this(caseSensitive, "", "");
     }
 
-    TableNameConverter(boolean caseSensitive, String prefix, String suffix) {
+    public TableNameConverter(boolean caseSensitive, String prefix, String suffix) {
         this.caseSensitive = caseSensitive;
         this.prefix = prefix;
         this.suffix = suffix;

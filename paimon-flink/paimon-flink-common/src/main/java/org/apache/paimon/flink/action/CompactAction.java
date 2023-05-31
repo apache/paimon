@@ -46,7 +46,7 @@ import static org.apache.paimon.flink.action.Action.getPartitions;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 
 /** Table compact action for Flink. */
-public class CompactAction extends ActionBase {
+public class CompactAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactAction.class);
 
@@ -170,6 +170,6 @@ public class CompactAction extends ActionBase {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
-        env.execute("Compact job");
+        execute(env, "Compact job");
     }
 }

@@ -31,4 +31,21 @@ public interface MergeFunctionFactory<T> extends Serializable {
     }
 
     MergeFunction<T> create(@Nullable int[][] projection);
+
+    default AdjustedProjection adjustProjection(@Nullable int[][] projection) {
+        return new AdjustedProjection(projection, null);
+    }
+
+    /** Result of adjusted projection. */
+    class AdjustedProjection {
+
+        @Nullable public final int[][] pushdownProjection;
+
+        @Nullable public final int[][] outerProjection;
+
+        public AdjustedProjection(int[][] pushdownProjection, int[][] outerProjection) {
+            this.pushdownProjection = pushdownProjection;
+            this.outerProjection = outerProjection;
+        }
+    }
 }

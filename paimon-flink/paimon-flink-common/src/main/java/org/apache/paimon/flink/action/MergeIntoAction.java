@@ -74,7 +74,7 @@ import static org.apache.paimon.flink.action.Action.parseKeyValues;
  * find MATCHED rows, and NOT EXISTS with merge-condition is used to find NOT MATCHED rows, then the
  * condition of each action is used to filter the rows.
  */
-public class MergeIntoAction extends ActionBase {
+public class MergeIntoAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(MergeIntoAction.class);
 
@@ -452,7 +452,8 @@ public class MergeIntoAction extends ActionBase {
         if (targetAlias != null) {
             // create a view 'targetAlias' in the path of target table, then we can find it with the
             // qualified name
-            tEnv.createTemporaryView(escapedTargetName(), tEnv.from(identifier.getFullName()));
+            batchTEnv.createTemporaryView(
+                    escapedTargetName(), batchTEnv.from(identifier.getFullName()));
         }
     }
 
@@ -461,7 +462,7 @@ public class MergeIntoAction extends ActionBase {
         if (sourceSqls != null) {
             for (String sql : sourceSqls) {
                 try {
-                    tEnv.executeSql(sql).await();
+                    batchTEnv.executeSql(sql).await();
                 } catch (Throwable t) {
                     String errMsg = "Error occurs when executing sql:\n%s";
                     LOG.error(String.format(errMsg, sql), t);
@@ -519,7 +520,7 @@ public class MergeIntoAction extends ActionBase {
                         matchedUpsertCondition == null ? "" : "WHERE " + matchedUpsertCondition);
         LOG.info("Query used for matched-update:\n{}", query);
 
-        Table source = tEnv.sqlQuery(query);
+        Table source = batchTEnv.sqlQuery(query);
         checkSchema("matched-upsert", source);
 
         return Optional.of(toDataStream(source, RowKind.UPDATE_AFTER, converters));
@@ -570,7 +571,7 @@ public class MergeIntoAction extends ActionBase {
 
         LOG.info("Query used for not-matched-by-source-upsert:\n{}", query);
 
-        Table source = tEnv.sqlQuery(query);
+        Table source = batchTEnv.sqlQuery(query);
         checkSchema("not-matched-by-source-upsert", source);
 
         return Optional.of(toDataStream(source, RowKind.UPDATE_AFTER, converters));
@@ -598,7 +599,7 @@ public class MergeIntoAction extends ActionBase {
                         matchedDeleteCondition == null ? "" : "WHERE " + matchedDeleteCondition);
         LOG.info("Query used by matched-delete:\n{}", query);
 
-        Table source = tEnv.sqlQuery(query);
+        Table source = batchTEnv.sqlQuery(query);
         checkSchema("matched-delete", source);
 
         return Optional.of(toDataStream(source, RowKind.DELETE, converters));
@@ -622,7 +623,7 @@ public class MergeIntoAction extends ActionBase {
                                 : String.format("AND (%s)", notMatchedBySourceDeleteCondition));
         LOG.info("Query used by not-matched-by-source-delete:\n{}", query);
 
-        Table source = tEnv.sqlQuery(query);
+        Table source = batchTEnv.sqlQuery(query);
         checkSchema("not-matched-by-source-delete", source);
 
         return Optional.of(toDataStream(source, RowKind.DELETE, converters));
@@ -646,7 +647,7 @@ public class MergeIntoAction extends ActionBase {
                                 : String.format("AND (%s)", notMatchedInsertCondition));
         LOG.info("Query used by not-matched-insert:\n{}", query);
 
-        Table source = tEnv.sqlQuery(query);
+        Table source = batchTEnv.sqlQuery(query);
         checkSchema("not-matched-insert", source);
 
         return Optional.of(toDataStream(source, RowKind.INSERT, converters));
@@ -674,7 +675,8 @@ public class MergeIntoAction extends ActionBase {
     // pass converters to avoid "not serializable" exception
     private DataStream<RowData> toDataStream(
             Table source, RowKind kind, List<DataStructureConverter<Object, Object>> converters) {
-        return tEnv.toChangelogStream(source)
+        return batchTEnv
+                .toChangelogStream(source)
                 .map(
                         row -> {
                             int arity = row.getArity();

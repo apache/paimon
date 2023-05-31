@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -180,6 +181,27 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "How many splits should assign to subtask per batch in StaticFileStoreSplitEnumerator "
                                     + "to avoid exceed `akka.framesize` limit.");
+
+    /* Sink writer allocate segments from managed memory. */
+    public static final ConfigOption<Boolean> SINK_USE_MANAGED_MEMORY =
+            ConfigOptions.key("sink.use-managed-memory-allocator")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, flink sink will use managed memory for merge tree; otherwise, "
+                                    + "it will create an independent memory allocator.");
+
+    /**
+     * Weight of writer buffer in managed memory, Flink will compute the memory size for writer
+     * according to the weight, the actual memory used depends on the running environment.
+     */
+    public static final ConfigOption<MemorySize> SINK_MANAGED_WRITER_BUFFER_MEMORY =
+            ConfigOptions.key("sink.managed.writer-buffer-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Weight of writer buffer in managed memory, Flink will compute the memory size "
+                                    + "for writer according to the weight, the actual memory used depends on the running environment.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

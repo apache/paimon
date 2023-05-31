@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.utils.SnapshotManager;
@@ -29,6 +30,8 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -68,8 +71,9 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             IOManager ioManager,
             boolean isOverwrite,
             boolean waitCompaction,
-            int deltaCommits) {
-        super(table, commitUser, state, ioManager, isOverwrite, waitCompaction);
+            int deltaCommits,
+            @Nullable MemorySegmentPool memoryPool) {
+        super(table, commitUser, state, ioManager, isOverwrite, waitCompaction, memoryPool);
 
         this.deltaCommits = deltaCommits;
 

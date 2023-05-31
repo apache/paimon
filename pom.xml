@@ -116,7 +116,7 @@ under the License.
         <test.randomization.seed/>
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
         <test.flink.main.version>1.17</test.flink.main.version>
-        <test.flink.version>1.17.0</test.flink.version>
+        <test.flink.version>1.17.1</test.flink.version>
 
         <janino.version>3.0.11</janino.version>
         <mockito.version>3.4.6</mockito.version>

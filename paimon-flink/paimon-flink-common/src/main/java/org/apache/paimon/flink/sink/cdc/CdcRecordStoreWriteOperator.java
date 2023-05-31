@@ -26,6 +26,7 @@ import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -36,6 +37,8 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+
+import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 
 /**
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
@@ -62,6 +65,7 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
+        super(Options.fromMap(table.options()));
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
@@ -95,17 +99,18 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
                         table,
                         commitUser,
                         state,
-                        getContainingTask().getEnvironment().getIOManager());
+                        getContainingTask().getEnvironment().getIOManager(),
+                        memoryPool);
     }
 
     @Override
     public void processElement(StreamRecord<CdcRecord> element) throws Exception {
         CdcRecord record = element.getValue();
-        Optional<GenericRow> optionalConverted = record.toGenericRow(table.schema().fields());
+        Optional<GenericRow> optionalConverted = toGenericRow(record, table.schema().fields());
         if (!optionalConverted.isPresent()) {
             while (true) {
                 table = table.copyWithLatestSchema();
-                optionalConverted = record.toGenericRow(table.schema().fields());
+                optionalConverted = toGenericRow(record, table.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;
                 }

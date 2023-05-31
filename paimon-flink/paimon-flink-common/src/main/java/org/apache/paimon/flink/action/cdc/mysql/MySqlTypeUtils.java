@@ -23,12 +23,27 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.types.VarBinaryType;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
+
+import com.esri.core.geometry.ogc.OGCGeometry;
 
 import javax.annotation.Nullable;
+
+import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /** Converts from MySQL type to {@link DataType}. */
 public class MySqlTypeUtils {
@@ -110,6 +125,22 @@ public class MySqlTypeUtils {
     // It returns the number of characters when converting this timestamp to string.
     // The base length of a timestamp is 19, for example "2023-03-23 17:20:00".
     private static final int JDBC_TIMESTAMP_BASE_LENGTH = 19;
+
+    private static final String LEFT_BRACKETS = "(";
+    private static final String RIGHT_BRACKETS = ")";
+    private static final String COMMA = ",";
+
+    private static final List<String> HAVE_SCALE_LIST =
+            Arrays.asList(DECIMAL, NUMERIC, DOUBLE, REAL, FIXED);
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    public static DataType toDataType(String mysqlType) {
+        return toDataType(
+                MySqlTypeUtils.getShortType(mysqlType),
+                MySqlTypeUtils.getPrecision(mysqlType),
+                MySqlTypeUtils.getScale(mysqlType));
+    }
 
     public static DataType toDataType(
             String type, @Nullable Integer length, @Nullable Integer scale) {
@@ -197,10 +228,13 @@ public class MySqlTypeUtils {
                                     + length
                                     + " for MySQL DATETIME and TIMESTAMP types");
                 }
+                // because tidb ddl event does not contain field precision
             case CHAR:
-                return DataTypes.CHAR(Preconditions.checkNotNull(length));
+                return length == null || length == 0 ? DataTypes.STRING() : DataTypes.CHAR(length);
             case VARCHAR:
-                return DataTypes.VARCHAR(Preconditions.checkNotNull(length));
+                return length == null || length == 0
+                        ? DataTypes.STRING()
+                        : DataTypes.VARCHAR(length);
             case TINYTEXT:
             case TEXT:
             case MEDIUMTEXT:
@@ -217,9 +251,13 @@ public class MySqlTypeUtils {
             case GEOMETRYCOLLECTION:
                 return DataTypes.STRING();
             case BINARY:
-                return DataTypes.BINARY(Preconditions.checkNotNull(length));
+                return length == null || length == 0
+                        ? DataTypes.BINARY(BinaryType.DEFAULT_LENGTH)
+                        : DataTypes.BINARY(length);
             case VARBINARY:
-                return DataTypes.VARBINARY(Preconditions.checkNotNull(length));
+                return length == null || length == 0
+                        ? DataTypes.VARBINARY(VarBinaryType.DEFAULT_LENGTH)
+                        : DataTypes.VARBINARY(length);
             case TINYBLOB:
             case BLOB:
             case MEDIUMBLOB:
@@ -230,6 +268,101 @@ public class MySqlTypeUtils {
             default:
                 throw new UnsupportedOperationException(
                         String.format("Don't support MySQL type '%s' yet.", type));
+        }
+    }
+
+    public static boolean isGeoType(String type) {
+        switch (type.toUpperCase()) {
+            case GEOMETRY:
+            case POINT:
+            case LINESTRING:
+            case POLYGON:
+            case MULTIPOINT:
+            case MULTILINESTRING:
+            case MULTIPOLYGON:
+            case GEOMETRYCOLLECTION:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    public static String convertWkbArray(byte[] wkb) throws JsonProcessingException {
+        String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
+        JsonNode originGeoNode = objectMapper.readTree(geoJson);
+
+        Optional<Integer> srid =
+                Optional.ofNullable(
+                        originGeoNode.has("srid") ? originGeoNode.get("srid").intValue() : null);
+        Map<String, Object> geometryInfo = new HashMap<>();
+        String geometryType = originGeoNode.get("type").asText();
+        geometryInfo.put("type", geometryType);
+        if (geometryType.equalsIgnoreCase("GeometryCollection")) {
+            geometryInfo.put("geometries", originGeoNode.get("geometries"));
+        } else {
+            geometryInfo.put("coordinates", originGeoNode.get("coordinates"));
+        }
+        geometryInfo.put("srid", srid.orElse(0));
+        ObjectWriter objectWriter = objectMapper.writer();
+        return objectWriter.writeValueAsString(geometryInfo);
+    }
+
+    public static boolean isScaleType(String typeName) {
+        return HAVE_SCALE_LIST.stream()
+                .anyMatch(type -> getShortType(typeName).toUpperCase().startsWith(type));
+    }
+
+    public static boolean isEnumType(String typeName) {
+        return typeName.toUpperCase().startsWith(ENUM);
+    }
+
+    public static boolean isSetType(String typeName) {
+        return typeName.toUpperCase().startsWith(SET);
+    }
+
+    /* Get type after the brackets are removed.*/
+    public static String getShortType(String typeName) {
+
+        if (typeName.contains(LEFT_BRACKETS) && typeName.contains(RIGHT_BRACKETS)) {
+            return typeName.substring(0, typeName.indexOf(LEFT_BRACKETS)).trim()
+                    + typeName.substring(typeName.indexOf(RIGHT_BRACKETS) + 1);
+        } else {
+            return typeName;
+        }
+    }
+
+    public static int getPrecision(String typeName) {
+        if (typeName.contains(LEFT_BRACKETS)
+                && typeName.contains(RIGHT_BRACKETS)
+                && isScaleType(typeName)) {
+            return Integer.parseInt(
+                    typeName.substring(typeName.indexOf(LEFT_BRACKETS) + 1, typeName.indexOf(COMMA))
+                            .trim());
+        } else if ((typeName.contains(LEFT_BRACKETS)
+                && typeName.contains(RIGHT_BRACKETS)
+                && !isScaleType(typeName)
+                && !isEnumType(typeName)
+                && !isSetType(typeName))) {
+            return Integer.parseInt(
+                    typeName.substring(
+                                    typeName.indexOf(LEFT_BRACKETS) + 1,
+                                    typeName.indexOf(RIGHT_BRACKETS))
+                            .trim());
+        } else {
+            return 0;
+        }
+    }
+
+    public static int getScale(String typeName) {
+        if (typeName.contains(LEFT_BRACKETS)
+                && typeName.contains(RIGHT_BRACKETS)
+                && isScaleType(typeName)) {
+            return Integer.parseInt(
+                    typeName.substring(
+                                    typeName.indexOf(COMMA) + 1, typeName.indexOf(RIGHT_BRACKETS))
+                            .trim());
+        } else {
+            return 0;
         }
     }
 }

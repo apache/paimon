@@ -1,0 +1,23 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+{"data":null,"database":"paimon_sync_table","es":1683008289000,"id":13,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_1694572663426906u by user 1486767996652600 */ ALTER TABLE schema_evolution_1 ADD COLUMN v2 INT","sqlType":null,"table":"schema_evolution_1","ts":1683008289401,"type":"ALTER"}
+{"data":[{"pt":"2","_id":"3","v1":"three","v2":"30"},{"pt":"1","_id":"5","v1":"five","v2":"50"}],"database":"paimon_sync_table","es":1683008289000,"id":14,"isDdl":false,"mysqlType":{"pt":"int","_id":"int","v1":"varchar(10)","v2":"INT"},"old":null,"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":4},"table":"schema_evolution_1","ts":1683008289719,"type":"INSERT"}
+{"data":null,"database":"paimon_sync_table","es":1683008290000,"id":15,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_1694572663430429j by user 1486767996652600 */ ALTER TABLE schema_evolution_2 ADD COLUMN v2 INT","sqlType":null,"table":"schema_evolution_2","ts":1683008290044,"type":"ALTER"}
+{"data":[{"pt":"1","_id":"6","v1":"six","v2":"60"}],"database":"paimon_sync_table","es":1683008290000,"id":16,"isDdl":false,"mysqlType":{"pt":"int","_id":"int","v1":"varchar(10)","v2":"INT"},"old":null,"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":4},"table":"schema_evolution_2","ts":1683008290391,"type":"INSERT"}
+{"data":[{"pt":"1","_id":"2","v1":"second","v2":null}],"database":"paimon_sync_table","es":1683008290000,"id":18,"isDdl":false,"mysqlType":{"pt":"int","_id":"int","v1":"varchar(10)","v2":"INT"},"old":[{"v1":"two"}],"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":4},"table":"schema_evolution_2","ts":1683008290626,"type":"UPDATE"}

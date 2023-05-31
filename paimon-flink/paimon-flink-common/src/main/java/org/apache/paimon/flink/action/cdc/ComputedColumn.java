@@ -16,8 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.action.cdc.mysql.Expression;
 import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
@@ -48,13 +49,13 @@ public class ComputedColumn implements Serializable {
         return expression.outputType();
     }
 
-    String fieldReference() {
+    public String fieldReference() {
         return expression.fieldReference();
     }
 
     /** Compute column's value from given argument. Return null if input is null. */
     @Nullable
-    String eval(@Nullable String input) {
+    public String eval(@Nullable String input) {
         if (input == null) {
             return null;
         }

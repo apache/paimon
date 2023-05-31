@@ -19,7 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -28,7 +28,6 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -38,8 +37,8 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
 
     private static final int MAX_LEVEL = 3;
 
-    private static final Comparator<InternalRow> COMPARATOR =
-            Comparator.comparingInt(o -> o.getInt(0));
+    private static final RecordEqualiser EQUALISER =
+            (RecordEqualiser) (row1, row2) -> row1.getInt(0) == row2.getInt(0);
 
     protected FullChangelogMergeFunctionWrapper wrapper;
 
@@ -51,7 +50,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
     public void beforeEach() {
         wrapper =
                 new FullChangelogMergeFunctionWrapper(
-                        createMergeFunction(), MAX_LEVEL, COMPARATOR, changelogRowDeduplicate());
+                        createMergeFunction(), MAX_LEVEL, EQUALISER, changelogRowDeduplicate());
     }
 
     private static final List<List<KeyValue>> INPUT_KVS =
