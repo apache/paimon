@@ -127,12 +127,15 @@ public abstract class FileStoreTableTestBase {
                     new DataType[] {
                         DataTypes.INT(),
                         DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
                         DataTypes.BIGINT(),
                         DataTypes.TIMESTAMP(0),
                         DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
-                        DataTypes.TIMESTAMP(6)
+                        DataTypes.TIMESTAMP(6),
+                        DataTypes.STRING()
                     },
-                    new String[] {"pt", "a", "b", "tm1", "tm2", "tm3"});
+                    new String[] {"pt", "a", "b", "sec", "mills", "tm0", "tm3", "tm6", "non_time"});
 
     protected static final int[] PROJECTION = new int[] {2, 1};
     protected static final Function<InternalRow, String> BATCH_ROW_TO_STRING =
@@ -173,13 +176,19 @@ public abstract class FileStoreTableTestBase {
                             + "|"
                             + rowData.getInt(1)
                             + "|"
-                            + rowData.getLong(2)
+                            + rowData.getInt(2)
                             + "|"
-                            + rowData.getTimestamp(3, 0)
+                            + rowData.getInt(3)
                             + "|"
-                            + rowData.getTimestamp(4, 3)
+                            + rowData.getLong(4)
                             + "|"
-                            + rowData.getTimestamp(5, 6);
+                            + rowData.getTimestamp(5, 0)
+                            + "|"
+                            + rowData.getTimestamp(6, 3)
+                            + "|"
+                            + rowData.getTimestamp(7, 6)
+                            + "|"
+                            + rowData.getString(8);
 
     @TempDir java.nio.file.Path tempDir;
 

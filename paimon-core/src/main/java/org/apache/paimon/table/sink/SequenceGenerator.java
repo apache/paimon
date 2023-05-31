@@ -20,7 +20,6 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -78,7 +77,7 @@ public class SequenceGenerator {
         switch (autoPadding) {
             case SECOND_TO_MICRO:
                 return generatorWithPadding.generateWithPaddingOnSeconds(row, index);
-            case MILLS_TO_MICRO:
+            case MILLIS_TO_MICRO:
                 return generatorWithPadding.generateWithPaddingOnMillis(row, index);
             default:
                 throw new UnsupportedOperationException(
@@ -215,6 +214,42 @@ public class SequenceGenerator {
         }
     }
 
+    private static class TimestampPaddingGenerator implements PaddingGenerator {
+        private Generator generator;
+
+        public TimestampPaddingGenerator(Generator generator) {
+            this.generator = generator;
+        }
+
+        @Override
+        public long generateWithPaddingOnSeconds(InternalRow row, int i) {
+            return generator.generate(row, i) / 1000 * 1_000_000 + getCurrentMicroOfSeconds();
+        }
+
+        @Override
+        public long generateWithPaddingOnMillis(InternalRow row, int i) {
+            return generator.generate(row, i) * 1_000 + getCurrentMicroOfMillis();
+        }
+    }
+
+    private static class NoopPaddingGenerator implements PaddingGenerator {
+        private Generator generator;
+
+        public NoopPaddingGenerator(Generator generator) {
+            this.generator = generator;
+        }
+
+        @Override
+        public long generateWithPaddingOnSeconds(InternalRow row, int i) {
+            return generator.generate(row, i);
+        }
+
+        @Override
+        public long generateWithPaddingOnMillis(InternalRow row, int i) {
+            return generator.generate(row, i);
+        }
+    }
+
     private static class PaddingSequenceGeneratorVisitor
             extends DataTypeDefaultVisitor<PaddingGenerator> {
 
@@ -226,41 +261,12 @@ public class SequenceGenerator {
 
         @Override
         public PaddingGenerator visit(TimestampType timestampType) {
-            return new DefaultPaddingGenerator(generator);
-//            return (row, i) -> {
-//                int precision = timestampType.getPrecision();
-//                Timestamp ts = row.getTimestamp(i, precision);
-//                return getNanos(ts, precision);
-//            };
+            return new TimestampPaddingGenerator(generator);
         }
 
         @Override
         public PaddingGenerator visit(LocalZonedTimestampType localZonedTimestampType) {
-            return new PaddingGenerator() {
-                @Override
-                public long generateWithPaddingOnSeconds(InternalRow row, int i) {
-//                    if (precision == 0) {
-//                        long nanos = ts.getMillisecond() / 1000 * 1_000_000_000 + getCurrentMicroOfSeconds();
-//                        return nanos;
-//                    } else if (precision == 3) {
-//                        long nanos = ts.getMillisecond() * 1_000_000 + getCurrentMicroOfMillis();
-//                        return nanos;
-//                    } else {
-//                        long millis = ts.getMillisecond();
-//                        return millis;
-//                    }
-                    long millis = generator.generate(row, i);
-                    long secondWithMicro = millis / 1000 * 1_000_000 + getCurrentMicroOfSeconds();
-                    return secondWithMicro;
-                }
-
-                @Override
-                public long generateWithPaddingOnMillis(InternalRow row, int i) {
-                    long millis = generator.generate(row, i);
-                    long millisWithMicro = millis * 1_000 + getCurrentMicroOfMillis();
-                    return millisWithMicro;
-                }
-            };
+            return new TimestampPaddingGenerator(generator);
         }
 
         @Override
@@ -273,23 +279,9 @@ public class SequenceGenerator {
             return new DefaultPaddingGenerator(generator);
         }
 
-        private long getNanos(Timestamp ts, int precision) {
-            if (precision == 0) {
-                long nanos = ts.getMillisecond() / 1000 * 1_000_000_000 + getCurrentMicroOfSeconds();
-                return nanos;
-            } else if (precision == 3) {
-                long nanos = ts.getMillisecond() * 1_000_000 + getCurrentMicroOfMillis();
-                return nanos;
-            } else {
-                long millis = ts.getMillisecond();
-                return millis;
-            }
-        }
-
         @Override
         protected PaddingGenerator defaultMethod(DataType dataType) {
-//            return (row, i) -> generator.generate(row, i);
-            return new DefaultPaddingGenerator(generator);
+            return new NoopPaddingGenerator(generator);
         }
     }
 }

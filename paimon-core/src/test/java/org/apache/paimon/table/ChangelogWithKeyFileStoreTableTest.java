@@ -161,39 +161,17 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testTimestampPrecision() throws Exception {
-        Timestamp ts1 = Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 0));
-        Timestamp ts2 = Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123000));
-        Timestamp ts3 = Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456));
-        InternalRow row1 = GenericRow.of(1, 11, 100L, ts1, ts1, ts1);
-        InternalRow row2 = GenericRow.of(2, 12, 101L, ts2, ts2, ts2);
-        InternalRow row3 = GenericRow.of(3, 13, 102L, ts3, ts3, ts3);
-        FileStoreTable table =
-                createFileStoreTable(
-                        conf -> {},
-                        ROW_TYPE_WITH_TIMESTAMP);
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
-        write.write(row1);
-        write.write(row2);
-        write.write(row3);
-        commit.commit(0, write.prepareCommit(true, 0));
-        write.close();
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead();
-        List<String> result = getResult(read, splits, binaryRow(1), 0, ROW_WITH_TIMESTAMP_TO_STRING);
-        System.out.println(result);
-    }
-
-    @Test
-    public void testNanosSequenceNumberOnTimestampSecond() throws Exception {
+    public void testPaddingSequenceNumberOnTimestampSecond() throws Exception {
         Timestamp ts =
                 Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456000));
-        List<InternalRow> rows = prepareTimestampRows(ts);
+        List<InternalRow> rows = prepareSequencePaddingRows(ts, 1685530987, 1685530987123L);
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(CoreOptions.SEQUENCE_FIELD, "tm1");
+                            conf.set(CoreOptions.SEQUENCE_FIELD, "tm0");
+                            conf.set(
+                                    CoreOptions.SEQUENCE_AUTO_PADDING,
+                                    CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO);
                         },
                         ROW_TYPE_WITH_TIMESTAMP);
         StreamTableWrite write = table.newWrite(commitUser);
@@ -203,17 +181,17 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         long sequenceNumber2 =
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(1)).sequenceNumber();
         long sec = ts.getMillisecond() / 1000;
-        assertEquals(sec, TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.NANOSECONDS));
-        assertEquals(sec, TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.NANOSECONDS));
+        assertEquals(sec, TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS));
+        assertEquals(sec, TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
         String expectedResult;
         if (sequenceNumber2 > sequenceNumber1) {
             expectedResult =
-                    "1|10|101|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456";
+                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2";
         } else {
             expectedResult =
-                    "1|10|100|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456";
+                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|1";
         }
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         TableRead read = table.newRead();
@@ -222,53 +200,17 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testNanosSequenceNumberOnTimestampMilliSecond() throws Exception {
+    public void testPaddingSequenceNumberOnTimestampMilliSecond() throws Exception {
         Timestamp ts =
                 Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456000));
-        List<InternalRow> rows = prepareTimestampRows(ts);
-        FileStoreTable table =
-                createFileStoreTable(
-                        conf -> {
-                            conf.set(CoreOptions.SEQUENCE_FIELD, "tm2");
-                        },
-                        ROW_TYPE_WITH_TIMESTAMP);
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
-        long sequenceNumber1 =
-                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(0)).sequenceNumber();
-        long sequenceNumber2 =
-                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(1)).sequenceNumber();
-        assertEquals(
-                ts.getMillisecond(),
-                TimeUnit.MILLISECONDS.convert(sequenceNumber1, TimeUnit.NANOSECONDS));
-        assertEquals(
-                ts.getMillisecond(),
-                TimeUnit.MILLISECONDS.convert(sequenceNumber2, TimeUnit.NANOSECONDS));
-        commit.commit(0, write.prepareCommit(true, 0));
-        write.close();
-        String expectedResult;
-        if (sequenceNumber2 > sequenceNumber1) {
-            expectedResult =
-                    "1|10|101|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456";
-        } else {
-            expectedResult =
-                    "1|10|100|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456";
-        }
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead();
-        assertThat(getResult(read, splits, binaryRow(1), 0, ROW_WITH_TIMESTAMP_TO_STRING))
-                .isEqualTo(Arrays.asList(expectedResult));
-    }
-
-    @Test
-    public void testNanosSequenceNumberOnTimestampMicroSecond() throws Exception {
-        Timestamp ts =
-                Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456000));
-        List<InternalRow> rows = prepareTimestampRows(ts);
+        List<InternalRow> rows = prepareSequencePaddingRows(ts, 1685530987, 1685530987123L);
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
                             conf.set(CoreOptions.SEQUENCE_FIELD, "tm3");
+                            conf.set(
+                                    CoreOptions.SEQUENCE_AUTO_PADDING,
+                                    CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO);
                         },
                         ROW_TYPE_WITH_TIMESTAMP);
         StreamTableWrite write = table.newWrite(commitUser);
@@ -277,38 +219,132 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(0)).sequenceNumber();
         long sequenceNumber2 =
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(1)).sequenceNumber();
-        assertEquals(ts.getMillisecond(), sequenceNumber1);
-        assertEquals(ts.getMillisecond(), sequenceNumber2);
+        assertEquals(
+                ts.getMillisecond(),
+                TimeUnit.MILLISECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS));
+        assertEquals(
+                ts.getMillisecond(),
+                TimeUnit.MILLISECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        String expectedResult;
+        if (sequenceNumber2 > sequenceNumber1) {
+            expectedResult =
+                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2";
+        } else {
+            expectedResult =
+                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|1";
+        }
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, ROW_WITH_TIMESTAMP_TO_STRING))
-                .isEqualTo(
-                        Arrays.asList(
-                                "1|10|101|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456"));
+                .isEqualTo(Arrays.asList(expectedResult));
     }
 
     @Test
-    public void testNanosSequenceNumberOnNonTimestampField() throws Exception {
+    public void testPaddingSequenceNumberOnIntSecondField() throws Exception {
         Timestamp ts =
                 Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456000));
-        List<InternalRow> rows = prepareTimestampRows(ts);
+        List<InternalRow> rows = prepareSequencePaddingRows(ts, 1685530987, 1685530987123L);
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(CoreOptions.SEQUENCE_FIELD, "b");
+                            conf.set(CoreOptions.SEQUENCE_FIELD, "sec");
+                            conf.set(
+                                    CoreOptions.SEQUENCE_AUTO_PADDING,
+                                    CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO);
                         },
                         ROW_TYPE_WITH_TIMESTAMP);
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-
         long sequenceNumber1 =
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(0)).sequenceNumber();
         long sequenceNumber2 =
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(1)).sequenceNumber();
-        assertEquals(100, sequenceNumber1);
-        assertEquals(101, sequenceNumber2);
+        assertEquals(1685530987, TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS));
+        assertEquals(1685530987, TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+
+        String expectedResult;
+        if (sequenceNumber2 > sequenceNumber1) {
+            expectedResult =
+                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2";
+        } else {
+            expectedResult =
+                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|1";
+        }
+        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, ROW_WITH_TIMESTAMP_TO_STRING))
+                .isEqualTo(Arrays.asList(expectedResult));
+    }
+
+    @Test
+    public void testPaddingSequenceNumberOnBigIntMillisField() throws Exception {
+        Timestamp ts =
+                Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456000));
+        List<InternalRow> rows = prepareSequencePaddingRows(ts, 1685530987, 1685530987123L);
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_FIELD, "mills");
+                            conf.set(
+                                    CoreOptions.SEQUENCE_AUTO_PADDING,
+                                    CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO);
+                        },
+                        ROW_TYPE_WITH_TIMESTAMP);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        long sequenceNumber1 =
+                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(0)).sequenceNumber();
+        long sequenceNumber2 =
+                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(1)).sequenceNumber();
+        assertEquals(
+                1685530987123L,
+                TimeUnit.MILLISECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS));
+        assertEquals(
+                1685530987123L,
+                TimeUnit.MILLISECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+
+        String expectedResult;
+        if (sequenceNumber2 > sequenceNumber1) {
+            expectedResult =
+                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2";
+        } else {
+            expectedResult =
+                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|1";
+        }
+        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, ROW_WITH_TIMESTAMP_TO_STRING))
+                .isEqualTo(Arrays.asList(expectedResult));
+    }
+
+    @Test
+    public void testPaddingSequenceNumberOnNonTimeAttrField() throws Exception {
+        Timestamp ts =
+                Timestamp.fromLocalDateTime(LocalDateTime.of(2023, 5, 23, 11, 22, 33, 123456000));
+        List<InternalRow> rows = prepareSequencePaddingRows(ts, 1685530987, 1685530987123L);
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.SEQUENCE_FIELD, "non_time");
+                            conf.set(
+                                    CoreOptions.SEQUENCE_AUTO_PADDING,
+                                    CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO);
+                        },
+                        ROW_TYPE_WITH_TIMESTAMP);
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        long sequenceNumber1 =
+                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(0)).sequenceNumber();
+        long sequenceNumber2 =
+                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(1)).sequenceNumber();
+        assertEquals(1, sequenceNumber1);
+        assertEquals(2, sequenceNumber2);
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
@@ -316,17 +352,36 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(1), 0, ROW_WITH_TIMESTAMP_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
-                                "1|10|101|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456"));
+                                "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2"));
     }
 
-    private List<InternalRow> prepareTimestampRows(Timestamp ts) {
+    private List<InternalRow> prepareSequencePaddingRows(
+            Timestamp ts, int intSec, long bigIntMillis) {
         long millis = ts.getMillisecond();
         long sec = millis / 1000;
 
         InternalRow row1 =
-                GenericRow.of(1, 10, 100L, Timestamp.fromEpochMillis(sec * 1000), ts, ts);
+                GenericRow.of(
+                        1,
+                        10,
+                        100,
+                        intSec,
+                        bigIntMillis,
+                        Timestamp.fromEpochMillis(sec * 1000),
+                        ts,
+                        ts,
+                        BinaryString.fromString("1"));
         InternalRow row2 =
-                GenericRow.of(1, 10, 101L, Timestamp.fromEpochMillis(sec * 1000), ts, ts);
+                GenericRow.of(
+                        1,
+                        10,
+                        101,
+                        intSec,
+                        bigIntMillis,
+                        Timestamp.fromEpochMillis(sec * 1000),
+                        ts,
+                        ts,
+                        BinaryString.fromString("2"));
         return Arrays.asList(row1, row2);
     }
 

@@ -375,8 +375,9 @@ public class CoreOptions implements Serializable {
             key("sequence.auto-padding")
                     .enumType(SequenceAutoPadding.class)
                     .defaultValue(SequenceAutoPadding.NONE)
-                    .withDescription("Specify the way of padding precision up to micro-second" +
-                            " if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.");
+                    .withDescription(
+                            "Specify the way of padding precision up to micro-second"
+                                    + " if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.");
 
     public static final ConfigOption<StartupMode> SCAN_MODE =
             key("scan.mode")
@@ -1291,7 +1292,9 @@ public class CoreOptions implements Serializable {
         SECOND_TO_MICRO(
                 "second-to-micro",
                 "Pads the sequence field that indicates time with precision of seconds to micro-second."),
-        MILLS_TO_MICRO("mills-to-micro", "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
+        MILLIS_TO_MICRO(
+                "millis-to-micro",
+                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
 
         private final String value;
         private final String description;

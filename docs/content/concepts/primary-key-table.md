@@ -260,8 +260,8 @@ there will be some cases that lead to data disorder. At this time, you can use a
 {{< hint info >}}
 When the record is updated or deleted, the `sequence.field` must become larger and cannot remain unchanged. For example,
 you can use [Mysql Binlog operation time](https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#available-metadata) as `sequence.field`.
-If the provided `sequence.field` doesn't meet the precision, you can set `sequence.nanos` as `true` so that the precision of sequence number will be made up to nanosecond by system. 
-Note that only fields of data type `Timestamp` with precision of `second` and `millisecond` can be made up by nanoseconds.
+If the provided `sequence.field` doesn't meet the precision, like a rough second or millisecond, you can set `sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision of sequence number will be made up to microsecond by system. 
+Note that only fields of data type `Timestamp`, `Integer` and `BigInt` which indicates a `second` or `millisecond` can be padded by microseconds.
 {{< /hint >}}
 
 {{< tabs "sequence.field" >}}
