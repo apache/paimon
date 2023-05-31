@@ -243,4 +243,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             throw new UncheckedIOException(e);
         }
     }
+
+    @Override
+    public void createTag(String tagName) {
+        store().createTag(tagName);
+    }
 }

@@ -33,11 +33,14 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Comparator;
+
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Base {@link FileStore} implementation.
@@ -180,5 +183,16 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.partitionTimestampFormatter(),
                 newScan(),
                 newCommit(commitUser));
+    }
+
+    @Override
+    public void createTag(String tagName) {
+        // create from the latest snapshot
+        SnapshotManager snapshotManager = snapshotManager();
+        Snapshot snapshot = snapshotManager.latestSnapshot();
+        checkState(snapshot != null, "There doesn't exist any snapshot.");
+
+        TagManager tagManager = new TagManager(fileIO, options.path());
+        tagManager.commitTag(snapshot, tagName);
     }
 }

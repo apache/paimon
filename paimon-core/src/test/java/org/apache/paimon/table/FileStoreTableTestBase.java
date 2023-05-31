@@ -644,6 +644,33 @@ public abstract class FileStoreTableTestBase {
         // table-path/schema/schema-0
     }
 
+    @Test
+    public void testCreateTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            // snapshot 1
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+            // snapshot 2
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        table.createTag("test-tag");
+
+        // verify that tag file exist
+        TraceableFileIO fileIO = new TraceableFileIO();
+        Path tagPath = new Path(tablePath, "tag/test-tag");
+        assertThat(fileIO.exists(tagPath)).isTrue();
+
+        // verify that test-tag is equal to snapshot 2
+        Snapshot tagged = Snapshot.fromPath(fileIO, tagPath);
+        Snapshot snapshot2 = table.snapshotManager().snapshot(2);
+        assertThat(tagged.equals(snapshot2)).isTrue();
+    }
+
     protected List<String> getResult(
             TableRead read,
             List<Split> splits,

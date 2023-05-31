@@ -62,4 +62,6 @@ public interface FileStore<T> extends Serializable {
 
     @Nullable
     PartitionExpire newPartitionExpire(String commitUser);
+
+    void createTag(String tagName);
 }
