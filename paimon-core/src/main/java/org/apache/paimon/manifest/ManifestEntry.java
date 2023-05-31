@@ -168,7 +168,7 @@ public class ManifestEntry {
         public final int level;
         public final String fileName;
 
-        /** Cache the hash code for the string */
+        /* Cache the hash code for the string */
         private Integer hash;
 
         private Identifier(BinaryRow partition, int bucket, int level, String fileName) {
