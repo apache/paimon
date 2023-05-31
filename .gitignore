@@ -2,6 +2,7 @@
 .classpath
 .idea/*
 !.idea/vcs.xml
+!.idea/icon.png
 .metadata
 .settings
 .project
