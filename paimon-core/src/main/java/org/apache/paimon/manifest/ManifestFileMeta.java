@@ -183,7 +183,7 @@ public class ManifestFileMeta {
         List<ManifestFileMeta> result = new ArrayList<>();
         List<ManifestFileMeta> candidates = new ArrayList<>();
         long totalSize = 0;
-        // 2. merge existing small manifest files
+        // merge existing small manifest files
         for (ManifestFileMeta manifest : input) {
             totalSize += manifest.fileSize;
             candidates.add(manifest);
@@ -195,7 +195,7 @@ public class ManifestFileMeta {
             }
         }
 
-        // 3. merge the last bit of manifests if there are too many
+        // merge the last bit of manifests if there are too many
         if (candidates.size() >= suggestedMinMetaCount) {
             mergeCandidates(candidates, manifestFile, result, newMetas);
         } else {
