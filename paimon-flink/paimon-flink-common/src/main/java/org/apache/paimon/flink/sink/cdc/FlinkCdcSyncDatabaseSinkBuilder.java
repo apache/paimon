@@ -22,12 +22,18 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
+
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 
 import javax.annotation.Nullable;
 
@@ -64,6 +70,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private Catalog.Loader catalogLoader;
     // database to sync, currently only support single database
     private String database;
+    private MySqlDatabaseSyncMode mode;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -90,6 +97,15 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         Preconditions.checkNotNull(input);
         Preconditions.checkNotNull(parserFactory);
 
+        StreamExecutionEnvironment env = input.getExecutionEnvironment();
+        if (mode == MySqlDatabaseSyncMode.DYNAMIC) {
+            buildDynamicCdcSink(env);
+        } else {
+            buildStaticCdcSink(env);
+        }
+    }
+
+    private void buildDynamicCdcSink(StreamExecutionEnvironment env) {
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(
@@ -166,6 +182,48 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         new FlinkCdcSink(table).sinkFrom(partitioned);
     }
 
+    private void buildStaticCdcSink(StreamExecutionEnvironment env) {
+        SingleOutputStreamOperator<Void> parsed =
+                input.forward()
+                        .process(
+                                new CdcMultiTableParsingProcessFunction<>(
+                                        database, catalogLoader, tables, parserFactory))
+                        .setParallelism(input.getParallelism());
+
+        for (FileStoreTable table : tables) {
+            DataStream<Void> schemaChangeProcessFunction =
+                    SingleOutputStreamOperatorUtils.getSideOutput(
+                                    parsed,
+                                    CdcMultiTableParsingProcessFunction
+                                            .createUpdatedDataFieldsOutputTag(table.name()))
+                            .process(
+                                    new UpdatedDataFieldsProcessFunction(
+                                            new SchemaManager(table.fileIO(), table.location())));
+            schemaChangeProcessFunction.getTransformation().setParallelism(1);
+            schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
+
+            DataStream<CdcRecord> parsedForTable =
+                SingleOutputStreamOperatorUtils.getSideOutput(
+                    parsed,
+                    CdcMultiTableParsingProcessFunction.createRecordOutputTag(
+                        table.name()));
+
+            BucketMode bucketMode = table.bucketMode();
+            switch (bucketMode) {
+                case FIXED:
+                    buildForFixedBucket(table, parsedForTable);
+                    break;
+                case DYNAMIC:
+                    buildForDynamicBucket(table, parsedForTable);
+                    break;
+                case UNAWARE:
+                default:
+                    throw new UnsupportedOperationException(
+                        "Unsupported bucket mode: " + bucketMode);
+            }
+        }
+    }
+
     public FlinkCdcSyncDatabaseSinkBuilder<T> withDatabase(String database) {
         this.database = database;
         return this;
@@ -173,6 +231,11 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withCatalogLoader(Catalog.Loader catalogLoader) {
         this.catalogLoader = catalogLoader;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(MySqlDatabaseSyncMode mode) {
+        this.mode = mode;
         return this;
     }
 }

@@ -18,14 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.core.execution.SavepointFormatType;
-import org.apache.flink.runtime.jobgraph.JobGraph;
-import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -38,6 +30,15 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
+
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -370,7 +371,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         null,
                         null,
                         Collections.emptyMap(),
-                        tableConfig);
+                        tableConfig,
+                        MySqlDatabaseSyncMode.STATIC);
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -544,7 +546,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         includingTables,
                         excludingTables,
                         Collections.emptyMap(),
-                        tableConfig);
+                        tableConfig,
+                        MySqlDatabaseSyncMode.STATIC);
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -661,7 +664,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     public void testNewlyAddedTable(
-        int numOfNewlyAddedTables, boolean testSavepointRecovery, boolean testSchemaChange, String databaseName)
+            int numOfNewlyAddedTables,
+            boolean testSavepointRecovery,
+            boolean testSchemaChange,
+            String databaseName)
             throws Exception {
         JobClient client = buildSyncDatabaseActionWithNewlyAddedTables(databaseName);
         waitJobRunning(client);
@@ -748,7 +754,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                             .join();
             assertThat(savepoint).isNotBlank();
 
-            client = buildSyncDatabaseActionWithNewlyAddedTables(savepoint, "paimon_sync_database_newly_added_tables");
+            client =
+                    buildSyncDatabaseActionWithNewlyAddedTables(
+                            savepoint, "paimon_sync_database_newly_added_tables");
             waitJobRunning(client);
         }
 
@@ -856,12 +864,13 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         "CREATE TABLE %s (k INT, v1 VARCHAR(10), PRIMARY KEY (k))", newTableName));
     }
 
-    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(String databaseName) throws Exception {
+    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(String databaseName)
+            throws Exception {
         return buildSyncDatabaseActionWithNewlyAddedTables(null, databaseName);
     }
 
-    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(String savepointPath, String databaseName)
-            throws Exception {
+    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(
+            String savepointPath, String databaseName) throws Exception {
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", databaseName);
@@ -885,7 +894,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         "t.+",
                         null,
                         Collections.emptyMap(),
-                        tableConfig);
+                        tableConfig,
+                        MySqlDatabaseSyncMode.DYNAMIC);
         action.build(env);
 
         if (Objects.nonNull(savepointPath)) {
