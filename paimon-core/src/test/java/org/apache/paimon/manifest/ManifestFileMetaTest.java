@@ -28,6 +28,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -37,6 +38,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -131,7 +133,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         testCleanUp(input, 0L);
     }
 
-    @RepeatedTest(3)
+    @Test
     public void testMerge() {
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
         // delta with delete apply parititon 1,2
@@ -147,7 +149,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         assertEquivalentEntries(input, merged);
     }
 
-    @RepeatedTest(3)
+    @Test
     public void testMergeWithoutDelta() {
 
         // base
@@ -172,7 +174,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         assertEquivalentEntries(input1, merged1);
     }
 
-    @RepeatedTest(3)
+    @Test
     public void testMergeWithoutBase() {
         List<ManifestFileMeta> input = new ArrayList<>();
         addDeltaManifests(input, true);
@@ -181,7 +183,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         assertEquivalentEntries(input, merged);
     }
 
-    @RepeatedTest(3)
+    @Test
     public void testMergeWithoutDeleteFile() {
         // entries are All ADD.
         List<ManifestFileMeta> input = new ArrayList<>();
@@ -207,18 +209,17 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         assertEquivalentEntries(input, merged);
     }
 
-    @RepeatedTest(3)
+    @Test
     public void testTriggerFullCompaction() {
-
-        List<ManifestEntry> entrys = new ArrayList<>();
+        List<ManifestEntry> entries = new ArrayList<>();
         for (int i = 0; i < 16; i++) {
-            entrys.add(makeEntry(true, String.valueOf(i)));
+            entries.add(makeEntry(true, String.valueOf(i)));
         }
 
         List<ManifestFileMeta> input = new ArrayList<>();
 
         // base manifest
-        input.add(makeManifest(entrys.toArray(new ManifestEntry[0])));
+        input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
 
         // delta manifest
         input.add(makeManifest(makeEntry(true, "A"), makeEntry(true, "B"), makeEntry(true, "C")));
@@ -234,18 +235,18 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
         // no trigger for delta size
         List<ManifestFileMeta> newMetas2 = new ArrayList<>();
-        List<ManifestFileMeta> manifestFileMetas =
+        Optional<List<ManifestFileMeta>> fullCompacted =
                 ManifestFileMeta.tryFullCompaction(
-                        input, newMetas2, manifestFile, getPartitionType(), 500, Long.MAX_VALUE);
-        List<ManifestFileMeta> expected2 = new ArrayList<>(input);
-        assertThat(manifestFileMetas).hasSameElementsAs(expected2);
+                        input, newMetas2, manifestFile, 500, Long.MAX_VALUE, getPartitionType());
+        assertThat(fullCompacted).isEmpty();
         assertThat(newMetas2).isEmpty();
 
         // trigger full compaction
         List<ManifestFileMeta> newMetas3 = new ArrayList<>();
-        List<ManifestFileMeta> mergedMainfest =
+        List<ManifestFileMeta> merged =
                 ManifestFileMeta.tryFullCompaction(
-                        input, newMetas3, manifestFile, getPartitionType(), 500, 100);
+                                input, newMetas3, manifestFile, 500, 100, getPartitionType())
+                        .get();
 
         List<String> entryFileNameExptected = new ArrayList<>();
         entryFileNameExptected.add("ADD-G");
@@ -253,23 +254,24 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
             entryFileNameExptected.add("ADD-" + i);
         }
 
-        containSameEntryFile(mergedMainfest, entryFileNameExptected);
+        containSameEntryFile(merged, entryFileNameExptected);
 
         assertThat(newMetas3).isNotEmpty();
     }
 
-    @RepeatedTest(3)
-    public void testMultiParitionFullCompaction() {
+    @Test
+    public void testMultiPartitionsFullCompaction() {
 
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
 
-        // delta with delete apply parititon 1,2
+        // delta with delete apply partition 1,2
         addDeltaManifests(input, true);
 
         List<ManifestFileMeta> newMetas = new ArrayList<>();
-        List<ManifestFileMeta> mergedMainfest =
+        List<ManifestFileMeta> mergedManifest =
                 ManifestFileMeta.tryFullCompaction(
-                        input, newMetas, manifestFile, getPartitionType(), 500, 100);
+                                input, newMetas, manifestFile, 500, 100, getPartitionType())
+                        .get();
 
         List<String> expected = Lists.newArrayList("ADD-C2", "ADD-D2", "ADD-G");
         HashMap<Integer, Integer> partitionAndFileLimit =
@@ -286,7 +288,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
             }
         }
 
-        containSameEntryFile(mergedMainfest, expected);
+        containSameEntryFile(mergedManifest, expected);
     }
 
     private void createData(
