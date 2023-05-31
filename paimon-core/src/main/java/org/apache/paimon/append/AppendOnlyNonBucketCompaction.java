@@ -19,23 +19,24 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.Table;
 
-/** Utils for {@link AppendOnlyFileStoreTable}. */
-public class AppendOnlyTableCheckUtils {
-    public static AppendOnlyTableCompactionCoordinator getCompactionCoordinator(Table table) {
-        checkAppendOnlyTable(table);
-        return ((AppendOnlyFileStoreTable) table).getCompactionCoordinator();
+/** Compaction for {@link AppendOnlyFileStoreTable}. */
+public class AppendOnlyNonBucketCompaction {
+    private final AppendOnlyFileStoreTable table;
+
+    public AppendOnlyNonBucketCompaction(AppendOnlyFileStoreTable table) {
+        this.table = table;
     }
 
-    public static AppendOnlyTableCompactionWorker getCompactionWorker(Table table) {
-        checkAppendOnlyTable(table);
-        return ((AppendOnlyFileStoreTable) table).getCompactionWorker();
+    public AppendOnlyTableCompactionCoordinator getCompactionCoordinator() {
+        return new AppendOnlyTableCompactionCoordinator(
+                table,
+                table.coreOptions().targetFileSize(),
+                table.coreOptions().compactionMinFileNum(),
+                table.coreOptions().compactionMaxFileNum());
     }
 
-    public static void checkAppendOnlyTable(Table table) {
-        if (!(table instanceof AppendOnlyFileStoreTable)) {
-            throw new NotAppendOnlyTableException();
-        }
+    public AppendOnlyTableCompactionWorker getCompactionWorker(String commitUser) {
+        return new AppendOnlyTableCompactionWorker(table, commitUser);
     }
 }

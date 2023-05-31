@@ -30,6 +30,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.RowDataFileWriter;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.source.DataSplit;
@@ -129,8 +130,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 fileCompression);
     }
 
-    // AppendOnlyCompactWorker need rewriter to execute compaction task
-    public AppendOnlyCompactManager.CompactRewriter compactRewriter(
+    private AppendOnlyCompactManager.CompactRewriter compactRewriter(
             BinaryRow partition, int bucket) {
         return toCompact -> {
             if (toCompact.isEmpty()) {
@@ -160,9 +160,35 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         };
     }
 
-    // overwrite flag in AppendOnlyFileStoreWrite only disable search for restored files
-    public void fromEmptyWriter() {
-        withOverwrite(true);
+    // AppendOnlyCompactWorker need rewriter to execute compaction task
+    public AppendOnlyCompactManager.CompactRewriter singleCompactRewriter(
+            BinaryRow partition, int bucket) {
+        return toCompact -> {
+            if (toCompact.isEmpty()) {
+                return Collections.emptyList();
+            }
+            RowDataFileWriter rewriter =
+                    new RowDataFileWriter(
+                            fileIO,
+                            fileFormat.createWriterFactory(rowType),
+                            pathFactory.createDataFilePathFactory(partition, bucket).newPath(),
+                            rowType,
+                            fileFormat.createStatsExtractor(rowType).orElse(null),
+                            schemaId,
+                            new LongCounter(toCompact.get(0).minSequenceNumber()),
+                            fileCompression);
+            rewriter.write(
+                    new RecordReaderIterator<>(
+                            read.createReader(
+                                    new DataSplit(
+                                            0L /* unused */,
+                                            partition,
+                                            bucket,
+                                            toCompact,
+                                            false))));
+            rewriter.close();
+            return Collections.singletonList(rewriter.result());
+        };
     }
 
     public void skipCompaction() {

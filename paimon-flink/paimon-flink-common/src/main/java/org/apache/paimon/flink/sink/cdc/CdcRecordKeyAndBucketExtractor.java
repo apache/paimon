@@ -26,6 +26,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BucketProcessor;
 
 import java.util.List;
 import java.util.stream.IntStream;
@@ -87,9 +88,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
             bucketKey = bucketKeyProjection.apply(projectAsInsert(record, bucketKeyFields));
         }
         if (bucket == null) {
-            bucket =
-                    KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+            bucket = BucketProcessor.calculateBucket(bucketKey, numBuckets);
         }
         return bucket;
     }

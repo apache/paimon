@@ -21,8 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
-import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
-import org.apache.paimon.append.AppendOnlyTableCompactionWorker;
+import org.apache.paimon.append.AppendOnlyNonBucketCompaction;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -43,22 +42,25 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.BucketProcessor;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.function.BiConsumer;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
-public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
+public class AppendOnlyFileStoreTable extends AbstractFileStoreTable implements NonBucketTable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final int NO_BUCKET_BUCKET = 0;
-
     private transient AppendOnlyFileStore lazyStore;
+    private boolean nonBucket = false;
 
     AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         super(fileIO, path, tableSchema);
+        if (BucketProcessor.checkNonBucket(coreOptions().bucket())) {
+            nonBucket = true;
+        }
     }
 
     @Override
@@ -136,22 +138,13 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
         AppendOnlyFileStoreWrite writer = store().newWrite(commitUser);
-        boolean negativeBucket = coreOptions().bucket() == -1;
-        if (negativeBucket) {
+        if (nonBucket()) {
             writer.skipCompaction();
-            writer.fromEmptyWriter();
+            writer.fromEmptyWriter(true);
         }
         return new TableWriteImpl<>(
                 writer,
-                new InternalRowKeyAndBucketExtractor(tableSchema) {
-                    @Override
-                    public int bucket() {
-                        if (negativeBucket) {
-                            return AppendOnlyFileStoreTable.NO_BUCKET_BUCKET;
-                        }
-                        return super.bucket();
-                    }
-                },
+                new InternalRowKeyAndBucketExtractor(tableSchema),
                 record -> {
                     Preconditions.checkState(
                             record.row().getRowKind() == RowKind.INSERT,
@@ -161,15 +154,15 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                 });
     }
 
-    public AppendOnlyTableCompactionCoordinator getCompactionCoordinator() {
-        return new AppendOnlyTableCompactionCoordinator(
-                this,
-                coreOptions().targetFileSize(),
-                coreOptions().compactionMinFileNum(),
-                coreOptions().compactionMaxFileNum());
+    @Override
+    public boolean nonBucket() {
+        return nonBucket;
     }
 
-    public AppendOnlyTableCompactionWorker getCompactionWorker() {
-        return new AppendOnlyTableCompactionWorker(this);
+    public AppendOnlyNonBucketCompaction createNonBucketCompaction() {
+        Preconditions.checkArgument(
+                nonBucket, "Only non bucket append-only table could create non bucket compaction.");
+
+        return new AppendOnlyNonBucketCompaction(this);
     }
 }

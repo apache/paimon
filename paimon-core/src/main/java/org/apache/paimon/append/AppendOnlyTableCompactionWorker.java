@@ -22,54 +22,48 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.utils.BucketProcessor;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /** {@link AppendOnlyFileStoreTable} compact worker. */
 public class AppendOnlyTableCompactionWorker {
-    private final List<CompactionTask> tasks = new ArrayList<>();
+    private final List<AppendOnlyCompactionTask> tasks = new ArrayList<>();
     private final List<CommitMessage> result = new ArrayList<>();
-    private final String commitUser = UUID.randomUUID().toString();
     private final AppendOnlyFileStoreWrite write;
     private final Map<BinaryRow, AppendOnlyCompactManager.CompactRewriter> rewriters =
             new HashMap<>();
 
-    public AppendOnlyTableCompactionWorker(AppendOnlyFileStoreTable table) {
+    public AppendOnlyTableCompactionWorker(AppendOnlyFileStoreTable table, String commitUser) {
         this.write = table.store().newWrite(commitUser);
     }
 
-    public AppendOnlyTableCompactionWorker accept(List<CompactionTask> tasks) {
+    public AppendOnlyTableCompactionWorker accept(List<AppendOnlyCompactionTask> tasks) {
         this.tasks.addAll(tasks);
         return this;
     }
 
-    public AppendOnlyTableCompactionWorker accept(CompactionTask task) {
+    public AppendOnlyTableCompactionWorker accept(AppendOnlyCompactionTask task) {
         this.tasks.add(task);
         return this;
     }
 
-    public AppendOnlyTableCompactionWorker doCompact() throws Exception {
-        for (CompactionTask task : tasks) {
+    public List<CommitMessage> doCompact() throws Exception {
+        for (AppendOnlyCompactionTask task : tasks) {
             AppendOnlyCompactManager.CompactRewriter rewriter =
                     rewriters.computeIfAbsent(task.partition(), this::buildRewriter);
-            task.doCompact(rewriter);
-            result.add(task.result());
+            result.add(task.doCompact(rewriter));
         }
+        ArrayList<CommitMessage> resultReturn = new ArrayList<>(result);
+        result.clear();
         tasks.clear();
-        return this;
+        return resultReturn;
     }
 
     private AppendOnlyCompactManager.CompactRewriter buildRewriter(BinaryRow partition) {
-        return write.compactRewriter(partition, AppendOnlyFileStoreTable.NO_BUCKET_BUCKET);
-    }
-
-    public List<CommitMessage> drainResult() {
-        ArrayList<CommitMessage> resultReturn = new ArrayList<>(result);
-        result.clear();
-        return resultReturn;
+        return write.singleCompactRewriter(partition, BucketProcessor.NON_BUCKET_BUCKET);
     }
 }

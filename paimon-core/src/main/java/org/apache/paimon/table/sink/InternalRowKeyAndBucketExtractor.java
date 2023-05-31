@@ -24,6 +24,7 @@ import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.BucketProcessor;
 
 /** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
 public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<InternalRow> {
@@ -90,9 +91,7 @@ public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<I
             }
         }
         if (bucket == null) {
-            bucket =
-                    KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
+            bucket = BucketProcessor.calculateBucket(bucketKey, numBuckets);
         }
         return bucket;
     }

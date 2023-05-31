@@ -18,14 +18,13 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.data.serializer.VersionedSerializer;
-import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.paimon.io.NewFilesIncrement;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -35,14 +34,13 @@ import java.util.List;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** {@link VersionedSerializer} for {@link CommitMessage}. */
-public class CommitMessageSerializer implements VersionedSerializer<CommitMessage> {
-
+/** Serializer for {@link AppendOnlyCompactionTask}. */
+public class CompactionTaskSerializer implements VersionedSerializer<AppendOnlyCompactionTask> {
     private static final int CURRENT_VERSION = 2;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
-    public CommitMessageSerializer() {
+    public CompactionTaskSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
     }
 
@@ -52,42 +50,38 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     }
 
     @Override
-    public byte[] serialize(CommitMessage obj) throws IOException {
+    public byte[] serialize(AppendOnlyCompactionTask obj) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
         serialize(obj, view);
         return out.toByteArray();
     }
 
-    public void serializeList(List<CommitMessage> list, DataOutputView view) throws IOException {
+    public void serializeList(List<AppendOnlyCompactionTask> list, DataOutputView view)
+            throws IOException {
         view.writeInt(list.size());
-        for (CommitMessage commitMessage : list) {
+        for (AppendOnlyCompactionTask commitMessage : list) {
             serialize(commitMessage, view);
         }
     }
 
-    private void serialize(CommitMessage obj, DataOutputView view) throws IOException {
-        CommitMessageImpl message = (CommitMessageImpl) obj;
-        serializeBinaryRow(obj.partition(), view);
-        view.writeInt(obj.bucket());
-        dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
-        dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
-        dataFileSerializer.serializeList(message.compactIncrement().compactBefore(), view);
-        dataFileSerializer.serializeList(message.compactIncrement().compactAfter(), view);
-        dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
+    private void serialize(AppendOnlyCompactionTask task, DataOutputView view) throws IOException {
+        serializeBinaryRow(task.partition(), view);
+        dataFileSerializer.serializeList(task.compactBefore(), view);
     }
 
     @Override
-    public CommitMessage deserialize(int version, byte[] serialized) throws IOException {
+    public AppendOnlyCompactionTask deserialize(int version, byte[] serialized) throws IOException {
         checkVersion(version);
         DataInputDeserializer view = new DataInputDeserializer(serialized);
         return deserialize(view);
     }
 
-    public List<CommitMessage> deserializeList(int version, DataInputView view) throws IOException {
+    public List<AppendOnlyCompactionTask> deserializeList(int version, DataInputView view)
+            throws IOException {
         checkVersion(version);
         int length = view.readInt();
-        List<CommitMessage> list = new ArrayList<>(length);
+        List<AppendOnlyCompactionTask> list = new ArrayList<>(length);
         for (int i = 0; i < length; i++) {
             list.add(deserialize(view));
         }
@@ -97,25 +91,17 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     private void checkVersion(int version) {
         if (version != CURRENT_VERSION) {
             throw new UnsupportedOperationException(
-                    "Expecting FileCommittable version to be "
+                    "Expecting CompactionTask version to be "
                             + CURRENT_VERSION
                             + ", but found "
                             + version
-                            + ".\nFileCommittable is not a compatible data structure. "
+                            + ".\nCompactionTask is not a compatible data structure. "
                             + "Please restart the job afresh (do not recover from savepoint).");
         }
     }
 
-    private CommitMessage deserialize(DataInputView view) throws IOException {
-        return new CommitMessageImpl(
-                deserializeBinaryRow(view),
-                view.readInt(),
-                new NewFilesIncrement(
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view)),
-                new CompactIncrement(
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view)));
+    private AppendOnlyCompactionTask deserialize(DataInputView view) throws IOException {
+        return new AppendOnlyCompactionTask(
+                deserializeBinaryRow(view), dataFileSerializer.deserializeList(view));
     }
 }

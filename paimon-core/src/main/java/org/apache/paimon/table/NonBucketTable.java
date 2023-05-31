@@ -16,16 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.append;
+package org.apache.paimon.table;
 
-/** Exception thrown while not {@link org.apache.paimon.table.AppendOnlyFileStoreTable}. */
-public class NotAppendOnlyTableException extends RuntimeException {
-
-    public NotAppendOnlyTableException() {
-        this("Only support AppendOnly Table.");
-    }
-
-    public NotAppendOnlyTableException(String msg) {
-        super(msg);
+/** Table bucket could be negative. */
+public interface NonBucketTable {
+    default boolean nonBucket() {
+        return false;
     }
 }

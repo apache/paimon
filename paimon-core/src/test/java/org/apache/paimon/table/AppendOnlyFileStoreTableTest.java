@@ -39,6 +39,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.utils.BucketProcessor;
 
 import org.junit.jupiter.api.Test;
 
@@ -52,8 +53,6 @@ import java.util.Random;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
-import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
@@ -227,7 +226,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         serializer
                                 .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();
-                int bucket = bucket(bucketKeyHashCode(data), numOfBucket);
+                int bucket = BucketProcessor.calculateBucket(data, numOfBucket);
                 dataPerBucket.compute(
                         bucket,
                         (k, v) -> {

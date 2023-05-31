@@ -18,29 +18,26 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.append.AppendOnlyCompactionTask;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
-import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
-import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link CommitMessageSerializer}. */
-public class CommitMessageSerializerTest {
-
+/** Tests for {@link CompactionTaskSerializer}. */
+public class CompactionTaskSerializerTest {
     @Test
-    public void test() throws IOException {
-        CommitMessageSerializer serializer = new CommitMessageSerializer();
-        NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
-        CompactIncrement compactIncrement = randomCompactIncrement();
-        CommitMessage committable =
-                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
-        CommitMessage newCommittable = serializer.deserialize(2, serializer.serialize(committable));
-        assertThat(newCommittable).isEqualTo(committable);
+    public void testCompactionTaskSerializer() throws IOException {
+        CompactionTaskSerializer serializer = new CompactionTaskSerializer();
+        AppendOnlyCompactionTask task =
+                new AppendOnlyCompactionTask(row(0), randomNewFilesIncrement().newFiles());
+
+        byte[] bytes = serializer.serialize(task);
+        AppendOnlyCompactionTask task1 = serializer.deserialize(serializer.getVersion(), bytes);
+        Assertions.assertEquals(task1, task);
     }
 }

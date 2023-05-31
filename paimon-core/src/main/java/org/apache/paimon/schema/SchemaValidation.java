@@ -146,7 +146,7 @@ public class SchemaValidation {
         }
 
         if (options.bucket() == -1 && options.toMap().get(BUCKET_KEY.key()) != null) {
-            throw new RuntimeException("Cannot define 'bucket-key' with negative bucket number.");
+            throw new RuntimeException("Cannot define 'bucket-key' in non bucket mode.");
         }
 
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {

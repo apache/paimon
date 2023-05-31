@@ -69,11 +69,11 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             String commitUser,
             StoreSinkWriteState state,
             IOManager ioManager,
-            boolean isOverwrite,
+            boolean emptyWriter,
             boolean waitCompaction,
             int deltaCommits,
             @Nullable MemorySegmentPool memoryPool) {
-        super(table, commitUser, state, ioManager, isOverwrite, waitCompaction, memoryPool);
+        super(table, commitUser, state, ioManager, emptyWriter, waitCompaction, memoryPool);
 
         this.deltaCommits = deltaCommits;
 

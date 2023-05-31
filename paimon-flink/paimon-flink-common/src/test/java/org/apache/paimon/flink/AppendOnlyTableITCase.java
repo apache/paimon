@@ -58,7 +58,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                         "CREATE TABLE pk_table (id INT, data STRING) "
                                                 + "WITH ('write-mode'='append-only', 'bucket' = '-1', 'bucket-key' = 'id')"))
                 .hasRootCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage("Cannot define 'bucket-key' with negative bucket number.");
+                .hasRootCauseMessage("Cannot define 'bucket-key' in non bucket mode.");
     }
 
     @Test
@@ -145,6 +145,39 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(1), Row.of(1), Row.of(2));
 
         rows = batchSql("SELECT data FROM append_table");
+        assertThat(rows.size()).isEqualTo(4);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of("AAA"), Row.of("AAA"), Row.of("BBB"), Row.of("AAA"));
+    }
+
+    @Test
+    public void testIngestNonBucketFromSource() {
+        List<Row> input =
+                Arrays.asList(
+                        Row.ofKind(RowKind.INSERT, 1, "AAA"),
+                        Row.ofKind(RowKind.INSERT, 1, "AAA"),
+                        Row.ofKind(RowKind.INSERT, 1, "BBB"),
+                        Row.ofKind(RowKind.INSERT, 2, "AAA"));
+
+        String id = TestValuesTableFactory.registerData(input);
+        batchSql(
+                "CREATE TEMPORARY TABLE source (id INT, data STRING) WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                id);
+
+        batchSql("INSERT INTO nonbucket_table SELECT * FROM source");
+
+        List<Row> rows = batchSql("SELECT * FROM nonbucket_table");
+        assertThat(rows.size()).isEqualTo(4);
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "AAA"), Row.of(1, "AAA"), Row.of(1, "BBB"), Row.of(2, "AAA"));
+
+        rows = batchSql("SELECT id FROM nonbucket_table");
+        assertThat(rows.size()).isEqualTo(4);
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(1), Row.of(1), Row.of(1), Row.of(2));
+
+        rows = batchSql("SELECT data FROM nonbucket_table");
         assertThat(rows.size()).isEqualTo(4);
         assertThat(rows)
                 .containsExactlyInAnyOrder(
@@ -246,6 +279,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only')",
+                "CREATE TABLE IF NOT EXISTS nonbucket_table (id INT, data STRING) WITH ('write-mode'='append-only', 'bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('write-mode'='append-only')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('write-mode'='append-only')");
     }

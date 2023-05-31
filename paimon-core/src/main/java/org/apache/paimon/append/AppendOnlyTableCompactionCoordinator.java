@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -25,26 +26,22 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.SnapshotManager;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.stream.Collectors;
 
 /** {@link AppendOnlyFileStoreTable} compact coordinator. */
 public class AppendOnlyTableCompactionCoordinator {
     private final SnapshotManager snapshotManager;
     private final AppendOnlyFileStoreScan scan;
-    private Long snapshotId;
 
+    private Long snapshotId;
     private final long targetFileSize;
     private final int minFileNum;
     private final int maxFileNum;
@@ -54,19 +51,19 @@ public class AppendOnlyTableCompactionCoordinator {
 
     public AppendOnlyTableCompactionCoordinator(
             AppendOnlyFileStoreTable table, long targetFileSize, int minFileNum, int maxFileNum) {
-        scan = table.store().newScan();
-        snapshotManager = table.snapshotManager();
+        this.scan = table.store().newScan();
+        this.snapshotManager = table.snapshotManager();
         this.targetFileSize = targetFileSize;
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
-        snapshotId = snapshotManager.latestSnapshotId();
+        this.snapshotId = snapshotManager.latestSnapshotId();
 
         if (snapshotId != null) {
             updateFull();
         }
     }
 
-    public void updateRestore() {
+    public void updateRestored() {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null || latestSnapshotId.equals(snapshotId)) {
             return;
@@ -88,7 +85,7 @@ public class AppendOnlyTableCompactionCoordinator {
                         (k, v) ->
                                 partitionCompactCoordinators
                                         .computeIfAbsent(k, PartitionCompactCoordinator::new)
-                                        .addRestoredFiles(
+                                        .addFiles(
                                                 v.stream()
                                                         .map(ManifestEntry::file)
                                                         .filter(
@@ -98,7 +95,7 @@ public class AppendOnlyTableCompactionCoordinator {
                                                         .collect(Collectors.toList())));
     }
 
-    private void updateDelta(Long targetSnapshotId) {
+    public void updateDelta(Long targetSnapshotId) {
         for (long id = snapshotId + 1; id <= targetSnapshotId; id++) {
             scan.withSnapshot(id).withKind(ScanKind.DELTA).plan().files().stream()
                     .collect(Collectors.groupingBy(ManifestEntry::partition))
@@ -110,146 +107,51 @@ public class AppendOnlyTableCompactionCoordinator {
         }
     }
 
-    public void addAll(List<CommitMessage> commitMessages) {
-        commitMessages.forEach(
-                commitMessage ->
-                        partitionCompactCoordinators
-                                .computeIfAbsent(
-                                        commitMessage.partition(), PartitionCompactCoordinator::new)
-                                .addIncremental(
-                                        ((CommitMessageImpl) commitMessage)
-                                                .newFilesIncrement()
-                                                .newFiles()));
-    }
-
-    public void add(CommitMessage commitMessage) {
-        partitionCompactCoordinators
-                .computeIfAbsent(commitMessage.partition(), PartitionCompactCoordinator::new)
-                .addIncremental(((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
-    }
-
-    public List<CompactionTask> compactPlan() {
+    // generate compaction task to the next stage
+    public List<AppendOnlyCompactionTask> compactPlan() {
         return partitionCompactCoordinators.values().stream()
-                .filter(t -> t.newFiles.size() > 0)
+                .filter(t -> t.toCompact.size() > 1)
                 .flatMap(t -> t.plan().stream())
                 .collect(Collectors.toList());
     }
 
-    public Long currentSnapshotId() {
-        return snapshotId;
+    @VisibleForTesting
+    public HashSet<DataFileMeta> listRestoredFiles() {
+        HashSet<DataFileMeta> sets = new HashSet<>();
+        partitionCompactCoordinators
+                .values()
+                .forEach(
+                        partitionCompactCoordinator ->
+                                sets.addAll(partitionCompactCoordinator.getToCompact()));
+        return sets;
     }
 
     /** Coordinator for a single partition. */
     private class PartitionCompactCoordinator {
         BinaryRow partition;
-        HashSet<DataFileMeta> restoredFiles = new HashSet<>();
-        HashSet<DataFileMeta> newFiles = new HashSet<>();
+        HashSet<DataFileMeta> toCompact = new HashSet<>();
 
         public PartitionCompactCoordinator(BinaryRow partition) {
             this.partition = partition;
         }
 
-        public List<CompactionTask> plan() {
-            List<CompactionTask> tasks = pickCompact();
-            newFiles.clear();
-            return tasks;
+        public List<AppendOnlyCompactionTask> plan() {
+            return pickCompact();
         }
 
-        private List<CompactionTask> pickCompact() {
-            Queue<DataFileMeta> toCompactNew = new ArrayDeque<>(newFiles);
-            Queue<DataFileMeta> toCompactRestored = new ArrayDeque<>(restoredFiles);
-            List<CompactionTask> tasks = new ArrayList<>();
-
-            List<DataFileMeta> candidateNewFiles = new ArrayList<>();
-            List<DataFileMeta> candidateRestoredFiles = new ArrayList<>();
-            List<DataFileMeta> remainedNewFiles = new ArrayList<>();
-
-            long totalFileSize = 0L;
-            int fileNum = 0;
-            // we generate new files compaction tasks first
-            while (!toCompactNew.isEmpty()) {
-                DataFileMeta file = toCompactNew.poll();
-                long fileSize = file.fileSize();
-                if (fileSize > targetFileSize) {
-                    remainedNewFiles.add(file);
-                    continue;
-                }
-
-                candidateNewFiles.add(file);
-                totalFileSize += fileSize;
-                fileNum++;
-
-                if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
-                        || fileNum >= maxFileNum) {
-                    tasks.add(
-                            new CompactionTask(
-                                    partition,
-                                    new ArrayList<>(candidateNewFiles),
-                                    Collections.EMPTY_LIST,
-                                    true));
-                    candidateNewFiles.clear();
-                    totalFileSize = 0;
-                    fileNum = 0;
-                }
-            }
-
-            // generate restored files compaction task, if new files in candidate remain, we add it
-            // to the first compaction task.
-            while (!toCompactRestored.isEmpty()) {
-                DataFileMeta file = toCompactRestored.poll();
-                long fileSize = file.fileSize();
-                if (fileSize > targetFileSize) {
-                    // big file will not participate in compaction again
-                    restoredFiles.remove(file);
-                    continue;
-                }
-                candidateRestoredFiles.add(file);
-                totalFileSize += fileSize;
-                fileNum++;
-
-                if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
-                        || fileNum >= maxFileNum) {
-                    if (candidateNewFiles.size() > 0) {
-                        tasks.add(
-                                new CompactionTask(
-                                        partition,
-                                        new ArrayList<>(candidateNewFiles),
-                                        candidateRestoredFiles,
-                                        true));
-                        candidateNewFiles.clear();
-                    } else {
-                        tasks.add(
-                                new CompactionTask(
-                                        partition,
-                                        Collections.EMPTY_LIST,
-                                        new ArrayList<>(candidateRestoredFiles),
-                                        true));
-                    }
-
-                    candidateRestoredFiles.forEach(restoredFiles::remove);
-                    candidateRestoredFiles.clear();
-                    totalFileSize = 0;
-                    fileNum = 0;
-                }
-            }
-
-            remainedNewFiles.addAll(candidateNewFiles);
-
-            if (remainedNewFiles.size() > 0) {
-                tasks.add(
-                        new CompactionTask(
-                                partition, remainedNewFiles, Collections.EMPTY_LIST, false));
-            }
-
-            return tasks;
+        public HashSet<DataFileMeta> getToCompact() {
+            return toCompact;
         }
 
-        public void addRestoredFiles(List<DataFileMeta> dataFileMetas) {
-            restoredFiles.addAll(dataFileMetas);
+        private List<AppendOnlyCompactionTask> pickCompact() {
+            List<List<DataFileMeta>> waitCompact = pack();
+            return waitCompact.stream()
+                    .map(files -> new AppendOnlyCompactionTask(partition, files))
+                    .collect(Collectors.toList());
         }
 
-        public void addIncremental(List<DataFileMeta> dataFileMetas) {
-            newFiles.addAll(dataFileMetas);
+        public void addFiles(List<DataFileMeta> dataFileMetas) {
+            toCompact.addAll(dataFileMetas);
         }
 
         public void updateRestoredFiles(List<ManifestEntry> entries) {
@@ -257,14 +159,42 @@ public class AppendOnlyTableCompactionCoordinator {
                     entry -> {
                         if (entry.kind() == FileKind.ADD) {
                             if (entry.file().fileSize() < targetFileSize) {
-                                restoredFiles.add(entry.file());
+                                toCompact.add(entry.file());
                             }
                         } else if (entry.kind() == FileKind.DELETE) {
-                            restoredFiles.remove(entry.file());
+                            toCompact.remove(entry.file());
                         } else {
                             throw new RuntimeException("unknown file kind: " + entry.kind());
                         }
                     });
+        }
+
+        private List<List<DataFileMeta>> pack() {
+            // we compact smaller files first
+            ArrayList<DataFileMeta> files = new ArrayList<>(toCompact);
+            files.sort(Comparator.comparingLong(DataFileMeta::fileSize));
+
+            List<List<DataFileMeta>> result = new ArrayList<>();
+
+            List<DataFileMeta> current = new ArrayList<>();
+            long totalFileSize = 0L;
+            int fileNum = 0;
+            for (DataFileMeta fileMeta : files) {
+                totalFileSize += fileMeta.fileSize();
+                fileNum++;
+                current.add(fileMeta);
+                if ((totalFileSize >= targetFileSize && fileNum >= minFileNum)
+                        || fileNum >= maxFileNum) {
+                    result.add(new ArrayList<>(current));
+                    // remove it from coordinator memory, won't join in compaction again
+                    current.forEach(toCompact::remove);
+                    current.clear();
+                    totalFileSize = 0;
+                    fileNum = 0;
+                }
+            }
+
+            return result;
         }
     }
 }
