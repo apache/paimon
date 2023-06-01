@@ -43,7 +43,7 @@ public class TagManager {
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
-    public void commitTag(Snapshot snapshot, String tagName) {
+    public void createTag(Snapshot snapshot, String tagName) {
         checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
 
         Path newTagPath = tagPath(tagName);

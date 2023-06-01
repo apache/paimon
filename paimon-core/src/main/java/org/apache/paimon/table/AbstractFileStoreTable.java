@@ -259,6 +259,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
         Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
         TagManager tagManager = new TagManager(fileIO, path);
-        tagManager.commitTag(snapshot, tagName);
+        tagManager.createTag(snapshot, tagName);
     }
 }
