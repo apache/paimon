@@ -37,6 +37,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeRefe
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import com.google.common.collect.Maps;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,8 +68,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final List<ComputedColumn> computedColumns;
 
     private JsonNode payload;
-    private Map<String, String> mySqlFieldTypes;
-    private Map<String, String> fieldClassNames;
+    private Map<String, Map<String, String>> mySqlFieldTypesMap = Maps.newConcurrentMap();
+    private Map<String, Map<String, String>> fieldClassNamesMap = Maps.newConcurrentMap();
 
     public MySqlDebeziumJsonEventParser(
             ZoneId serverTimeZone, boolean caseSensitive, List<ComputedColumn> computedColumns) {
@@ -103,7 +104,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     + "in the JsonDebeziumDeserializationSchema you created");
             payload = root.get("payload");
 
-            if (!isSchemaChange()) {
+            if (!mySqlFieldTypesMap.containsKey(parseTableName())) {
                 updateFieldTypes(schema);
             }
         } catch (Exception e) {
@@ -118,8 +119,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     private void updateFieldTypes(JsonNode schema) {
-        mySqlFieldTypes = new HashMap<>();
-        fieldClassNames = new HashMap<>();
+        Map<String, String> mySqlFieldTypes = new HashMap<>();
+        Map<String, String> fieldClassNames = new HashMap<>();
         JsonNode arrayNode = schema.get("fields");
         for (int i = 0; i < arrayNode.size(); i++) {
             JsonNode elementNode = arrayNode.get(i);
@@ -138,6 +139,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 }
             }
         }
+        mySqlFieldTypesMap.put(parseTableName(), mySqlFieldTypes);
+        fieldClassNamesMap.put(parseTableName(), fieldClassNames);
     }
 
     private boolean isSchemaChange() {
@@ -192,6 +195,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String fieldName = column.get("name").asText();
             result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
         }
+        mySqlFieldTypesMap.remove(parseTableName());
+        fieldClassNamesMap.remove(parseTableName());
         return result;
     }
 
@@ -226,7 +231,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         if (jsonMap == null) {
             return new HashMap<>();
         }
-
+        Map<String, String> mySqlFieldTypes = mySqlFieldTypesMap.get(parseTableName());
+        Map<String, String> fieldClassNames = fieldClassNamesMap.get(parseTableName());
         Map<String, String> resultMap = new HashMap<>();
         for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
             String fieldName = field.getKey();
