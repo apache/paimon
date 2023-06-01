@@ -110,62 +110,31 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 input.forward()
                         .process(
                                 new CdcMultiTableParsingProcessFunction<>(
-                                        database, catalogLoader, tables, parserFactory))
+                                        database, catalogLoader, tables, parserFactory, mode))
                         .setParallelism(input.getParallelism());
-
-        for (FileStoreTable table : tables) {
-            DataStream<Void> schemaChangeProcessFunction =
-                    SingleOutputStreamOperatorUtils.getSideOutput(
-                                    parsed,
-                                    CdcMultiTableParsingProcessFunction
-                                            .createUpdatedDataFieldsOutputTag(table.name()))
-                            .process(
-                                    new UpdatedDataFieldsProcessFunction(
-                                            new SchemaManager(table.fileIO(), table.location())));
-            schemaChangeProcessFunction.getTransformation().setParallelism(1);
-            schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
-
-            DataStream<CdcRecord> parsedForTable =
-                    SingleOutputStreamOperatorUtils.getSideOutput(
-                            parsed,
-                            CdcMultiTableParsingProcessFunction.createRecordOutputTag(
-                                    table.name()));
-
-            BucketMode bucketMode = table.bucketMode();
-            switch (bucketMode) {
-                case FIXED:
-                    buildForFixedBucket(table, parsedForTable);
-                    break;
-                case DYNAMIC:
-                    buildForDynamicBucket(table, parsedForTable);
-                    break;
-                case UNAWARE:
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unsupported bucket mode: " + bucketMode);
-            }
-        }
 
         // for newly-added tables, create a multiplexing operator that handles all their records
         //     and writes to multiple tables
         DataStream<CdcMultiplexRecord> newlyAddedTableStream =
-            SingleOutputStreamOperatorUtils.getSideOutput(
-                parsed, CdcMultiTableParsingProcessFunction.NEW_TABLE_OUTPUT_TAG);
+                SingleOutputStreamOperatorUtils.getSideOutput(
+                        parsed, CdcMultiTableParsingProcessFunction.DYNAMIC_OUTPUT_TAG);
         // handles schema change for newly added tables
         SingleOutputStreamOperator<Void> multipleSchemaChangeProcessFunction =
-            SingleOutputStreamOperatorUtils.getSideOutput(
-                parsed,
-                CdcMultiTableParsingProcessFunction
-                    .NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG)
-                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader));
+                SingleOutputStreamOperatorUtils.getSideOutput(
+                                parsed,
+                                CdcMultiTableParsingProcessFunction
+                                        .DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
+                        .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader));
 
-        FlinkStreamPartitioner<CdcMultiplexRecord> multiplePartitioner =
-            new FlinkStreamPartitioner<>(new CdcMultiplexRecordChannelComputer());
-        PartitionTransformation<CdcMultiplexRecord> multiplePartitioned =
-            new PartitionTransformation<>(
-                newlyAddedTableStream.getTransformation(), multiplePartitioner);
+        FlinkStreamPartitioner<CdcMultiplexRecord> partitioner =
+                new FlinkStreamPartitioner<>(
+                        new CdcMultiplexRecordChannelComputer(catalogLoader));
+        PartitionTransformation<CdcMultiplexRecord> partitioned =
+                new PartitionTransformation<>(
+                        newlyAddedTableStream.getTransformation(), partitioner);
+
         if (parallelism != null) {
-            multiplePartitioned.setParallelism(parallelism);
+            partitioned.setParallelism(parallelism);
         }
 
         FlinkCdcMultiTableSink sink = new FlinkCdcMultiTableSink(catalogLoader, lockFactory);

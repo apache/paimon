@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 
@@ -52,18 +53,18 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private final Set<String> initialTables;
     private final String database;
     private final Catalog.Loader catalogLoader;
+    private final MySqlDatabaseSyncMode mode;
 
     private transient EventParser<T> parser;
     private transient Catalog catalog;
     private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
-    public static final OutputTag<CdcMultiplexRecord> NEW_TABLE_OUTPUT_TAG =
-            new OutputTag<>(
-                    "paimon-newly-added-table", TypeInformation.of(CdcMultiplexRecord.class));
+    public static final OutputTag<CdcMultiplexRecord> DYNAMIC_OUTPUT_TAG =
+            new OutputTag<>("paimon-dynamic-table", TypeInformation.of(CdcMultiplexRecord.class));
     public static final OutputTag<Tuple2<Identifier, List<DataField>>>
-            NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG =
+            DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG =
                     new OutputTag<>(
-                            "paimon-newly-added-table-schema-change",
+                            "paimon-dynamic-table-schema-change",
                             TypeInformation.of(
                                     new TypeHint<Tuple2<Identifier, List<DataField>>>() {}));
 
@@ -72,11 +73,21 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
             Catalog.Loader catalogLoader,
             List<FileStoreTable> tables,
             EventParser.Factory<T> parserFactory) {
+        this(database, catalogLoader, tables, parserFactory, MySqlDatabaseSyncMode.STATIC);
+    }
+
+    public CdcMultiTableParsingProcessFunction(
+            String database,
+            Catalog.Loader catalogLoader,
+            List<FileStoreTable> tables,
+            EventParser.Factory<T> parserFactory,
+            MySqlDatabaseSyncMode mode) {
         // for now, only support single database
         this.database = database;
         this.catalogLoader = catalogLoader;
         this.initialTables = tables.stream().map(FileStoreTable::name).collect(Collectors.toSet());
         this.parserFactory = parserFactory;
+        this.mode = mode;
     }
 
     @Override
@@ -111,21 +122,21 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
 
         List<DataField> schemaChange = parser.parseSchemaChange();
         if (schemaChange.size() > 0) {
-            if (isTableNewlyAdded(tableName)) {
+            if (mode == MySqlDatabaseSyncMode.DYNAMIC) {
                 context.output(
-                        NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG,
+                        DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG,
                         Tuple2.of(Identifier.create(database, tableName), schemaChange));
             } else {
                 context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);
             }
         }
 
-        if (isTableNewlyAdded(tableName)) {
+        if (mode == MySqlDatabaseSyncMode.DYNAMIC) {
             parser.parseRecords()
                     .forEach(
                             record ->
                                     context.output(
-                                            NEW_TABLE_OUTPUT_TAG,
+                                            DYNAMIC_OUTPUT_TAG,
                                             wrapRecord(database, tableName, record)));
 
         } else {

@@ -18,27 +18,59 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.ChannelComputer;
+import org.apache.paimon.table.FileStoreTable;
 
+import java.util.Map;
 import java.util.Objects;
 
 /** {@link ChannelComputer} for {@link CdcRecord}. */
 public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMultiplexRecord> {
 
     private static final long serialVersionUID = 1L;
+    private final Catalog.Loader catalogLoader;
 
     private transient int numChannels;
 
-    public CdcMultiplexRecordChannelComputer() {}
+    private Map<Identifier, CdcRecordChannelComputer> channelComputers;
+    private Catalog catalog;
+
+    public CdcMultiplexRecordChannelComputer(Catalog.Loader catalogLoader) {
+        this.catalogLoader = catalogLoader;
+    }
 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
+        this.catalog = catalogLoader.load();
     }
 
     @Override
-    public int channel(CdcMultiplexRecord record) {
-        return Objects.hash(record.databaseName(), record.tableName()) % numChannels;
+    public int channel(CdcMultiplexRecord multiplexRecord) {
+        return Objects.hash(
+                        multiplexRecord.databaseName(),
+                        multiplexRecord.tableName(),
+                        computeChannelComputer(multiplexRecord).channel(multiplexRecord.record()))
+                % numChannels;
+    }
+
+    private ChannelComputer<CdcRecord> computeChannelComputer(CdcMultiplexRecord record) {
+        return channelComputers.computeIfAbsent(
+                Identifier.create(record.databaseName(), record.tableName()),
+                id -> {
+                    FileStoreTable table;
+                    try {
+                        table = (FileStoreTable) catalog.getTable(id);
+                    } catch (Catalog.TableNotExistException e) {
+                        throw new RuntimeException("Failed to get table " + id.getFullName());
+                    }
+                    CdcRecordChannelComputer channelComputer =
+                            new CdcRecordChannelComputer(table.schema());
+                    channelComputer.setup(numChannels);
+                    return channelComputer;
+                });
     }
 
     @Override
