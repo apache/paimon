@@ -189,6 +189,8 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING, d INT, e FLOAT)");
         sql("INSERT INTO T VALUES('paimon', 'bbb', 'ccc', 1, 3.4)");
+
+        // change type: FLOAT to DOUBLE
         sql("ALTER TABLE T MODIFY e DOUBLE");
         sql("INSERT INTO T VALUES('flink', 'ddd', 'eee', 4, 6.7)");
         List<Row> result = sql("SHOW CREATE TABLE T");
@@ -204,6 +206,23 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThat(result.toString())
                 .isEqualTo(
                         "[+I[flink, ddd, eee, 4, 6.7], +I[paimon, bbb, ccc, 1, 3.4000000953674316]]");
+
+        // change type: DOUBLE to STRING
+        sql("ALTER TABLE T MODIFY e STRING");
+        result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `b` VARCHAR(2147483647),\n"
+                                + "  `c` VARCHAR(2147483647),\n"
+                                + "  `d` INT,\n"
+                                + "  `e` VARCHAR(2147483647),");
+        sql("INSERT INTO T VALUES('apache', 'fff', 'ggg', 8, 'test')");
+        result = sql("SELECT * FROM T");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[apache, fff, ggg, 8, test], +I[flink, ddd, eee, 4, 6.7], +I[paimon, bbb, ccc, 1, 3.4]]");
 
         assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY c DOUBLE"))
                 .hasMessageContaining(
@@ -547,18 +566,22 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "+I[b, STRING, true, null, null, null, from column b]",
                         "+I[c, BIGINT, true, null, null, null, null]");
 
-        // invalid type change: BIGINT to INT
-        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY (c INT)"))
-                .getRootCause()
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Column type c[BIGINT] cannot be converted to INT without loosing information.");
+        // type change: BIGINT to INT
+        sql("ALTER TABLE T MODIFY (c INT)");
+        result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, from column b]",
+                        "+I[c, INT, true, null, null, null, null]");
 
-        // invalid type change: BIGINT to STRING
-        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY (c STRING)"))
-                .getRootCause()
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Column type c[BIGINT] cannot be converted to STRING without loosing information.");
+        // type change: INT to STRING
+        sql("ALTER TABLE T MODIFY (c STRING)");
+        result = sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, STRING, true, null, null, null, null]",
+                        "+I[b, STRING, true, null, null, null, from column b]",
+                        "+I[c, STRING, true, null, null, null, null]");
     }
 }

@@ -145,6 +145,51 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testNumericToString() {
+        // byte to string
+        compareCastResult(
+                CastExecutors.resolve(new TinyIntType(false), new VarCharType(5)),
+                (byte) 1,
+                BinaryString.fromString("1"));
+
+        // short to string
+        compareCastResult(
+                CastExecutors.resolve(new SmallIntType(false), new VarCharType(5)),
+                (short) 1,
+                BinaryString.fromString("1"));
+
+        // int to string
+        compareCastResult(
+                CastExecutors.resolve(new IntType(false), new VarCharType(5)),
+                1,
+                BinaryString.fromString("1"));
+
+        // bigint to string
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new VarCharType(5)),
+                1L,
+                BinaryString.fromString("1"));
+
+        // float to string
+        compareCastResult(
+                CastExecutors.resolve(new FloatType(false), new VarCharType(10)),
+                1.23456F,
+                BinaryString.fromString("1.23456"));
+
+        // double to string
+        compareCastResult(
+                CastExecutors.resolve(new DoubleType(false), new VarCharType(10)),
+                1.23456D,
+                BinaryString.fromString("1.23456"));
+
+        // decimal to string
+        compareCastResult(
+                CastExecutors.resolve(new DecimalType(10, 5), new VarCharType(20)),
+                DecimalUtils.castFrom(1.23456D, 10, 5),
+                BinaryString.fromString("1.23456"));
+    }
+
+    @Test
     public void testStringToString() {
         // varchar(10) to varchar(5)
         compareCastResult(

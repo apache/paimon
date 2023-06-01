@@ -97,6 +97,8 @@ public class CastExecutors {
                                         }
                                 }
                             };
+                        case VARCHAR:
+                            return value -> BinaryString.fromString(value.toString());
                         default:
                             return null;
                     }
@@ -123,6 +125,8 @@ public class CastExecutors {
                                             (Decimal) value,
                                             decimalType.getPrecision(),
                                             decimalType.getScale());
+                        case VARCHAR:
+                            return value -> BinaryString.fromString(value.toString());
                         default:
                             return null;
                     }

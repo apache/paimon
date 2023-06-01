@@ -596,18 +596,18 @@ public abstract class CatalogTestBase {
         assertThat(table.rowType().getTypeAt(1)).isEqualTo(DataTypes.DOUBLE());
 
         // Alter table update a column type throws Exception when column data type does not support
-        // implicit cast
+        // cast
         assertThatThrownBy(
                         () ->
                                 catalog.alterTable(
                                         identifier,
                                         Lists.newArrayList(
                                                 SchemaChange.updateColumnType(
-                                                        "col1", DataTypes.STRING())),
+                                                        "col1", DataTypes.DATE())),
                                         false))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasMessageContaining(
-                        "Column type col1[DOUBLE] cannot be converted to STRING without loosing information.");
+                        "Column type col1[DOUBLE] cannot be converted to DATE without loosing information.");
 
         // Alter table update a column type throws ColumnNotExistException when column does not
         // exist
