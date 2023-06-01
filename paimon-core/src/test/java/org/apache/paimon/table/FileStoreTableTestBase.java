@@ -58,6 +58,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.AfterEach;
@@ -658,15 +659,14 @@ public abstract class FileStoreTableTestBase {
             commit.commit(1, write.prepareCommit(false, 2));
         }
 
-        table.createTag("test-tag");
+        table.createTag("test-tag", 2);
 
         // verify that tag file exist
-        TraceableFileIO fileIO = new TraceableFileIO();
-        Path tagPath = new Path(tablePath, "tag/test-tag");
-        assertThat(fileIO.exists(tagPath)).isTrue();
+        TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+        assertThat(tagManager.tagExists("test-tag")).isTrue();
 
         // verify that test-tag is equal to snapshot 2
-        Snapshot tagged = Snapshot.fromPath(fileIO, tagPath);
+        Snapshot tagged = tagManager.taggedSnapshot("test-tag");
         Snapshot snapshot2 = table.snapshotManager().snapshot(2);
         assertThat(tagged.equals(snapshot2)).isTrue();
     }

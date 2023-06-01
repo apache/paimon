@@ -90,6 +90,4 @@ public interface FileStoreTable extends DataTable {
     default BinaryTableStats getSchemaFieldStats(DataFileMeta dataFileMeta) {
         return dataFileMeta.valueStats();
     }
-
-    void createTag(String tagName);
 }

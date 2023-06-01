@@ -72,8 +72,8 @@ public class TagManager {
         }
     }
 
-    /** Get the tagged snapshot. */
-    public Snapshot snapshot(String tagName) {
+    /** Get the tagged snapshot by name. */
+    public Snapshot taggedSnapshot(String tagName) {
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
         return Snapshot.fromPath(fileIO, tagPath(tagName));
     }
