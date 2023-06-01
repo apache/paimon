@@ -535,4 +535,22 @@ public class StringUtils {
         }
         return true;
     }
+
+    /**
+     * Checks if the string contains only digits.
+     *
+     * <p>NOTE: This method considers numbers like -123, 1.0 as non-numeric.
+     */
+    public static boolean isNumeric(String str) {
+        int strLen;
+        if (str == null || (strLen = str.length()) == 0) {
+            return false;
+        }
+        for (int i = 0; i < strLen; i++) {
+            if (!Character.isDigit(str.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
 }
