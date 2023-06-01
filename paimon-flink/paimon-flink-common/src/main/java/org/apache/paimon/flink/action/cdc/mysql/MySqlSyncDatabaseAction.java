@@ -192,13 +192,14 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         incompatibleMessage(table.schema(), mySqlSchema, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
                     monitoredTables.add(mySqlSchema.tableName());
+                    fileStoreTables.add(table);
                 }
             } catch (Catalog.TableNotExistException e) {
                 catalog.createTable(identifier, fromMySql, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
                 monitoredTables.add(mySqlSchema.tableName());
+                fileStoreTables.add(table);
             }
-            fileStoreTables.add(table);
         }
 
         Preconditions.checkState(
