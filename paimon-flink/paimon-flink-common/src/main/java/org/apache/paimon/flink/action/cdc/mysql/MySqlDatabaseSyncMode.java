@@ -1,6 +1,8 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
-public enum MySqlDatabaseSyncMode {
+import java.io.Serializable;
+
+public enum MySqlDatabaseSyncMode implements Serializable {
     STATIC,
     DYNAMIC
 }

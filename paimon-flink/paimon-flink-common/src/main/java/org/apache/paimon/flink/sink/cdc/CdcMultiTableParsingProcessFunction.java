@@ -51,10 +51,10 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private final EventParser.Factory<T> parserFactory;
     private final Set<String> initialTables;
     private final String database;
-    private Catalog catalog;
     private final Catalog.Loader catalogLoader;
 
     private transient EventParser<T> parser;
+    private transient Catalog catalog;
     private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
     public static final OutputTag<CdcMultiplexRecord> NEW_TABLE_OUTPUT_TAG =
@@ -97,18 +97,6 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
         String databaseName = parser.parseDatabaseName();
         String tableName = parser.parseTableName();
 
-        List<DataField> schemaChange = parser.parseSchemaChange();
-        if (schemaChange.size() > 0) {
-            context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);
-            if (isTableNewlyAdded(tableName)) {
-                context.output(
-                        NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG,
-                        Tuple2.of(Identifier.create(database, tableName), schemaChange));
-            } else {
-                context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);
-            }
-        }
-
         // check for newly added table
         parser.parseNewSchema(database)
                 .ifPresent(
@@ -120,6 +108,18 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
                             } catch (Throwable ignored) {
                             }
                         });
+
+        List<DataField> schemaChange = parser.parseSchemaChange();
+        if (schemaChange.size() > 0) {
+            if (isTableNewlyAdded(tableName)) {
+                context.output(
+                        NEW_TABLE_SCHEMA_CHANGE_OUTPUT_TAG,
+                        Tuple2.of(Identifier.create(database, tableName), schemaChange));
+            } else {
+                context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);
+            }
+        }
+
         if (isTableNewlyAdded(tableName)) {
             parser.parseRecords()
                     .forEach(

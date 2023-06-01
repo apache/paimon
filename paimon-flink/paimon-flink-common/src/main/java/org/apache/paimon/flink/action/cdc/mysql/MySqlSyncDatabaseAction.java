@@ -27,6 +27,7 @@ import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -159,6 +160,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
         this.excludedTables = new LinkedList<>();
         this.catalogOptions = Options.fromMap(catalogConfig);
+        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         this.tableConfig = tableConfig;
         this.mode = mode;
     }
@@ -239,6 +241,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         EventParser.Factory<String> parserFactory =
                 () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, tableNameConverter);
 
+        Options catalogOptions = this.catalogOptions;
+        String database = this.database;
+        MySqlDatabaseSyncMode mode = this.mode;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(

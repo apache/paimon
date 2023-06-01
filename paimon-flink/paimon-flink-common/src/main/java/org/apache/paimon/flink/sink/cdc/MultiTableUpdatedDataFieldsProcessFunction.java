@@ -83,7 +83,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
                 schemaManagers.computeIfAbsent(
                         tableId,
                         id -> {
-                            FileStoreTable table = null;
+                            FileStoreTable table;
                             try {
                                 table = (FileStoreTable) catalog.getTable(tableId);
                             } catch (Catalog.TableNotExistException e) {
