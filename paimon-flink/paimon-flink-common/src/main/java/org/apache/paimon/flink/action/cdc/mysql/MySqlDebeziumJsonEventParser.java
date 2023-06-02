@@ -68,7 +68,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final List<ComputedColumn> computedColumns;
 
     private JsonNode payload;
+
+    // key is tableName,value is a map:key is columnName value is columnType.
     private Map<String, Map<String, String>> mySqlFieldTypesMap = Maps.newConcurrentMap();
+    // key is tableName,value is a map:key is columnName value is columnClass.
     private Map<String, Map<String, String>> fieldClassNamesMap = Maps.newConcurrentMap();
 
     public MySqlDebeziumJsonEventParser(
