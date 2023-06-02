@@ -274,7 +274,8 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                     });
         } else {
             List<KafkaSchema> kafkaSchemaList =
-                    KafkaSchema.getListKafkaSchema(kafkaConfig, topicList.get(0), 0);
+                    KafkaSchema.getListKafkaSchema(
+                            kafkaConfig, topicList.get(0), schemaInitMaxRead);
             kafkaSchemaList =
                     kafkaSchemaList.stream()
                             .filter(kafkaSchema -> shouldMonitorTable(kafkaSchema.tableName()))
