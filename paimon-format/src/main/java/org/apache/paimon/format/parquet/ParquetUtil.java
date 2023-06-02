@@ -46,25 +46,27 @@ public class ParquetUtil {
      */
     public static Map<String, Statistics<?>> extractColumnStats(FileIO fileIO, Path path)
             throws IOException {
-        ParquetMetadata parquetMetadata = getParquetReader(fileIO, path).getFooter();
-        List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
-        Map<String, Statistics<?>> resultStats = new HashMap<>();
-        for (BlockMetaData blockMetaData : blockMetaDataList) {
-            List<ColumnChunkMetaData> columnChunkMetaDataList = blockMetaData.getColumns();
-            for (ColumnChunkMetaData columnChunkMetaData : columnChunkMetaDataList) {
-                Statistics<?> stats = columnChunkMetaData.getStatistics();
-                String columnName = columnChunkMetaData.getPath().toDotString();
-                Statistics<?> midStats;
-                if (!resultStats.containsKey(columnName)) {
-                    midStats = stats;
-                } else {
-                    midStats = resultStats.get(columnName);
-                    midStats.mergeStatistics(stats);
+        try (ParquetFileReader reader = getParquetReader(fileIO, path)) {
+            ParquetMetadata parquetMetadata = reader.getFooter();
+            List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
+            Map<String, Statistics<?>> resultStats = new HashMap<>();
+            for (BlockMetaData blockMetaData : blockMetaDataList) {
+                List<ColumnChunkMetaData> columnChunkMetaDataList = blockMetaData.getColumns();
+                for (ColumnChunkMetaData columnChunkMetaData : columnChunkMetaDataList) {
+                    Statistics<?> stats = columnChunkMetaData.getStatistics();
+                    String columnName = columnChunkMetaData.getPath().toDotString();
+                    Statistics<?> midStats;
+                    if (!resultStats.containsKey(columnName)) {
+                        midStats = stats;
+                    } else {
+                        midStats = resultStats.get(columnName);
+                        midStats.mergeStatistics(stats);
+                    }
+                    resultStats.put(columnName, midStats);
                 }
-                resultStats.put(columnName, midStats);
             }
+            return resultStats;
         }
-        return resultStats;
     }
 
     /**
