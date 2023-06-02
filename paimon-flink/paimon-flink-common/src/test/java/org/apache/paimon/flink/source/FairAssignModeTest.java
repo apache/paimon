@@ -27,25 +27,23 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext.SplitAssignmentState;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
 import static org.apache.paimon.flink.source.ContinuousFileSplitEnumeratorTest.createSnapshotSplit;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Unit tests for the {@link StaticFileStoreSplitEnumerator}. */
-public class StaticFileStoreSplitEnumeratorTest {
+/** Tests for {@link StaticFileStoreSplitEnumerator} with {@link SplitAssignMode#FAIR}. */
+public class FairAssignModeTest extends StaticFileStoreSplitEnumeratorTestBase {
 
     @Test
     public void testSplitAllocation() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         List<FileStoreSourceSplit> splits = new ArrayList<>();
         for (int i = 1; i <= 4; i++) {
             splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
         }
-        StaticFileStoreSplitEnumerator enumerator =
-                new StaticFileStoreSplitEnumerator(context, null, splits, 10);
+        StaticFileStoreSplitEnumerator enumerator = getSplitEnumerator(context, splits);
 
         // test assign
         enumerator.handleSplitRequest(0, "test-host");
@@ -70,16 +68,13 @@ public class StaticFileStoreSplitEnumeratorTest {
     @Test
     public void testSplitBatch() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         List<FileStoreSourceSplit> splits = new ArrayList<>();
         for (int i = 1; i <= 28; i++) {
             splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
         }
-        StaticFileStoreSplitEnumerator enumerator =
-                new StaticFileStoreSplitEnumerator(context, null, splits, 10);
+        StaticFileStoreSplitEnumerator enumerator = getSplitEnumerator(context, splits);
 
         // test assign
         enumerator.handleSplitRequest(0, "test-host");
@@ -110,16 +105,13 @@ public class StaticFileStoreSplitEnumeratorTest {
     @Test
     public void testSplitAllocationNotEvenly() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         List<FileStoreSourceSplit> splits = new ArrayList<>();
         for (int i = 1; i <= 3; i++) {
             splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
         }
-        StaticFileStoreSplitEnumerator enumerator =
-                new StaticFileStoreSplitEnumerator(context, null, splits, 10);
+        StaticFileStoreSplitEnumerator enumerator = getSplitEnumerator(context, splits);
 
         // test assign
         enumerator.handleSplitRequest(0, "test-host");
@@ -135,17 +127,13 @@ public class StaticFileStoreSplitEnumeratorTest {
     @Test
     public void testSplitAllocationSomeEmpty() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(3);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
-        context.registerReader(2, "test-host");
+                getSplitEnumeratorContext(3);
 
         List<FileStoreSourceSplit> splits = new ArrayList<>();
         for (int i = 1; i <= 2; i++) {
             splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
         }
-        StaticFileStoreSplitEnumerator enumerator =
-                new StaticFileStoreSplitEnumerator(context, null, splits, 1);
+        StaticFileStoreSplitEnumerator enumerator = getSplitEnumerator(context, splits);
 
         // test assign
         enumerator.handleSplitRequest(0, "test-host");
@@ -157,5 +145,10 @@ public class StaticFileStoreSplitEnumeratorTest {
         assertThat(assignments.get(0).getAssignedSplits()).containsExactly(splits.get(0));
         assertThat(assignments.get(1).getAssignedSplits()).containsExactly(splits.get(1));
         assertThat(assignments.get(2).getAssignedSplits()).isEmpty();
+    }
+
+    @Override
+    protected SplitAssignMode splitAssignMode() {
+        return SplitAssignMode.FAIR;
     }
 }

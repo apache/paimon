@@ -128,8 +128,11 @@ public class LogHybridSourceFactory
             return new StaticFileStoreSplitEnumerator(
                     context,
                     snapshot,
-                    splits,
-                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE));
+                    StaticFileStoreSource.createSplitAssigner(
+                            context,
+                            options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                            options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
+                            splits));
         }
     }
 }
