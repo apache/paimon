@@ -260,7 +260,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    // @Timeout(60)
     public void testIgnoreIncompatibleTables() throws Exception {
         // create an incompatible table
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));

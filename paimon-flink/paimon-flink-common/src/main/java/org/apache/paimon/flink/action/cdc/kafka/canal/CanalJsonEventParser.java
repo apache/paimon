@@ -55,6 +55,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -72,8 +73,8 @@ public class CanalJsonEventParser implements EventParser<String> {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private JsonNode root;
-    private Map<String, String> mySqlFieldTypes;
-    private Map<String, DataType> paimonFieldTypes;
+    private Map<String, Map<String, String>> mySqlFieldTypesMap = new ConcurrentHashMap<>();
+    private Map<String, Map<String, DataType>> paimonFieldTypesMap = new ConcurrentHashMap<>();
 
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
@@ -106,7 +107,7 @@ public class CanalJsonEventParser implements EventParser<String> {
                             + "please make sure that your topic's format is accurate.");
             JsonNode mysqlType = root.get("mysqlType");
 
-            if (!isSchemaChange()) {
+            if (!mySqlFieldTypesMap.containsKey(parseTableName())) {
                 updateFieldTypes(mysqlType);
             }
         } catch (Exception e) {
@@ -121,8 +122,8 @@ public class CanalJsonEventParser implements EventParser<String> {
     }
 
     private void updateFieldTypes(JsonNode schema) {
-        mySqlFieldTypes = new LinkedHashMap<>();
-        paimonFieldTypes = new LinkedHashMap<>();
+        Map<String, String> mySqlFieldTypes = new LinkedHashMap<>();
+        Map<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         Iterator<String> iterator = schema.fieldNames();
         while (iterator.hasNext()) {
             String fieldName = iterator.next();
@@ -130,6 +131,8 @@ public class CanalJsonEventParser implements EventParser<String> {
             mySqlFieldTypes.put(fieldName, fieldType);
             paimonFieldTypes.put(fieldName, MySqlTypeUtils.toDataType(fieldType));
         }
+        mySqlFieldTypesMap.put(parseTableName(), mySqlFieldTypes);
+        paimonFieldTypesMap.put(parseTableName(), paimonFieldTypes);
     }
 
     private boolean isSchemaChange() {
@@ -151,7 +154,8 @@ public class CanalJsonEventParser implements EventParser<String> {
         if (StringUtils.isEmpty(sql)) {
             return Collections.emptyList();
         }
-
+        Map<String, DataType> paimonFieldTypes = paimonFieldTypesMap.get(parseTableName());
+        Map<String, String> mySqlFieldTypes = mySqlFieldTypesMap.get(parseTableName());
         List<DataField> result = new ArrayList<>();
         int id = 0;
         for (Map.Entry<String, DataType> fieldType : paimonFieldTypes.entrySet()) {
@@ -330,6 +334,7 @@ public class CanalJsonEventParser implements EventParser<String> {
             return new HashMap<>();
         }
         Map<String, String> resultMap = new HashMap<>();
+        Map<String, String> mySqlFieldTypes = mySqlFieldTypesMap.get(parseTableName());
         for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue();

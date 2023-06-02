@@ -19,17 +19,14 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.kafka.canal.CanalJsonEventParser;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
-import org.apache.paimon.options.CatalogOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -41,6 +38,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
+import org.apache.flink.util.CollectionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,6 +51,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.Action.getConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -93,17 +93,18 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * not very efficient in resource saving. We may optimize this action by merging all sinks into one
  * instance in the future.
  */
-public class KafkaSyncDatabaseAction implements Action {
+public class KafkaSyncDatabaseAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaSyncDatabaseAction.class);
 
     private final Configuration kafkaConfig;
-    private final String warehouse;
     private final String database;
+    private final int schemaInitMaxRead;
     private final boolean ignoreIncompatible;
     private final String tablePrefix;
     private final String tableSuffix;
-    private final Map<String, String> catalogConfig;
+    @Nullable private final Pattern includingPattern;
+    @Nullable private final Pattern excludingPattern;
     private final Map<String, String> tableConfig;
 
     KafkaSyncDatabaseAction(
@@ -117,7 +118,10 @@ public class KafkaSyncDatabaseAction implements Action {
                 kafkaConfig,
                 warehouse,
                 database,
+                0,
                 ignoreIncompatible,
+                null,
+                null,
                 null,
                 null,
                 catalogConfig,
@@ -128,18 +132,23 @@ public class KafkaSyncDatabaseAction implements Action {
             Map<String, String> kafkaConfig,
             String warehouse,
             String database,
+            int schemaInitMaxRead,
             boolean ignoreIncompatible,
             @Nullable String tablePrefix,
             @Nullable String tableSuffix,
+            @Nullable String includingTables,
+            @Nullable String excludingTables,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
+        super(warehouse, catalogConfig);
         this.kafkaConfig = Configuration.fromMap(kafkaConfig);
-        this.warehouse = warehouse;
         this.database = database;
+        this.schemaInitMaxRead = schemaInitMaxRead;
         this.ignoreIncompatible = ignoreIncompatible;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
-        this.catalogConfig = catalogConfig;
+        this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
+        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
         this.tableConfig = tableConfig;
     }
 
@@ -148,20 +157,16 @@ public class KafkaSyncDatabaseAction implements Action {
                 kafkaConfig.contains(KafkaConnectorOptions.VALUE_FORMAT),
                 KafkaConnectorOptions.VALUE_FORMAT.key() + " cannot be null.");
         checkArgument(
-                kafkaConfig.get(KafkaConnectorOptions.TOPIC).size() > 1,
-                "kafka-sync-database requires that the size of topics be greater than one.");
-        Catalog catalog =
-                CatalogFactory.createCatalog(
-                        CatalogContext.create(
-                                new Options(catalogConfig)
-                                        .set(CatalogOptions.WAREHOUSE, warehouse)));
+                !CollectionUtil.isNullOrEmpty(kafkaConfig.get(KafkaConnectorOptions.TOPIC)),
+                KafkaConnectorOptions.TOPIC.key() + " cannot be null.");
+
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {
             validateCaseInsensitive();
         }
 
-        Map<String, KafkaSchema> kafkaCanalSchemaMap = getKafkaCanalSchemaMap();
+        Map<String, List<KafkaSchema>> kafkaCanalSchemaMap = getKafkaCanalSchemaMap();
 
         catalog.createDatabase(database, true);
         TableNameConverter tableNameConverter =
@@ -169,38 +174,41 @@ public class KafkaSyncDatabaseAction implements Action {
 
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
         List<String> monitoredTopics = new ArrayList<>();
-        for (Map.Entry<String, KafkaSchema> kafkaCanalSchemaEntry :
+        for (Map.Entry<String, List<KafkaSchema>> kafkaCanalSchemaEntry :
                 kafkaCanalSchemaMap.entrySet()) {
-            KafkaSchema kafkaSchema = kafkaCanalSchemaEntry.getValue();
+            List<KafkaSchema> kafkaSchemaList = kafkaCanalSchemaEntry.getValue();
             String topic = kafkaCanalSchemaEntry.getKey();
-            String paimonTableName = tableNameConverter.convert(kafkaSchema.tableName());
-            Identifier identifier = new Identifier(database, paimonTableName);
-            FileStoreTable table;
-            Schema fromCanal =
-                    KafkaActionUtils.buildPaimonSchema(
-                            kafkaSchema,
-                            Collections.emptyList(),
-                            Collections.emptyList(),
-                            Collections.emptyList(),
-                            tableConfig,
-                            caseSensitive);
-            try {
-                table = (FileStoreTable) catalog.getTable(identifier);
-                Supplier<String> errMsg =
-                        incompatibleMessage(table.schema(), kafkaSchema, identifier);
-                if (shouldMonitorTable(table.schema(), fromCanal, errMsg)) {
+            for (KafkaSchema kafkaSchema : kafkaSchemaList) {
+                String paimonTableName = tableNameConverter.convert(kafkaSchema.tableName());
+                Identifier identifier = new Identifier(database, paimonTableName);
+                FileStoreTable table;
+                Schema fromCanal =
+                        KafkaActionUtils.buildPaimonSchema(
+                                kafkaSchema,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                tableConfig,
+                                caseSensitive);
+                try {
+                    table = (FileStoreTable) catalog.getTable(identifier);
+                    Supplier<String> errMsg =
+                            incompatibleMessage(table.schema(), kafkaSchema, identifier);
+                    if (shouldMonitorTable(table.schema(), fromCanal, errMsg)) {
+                        monitoredTopics.add(topic);
+                        fileStoreTables.add(table);
+                    }
+                } catch (Catalog.TableNotExistException e) {
+                    catalog.createTable(identifier, fromCanal, false);
+                    table = (FileStoreTable) catalog.getTable(identifier);
                     monitoredTopics.add(topic);
+                    fileStoreTables.add(table);
                 }
-            } catch (Catalog.TableNotExistException e) {
-                catalog.createTable(identifier, fromCanal, false);
-                table = (FileStoreTable) catalog.getTable(identifier);
-                monitoredTopics.add(topic);
             }
-            fileStoreTables.add(table);
         }
-
+        monitoredTopics = monitoredTopics.stream().distinct().collect(Collectors.toList());
         Preconditions.checkState(
-                !monitoredTopics.isEmpty(),
+                !fileStoreTables.isEmpty(),
                 "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
                         + "Kafka topic's table are not compatible with those of existed Paimon tables. Please check the log.");
 
@@ -243,21 +251,50 @@ public class KafkaSyncDatabaseAction implements Action {
                 tableSuffix.equals(tableSuffix.toLowerCase()),
                 String.format(
                         "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tablePrefix));
+                        tableSuffix));
     }
 
-    private Map<String, KafkaSchema> getKafkaCanalSchemaMap() throws Exception {
-        Map<String, KafkaSchema> kafkaCanalSchemaMap = new HashMap<>();
+    private Map<String, List<KafkaSchema>> getKafkaCanalSchemaMap() throws Exception {
+        Map<String, List<KafkaSchema>> kafkaCanalSchemaMap = new HashMap<>();
         List<String> topicList = kafkaConfig.get(KafkaConnectorOptions.TOPIC);
-        topicList.forEach(
-                topic -> {
-                    try {
-                        kafkaCanalSchemaMap.put(topic, new KafkaSchema(kafkaConfig, topic));
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
-                });
+        if (topicList.size() > 1) {
+            topicList.forEach(
+                    topic -> {
+                        try {
+                            KafkaSchema kafkaSchema =
+                                    KafkaSchema.getKafkaSchema(kafkaConfig, topic);
+                            if (shouldMonitorTable(kafkaSchema.tableName())) {
+                                kafkaCanalSchemaMap.put(
+                                        topic, Collections.singletonList(kafkaSchema));
+                            }
+
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
+        } else {
+            List<KafkaSchema> kafkaSchemaList =
+                    KafkaSchema.getListKafkaSchema(kafkaConfig, topicList.get(0), 0);
+            kafkaSchemaList =
+                    kafkaSchemaList.stream()
+                            .filter(kafkaSchema -> shouldMonitorTable(kafkaSchema.tableName()))
+                            .collect(Collectors.toList());
+            kafkaCanalSchemaMap.put(topicList.get(0), kafkaSchemaList);
+        }
+
         return kafkaCanalSchemaMap;
+    }
+
+    private boolean shouldMonitorTable(String mySqlTableName) {
+        boolean shouldMonitor = true;
+        if (includingPattern != null) {
+            shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
+        }
+        if (excludingPattern != null) {
+            shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
+        }
+        LOG.debug("Source table {} is monitored? {}", mySqlTableName, shouldMonitor);
+        return shouldMonitor;
     }
 
     private boolean shouldMonitorTable(
@@ -302,9 +339,12 @@ public class KafkaSyncDatabaseAction implements Action {
 
         String warehouse = params.get("warehouse");
         String database = params.get("database");
+        int schemaInitMaxRead = Integer.parseInt(params.get("schema-init-max-read"));
         boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
         String tablePrefix = params.get("table-prefix");
         String tableSuffix = params.get("table-suffix");
+        String includingTables = params.get("including-tables");
+        String excludingTables = params.get("excluding-tables");
 
         Optional<Map<String, String>> kafkaConfigOption = getConfigMap(params, "kafka-conf");
         Optional<Map<String, String>> catalogConfigOption = getConfigMap(params, "catalog-conf");
@@ -315,9 +355,12 @@ public class KafkaSyncDatabaseAction implements Action {
                                 kafkaConfig,
                                 warehouse,
                                 database,
+                                schemaInitMaxRead,
                                 ignoreIncompatible,
                                 tablePrefix,
                                 tableSuffix,
+                                includingTables,
+                                excludingTables,
                                 catalogConfigOption.orElse(Collections.emptyMap()),
                                 tableConfigOption.orElse(Collections.emptyMap())));
     }
@@ -333,6 +376,7 @@ public class KafkaSyncDatabaseAction implements Action {
         System.out.println("Syntax:");
         System.out.println(
                 "  kafka-sync-database --warehouse <warehouse-path> --database <database-name> "
+                        + "[--schema-init-max-read <schema-init-max-read>] "
                         + "[--ignore-incompatible <true/false>] "
                         + "[--table-prefix <paimon-table-prefix>] "
                         + "[--table-suffix <paimon-table-suffix>] "
@@ -341,6 +385,10 @@ public class KafkaSyncDatabaseAction implements Action {
                         + "[--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+        System.out.println();
+
+        System.out.println(
+                "--schema-init-max-read is default 1000, if your tables are all from a topic, you can set this parameter to initialize the number of tables to be synchronized.");
         System.out.println();
 
         System.out.println(
