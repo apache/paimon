@@ -39,7 +39,6 @@ under the License.
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
         <geometry.version>2.2.0</geometry.version>
         <druid.version>1.2.15</druid.version>
-        <fastsql.version>2.0.0_preview_973</fastsql.version>
     </properties>
 
     <dependencies>
@@ -274,11 +273,6 @@ under the License.
             <artifactId>druid</artifactId>
             <version>${druid.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.alibaba.fastsql</groupId>
-            <artifactId>fastsql</artifactId>
-            <version>${fastsql.version}</version>
-        </dependency>
     </dependencies>
 
     <build>
@@ -297,7 +291,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-bundle</include>
-                                    <include>com.alibaba.fastsql:fastsql</include>
+                                    <include>com.alibaba.druid:druid</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
