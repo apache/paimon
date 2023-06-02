@@ -27,8 +27,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
@@ -63,8 +61,6 @@ class KafkaActionUtils {
 
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
-
-    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     static void assertSchemaCompatible(TableSchema tableSchema, Schema kafkaCanalSchema) {
         if (!schemaCompatible(tableSchema, kafkaCanalSchema)) {

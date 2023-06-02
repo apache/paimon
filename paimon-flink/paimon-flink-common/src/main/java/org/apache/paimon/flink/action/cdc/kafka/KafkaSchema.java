@@ -102,11 +102,11 @@ public class KafkaSchema {
         return consumer;
     }
 
-    public static Boolean extractIsDDL(JsonNode record) {
+    private static Boolean extractIsDDL(JsonNode record) {
         return Boolean.valueOf(extractJsonNode(record, "isDdl"));
     }
 
-    public static String extractJsonNode(JsonNode record, String key) {
+    private static String extractJsonNode(JsonNode record, String key) {
         return record != null && record.get(key) != null ? record.get(key).asText() : null;
     }
 
