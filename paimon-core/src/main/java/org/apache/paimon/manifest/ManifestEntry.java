@@ -168,6 +168,9 @@ public class ManifestEntry {
         public final int level;
         public final String fileName;
 
+        /* Cache the hash code for the string */
+        private Integer hash;
+
         private Identifier(BinaryRow partition, int bucket, int level, String fileName) {
             this.partition = partition;
             this.bucket = bucket;
@@ -189,7 +192,10 @@ public class ManifestEntry {
 
         @Override
         public int hashCode() {
-            return Objects.hash(partition, bucket, level, fileName);
+            if (hash == null) {
+                hash = Objects.hash(partition, bucket, level, fileName);
+            }
+            return hash;
         }
 
         @Override

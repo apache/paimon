@@ -53,11 +53,13 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.AfterEach;
@@ -67,6 +69,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.File;
 import java.io.IOException;
@@ -92,6 +95,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 /** Base test class for {@link FileStoreTable}. */
@@ -194,7 +198,7 @@ public abstract class FileStoreTableTestBase {
 
         table =
                 createFileStoreTable(
-                        conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO));
+                        conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.PARQUET));
         write = table.newWrite(commitUser);
         commit = table.newCommit(commitUser);
         write.write(rowData(1, 11, 111L));
@@ -213,6 +217,33 @@ public abstract class FileStoreTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
                         "1|11|111|binary|varbinary|mapKey:mapVal|multiset",
                         "2|22|222|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"avro", "orc", "parquet"})
+    public void testMultipleCommits(String format) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.setString(FILE_FORMAT.key(), format));
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            write.write(rowData(1, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+            expected.add(
+                    String.format("1|%s|%s|binary|varbinary|mapKey:mapVal|multiset", i, i * 100));
+        }
+
+        write.close();
+        commit.close();
+
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotSplitReader().splits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyElementsOf(expected);
     }
 
     @ParameterizedTest(name = "dynamic = {0}, partition={2}")
@@ -642,6 +673,55 @@ public abstract class FileStoreTableTestBase {
         // table-path/manifest/manifest-list-0
         // table-path/schema
         // table-path/schema/schema-0
+    }
+
+    @Test
+    public void testCreateTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            // snapshot 1
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+            // snapshot 2
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        table.createTag("test-tag", 2);
+
+        // verify that tag file exist
+        TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+        assertThat(tagManager.tagExists("test-tag")).isTrue();
+
+        // verify that test-tag is equal to snapshot 2
+        Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+        Snapshot snapshot2 = table.snapshotManager().snapshot(2);
+        assertThat(tagged.equals(snapshot2)).isTrue();
+    }
+
+    @Test
+    public void testUnsupportedTagName() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        assertThatThrownBy(() -> table.createTag("", 1))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                String.format("Tag name '%s' is blank", "")));
+
+        assertThatThrownBy(() -> table.createTag("10", 1))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Tag name cannot be pure numeric string but is '10'."));
     }
 
     protected List<String> getResult(

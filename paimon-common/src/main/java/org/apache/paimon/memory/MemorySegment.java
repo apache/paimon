@@ -92,15 +92,6 @@ public final class MemorySegment {
         return size;
     }
 
-    public void free() {
-        if (this.heapMemory == null) {
-            UNSAFE.freeMemory(this.address);
-        }
-        this.heapMemory = null;
-        this.offHeapBuffer = null;
-        this.address = 0;
-    }
-
     public boolean isOffHeap() {
         return heapMemory == null;
     }

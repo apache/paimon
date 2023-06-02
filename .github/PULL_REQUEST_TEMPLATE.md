@@ -2,7 +2,10 @@
 
 ### Purpose
 
-<!-- What is the purpose of the change, or the associated issue -->
+<!-- Linking this pull request to the issue -->
+Linked issue: close #xxx
+
+<!-- What is the purpose of the change -->
 
 ### Tests
 

@@ -31,8 +31,6 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
@@ -138,34 +136,8 @@ public class FileStoreExpireDeleteDirTest {
                 partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
 
         // step 4: generate snapshot 4 by cleaning dt=0402/hr=12/bucket-0
-        // manually make delete ManifestEntry
         BinaryRow partition = partitions.get(7);
-        Predicate partitionFilter =
-                PredicateBuilder.equalPartition(partition, TestKeyValueGenerator.DEFAULT_PART_TYPE);
-        List<ManifestEntry> bucketEntries =
-                store.newScan()
-                        .withSnapshot(3)
-                        .withPartitionFilter(partitionFilter)
-                        .withBucket(0)
-                        .plan()
-                        .files();
-        List<ManifestEntry> delete =
-                bucketEntries.stream()
-                        .map(
-                                entry ->
-                                        new ManifestEntry(
-                                                FileKind.DELETE, partition, 0, 2, entry.file()))
-                        .collect(Collectors.toList());
-        // commit
-        commit.tryCommitOnce(
-                delete,
-                Collections.emptyList(),
-                commitIdentifier++,
-                null,
-                Collections.emptyMap(),
-                Snapshot.CommitKind.APPEND,
-                3L,
-                null);
+        cleanBucket(store, partition, 0);
 
         // step 5: expire and check file paths
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
@@ -195,27 +167,8 @@ public class FileStoreExpireDeleteDirTest {
         commitData(store, commitIdentifier++, writers);
 
         // cleaning bucket 0
-        List<ManifestEntry> bucketEntries =
-                store.newScan().withSnapshot(1).withBucket(0).plan().files();
         BinaryRow partition = gen.getPartition(gen.next());
-        List<ManifestEntry> delete =
-                bucketEntries.stream()
-                        .map(
-                                entry ->
-                                        new ManifestEntry(
-                                                FileKind.DELETE, partition, 0, 2, entry.file()))
-                        .collect(Collectors.toList());
-        // commit
-        store.newCommit()
-                .tryCommitOnce(
-                        delete,
-                        Collections.emptyList(),
-                        commitIdentifier++,
-                        null,
-                        Collections.emptyMap(),
-                        Snapshot.CommitKind.APPEND,
-                        1L,
-                        null);
+        cleanBucket(store, partition, 0);
 
         // check before expiring
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
@@ -286,5 +239,34 @@ public class FileStoreExpireDeleteDirTest {
             throws Exception {
         writers.computeIfAbsent(partition, p -> new HashMap<>())
                 .put(bucket, FileStoreTestUtils.writeData(store, kvs, partition, bucket));
+    }
+
+    // clean given bucket and generate a new snapshot
+    private void cleanBucket(TestFileStore store, BinaryRow partition, int bucket) {
+        // manually make delete ManifestEntry
+        List<ManifestEntry> bucketEntries =
+                store.newScan().withPartitionBucket(partition, bucket).plan().files();
+        List<ManifestEntry> delete =
+                bucketEntries.stream()
+                        .map(
+                                entry ->
+                                        new ManifestEntry(
+                                                FileKind.DELETE,
+                                                partition,
+                                                bucket,
+                                                entry.totalBuckets(),
+                                                entry.file()))
+                        .collect(Collectors.toList());
+        // commit
+        store.newCommit()
+                .tryCommitOnce(
+                        delete,
+                        Collections.emptyList(),
+                        commitIdentifier++,
+                        null,
+                        Collections.emptyMap(),
+                        Snapshot.CommitKind.APPEND,
+                        store.snapshotManager().latestSnapshotId(),
+                        null);
     }
 }

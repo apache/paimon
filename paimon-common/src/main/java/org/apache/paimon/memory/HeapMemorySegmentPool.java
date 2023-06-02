@@ -18,49 +18,15 @@
 
 package org.apache.paimon.memory;
 
-import java.util.LinkedList;
-import java.util.List;
-
 /** MemorySegment pool from heap. */
-public class HeapMemorySegmentPool implements MemorySegmentPool {
-
-    private final LinkedList<MemorySegment> segments;
-    private final int maxPages;
-    private final int pageSize;
-
-    private int numPage;
+public class HeapMemorySegmentPool extends AbstractMemorySegmentPool {
 
     public HeapMemorySegmentPool(long maxMemory, int pageSize) {
-        this.segments = new LinkedList<>();
-        this.maxPages = (int) (maxMemory / pageSize);
-        this.pageSize = pageSize;
-        this.numPage = 0;
+        super(maxMemory, pageSize);
     }
 
     @Override
-    public MemorySegment nextSegment() {
-        if (this.segments.size() > 0) {
-            return this.segments.poll();
-        } else if (numPage < maxPages) {
-            numPage++;
-            return MemorySegment.allocateHeapMemory(pageSize);
-        }
-
-        return null;
-    }
-
-    @Override
-    public int pageSize() {
-        return pageSize;
-    }
-
-    @Override
-    public void returnAll(List<MemorySegment> memory) {
-        segments.addAll(memory);
-    }
-
-    @Override
-    public int freePages() {
-        return segments.size() + maxPages - numPage;
+    protected MemorySegment allocateMemory() {
+        return MemorySegment.allocateHeapMemory(pageSize);
     }
 }
