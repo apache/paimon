@@ -67,6 +67,10 @@ public interface Table extends Serializable {
     @Experimental
     void rollbackTo(long snapshotId);
 
+    /** Create a tag from given snapshot. */
+    @Experimental
+    void createTag(String tagName, long fromSnapshotId);
+
     // =============== Read & Write Operations ==================
 
     /** Returns a new read builder. */

@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -50,6 +51,7 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Abstract {@link FileStoreTable}. */
 public abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -242,5 +244,18 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    @Override
+    public void createTag(String tagName, long fromSnapshotId) {
+        SnapshotManager snapshotManager = snapshotManager();
+        checkArgument(
+                snapshotManager.snapshotExists(fromSnapshotId),
+                "Cannot create tag because given snapshot #%s doesn't exist.",
+                fromSnapshotId);
+
+        Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
+        TagManager tagManager = new TagManager(fileIO, path);
+        tagManager.createTag(snapshot, tagName);
     }
 }
