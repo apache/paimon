@@ -25,7 +25,10 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.*;
+import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.DecimalUtils;
+import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
 
@@ -33,9 +36,7 @@ import java.util.Arrays;
 
 import static org.apache.paimon.types.DataTypeRoot.BINARY;
 import static org.apache.paimon.types.DataTypeRoot.CHAR;
-import static org.apache.paimon.types.DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
 import static org.apache.paimon.types.DataTypeRoot.VARBINARY;
-import static org.apache.paimon.types.DataTypeRoot.VARCHAR;
 
 /** Cast executors for input type and output type. */
 public class CastExecutors {
