@@ -67,6 +67,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -191,7 +192,7 @@ public abstract class FileStoreTableTestBase {
 
         table =
                 createFileStoreTable(
-                        conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO));
+                        conf -> conf.set(FILE_FORMAT, CoreOptions.FileFormatType.PARQUET));
         write = table.newWrite(commitUser);
         commit = table.newCommit(commitUser);
         write.write(rowData(1, 11, 111L));
@@ -210,6 +211,33 @@ public abstract class FileStoreTableTestBase {
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
                         "1|11|111|binary|varbinary|mapKey:mapVal|multiset",
                         "2|22|222|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {"avro", "orc", "parquet"})
+    public void testMultipleCommits(String format) throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(conf -> conf.setString(FILE_FORMAT.key(), format));
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        List<String> expected = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            write.write(rowData(1, i, (long) i * 100));
+            commit.commit(i, write.prepareCommit(true, i));
+            expected.add(
+                    String.format("1|%s|%s|binary|varbinary|mapKey:mapVal|multiset", i, i * 100));
+        }
+
+        write.close();
+        commit.close();
+
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotSplitReader().splits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyElementsOf(expected);
     }
 
     @ParameterizedTest(name = "dynamic = {0}, partition={2}")
