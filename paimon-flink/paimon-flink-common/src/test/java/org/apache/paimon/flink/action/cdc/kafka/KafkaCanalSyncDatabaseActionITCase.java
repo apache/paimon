@@ -35,18 +35,21 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
-public class KafkaCanalSyncDatabaseActionITCase extends KafkaCanalActionITCaseBase {
+public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     private static final String DATABASE_NAME = "paimon_sync_database";
 
@@ -557,6 +560,94 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaCanalActionITCaseBa
                         "+I[8, eight, s_8]",
                         "+I[10, ten, long_s_10]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testIncludingTables() throws Exception {
+        includingAndExcludingTablesImpl(
+                "flink|paimon.+",
+                null,
+                Arrays.asList("flink", "paimon_1", "paimon_2"),
+                Collections.singletonList("ignore"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testExcludingTables() throws Exception {
+        includingAndExcludingTablesImpl(
+                null,
+                "flink|paimon.+",
+                Collections.singletonList("ignore"),
+                Arrays.asList("flink", "paimon_1", "paimon_2"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testIncludingAndExcludingTables() throws Exception {
+        includingAndExcludingTablesImpl(
+                "flink|paimon.+",
+                "paimon_1",
+                Arrays.asList("flink", "paimon_2"),
+                Arrays.asList("paimon_1", "ignore"));
+    }
+
+    private void includingAndExcludingTablesImpl(
+            @Nullable String includingTables,
+            @Nullable String excludingTables,
+            List<String> existedTables,
+            List<String> notExistedTables)
+            throws Exception {
+        final String topic1 = "include_exclude" + UUID.randomUUID();
+        List<String> topics = Collections.singletonList(topic1);
+        topics.forEach(
+                topic -> {
+                    createTestTopic(topic, 1, 1);
+                });
+
+        // ---------- Write the Canal json into Kafka -------------------
+
+        try {
+            writeRecordsToKafka(
+                    topics.get(0),
+                    readLines("kafka.canal/database/include/topic0/canal-data-1.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        // try synchronization
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", String.join(";", topics));
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        KafkaSyncDatabaseAction action =
+                new KafkaSyncDatabaseAction(
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        0,
+                        false,
+                        null,
+                        null,
+                        includingTables,
+                        excludingTables,
+                        Collections.emptyMap(),
+                        tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        // check paimon tables
+        assertTableExists(existedTables);
+        assertTableNotExists(notExistedTables);
     }
 
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {

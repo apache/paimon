@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for {@link KafkaCanalSyncTableActionITCase}. */
-public class KafkaCanalSyncTableActionITCase extends KafkaCanalActionITCaseBase {
+public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
