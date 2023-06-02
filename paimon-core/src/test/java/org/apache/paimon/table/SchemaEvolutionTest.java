@@ -177,18 +177,6 @@ public class SchemaEvolutionTest {
         // bigint to string
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.updateColumnType("f0", DataTypes.STRING())));
-
-        assertThatThrownBy(
-                        () ->
-                                schemaManager.commitChanges(
-                                        Collections.singletonList(
-                                                SchemaChange.updateColumnType(
-                                                        "f0", DataTypes.INT()))))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        String.format(
-                                "Column type %s[%s] cannot be converted to %s without loosing information.",
-                                "f0", DataTypes.STRING(), DataTypes.INT()));
     }
 
     @Test

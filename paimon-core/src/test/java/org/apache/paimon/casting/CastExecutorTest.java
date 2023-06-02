@@ -20,20 +20,7 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.BinaryType;
-import org.apache.paimon.types.CharType;
-import org.apache.paimon.types.DateType;
-import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.DoubleType;
-import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.SmallIntType;
-import org.apache.paimon.types.TimeType;
-import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.types.TinyIntType;
-import org.apache.paimon.types.VarBinaryType;
-import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.types.*;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.DecimalUtils;
 
@@ -280,6 +267,38 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new BinaryType(10), new VarBinaryType(20)),
                 "12345678".getBytes(),
                 "12345678".getBytes());
+    }
+
+    @Test
+    public void testBoolean() {
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new TinyIntType(false)),
+                true,
+                (byte) 1);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new SmallIntType(false)),
+                true,
+                (short) 1);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new IntType(false)), true, 1);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new BigIntType(false)), true, 1L);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new FloatType(false)), true, 1F);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new DoubleType(false)), true, 1D);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new DecimalType(1, 0)),
+                true,
+                DecimalUtils.castFrom(1, 1, 0));
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new CharType(5)),
+                true,
+                BinaryString.fromString("true "));
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new VarCharType(5)),
+                true,
+                BinaryString.fromString("true"));
     }
 
     @Test

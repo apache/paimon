@@ -25,9 +25,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.DecimalUtils;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.utils.*;
 
 import javax.annotation.Nullable;
 
@@ -97,8 +95,9 @@ public class CastExecutors {
                                         }
                                 }
                             };
+                        case CHAR:
                         case VARCHAR:
-                            return value -> BinaryString.fromString(value.toString());
+                            return value -> toCharacterString(value.toString(), outputType);
                         default:
                             return null;
                     }
@@ -125,51 +124,77 @@ public class CastExecutors {
                                             (Decimal) value,
                                             decimalType.getPrecision(),
                                             decimalType.getScale());
+                        case CHAR:
                         case VARCHAR:
-                            return value -> BinaryString.fromString(value.toString());
+                            return value -> toCharacterString(value.toString(), outputType);
+                        default:
+                            return null;
+                    }
+                }
+            case BOOLEAN:
+                {
+                    switch (outputType.getTypeRoot()) {
+                        case TINYINT:
+                            return value -> (byte) TypeUtils.toInt((Boolean) value);
+                        case SMALLINT:
+                            return value -> (short) TypeUtils.toInt((Boolean) value);
+                        case INTEGER:
+                            return value -> TypeUtils.toInt((Boolean) value);
+                        case BIGINT:
+                            return value -> (long) TypeUtils.toInt((Boolean) value);
+                        case FLOAT:
+                            return value -> (float) TypeUtils.toInt((Boolean) value);
+                        case DOUBLE:
+                            return value -> (double) TypeUtils.toInt((Boolean) value);
+                        case DECIMAL:
+                            final DecimalType decimalType = (DecimalType) outputType;
+                            return value ->
+                                    DecimalUtils.castFrom(
+                                            TypeUtils.toInt((Boolean) value),
+                                            decimalType.getPrecision(),
+                                            decimalType.getScale());
+                        case CHAR:
+                        case VARCHAR:
+                            return value -> toCharacterString(value.toString(), outputType);
                         default:
                             return null;
                     }
                 }
             case CHAR:
             case VARCHAR:
-                if (outputType.getTypeRoot() == CHAR || outputType.getTypeRoot() == VARCHAR) {
-                    final boolean targetCharType = outputType.getTypeRoot() == CHAR;
-                    final int targetLength = DataTypeChecks.getLength(outputType);
-                    return value -> {
-                        BinaryString result;
-                        String strVal = value.toString();
-                        BinaryString strData = BinaryString.fromString(strVal);
-                        if (strData.numChars() > targetLength) {
-                            result = BinaryString.fromString(strVal.substring(0, targetLength));
-                        } else {
-                            if (strData.numChars() < targetLength) {
-                                if (targetCharType) {
-                                    int padLength = targetLength - strData.numChars();
-                                    BinaryString padString = BinaryString.blankString(padLength);
-                                    result = StringUtils.concat(strData, padString);
-                                } else {
-                                    result = strData;
-                                }
-                            } else {
-                                result = strData;
+                {
+                    switch (outputType.getTypeRoot()) {
+                        case CHAR:
+                        case VARCHAR:
+                            return value -> toCharacterString(value.toString(), outputType);
+                        case VARBINARY:
+                            {
+                                final int targetLength = DataTypeChecks.getLength(outputType);
+                                return value -> {
+                                    byte[] byteArrayTerm = ((BinaryString) value).toBytes();
+                                    if (byteArrayTerm.length <= targetLength) {
+                                        return byteArrayTerm;
+                                    } else {
+                                        return Arrays.copyOf(byteArrayTerm, targetLength);
+                                    }
+                                };
                             }
-                        }
-
-                        return result;
-                    };
-                } else if (outputType.getTypeRoot() == VARBINARY) {
-                    final int targetLength = DataTypeChecks.getLength(outputType);
-                    return value -> {
-                        byte[] byteArrayTerm = ((BinaryString) value).toBytes();
-                        if (byteArrayTerm.length <= targetLength) {
-                            return byteArrayTerm;
-                        } else {
-                            return Arrays.copyOf(byteArrayTerm, targetLength);
-                        }
-                    };
+                        case BOOLEAN:
+                        case TINYINT:
+                        case SMALLINT:
+                        case INTEGER:
+                        case BIGINT:
+                        case FLOAT:
+                        case DOUBLE:
+                        case DECIMAL:
+                        case DATE:
+                        case TIME_WITHOUT_TIME_ZONE:
+                        case TIMESTAMP_WITHOUT_TIME_ZONE:
+                            return value -> TypeUtils.castFromString(value.toString(), outputType);
+                        default:
+                            return null;
+                    }
                 }
-                return null;
             case BINARY:
             case VARBINARY:
                 if (outputType.getTypeRoot() == BINARY || outputType.getTypeRoot() == VARBINARY) {
@@ -219,19 +244,52 @@ public class CastExecutors {
                                             (((Timestamp) value).getMillisecond()
                                                     % DateTimeUtils.MILLIS_PER_DAY);
                         }
+                    case TINYINT:
+                        return value -> (byte) (((Timestamp) value).getMillisecond());
+                    case SMALLINT:
+                        return value -> (short) (((Timestamp) value).getMillisecond());
+                    case INTEGER:
+                        return value -> (int) (((Timestamp) value).getMillisecond());
+                    case BIGINT:
+                        return value -> (((Timestamp) value).getMillisecond());
+                    case FLOAT:
+                        return value -> (float) (((Timestamp) value).getMillisecond());
+                    case DOUBLE:
+                        return value -> (double) (((Timestamp) value).getMillisecond());
+                    case DECIMAL:
+                        final DecimalType decimalType = (DecimalType) outputType;
+                        return value ->
+                                DecimalUtils.castFrom(
+                                        (((Timestamp) value).getMillisecond()),
+                                        decimalType.getPrecision(),
+                                        decimalType.getScale());
+                    case CHAR:
+                    case VARCHAR:
+                        return value -> toCharacterString(value.toString(), outputType);
                     default:
-                        {
-                            return null;
-                        }
+                        return null;
                 }
             case TIME_WITHOUT_TIME_ZONE:
-                if (outputType.getTypeRoot() == TIMESTAMP_WITHOUT_TIME_ZONE) {
-                    return value ->
-                            (int)
-                                    (((Timestamp) value).getMillisecond()
-                                            % DateTimeUtils.MILLIS_PER_DAY);
+                switch (outputType.getTypeRoot()) {
+                    case TIMESTAMP_WITHOUT_TIME_ZONE:
+                        return value ->
+                                (int)
+                                        (((Timestamp) value).getMillisecond()
+                                                % DateTimeUtils.MILLIS_PER_DAY);
+                    case CHAR:
+                    case VARCHAR:
+                        return value -> toCharacterString(value.toString(), outputType);
+                    default:
+                        return null;
                 }
-                return null;
+            case DATE:
+                switch (outputType.getTypeRoot()) {
+                    case CHAR:
+                    case VARCHAR:
+                        return value -> toCharacterString(value.toString(), outputType);
+                    default:
+                        return null;
+                }
             default:
                 return null;
         }
@@ -239,5 +297,19 @@ public class CastExecutors {
 
     public static CastExecutor<?, ?> identityCastExecutor() {
         return IDENTITY_CAST_EXECUTOR;
+    }
+
+    private static BinaryString toCharacterString(String strVal, DataType type) {
+        final boolean targetCharType = type.getTypeRoot() == CHAR;
+        final int targetLength = DataTypeChecks.getLength(type);
+        BinaryString strData = BinaryString.fromString(strVal);
+        if (strData.numChars() > targetLength) {
+            return BinaryString.fromString(strVal.substring(0, targetLength));
+        } else if (strData.numChars() < targetLength && targetCharType) {
+            int padLength = targetLength - strData.numChars();
+            BinaryString padString = BinaryString.blankString(padLength);
+            return StringUtils.concat(strData, padString);
+        }
+        return strData;
     }
 }

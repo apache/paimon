@@ -170,6 +170,10 @@ public class TypeUtils {
         throw new RuntimeException("Cannot parse '" + str + "' as BOOLEAN.");
     }
 
+    public static int toInt(Boolean bool) {
+        return bool ? 1 : 0;
+    }
+
     public static int toDate(BinaryString input) throws DateTimeException {
         Integer date = DateTimeUtils.parseDate(input.toString());
         if (date == null) {

@@ -188,11 +188,11 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnType() {
         sql(
                 "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b STRING, c STRING, d INT, e FLOAT)");
-        sql("INSERT INTO T VALUES('paimon', 'bbb', 'ccc', 1, 3.4)");
+        sql("INSERT INTO T VALUES('paimon', 'bbb', '11', 1, 3.4)");
 
         // change type: FLOAT to DOUBLE
         sql("ALTER TABLE T MODIFY e DOUBLE");
-        sql("INSERT INTO T VALUES('flink', 'ddd', 'eee', 4, 6.7)");
+        sql("INSERT INTO T VALUES('flink', 'ddd', '12', 4, 6.7)");
         List<Row> result = sql("SHOW CREATE TABLE T");
         assertThat(result.toString())
                 .contains(
@@ -205,7 +205,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         result = sql("SELECT * FROM T");
         assertThat(result.toString())
                 .isEqualTo(
-                        "[+I[flink, ddd, eee, 4, 6.7], +I[paimon, bbb, ccc, 1, 3.4000000953674316]]");
+                        "[+I[flink, ddd, 12, 4, 6.7], +I[paimon, bbb, 11, 1, 3.4000000953674316]]");
 
         // change type: DOUBLE to STRING
         sql("ALTER TABLE T MODIFY e STRING");
@@ -218,15 +218,33 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `c` VARCHAR(2147483647),\n"
                                 + "  `d` INT,\n"
                                 + "  `e` VARCHAR(2147483647),");
-        sql("INSERT INTO T VALUES('apache', 'fff', 'ggg', 8, 'test')");
+        sql("INSERT INTO T VALUES('apache', 'fff', '13', 3, 'test')");
         result = sql("SELECT * FROM T");
         assertThat(result.toString())
                 .isEqualTo(
-                        "[+I[apache, fff, ggg, 8, test], +I[flink, ddd, eee, 4, 6.7], +I[paimon, bbb, ccc, 1, 3.4]]");
+                        "[+I[apache, fff, 13, 3, test], +I[flink, ddd, 12, 4, 6.7], +I[paimon, bbb, 11, 1, 3.4]]");
 
-        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY c DOUBLE"))
+        // change type: STRING to INT
+        sql("ALTER TABLE T MODIFY c INT");
+        result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` VARCHAR(2147483647) NOT NULL,\n"
+                                + "  `b` VARCHAR(2147483647),\n"
+                                + "  `c` INT,\n"
+                                + "  `d` INT,\n"
+                                + "  `e` VARCHAR(2147483647),");
+        sql("INSERT INTO T VALUES('store', 'ggg', 14, 4, 't1')");
+        result = sql("SELECT * FROM T");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[apache, fff, 13, 3, test], +I[flink, ddd, 12, 4, 6.7], +I[paimon, bbb, 11, 1, 3.4], +I[store, ggg, 14, 4, t1]]");
+
+        // change type: INT to DATE
+        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY c DATE"))
                 .hasMessageContaining(
-                        "Could not execute ALTER TABLE PAIMON.default.T\n" + "  MODIFY `c` DOUBLE");
+                        "Could not execute ALTER TABLE PAIMON.default.T\n" + "  MODIFY `c` DATE");
     }
 
     @Test
