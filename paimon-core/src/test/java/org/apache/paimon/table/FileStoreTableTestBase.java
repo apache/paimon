@@ -53,6 +53,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -93,6 +94,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 /** Base test class for {@link FileStoreTable}. */
@@ -669,6 +671,29 @@ public abstract class FileStoreTableTestBase {
         Snapshot tagged = tagManager.taggedSnapshot("test-tag");
         Snapshot snapshot2 = table.snapshotManager().snapshot(2);
         assertThat(tagged.equals(snapshot2)).isTrue();
+    }
+
+    @Test
+    public void testUnsupportedTagName() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        assertThatThrownBy(() -> table.createTag("", 1))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                String.format("Tag name '%s' is blank", "")));
+
+        assertThatThrownBy(() -> table.createTag("10", 1))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Tag name cannot be pure numeric string but is '10'."));
     }
 
     protected List<String> getResult(

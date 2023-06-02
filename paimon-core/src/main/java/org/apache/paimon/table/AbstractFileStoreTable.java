@@ -40,7 +40,6 @@ import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
 import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
@@ -249,8 +248,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void createTag(String tagName, long fromSnapshotId) {
-        checkArgument(!StringUtils.isNumeric(tagName), "Tag name cannot be pure numeric string.");
-
         SnapshotManager snapshotManager = snapshotManager();
         checkArgument(
                 snapshotManager.snapshotExists(fromSnapshotId),
