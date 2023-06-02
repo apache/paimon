@@ -79,7 +79,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link org.apache.paimon.flink.action.Action}s related to MySQL. */
-public class KafkaActionITCaseBase extends ActionITCaseBase {
+public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
