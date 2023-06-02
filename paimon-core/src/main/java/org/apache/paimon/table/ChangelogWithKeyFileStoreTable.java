@@ -26,7 +26,6 @@ import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
@@ -212,12 +211,6 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
-    }
-
-    @Override
-    public TableWriteImpl<KeyValue> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
         final SequenceGenerator sequenceGenerator =
                 store().options()
                         .sequenceField()
@@ -225,7 +218,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         .orElse(null);
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
-                store().newWrite(commitUser, manifestFilter),
+                store().newWrite(commitUser),
                 new InternalRowKeyAndBucketExtractor(tableSchema),
                 record -> {
                     long sequenceNumber =

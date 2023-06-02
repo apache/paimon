@@ -18,7 +18,6 @@
 
 package org.apache.paimon;
 
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.FileStoreRead;
@@ -51,8 +50,6 @@ public interface FileStore<T> extends Serializable {
     FileStoreRead<T> newRead();
 
     FileStoreWrite<T> newWrite(String commitUser);
-
-    FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
 
     FileStoreCommit newCommit(String commitUser);
 

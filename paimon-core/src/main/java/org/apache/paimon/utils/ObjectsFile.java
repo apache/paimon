@@ -56,14 +56,13 @@ public abstract class ObjectsFile<T> {
     }
 
     public List<T> read(String fileName) {
-        return read(fileName, Filter.alwaysTrue(), Filter.alwaysTrue());
+        return read(fileName, Filter.alwaysTrue());
     }
 
-    public List<T> read(
-            String fileName, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter) {
+    public List<T> read(String fileName, Filter<InternalRow> readFilter) {
         try {
             if (cache != null) {
-                return cache.read(fileName, loadFilter, readFilter);
+                return cache.read(fileName, readFilter);
             }
 
             RecordReader<InternalRow> reader =

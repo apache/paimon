@@ -21,7 +21,6 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
@@ -77,8 +76,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private ScanKind scanKind = ScanKind.ALL;
     private Filter<Integer> levelFilter = null;
 
-    private ManifestCacheFilter manifestCacheFilter = null;
-    private Integer scanManifestParallelism;
+    private final Integer scanManifestParallelism;
 
     public AbstractFileStoreScan(
             RowType partitionType,
@@ -137,13 +135,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withPartitionBucket(BinaryRow partition, int bucket) {
-        if (manifestCacheFilter != null) {
-            checkArgument(
-                    manifestCacheFilter.test(partition, bucket),
-                    String.format(
-                            "This is a bug! The partition %s and bucket %s is filtered!",
-                            partition, bucket));
-        }
         withPartitionFilter(Collections.singletonList(partition));
         withBucket(bucket);
         return this;
@@ -176,12 +167,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withLevelFilter(Filter<Integer> levelFilter) {
         this.levelFilter = levelFilter;
-        return this;
-    }
-
-    @Override
-    public FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter) {
-        this.manifestCacheFilter = manifestFilter;
         return this;
     }
 
@@ -332,9 +317,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
-        return manifestFileFactory
-                .create()
-                .read(manifest.fileName(), manifestCacheRowFilter(), manifestEntryRowFilter());
+        return manifestFileFactory.create().read(manifest.fileName(), manifestEntryRowFilter());
     }
 
     /** Note: Keep this thread-safe. */
@@ -356,26 +339,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             }
 
             return true;
-        };
-    }
-
-    /** Note: Keep this thread-safe. */
-    private Filter<InternalRow> manifestCacheRowFilter() {
-        if (manifestCacheFilter == null) {
-            return Filter.alwaysTrue();
-        }
-
-        Function<InternalRow, BinaryRow> partitionGetter =
-                ManifestEntrySerializer.partitionGetter();
-        Function<InternalRow, Integer> bucketGetter = ManifestEntrySerializer.bucketGetter();
-        Function<InternalRow, Integer> totalBucketGetter =
-                ManifestEntrySerializer.totalBucketGetter();
-        return row -> {
-            if (numOfBuckets != totalBucketGetter.apply(row)) {
-                return true;
-            }
-
-            return manifestCacheFilter.test(partitionGetter.apply(row), bucketGetter.apply(row));
         };
     }
 

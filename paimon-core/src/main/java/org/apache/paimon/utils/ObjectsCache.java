@@ -51,9 +51,8 @@ public class ObjectsCache<K, V> {
         this.reader = reader;
     }
 
-    public List<V> read(K key, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter)
-            throws IOException {
-        Segments segments = cache.getSegments(key, k -> readSegments(k, loadFilter));
+    public List<V> read(K key, Filter<InternalRow> readFilter) throws IOException {
+        Segments segments = cache.getSegments(key, this::readSegments);
         List<V> entries = new ArrayList<>();
         RandomAccessInputView view =
                 new RandomAccessInputView(
@@ -71,7 +70,7 @@ public class ObjectsCache<K, V> {
         }
     }
 
-    private Segments readSegments(K key, Filter<InternalRow> loadFilter) {
+    private Segments readSegments(K key) {
         try (CloseableIterator<InternalRow> iterator = reader.apply(key)) {
             ArrayList<MemorySegment> segments = new ArrayList<>();
             MemorySegmentSource segmentSource =
@@ -79,10 +78,7 @@ public class ObjectsCache<K, V> {
             SimpleCollectingOutputView output =
                     new SimpleCollectingOutputView(segments, segmentSource, cache.pageSize());
             while (iterator.hasNext()) {
-                InternalRow row = iterator.next();
-                if (loadFilter.test(row)) {
-                    rowSerializer.serializeToPages(row, output);
-                }
+                rowSerializer.serializeToPages(iterator.next(), output);
             }
             return new Segments(segments, output.getCurrentPositionInSegment());
         } catch (Exception e) {

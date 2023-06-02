@@ -27,7 +27,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
@@ -142,15 +141,9 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
-    }
-
-    @Override
-    public TableWriteImpl<KeyValue> newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
-                store().newWrite(commitUser, manifestFilter),
+                store().newWrite(commitUser),
                 new InternalRowKeyAndBucketExtractor(tableSchema),
                 record -> {
                     switch (record.row().getRowKind()) {

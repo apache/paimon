@@ -21,7 +21,6 @@ package org.apache.paimon.operation;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.predicate.Predicate;
@@ -53,8 +52,6 @@ public interface FileStoreScan {
     FileStoreScan withKind(ScanKind scanKind);
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
-
-    FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter);
 
     /** Produce a {@link Plan}. */
     Plan plan();

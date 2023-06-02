@@ -21,7 +21,6 @@ package org.apache.paimon;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
@@ -67,12 +66,6 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public AppendOnlyFileStoreWrite newWrite(String commitUser) {
-        return newWrite(commitUser, null);
-    }
-
-    @Override
-    public AppendOnlyFileStoreWrite newWrite(
-            String commitUser, ManifestCacheFilter manifestFilter) {
         return new AppendOnlyFileStoreWrite(
                 fileIO,
                 newRead(),
@@ -81,7 +74,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true).withManifestCacheFilter(manifestFilter),
+                newScan(true),
                 options);
     }
 
