@@ -1,0 +1,26 @@
+paimon-flink-common
+Copyright 2023-2023 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+This project bundles the following dependencies under the Apache Software License 2.0. (http://www.apache.org/licenses/LICENSE-2.0.txt)
+
+- org.apache.orc:orc-core:1.5.6
+- org.apache.orc:orc-shims:1.5.6
+- org.apache.hive:hive-storage-api:2.6.0
+- io.airlift:aircompressor:0.10
+- commons-lang:commons-lang:2.6
+
+- com.alibaba.fastsql:2.0.0_preview_973
+
+- org.apache.avro:avro:1.11.1
+
+- org.apache.parquet:parquet-hadoop:1.12.3
+- org.apache.parquet:parquet-column:1.12.3
+- org.apache.parquet:parquet-common:1.12.3
+- org.apache.parquet:parquet-encoding:1.12.3
+- org.apache.parquet:parquet-format-structures:1.12.3
+- org.apache.parquet:parquet-jackson:1.12.3
+- commons-pool:commons-pool:1.6
+
