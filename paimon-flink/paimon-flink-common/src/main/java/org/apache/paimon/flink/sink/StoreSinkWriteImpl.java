@@ -72,10 +72,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     private TableWriteImpl<?> newTableWrite(FileStoreTable table) {
-        return table.newWrite(
-                        commitUser,
-                        (part, bucket) ->
-                                state.stateValueFilter().filter(table.name(), part, bucket))
+        return table.newWrite(commitUser)
                 .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
                 .withMemoryPool(
                         memoryPool != null
