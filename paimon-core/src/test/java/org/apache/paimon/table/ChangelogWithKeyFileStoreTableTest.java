@@ -76,6 +76,7 @@ import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
 public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
@@ -188,10 +189,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         String expectedResult;
         if (sequenceNumber2 > sequenceNumber1) {
             expectedResult =
-                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2";
+                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|a2";
         } else {
             expectedResult =
-                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|1";
+                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|a1";
         }
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         TableRead read = table.newRead();
@@ -230,10 +231,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         String expectedResult;
         if (sequenceNumber2 > sequenceNumber1) {
             expectedResult =
-                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2";
+                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|a2";
         } else {
             expectedResult =
-                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|1";
+                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|a1";
         }
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         TableRead read = table.newRead();
@@ -269,10 +270,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         String expectedResult;
         if (sequenceNumber2 > sequenceNumber1) {
             expectedResult =
-                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2";
+                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|a2";
         } else {
             expectedResult =
-                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|1";
+                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|a1";
         }
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         TableRead read = table.newRead();
@@ -312,10 +313,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         String expectedResult;
         if (sequenceNumber2 > sequenceNumber1) {
             expectedResult =
-                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2";
+                    "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|a2";
         } else {
             expectedResult =
-                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|1";
+                    "1|10|100|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|a1";
         }
         List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
         TableRead read = table.newRead();
@@ -338,21 +339,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         },
                         ROW_TYPE_WITH_TIMESTAMP);
         StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
-        long sequenceNumber1 =
-                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(0)).sequenceNumber();
-        long sequenceNumber2 =
-                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(1)).sequenceNumber();
-        assertEquals(1, sequenceNumber1);
-        assertEquals(2, sequenceNumber2);
-        commit.commit(0, write.prepareCommit(true, 0));
-        write.close();
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
-        TableRead read = table.newRead();
-        assertThat(getResult(read, splits, binaryRow(1), 0, ROW_WITH_TIMESTAMP_TO_STRING))
-                .isEqualTo(
-                        Arrays.asList(
-                                "1|10|101|1685530987|1685530987123|2023-05-23T11:22:33|2023-05-23T11:22:33.123|2023-05-23T11:22:33.123456|2"));
+        assertThrows(
+                NumberFormatException.class,
+                () -> ((TableWriteImpl<KeyValue>) write).writeAndReturnData(rows.get(0)));
     }
 
     private List<InternalRow> prepareSequencePaddingRows(
@@ -370,7 +359,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         Timestamp.fromEpochMillis(sec * 1000),
                         ts,
                         ts,
-                        BinaryString.fromString("1"));
+                        BinaryString.fromString("a1"));
         InternalRow row2 =
                 GenericRow.of(
                         1,
@@ -381,7 +370,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                         Timestamp.fromEpochMillis(sec * 1000),
                         ts,
                         ts,
-                        BinaryString.fromString("2"));
+                        BinaryString.fromString("a2"));
         return Arrays.asList(row1, row2);
     }
 

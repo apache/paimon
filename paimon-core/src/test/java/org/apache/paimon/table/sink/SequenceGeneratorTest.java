@@ -164,22 +164,23 @@ public class SequenceGeneratorTest {
     @Test
     public void testGenerateWithPadding() {
         assertEquals(1, getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_id")));
-        assertEquals(1, generateWithPaddingOnSecond("pt"));
+        assertEquals(1, getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("pt")));
         assertEquals(
                 1685548953,
                 getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_intsecond")));
-        assertEquals(2, generateWithPaddingOnSecond("_tinyint"));
-        assertEquals(3, generateWithPaddingOnSecond("_smallint"));
+        assertEquals(2, getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_tinyint")));
+        assertEquals(
+                3, getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_smallint")));
         assertEquals(
                 4000000000000L,
                 getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_bigint")));
         assertEquals(
                 1685548953000L,
                 getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_bigintmillis")));
-        assertEquals(2, generateWithPaddingOnMillis("_float"));
-        assertEquals(3, generateWithPaddingOnMillis("_double"));
-        assertEquals(1, generateWithPaddingOnMillis("_string"));
-        assertEquals(375, generateWithPaddingOnMillis("_date"));
+        assertEquals(2, getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_float")));
+        assertEquals(3, getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_double")));
+        assertEquals(1, getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_string")));
+        assertEquals(375, getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_date")));
         assertEquals(
                 1685548953L,
                 getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_timestamp0")));
@@ -189,8 +190,11 @@ public class SequenceGeneratorTest {
         assertEquals(
                 1685548953123L,
                 getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_timestamp6")));
-        assertEquals(3, generateWithPaddingOnMillis("_char"));
-        assertEquals(4, generateWithPaddingOnMillis("_varchar"));
+        assertEquals(3, getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_char")));
+        assertEquals(4, getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_varchar")));
+        assertEquals(
+                1685548953L,
+                getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_localtimestamp")));
         assertEquals(
                 1685548953123L,
                 getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_localtimestamp")));
