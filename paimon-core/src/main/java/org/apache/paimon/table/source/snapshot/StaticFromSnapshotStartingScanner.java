@@ -35,11 +35,12 @@ public class StaticFromSnapshotStartingScanner implements StartingScanner {
 
     @Override
     public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
-        if (snapshotManager.earliestSnapshotId() == null
-                || snapshotId < snapshotManager.earliestSnapshotId()) {
+        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        if (earliestSnapshotId == null) {
             return new NoSnapshot();
         }
+        long ceiledSnapshotId = Math.max(snapshotId, earliestSnapshotId);
         return StartingScanner.fromPlan(
-                snapshotReader.withKind(ScanKind.ALL).withSnapshot(snapshotId).read());
+                snapshotReader.withKind(ScanKind.ALL).withSnapshot(ceiledSnapshotId).read());
     }
 }
