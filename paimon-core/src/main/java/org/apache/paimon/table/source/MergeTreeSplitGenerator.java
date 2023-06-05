@@ -22,7 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
-import org.apache.paimon.utils.OrderedPacking;
+import org.apache.paimon.utils.BinPacking;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -79,7 +79,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
     private List<List<DataFileMeta>> packSplits(List<List<DataFileMeta>> sections) {
         Function<List<DataFileMeta>, Long> weightFunc =
                 file -> Math.max(totalSize(file), openFileCost);
-        return OrderedPacking.pack(sections, weightFunc, targetSplitSize).stream()
+        return BinPacking.packForOrdered(sections, weightFunc, targetSplitSize).stream()
                 .map(this::flatFiles)
                 .collect(Collectors.toList());
     }

@@ -25,13 +25,14 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link FixBinPacking}. */
-public class FixBinPackingTest {
+/** Test for {@link BinPacking}. */
+public class BinPackingTest {
 
     @Test
-    public void test() {
+    public void testPackForFixedBinNumber() {
         List<List<Integer>> pack =
-                FixBinPacking.pack(Arrays.asList(1, 5, 1, 2, 3, 6, 2), Integer::longValue, 3);
+                BinPacking.packForFixedBinNumber(
+                        Arrays.asList(1, 5, 1, 2, 3, 6, 2), Integer::longValue, 3);
         assertThat(pack)
                 .containsExactlyInAnyOrder(
                         Arrays.asList(1, 3), Arrays.asList(2, 5), Arrays.asList(1, 2, 6));
