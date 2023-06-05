@@ -21,5 +21,5 @@ package org.apache.paimon.table.sink;
 /** Inner {@link TableWrite} contains overwrite setter. */
 public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
 
-    InnerTableWrite withOverwrite(boolean overwrite);
+    InnerTableWrite fromEmptyWriter(boolean emptyWriter);
 }

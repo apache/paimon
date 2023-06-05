@@ -281,7 +281,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         // overwrite data
-        try (StreamTableWrite write = table.newWrite(commitUser).withOverwrite(true);
+        try (StreamTableWrite write = table.newWrite(commitUser).fromEmptyWriter(true);
                 InnerTableCommit commit = table.newCommit(commitUser)) {
             for (InternalRow row : overwriteData) {
                 write.write(row);
@@ -313,7 +313,7 @@ public abstract class FileStoreTableTestBase {
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
-        write = table.newWrite(commitUser).withOverwrite(true);
+        write = table.newWrite(commitUser).fromEmptyWriter(true);
         commit = table.newCommit(commitUser);
         write.write(rowData(2, 21, 201L));
         Map<String, String> overwritePartition = new HashMap<>();
