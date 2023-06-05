@@ -160,6 +160,10 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
     }
 
     private void checkSuccessfulFullCompaction() {
+        if (commitIdentifiersToCheck.isEmpty()) {
+            return;
+        }
+
         snapshotManager.traversalSnapshotsFromLatestSafely(this::checkSuccessfulFullCompaction);
     }
 
