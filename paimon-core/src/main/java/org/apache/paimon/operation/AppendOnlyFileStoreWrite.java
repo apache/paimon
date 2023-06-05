@@ -30,6 +30,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.RowDataFileWriter;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.source.DataSplit;
@@ -62,7 +63,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final int compactionMinFileNum;
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
-    private final boolean skipCompaction;
+    private boolean skipCompaction;
     private final boolean assertDisorder;
     private final String fileCompression;
 
@@ -157,5 +158,40 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             rewriter.close();
             return rewriter.result();
         };
+    }
+
+    // AppendOnlyCompactWorker need rewriter to execute compaction task
+    public AppendOnlyCompactManager.CompactRewriter singleCompactRewriter(
+            BinaryRow partition, int bucket) {
+        return toCompact -> {
+            if (toCompact.isEmpty()) {
+                return Collections.emptyList();
+            }
+            RowDataFileWriter rewriter =
+                    new RowDataFileWriter(
+                            fileIO,
+                            fileFormat.createWriterFactory(rowType),
+                            pathFactory.createDataFilePathFactory(partition, bucket).newPath(),
+                            rowType,
+                            fileFormat.createStatsExtractor(rowType).orElse(null),
+                            schemaId,
+                            new LongCounter(toCompact.get(0).minSequenceNumber()),
+                            fileCompression);
+            rewriter.write(
+                    new RecordReaderIterator<>(
+                            read.createReader(
+                                    new DataSplit(
+                                            0L /* unused */,
+                                            partition,
+                                            bucket,
+                                            toCompact,
+                                            false))));
+            rewriter.close();
+            return Collections.singletonList(rewriter.result());
+        };
+    }
+
+    public void skipCompaction() {
+        skipCompaction = true;
     }
 }
