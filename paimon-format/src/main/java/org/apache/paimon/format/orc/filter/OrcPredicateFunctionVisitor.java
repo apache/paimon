@@ -185,7 +185,7 @@ public class OrcPredicateFunctionVisitor
     }
 
     @Nullable
-    private static PredicateLeaf.Type toOrcType(DataType type) {
+    protected static PredicateLeaf.Type toOrcType(DataType type) {
         switch (type.getTypeRoot()) {
             case TINYINT:
             case SMALLINT:
