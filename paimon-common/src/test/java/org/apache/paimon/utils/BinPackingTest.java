@@ -37,4 +37,13 @@ public class BinPackingTest {
                 .containsExactlyInAnyOrder(
                         Arrays.asList(1, 3), Arrays.asList(2, 5), Arrays.asList(1, 2, 6));
     }
+
+    @Test
+    public void testExactlyPack() {
+        List<Pair<String, Long>> items =
+                Arrays.asList(Pair.of("a", 1000L), Pair.of("b", 20L), Pair.of("c", 200L));
+        List<List<Pair<String, Long>>> packed =
+                BinPacking.packForOrdered(items, Pair<String, Long>::getRight, 800);
+        assertThat(packed.size()).isEqualTo(2);
+    }
 }
