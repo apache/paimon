@@ -416,19 +416,8 @@ public class DateTimeUtils {
                 fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision));
     }
 
-    /**
-     * transform date string to {@link LocalDateTime}
-     *
-     * @param dateStr string for type DATE,DATETIME,TIMESTAMP
-     * @param precision If the value of precision is 0, the nanoOfSecond is 0, otherwise the
-     *     nanoOfSecond is calculated
-     */
     public static LocalDateTime toLocalDateTime(String dateStr, int precision) {
         return fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision);
-    }
-
-    public static LocalDateTime toLocalDateTime(String dateStr) {
-        return toLocalDateTime(dateStr, 0);
     }
 
     /**

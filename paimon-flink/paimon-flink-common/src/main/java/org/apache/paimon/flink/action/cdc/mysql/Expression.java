@@ -150,7 +150,7 @@ public interface Expression extends Serializable {
 
         @Override
         public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input);
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getYear());
         }
     }
@@ -178,7 +178,7 @@ public interface Expression extends Serializable {
 
         @Override
         public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input);
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getMonthValue());
         }
     }
@@ -206,7 +206,7 @@ public interface Expression extends Serializable {
 
         @Override
         public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input);
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getDayOfMonth());
         }
     }
@@ -234,7 +234,7 @@ public interface Expression extends Serializable {
 
         @Override
         public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input);
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getHour());
         }
     }
