@@ -170,7 +170,7 @@ public class TypeUtils {
         throw new RuntimeException("Cannot parse '" + str + "' as BOOLEAN.");
     }
 
-    public static int toInt(Boolean bool) {
+    public static int toInt(boolean bool) {
         return bool ? 1 : 0;
     }
 

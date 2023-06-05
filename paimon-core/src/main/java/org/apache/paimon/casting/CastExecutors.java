@@ -37,6 +37,7 @@ import java.util.Arrays;
 import static org.apache.paimon.types.DataTypeRoot.BINARY;
 import static org.apache.paimon.types.DataTypeRoot.CHAR;
 import static org.apache.paimon.types.DataTypeRoot.VARBINARY;
+import static org.apache.paimon.utils.DateTimeUtils.unixTimestamp;
 
 /** Cast executors for input type and output type. */
 public class CastExecutors {
@@ -246,22 +247,23 @@ public class CastExecutors {
                                                     % DateTimeUtils.MILLIS_PER_DAY);
                         }
                     case TINYINT:
-                        return value -> (byte) (((Timestamp) value).getMillisecond());
+                        return value -> (byte) unixTimestamp(((Timestamp) value).getMillisecond());
                     case SMALLINT:
-                        return value -> (short) (((Timestamp) value).getMillisecond());
+                        return value -> (short) unixTimestamp(((Timestamp) value).getMillisecond());
                     case INTEGER:
-                        return value -> (int) (((Timestamp) value).getMillisecond());
+                        return value -> (int) unixTimestamp(((Timestamp) value).getMillisecond());
                     case BIGINT:
-                        return value -> (((Timestamp) value).getMillisecond());
+                        return value -> unixTimestamp(((Timestamp) value).getMillisecond());
                     case FLOAT:
-                        return value -> (float) (((Timestamp) value).getMillisecond());
+                        return value -> (float) unixTimestamp(((Timestamp) value).getMillisecond());
                     case DOUBLE:
-                        return value -> (double) (((Timestamp) value).getMillisecond());
+                        return value ->
+                                (double) unixTimestamp(((Timestamp) value).getMillisecond());
                     case DECIMAL:
                         final DecimalType decimalType = (DecimalType) outputType;
                         return value ->
                                 DecimalUtils.castFrom(
-                                        (((Timestamp) value).getMillisecond()),
+                                        unixTimestamp(((Timestamp) value).getMillisecond()),
                                         decimalType.getPrecision(),
                                         decimalType.getScale());
                     case CHAR:

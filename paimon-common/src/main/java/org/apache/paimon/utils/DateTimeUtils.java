@@ -467,6 +467,11 @@ public class DateTimeUtils {
         return x;
     }
 
+    /** Returns the value of the timestamp to seconds since '1970-01-01 00:00:00' UTC. */
+    public static long unixTimestamp(long ts) {
+        return ts / 1000;
+    }
+
     public static Timestamp truncate(Timestamp ts, int precision) {
         String fraction = Integer.toString(ts.toLocalDateTime().getNano());
         if (fraction.length() <= precision) {
