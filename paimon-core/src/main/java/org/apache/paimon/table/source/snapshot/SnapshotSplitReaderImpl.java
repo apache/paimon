@@ -272,7 +272,14 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
         return splits;
     }
 
+    private boolean splitStreaming = false;
+
+    // while reading from a non-bucket table, we set this true.
+    public void withSplitStreaming(boolean split) {
+        splitStreaming = split;
+    }
+
     private boolean splitStreaming() {
-        return options.bucket() == -1;
+        return splitStreaming;
     }
 }

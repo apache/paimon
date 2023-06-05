@@ -18,15 +18,11 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.operation.AppendOnlyFileStoreScan;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -38,10 +34,6 @@ import java.util.stream.Collectors;
 
 /** {@link AppendOnlyFileStoreTable} compact coordinator. */
 public class AppendOnlyTableCompactionCoordinator {
-    private final SnapshotManager snapshotManager;
-    private final AppendOnlyFileStoreScan scan;
-
-    private Long snapshotId;
     private final long targetFileSize;
     private final int minFileNum;
     private final int maxFileNum;
@@ -49,62 +41,20 @@ public class AppendOnlyTableCompactionCoordinator {
     private final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
             new HashMap<>();
 
-    public AppendOnlyTableCompactionCoordinator(
-            AppendOnlyFileStoreTable table, long targetFileSize, int minFileNum, int maxFileNum) {
-        this.scan = table.store().newScan();
-        this.snapshotManager = table.snapshotManager();
-        this.targetFileSize = targetFileSize;
-        this.minFileNum = minFileNum;
-        this.maxFileNum = maxFileNum;
-        this.snapshotId = snapshotManager.latestSnapshotId();
-
-        if (snapshotId != null) {
-            updateFull();
-        }
+    public AppendOnlyTableCompactionCoordinator(AppendOnlyFileStoreTable table) {
+        CoreOptions coreOptions = table.coreOptions();
+        this.targetFileSize = coreOptions.targetFileSize();
+        this.minFileNum = coreOptions.compactionMinFileNum();
+        this.maxFileNum = coreOptions.compactionMaxFileNum();
     }
 
-    public void updateRestored() {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        if (latestSnapshotId == null || latestSnapshotId.equals(snapshotId)) {
-            return;
-        }
-
-        if (snapshotId == null) {
-            snapshotId = latestSnapshotId;
-            updateFull();
-        } else {
-            updateDelta(latestSnapshotId);
-            snapshotId = latestSnapshotId;
-        }
-    }
-
-    private void updateFull() {
-        scan.withSnapshot(snapshotId).plan().files().stream()
-                .collect(Collectors.groupingBy(ManifestEntry::partition))
-                .forEach(
-                        (k, v) ->
-                                partitionCompactCoordinators
-                                        .computeIfAbsent(k, PartitionCompactCoordinator::new)
-                                        .addFiles(
-                                                v.stream()
-                                                        .map(ManifestEntry::file)
-                                                        .filter(
-                                                                dataFileMeta ->
-                                                                        dataFileMeta.fileSize()
-                                                                                < targetFileSize)
-                                                        .collect(Collectors.toList())));
-    }
-
-    public void updateDelta(Long targetSnapshotId) {
-        for (long id = snapshotId + 1; id <= targetSnapshotId; id++) {
-            scan.withSnapshot(id).withKind(ScanKind.DELTA).plan().files().stream()
-                    .collect(Collectors.groupingBy(ManifestEntry::partition))
-                    .forEach(
-                            (k, v) ->
-                                    partitionCompactCoordinators
-                                            .computeIfAbsent(k, PartitionCompactCoordinator::new)
-                                            .updateRestoredFiles(v));
-        }
+    public void notifyNewFiles(BinaryRow partition, List<DataFileMeta> files) {
+        partitionCompactCoordinators
+                .computeIfAbsent(partition, PartitionCompactCoordinator::new)
+                .addFiles(
+                        files.stream()
+                                .filter(file -> file.fileSize() < targetFileSize)
+                                .collect(Collectors.toList()));
     }
 
     // generate compaction task to the next stage
@@ -154,28 +104,16 @@ public class AppendOnlyTableCompactionCoordinator {
             toCompact.addAll(dataFileMetas);
         }
 
-        public void updateRestoredFiles(List<ManifestEntry> entries) {
-            entries.forEach(
-                    entry -> {
-                        if (entry.kind() == FileKind.ADD) {
-                            if (entry.file().fileSize() < targetFileSize) {
-                                toCompact.add(entry.file());
-                            }
-                        } else if (entry.kind() == FileKind.DELETE) {
-                            toCompact.remove(entry.file());
-                        } else {
-                            throw new RuntimeException("unknown file kind: " + entry.kind());
-                        }
-                    });
-        }
-
         private List<List<DataFileMeta>> pack() {
             // we compact smaller files first
+            // step 1, sort files by file size, pick the smaller first
             ArrayList<DataFileMeta> files = new ArrayList<>(toCompact);
             files.sort(Comparator.comparingLong(DataFileMeta::fileSize));
 
+            // step 2, when files picked size greater than targetFileSize(meanwhile file num greater
+            // than minFileNum) or file numbers bigger than maxFileNum, we pack it to a compaction
+            // task
             List<List<DataFileMeta>> result = new ArrayList<>();
-
             List<DataFileMeta> current = new ArrayList<>();
             long totalFileSize = 0L;
             int fileNum = 0;
@@ -193,7 +131,6 @@ public class AppendOnlyTableCompactionCoordinator {
                     fileNum = 0;
                 }
             }
-
             return result;
         }
     }

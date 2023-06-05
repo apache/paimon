@@ -18,28 +18,33 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-import org.apache.flink.table.data.RowData;
 
-/** Builder for {@link CompactorSink}. */
-public class CompactorSinkBuilder extends AbstractComactorSinkBuider {
-    public CompactorSinkBuilder(FileStoreTable table) {
+/** Builder for {@link NonBucketCompactorSink}. */
+public class NonBucketCompactorSinkBuilder extends AbstractComactorSinkBuider {
+
+    public NonBucketCompactorSinkBuilder(FileStoreTable table) {
         super(table);
+        checkTableType(table);
     }
 
     public DataStreamSink<?> build() {
-        BucketingStreamPartitioner<RowData> partitioner =
-                new BucketingStreamPartitioner<>(new BucketsRowChannelComputer());
-        PartitionTransformation<RowData> partitioned =
-                new PartitionTransformation<>(input.getTransformation(), partitioner);
+        Options conf = Options.fromMap(table.options());
+        NonBucketCompactorSink sink =
+                new NonBucketCompactorSink((AppendOnlyFileStoreTable) table, lockFactory);
+        sink.withCompactionWorkerParallelism(
+                conf.get(FlinkConnectorOptions.COMPACTION_PARALLELISM));
+        return sink.sinkFrom(input);
+    }
 
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        CompactorSink sink = new CompactorSink(table, lockFactory);
-        return sink.sinkFrom(new DataStream<>(env, partitioned));
+    private void checkTableType(FileStoreTable table) {
+        if (!(table instanceof AppendOnlyFileStoreTable)) {
+            throw new RuntimeException("Currently only support append-only table.");
+        }
     }
 }

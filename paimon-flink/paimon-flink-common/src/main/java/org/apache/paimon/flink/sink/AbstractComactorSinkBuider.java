@@ -18,28 +18,36 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.table.data.RowData;
 
-/** Builder for {@link CompactorSink}. */
-public class CompactorSinkBuilder extends AbstractComactorSinkBuider {
-    public CompactorSinkBuilder(FileStoreTable table) {
-        super(table);
+/**
+ * Sink Builder for Compaction. see {@link CompactorSinkBuilder} and {@link
+ * NonBucketCompactorSinkBuilder}.
+ */
+public abstract class AbstractComactorSinkBuider {
+    protected final FileStoreTable table;
+
+    protected DataStreamSource<RowData> input;
+    protected Lock.Factory lockFactory = Lock.emptyFactory();
+
+    public AbstractComactorSinkBuider(FileStoreTable table) {
+        this.table = table;
     }
 
-    public DataStreamSink<?> build() {
-        BucketingStreamPartitioner<RowData> partitioner =
-                new BucketingStreamPartitioner<>(new BucketsRowChannelComputer());
-        PartitionTransformation<RowData> partitioned =
-                new PartitionTransformation<>(input.getTransformation(), partitioner);
-
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        CompactorSink sink = new CompactorSink(table, lockFactory);
-        return sink.sinkFrom(new DataStream<>(env, partitioned));
+    public AbstractComactorSinkBuider withInput(DataStreamSource<RowData> input) {
+        this.input = input;
+        return this;
     }
+
+    public AbstractComactorSinkBuider withLockFactory(Lock.Factory lockFactory) {
+        this.lockFactory = lockFactory;
+        return this;
+    }
+
+    public abstract DataStreamSink<?> build();
 }

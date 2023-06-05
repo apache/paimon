@@ -29,11 +29,7 @@ public class AppendOnlyNonBucketCompaction {
     }
 
     public AppendOnlyTableCompactionCoordinator getCompactionCoordinator() {
-        return new AppendOnlyTableCompactionCoordinator(
-                table,
-                table.coreOptions().targetFileSize(),
-                table.coreOptions().compactionMinFileNum(),
-                table.coreOptions().compactionMaxFileNum());
+        return new AppendOnlyTableCompactionCoordinator(table);
     }
 
     public AppendOnlyTableCompactionWorker getCompactionWorker(String commitUser) {

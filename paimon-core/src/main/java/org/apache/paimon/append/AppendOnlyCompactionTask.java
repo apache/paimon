@@ -27,7 +27,7 @@ import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
-import org.apache.paimon.utils.BucketProcessor;
+import org.apache.paimon.utils.BucketUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -85,7 +85,7 @@ public class AppendOnlyCompactionTask implements Serializable {
                 new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
         return new CommitMessageImpl(
                 partition,
-                BucketProcessor.NON_BUCKET_BUCKET,
+                BucketUtils.NON_BUCKET_BUCKET,
                 NewFilesIncrement.emptyIncrement(),
                 compactIncrement);
     }

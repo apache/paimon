@@ -24,7 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.BucketProcessor;
+import org.apache.paimon.utils.BucketUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
 
@@ -73,7 +73,7 @@ public class BucketSelector implements Serializable {
     Set<Integer> createBucketSet(int numBucket) {
         ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
         for (int hash : hashCodes) {
-            builder.add(BucketProcessor.calculateBucket(hash, numBucket));
+            builder.add(BucketUtils.calculateBucket(hash, numBucket));
         }
         return builder.build();
     }

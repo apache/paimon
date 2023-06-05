@@ -19,11 +19,15 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.sink.AbstractComactorSinkBuider;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
+import org.apache.paimon.flink.sink.NonBucketCompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BucketUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.java.tuple.Tuple3;
@@ -51,7 +55,7 @@ public class CompactAction extends TableActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(CompactAction.class);
 
     private final CompactorSourceBuilder sourceBuilder;
-    private final CompactorSinkBuilder sinkBuilder;
+    private final AbstractComactorSinkBuider sinkBuilder;
 
     public CompactAction(String warehouse, String database, String tableName) {
         this(warehouse, database, tableName, new Options());
@@ -69,7 +73,12 @@ public class CompactAction extends TableActionBase {
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
         sourceBuilder =
                 new CompactorSourceBuilder(identifier.getFullName(), (FileStoreTable) table);
-        sinkBuilder = new CompactorSinkBuilder((FileStoreTable) table);
+        if (BucketUtils.checkNonBucketTable(table)) {
+            // now only append-only table support non bucket
+            sinkBuilder = new NonBucketCompactorSinkBuilder((AppendOnlyFileStoreTable) table);
+        } else {
+            sinkBuilder = new CompactorSinkBuilder((FileStoreTable) table);
+        }
     }
 
     // ------------------------------------------------------------------------

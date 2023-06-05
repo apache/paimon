@@ -27,6 +27,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.BucketUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
@@ -78,7 +79,8 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
-        BucketsTable bucketsTable = new BucketsTable(table, true);
+        BucketsTable bucketsTable =
+                new BucketsTable(table, true, BucketUtils.checkNonBucketTable(table));
         TableRead read = bucketsTable.newRead();
         ContinuousCompactorFollowUpScanner scanner = new ContinuousCompactorFollowUpScanner();
 

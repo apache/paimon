@@ -63,10 +63,12 @@ public class BucketsTable implements DataTable, ReadonlyTable {
 
     private final FileStoreTable wrapped;
     private final boolean isContinuous;
+    private final boolean nonBucketCompaction;
 
-    public BucketsTable(FileStoreTable wrapped, boolean isContinuous) {
+    public BucketsTable(FileStoreTable wrapped, boolean isContinuous, boolean nonBucketCompaction) {
         this.wrapped = wrapped;
         this.isContinuous = isContinuous;
+        this.nonBucketCompaction = nonBucketCompaction;
     }
 
     @Override
@@ -131,7 +133,7 @@ public class BucketsTable implements DataTable, ReadonlyTable {
 
     @Override
     public BucketsTable copy(Map<String, String> dynamicOptions) {
-        return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous);
+        return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous, nonBucketCompaction);
     }
 
     @Override
@@ -163,10 +165,12 @@ public class BucketsTable implements DataTable, ReadonlyTable {
             DataSplit dataSplit = (DataSplit) split;
 
             List<DataFileMeta> files = Collections.emptyList();
-            if (isContinuous) {
+            if (isContinuous || nonBucketCompaction) {
                 // Serialized files are only useful in streaming jobs.
                 // Batch compact jobs only run once, so they only need to know what buckets should
                 // be compacted and don't need to concern incremental new files.
+
+                // while non-bucket compaction, we need to add files to compaction coordinator.
                 files = dataSplit.files();
             }
             InternalRow row =

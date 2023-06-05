@@ -32,6 +32,8 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -51,6 +53,7 @@ public class AppendOnlyTableCompactionTest {
     @TempDir Path tempDir;
 
     private AppendOnlyFileStoreTable appendOnlyFileStoreTable;
+    private TableScan scan;
     private SnapshotManager snapshotManager;
     private AppendOnlyTableCompactionCoordinator compactionCoordinator;
     private AppendOnlyTableCompactionWorker compactionWorker;
@@ -73,7 +76,7 @@ public class AppendOnlyTableCompactionTest {
         commit(messages);
 
         // first compact, six files left after commit compact and update restored files
-        compactionCoordinator.updateRestored();
+        updateRestored();
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
         Assertions.assertEquals(tasks.size(), 1);
         AppendOnlyCompactionTask task = tasks.get(0);
@@ -82,7 +85,7 @@ public class AppendOnlyTableCompactionTest {
         List<CommitMessage> result = compactionWorker.doCompact();
         Assertions.assertEquals(1, result.size());
         commit(result);
-        compactionCoordinator.updateRestored();
+        updateRestored();
         Assertions.assertEquals(compactionCoordinator.listRestoredFiles().size(), 6);
 
         // second compact, only one file left after updateRestored
@@ -91,7 +94,7 @@ public class AppendOnlyTableCompactionTest {
         // before update, zero file left
         Assertions.assertEquals(compactionCoordinator.listRestoredFiles().size(), 0);
         commit(compactionWorker.accept(tasks).doCompact());
-        compactionCoordinator.updateRestored();
+        updateRestored();
         // one file is loaded from delta
         List<DataFileMeta> last = new ArrayList<>(compactionCoordinator.listRestoredFiles());
         Assertions.assertEquals(last.size(), 1);
@@ -106,9 +109,9 @@ public class AppendOnlyTableCompactionTest {
         for (int i = 90; i < 100; i++) {
             count += i;
             commit(writeCommit(i));
-            compactionCoordinator.updateRestored();
+            updateRestored();
             commit(compactionWorker.accept(compactionCoordinator.compactPlan()).doCompact());
-            compactionCoordinator.updateRestored();
+            updateRestored();
             Assertions.assertEquals(
                     compactionCoordinator.listRestoredFiles().stream()
                             .map(DataFileMeta::rowCount)
@@ -124,7 +127,7 @@ public class AppendOnlyTableCompactionTest {
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
         while (tasks.size() != 0) {
             commit(compactionWorker.accept(tasks).doCompact());
-            compactionCoordinator.updateRestored();
+            updateRestored();
             tasks = compactionCoordinator.compactPlan();
         }
 
@@ -142,6 +145,7 @@ public class AppendOnlyTableCompactionTest {
         schemaBuilder.option("compaction.min.file-num", "3");
         schemaBuilder.option("compaction.max.file-num", "6");
         schemaBuilder.option("bucket", "-1");
+        schemaBuilder.option("streaming-compact", "true");
         return schemaBuilder.build();
     }
 
@@ -186,5 +190,23 @@ public class AppendOnlyTableCompactionTest {
                 appendOnlyFileStoreTable.createNonBucketCompaction();
         compactionCoordinator = compaction.getCompactionCoordinator();
         compactionWorker = compaction.getCompactionWorker(commitUser);
+        scan = appendOnlyFileStoreTable.newStreamScan();
+    }
+
+    private boolean scaned = false;
+
+    private void updateRestored() {
+        if (!scaned) {
+            scaned = true;
+            updateRestored();
+        }
+        scan.plan()
+                .splits()
+                .forEach(
+                        split -> {
+                            DataSplit dataSplit = (DataSplit) split;
+                            compactionCoordinator.notifyNewFiles(
+                                    dataSplit.partition(), dataSplit.files());
+                        });
     }
 }

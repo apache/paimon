@@ -42,7 +42,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.BucketProcessor;
+import org.apache.paimon.utils.BucketUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -58,7 +58,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable implements 
 
     AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         super(fileIO, path, tableSchema);
-        if (BucketProcessor.checkNonBucket(coreOptions().bucket())) {
+        if (BucketUtils.checkNonBucket(coreOptions().bucket())) {
             nonBucket = true;
         }
     }
@@ -138,6 +138,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable implements 
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
         AppendOnlyFileStoreWrite writer = store().newWrite(commitUser);
+        // if this table is non-bucket table, we skip compaction and restored files searching
         if (nonBucket()) {
             writer.skipCompaction();
             writer.fromEmptyWriter(true);

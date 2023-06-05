@@ -19,10 +19,12 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.table.NonBucketTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
 /** Processor for bucket, including calculate bucket num, handle non bucket, etc. */
-public class BucketProcessor {
+public class BucketUtils {
     public static final int NON_BUCKET_NUM = -1;
     public static final int NON_BUCKET_BUCKET = 0;
 
@@ -45,5 +47,12 @@ public class BucketProcessor {
 
     public static boolean checkNonBucket(int bucketNum) {
         return bucketNum == NON_BUCKET_NUM;
+    }
+
+    public static boolean checkNonBucketTable(Table table) {
+        if (table instanceof NonBucketTable) {
+            return ((NonBucketTable) table).nonBucket();
+        }
+        return false;
     }
 }

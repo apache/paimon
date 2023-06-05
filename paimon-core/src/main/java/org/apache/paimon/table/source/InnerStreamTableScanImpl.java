@@ -25,6 +25,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousNonBucketCompactorFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
@@ -157,8 +158,12 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     }
 
     private FollowUpScanner createFollowUpScanner() {
-        if (options.toConfiguration().get(CoreOptions.STREAMING_COMPACT)) {
+        if (options.toConfiguration().get(CoreOptions.STREAMING_COMPACT)
+                == CoreOptions.StreamingCompactionType.NORMAL) {
             return new ContinuousCompactorFollowUpScanner();
+        } else if (options.toConfiguration().get(CoreOptions.STREAMING_COMPACT)
+                == CoreOptions.StreamingCompactionType.NON_BUCKET) {
+            return new ContinuousNonBucketCompactorFollowUpScanner();
         }
 
         CoreOptions.ChangelogProducer changelogProducer = options.changelogProducer();

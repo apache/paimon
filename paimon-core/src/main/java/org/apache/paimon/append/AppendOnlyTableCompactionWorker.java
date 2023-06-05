@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.utils.BucketProcessor;
+import org.apache.paimon.utils.BucketUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -64,6 +64,6 @@ public class AppendOnlyTableCompactionWorker {
     }
 
     private AppendOnlyCompactManager.CompactRewriter buildRewriter(BinaryRow partition) {
-        return write.singleCompactRewriter(partition, BucketProcessor.NON_BUCKET_BUCKET);
+        return write.singleCompactRewriter(partition, BucketUtils.NON_BUCKET_BUCKET);
     }
 }

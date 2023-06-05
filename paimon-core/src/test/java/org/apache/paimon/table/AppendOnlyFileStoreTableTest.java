@@ -39,7 +39,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.utils.BucketProcessor;
+import org.apache.paimon.utils.BucketUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -226,7 +226,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         serializer
                                 .toBinaryRow(rowData(i, random.nextInt(), random.nextLong()))
                                 .copy();
-                int bucket = BucketProcessor.calculateBucket(data, numOfBucket);
+                int bucket = BucketUtils.calculateBucket(data, numOfBucket);
                 dataPerBucket.compute(
                         bucket,
                         (k, v) -> {

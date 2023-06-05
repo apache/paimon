@@ -611,10 +611,10 @@ public class CoreOptions implements Serializable {
                             "Full compaction will be constantly triggered after delta commits.");
 
     @ExcludeFromDocumentation("Internal use only")
-    public static final ConfigOption<Boolean> STREAMING_COMPACT =
+    public static final ConfigOption<StreamingCompactionType> STREAMING_COMPACT =
             key("streaming-compact")
-                    .booleanType()
-                    .defaultValue(false)
+                    .enumType(StreamingCompactionType.class)
+                    .defaultValue(StreamingCompactionType.NONE)
                     .withDescription(
                             "Only used to force TableScan to construct 'ContinuousCompactorStartingScanner' and "
                                     + "'ContinuousCompactorFollowUpScanner' for dedicated streaming compaction job.");
@@ -1199,6 +1199,51 @@ public class CoreOptions implements Serializable {
                             value,
                             StringUtils.join(
                                     Arrays.stream(StreamingReadMode.values()).iterator(), ",")));
+        }
+    }
+
+    /** Compaction type when trigger a compaction action. */
+    public enum StreamingCompactionType implements DescribedEnum {
+        NONE("none", "not a streaming compaction."),
+        NORMAL("normal", "Reads from the log store."),
+        NON_BUCKET("non-bucket", "Reads from the file store.");
+
+        private final String value;
+        private final String description;
+
+        StreamingCompactionType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        @VisibleForTesting
+        public static StreamingCompactionType fromValue(String value) {
+            for (StreamingCompactionType formatType : StreamingCompactionType.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(StreamingCompactionType.values()).iterator(),
+                                    ",")));
         }
     }
 

@@ -27,6 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BucketUtils;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Source;
@@ -116,7 +117,8 @@ public class CompactorSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
-        BucketsTable bucketsTable = new BucketsTable(table, isContinuous);
+        BucketsTable bucketsTable =
+                new BucketsTable(table, isContinuous, BucketUtils.checkNonBucketTable(table));
         RowType produceType = bucketsTable.rowType();
         return env.fromSource(
                 buildSource(bucketsTable),
@@ -129,7 +131,11 @@ public class CompactorSourceBuilder {
         // set 'streaming-compact' and remove 'scan.bounded.watermark'
         return new HashMap<String, String>() {
             {
-                put(CoreOptions.STREAMING_COMPACT.key(), "true");
+                if (BucketUtils.checkNonBucketTable(table)) {
+                    put(CoreOptions.STREAMING_COMPACT.key(), "non-bucket");
+                } else {
+                    put(CoreOptions.STREAMING_COMPACT.key(), "normal");
+                }
                 put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), null);
             }
         };
