@@ -172,21 +172,15 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                 && snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
             long commitIdentifier = snapshot.commitIdentifier();
             if (commitIdentifiersToCheck.contains(commitIdentifier)) {
-                // We found a full compaction snapshot triggered by
-                // `submitFullCompaction`
-                // method.
+                // We found a full compaction snapshot triggered by `submitFullCompaction` method.
                 //
-                // Because `submitFullCompaction` will compact all buckets in
-                // `writtenBuckets`,
-                // thus a successful commit indicates that all previous buckets have
-                // been
-                // compacted.
+                // Because `submitFullCompaction` will compact all buckets in `writtenBuckets`, thus
+                // a successful commit indicates that all previous buckets have been compacted.
                 //
                 // We must make sure that the compact snapshot is triggered by
-                // `submitFullCompaction`, because normal compaction may also trigger
-                // full
-                // compaction, but that only compacts a specific bucket, not all buckets
-                // recorded in `writtenBuckets`.
+                // `submitFullCompaction`, because normal compaction may also trigger full
+                // compaction, but that only compacts a specific bucket, not all buckets recorded in
+                // `writtenBuckets`.
                 if (LOG.isDebugEnabled()) {
                     LOG.debug(
                             "Found full compaction snapshot #{} with identifier {}",
