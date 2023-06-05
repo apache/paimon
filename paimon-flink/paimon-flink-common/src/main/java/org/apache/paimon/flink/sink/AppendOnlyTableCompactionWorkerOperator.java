@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.append.AppendOnlyTableCompactionWorker;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 
@@ -35,7 +36,7 @@ import java.util.stream.Collectors;
  * AppendOnlyTableCompactionCoordinatorOperator}.
  */
 public class AppendOnlyTableCompactionWorkerOperator
-        extends PrepareCommitOperator<AppendOnlyCompactionTask> {
+        extends PrepareCommitOperator<AppendOnlyCompactionTask, Committable> {
     private final AppendOnlyFileStoreTable table;
     private transient AppendOnlyTableCompactionWorker worker;
     private final String commitUser;
@@ -43,6 +44,7 @@ public class AppendOnlyTableCompactionWorkerOperator
 
     public AppendOnlyTableCompactionWorkerOperator(
             AppendOnlyFileStoreTable table, String commitUser) {
+        super(Options.fromMap(table.options()));
         this.table = table;
         this.commitUser = commitUser;
     }

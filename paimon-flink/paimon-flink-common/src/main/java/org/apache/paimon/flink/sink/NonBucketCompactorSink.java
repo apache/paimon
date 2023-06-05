@@ -23,6 +23,7 @@ import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -37,7 +38,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.util.function.SerializableFunction;
 
 import java.io.Serializable;
 import java.util.UUID;
