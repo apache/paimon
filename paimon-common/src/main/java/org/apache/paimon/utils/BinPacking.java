@@ -39,7 +39,9 @@ public class BinPacking {
 
         for (T item : items) {
             long weight = weightFunc.apply(item);
-            if (binWeight + weight > targetWeight) {
+            // when get a much big item or total weight enough, we check the binItems size. If
+            // greater than zero, we pack it
+            if (binWeight + weight > targetWeight && binItems.size() > 0) {
                 packed.add(binItems);
                 binItems = new ArrayList<>();
                 binWeight = 0;
