@@ -25,7 +25,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
@@ -52,9 +51,10 @@ public class PostgreSqlActionUtils {
     static Connection getConnection(Configuration postgreSqlConfig) throws Exception {
         return DriverManager.getConnection(
                 String.format(
-                        "jdbc:postgresql://%s:%d/",
+                        "jdbc:postgresql://%s:%d/%s",
                         postgreSqlConfig.get(PostgreSqlSourceOptions.HOSTNAME),
-                        postgreSqlConfig.get(PostgreSqlSourceOptions.PORT)),
+                        postgreSqlConfig.get(PostgreSqlSourceOptions.PORT),
+                        postgreSqlConfig.get(PostgreSqlSourceOptions.DATABASE_NAME)),
                 postgreSqlConfig.get(PostgreSqlSourceOptions.USERNAME),
                 postgreSqlConfig.get(PostgreSqlSourceOptions.PASSWORD));
     }

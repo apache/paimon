@@ -50,16 +50,16 @@ public class PostgreSqlSchema {
         this.tableName = tableName;
 
         fields = new LinkedHashMap<>();
-        try (ResultSet rs = metaData.getColumns(databaseName, schemaName, tableName, null)) {
+        try (ResultSet rs = metaData.getColumns(null, schemaName, tableName, null)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
                 String fieldType = rs.getString("TYPE_NAME");
                 Integer precision = rs.getInt("COLUMN_SIZE");
                 String fieldComment = rs.getString("REMARKS");
 
-                if (rs.wasNull()) {
+                /*if (rs.wasNull()) {
                     precision = null;
-                }
+                }*/
                 Integer scale = rs.getInt("DECIMAL_DIGITS");
                 if (rs.wasNull()) {
                     scale = null;

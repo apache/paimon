@@ -18,9 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
@@ -30,9 +29,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlDebeziumJsonEventParser;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlSchema;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseAction;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
 import org.apache.paimon.schema.Schema;
@@ -51,10 +48,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.flink.action.Action.getConfigMap;
 
 /**
  * An {@link Action} which synchronize the whole PostgreSQL database into one Paimon database.
@@ -64,7 +63,6 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(PostgreSqlSyncDatabaseAction.class);
 
     private final Configuration postgresqlConfig;
-    private final String warehouse;
     private final String database;
     private final boolean ignoreIncompatible;
     private final String tablePrefix;
@@ -72,7 +70,6 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
     @Nullable
     private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
-    private final Map<String, String> catalogConfig;
     private final Map<String, String> tableConfig;
 
     PostgreSqlSyncDatabaseAction(
@@ -108,14 +105,12 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
             Map<String, String> tableConfig) {
         super(warehouse, catalogConfig);
         this.postgresqlConfig = Configuration.fromMap(postgresqlConfig);
-        this.warehouse = warehouse;
         this.database = database;
         this.ignoreIncompatible = ignoreIncompatible;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
         this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
-        this.catalogConfig = catalogConfig;
         this.tableConfig = tableConfig;
     }
 
@@ -150,7 +145,7 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
             String paimonTableName = tableNameConverter.convert(postgreSqlSchema.tableName());
             Identifier identifier = new Identifier(database, paimonTableName);
             FileStoreTable table;
-            Schema fromMySql =
+            Schema fromPostgreSql =
                     PostgreSqlActionUtils.buildPaimonSchema(
                             postgreSqlSchema,
                             Collections.emptyList(),
@@ -162,11 +157,11 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), postgreSqlSchema, identifier);
-                if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
+                if (shouldMonitorTable(table.schema(), fromPostgreSql, errMsg)) {
                     monitoredTables.add(postgreSqlSchema.tableName());
                 }
             } catch (Catalog.TableNotExistException e) {
-                catalog.createTable(identifier, fromMySql, false);
+                catalog.createTable(identifier, fromPostgreSql, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
                 monitoredTables.add(postgreSqlSchema.tableName());
             }
@@ -179,19 +174,19 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
                         + "PostgreSQL database are not compatible with those of existed Paimon tables. Please check the log.");
 
         postgresqlConfig.set(
-                MySqlSourceOptions.TABLE_NAME, "(" + String.join("|", monitoredTables) + ")");
+                PostgreSqlSourceOptions.TABLE_NAME, "(" + String.join("|", monitoredTables) + ")");
         SourceFunction<String> source = PostgreSqlActionUtils.buildPostgreSqlSource(postgresqlConfig);
 
         String serverTimeZone = postgresqlConfig.get(PostgreSqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         EventParser.Factory<String> parserFactory =
-                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, tableNameConverter);
+                () -> new PostgreSqlDebeziumJsonEventParser(zoneId, caseSensitive, tableNameConverter);
 
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
-                                env.fromSource(
-                                        source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
+                                env.addSource(
+                                        source, "PostgreSQL Source"))
                         .withParserFactory(parserFactory)
                         .withTables(fileStoreTables);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -225,7 +220,7 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
             DatabaseMetaData metaData = conn.getMetaData();
             for (String schemaName : SchemeList) {
                 try (ResultSet tables =
-                             metaData.getTables(databaseName, schemaName, "%", new String[] {"TABLE"})) {
+                             metaData.getTables(null, schemaName, "%", new String[] {"TABLE"})) {
                     while (tables.next()) {
                         String tableName = tables.getString("TABLE_NAME");
                         if (!shouldMonitorTable(tableName)) {
@@ -287,8 +282,129 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
                         tableSuffix));
     }
 
+    // ------------------------------------------------------------------------
+    //  Flink run methods
+    // ------------------------------------------------------------------------
+
+    public static Optional<Action> create(String[] args) {
+        MultipleParameterTool params = MultipleParameterTool.fromArgs(args);
+
+        if (params.has("help")) {
+            printHelp();
+            return Optional.empty();
+        }
+
+        String warehouse = params.get("warehouse");
+        String database = params.get("database");
+        boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
+        String tablePrefix = params.get("table-prefix");
+        String tableSuffix = params.get("table-suffix");
+        String includingTables = params.get("including-tables");
+        String excludingTables = params.get("excluding-tables");
+
+        Optional<Map<String, String>> postgresqlConfigOption = getConfigMap(params, "postgresql-conf");
+        Optional<Map<String, String>> catalogConfigOption = getConfigMap(params, "catalog-conf");
+        Optional<Map<String, String>> tableConfigOption = getConfigMap(params, "table-conf");
+        return postgresqlConfigOption.map(
+                postgreSqlConfig ->
+                        new PostgreSqlSyncDatabaseAction(
+                                postgreSqlConfig,
+                                warehouse,
+                                database,
+                                ignoreIncompatible,
+                                tablePrefix,
+                                tableSuffix,
+                                includingTables,
+                                excludingTables,
+                                catalogConfigOption.orElse(Collections.emptyMap()),
+                                tableConfigOption.orElse(Collections.emptyMap())));
+    }
+
+    private static void printHelp() {
+        System.out.println(
+                "Action \"mysql-sync-database\" creates a streaming job "
+                        + "with a Flink MySQL CDC source and multiple Paimon table sinks "
+                        + "to synchronize a whole MySQL database into one Paimon database.\n"
+                        + "Only MySQL tables with primary keys will be considered. "
+                        + "Newly created MySQL tables after the job starts will not be included.");
+        System.out.println();
+
+        System.out.println("Syntax:");
+        System.out.println(
+                "  mysql-sync-database --warehouse <warehouse-path> --database <database-name> "
+                        + "[--ignore-incompatible <true/false>] "
+                        + "[--table-prefix <paimon-table-prefix>] "
+                        + "[--table-suffix <paimon-table-suffix>] "
+                        + "[--including-tables <mysql-table-name|name-regular-expr>] "
+                        + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
+                        + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
+                        + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
+                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+        System.out.println();
+
+        System.out.println(
+                "--ignore-incompatible is default false, in this case, if MySQL table name exists in Paimon "
+                        + "and their schema is incompatible, an exception will be thrown. "
+                        + "You can specify it to true explicitly to ignore the incompatible tables and exception.");
+        System.out.println();
+
+        System.out.println(
+                "--table-prefix is the prefix of all Paimon tables to be synchronized. For example, if you want all "
+                        + "synchronized tables to have \"ods_\" as prefix, you can specify `--table-prefix ods_`.");
+        System.out.println("The usage of --table-suffix is same as `--table-prefix`");
+        System.out.println();
+
+        System.out.println(
+                "--including-tables is used to specify which source tables are to be synchronized. "
+                        + "You must use '|' to separate multiple tables. Regular expression is supported.");
+        System.out.println(
+                "--excluding-tables is used to specify which source tables are not to be synchronized. "
+                        + "The usage is same as --including-tables.");
+        System.out.println(
+                "--excluding-tables has higher priority than --including-tables if you specified both.");
+        System.out.println();
+
+        System.out.println("MySQL CDC source conf syntax:");
+        System.out.println("  key=value");
+        System.out.println(
+                "'hostname', 'username', 'password' and 'database-name' "
+                        + "are required configurations, others are optional. "
+                        + "Note that 'database-name' should be the exact name "
+                        + "of the MySQL databse you want to synchronize. "
+                        + "It can't be a regular expression.");
+        System.out.println(
+                "For a complete list of supported configurations, "
+                        + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options");
+        System.out.println();
+
+        System.out.println("Paimon catalog and table sink conf syntax:");
+        System.out.println("  key=value");
+        System.out.println("All Paimon sink table will be applied the same set of configurations.");
+        System.out.println(
+                "For a complete list of supported configurations, "
+                        + "see https://paimon.apache.org/docs/master/maintenance/configurations/");
+        System.out.println();
+
+        System.out.println("Examples:");
+        System.out.println(
+                "  mysql-sync-database \\\n"
+                        + "    --warehouse hdfs:///path/to/warehouse \\\n"
+                        + "    --database test_db \\\n"
+                        + "    --mysql-conf hostname=127.0.0.1 \\\n"
+                        + "    --mysql-conf username=root \\\n"
+                        + "    --mysql-conf password=123456 \\\n"
+                        + "    --mysql-conf database-name=source_db \\\n"
+                        + "    --catalog-conf metastore=hive \\\n"
+                        + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
+                        + "    --table-conf bucket=4 \\\n"
+                        + "    --table-conf changelog-producer=input \\\n"
+                        + "    --table-conf sink.parallelism=4");
+    }
+
     @Override
     public void run() throws Exception {
-
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        build(env);
+        execute(env, String.format("PostgreSQL-Paimon Database Sync: %s", database));
     }
 }

@@ -32,12 +32,25 @@ public class PostgreSqlTypeUtils {
     private static final String BOOLEAN = "BOOLEAN";
     private static final String BOOL = "BOOL";
     private static final String SMALLINT = "SMALLINT";
-    private static final String INT = "INT";
+    private static final String SMALLSERIAL = "SMALLSERIAL";
+    private static final String SERIAL_2 = "SERIAL2";
+    private static final String INT_2 = "INT2";
+    private static final String INT_4 = "INT4";
     private static final String INTEGER = "INTEGER";
+    private static final String INT = "INT";
+    private static final String SERIAL = "SERIAL";
+    private static final String SERIAL_4 = "SERIAL4";
     private static final String BIGINT = "BIGINT";
+    private static final String BIGSERIAL = "BIGSERIAL";
+    private static final String SERIAL_8 = "SERIAL8";
+    private static final String INT_8 = "INT8";
     private static final String REAL = "REAL";
+    private static final String FLOAT_4 = "FLOAT4";
+    private static final String FLOAT_8 = "FLOAT8";
+    private static final String DOUBLE_PRECISION = "DOUBLE PRECISION";
     private static final String CHAR = "CHAR";
     private static final String VARCHAR = "VARCHAR";
+    private static final String INET = "INET";
     private static final String TEXT = "TEXT";
 
     public static DataType toDataType(
@@ -47,19 +60,33 @@ public class PostgreSqlTypeUtils {
             case BOOL:
                 return DataTypes.BOOLEAN();
             case SMALLINT:
+            case INT_2:
+            case SMALLSERIAL:
+            case SERIAL_2:
                 return DataTypes.SMALLINT();
+            case INT_4:
             case INT:
             case INTEGER:
+            case SERIAL:
+            case SERIAL_4:
                 return DataTypes.INT();
             case BIGINT:
+            case INT_8:
+            case BIGSERIAL:
+            case SERIAL_8:
                 return DataTypes.BIGINT();
             case REAL:
+            case FLOAT_4:
                 return DataTypes.FLOAT();
+            case FLOAT_8:
+            case DOUBLE_PRECISION:
+                return DataTypes.DOUBLE();
             case CHAR:
                 return DataTypes.CHAR(Preconditions.checkNotNull(length));
             case VARCHAR:
                 return DataTypes.VARCHAR(Preconditions.checkNotNull(length));
             case TEXT:
+            case INET:
                 return DataTypes.STRING();
             default:
                 throw new UnsupportedOperationException(
