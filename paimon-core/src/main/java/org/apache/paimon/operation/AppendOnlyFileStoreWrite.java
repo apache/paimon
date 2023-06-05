@@ -30,6 +30,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FileWriter;
 import org.apache.paimon.io.RowDataFileWriter;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -37,6 +38,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -113,7 +115,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                                 compactionMinFileNum,
                                 compactionMaxFileNum,
                                 targetFileSize,
-                                compactRewriter(partition, bucket),
+                                compactRewriter(partition, bucket, true),
                                 assertDisorder);
 
         return new AppendOnlyWriter(
@@ -130,22 +132,49 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 fileCompression);
     }
 
-    private AppendOnlyCompactManager.CompactRewriter compactRewriter(
-            BinaryRow partition, int bucket) {
+    public AppendOnlyCompactManager.CompactRewriter compactRewriter(
+            BinaryRow partition, int bucket, boolean allowRolling) {
         return toCompact -> {
             if (toCompact.isEmpty()) {
                 return Collections.emptyList();
             }
-            RowDataRollingFileWriter rewriter =
-                    new RowDataRollingFileWriter(
-                            fileIO,
-                            schemaId,
-                            fileFormat,
-                            targetFileSize,
-                            rowType,
-                            pathFactory.createDataFilePathFactory(partition, bucket),
-                            new LongCounter(toCompact.get(0).minSequenceNumber()),
-                            fileCompression);
+            if (allowRolling) {
+                RowDataRollingFileWriter rewriter =
+                        new RowDataRollingFileWriter(
+                                fileIO,
+                                schemaId,
+                                fileFormat,
+                                targetFileSize,
+                                rowType,
+                                pathFactory.createDataFilePathFactory(partition, bucket),
+                                new LongCounter(toCompact.get(0).minSequenceNumber()),
+                                fileCompression);
+                doReWriteAndClose(rewriter, partition, bucket, toCompact);
+                return rewriter.result();
+            } else {
+                RowDataFileWriter rewriter =
+                        new RowDataFileWriter(
+                                fileIO,
+                                fileFormat.createWriterFactory(rowType),
+                                pathFactory.createDataFilePathFactory(partition, bucket).newPath(),
+                                rowType,
+                                fileFormat.createStatsExtractor(rowType).orElse(null),
+                                schemaId,
+                                new LongCounter(toCompact.get(0).minSequenceNumber()),
+                                fileCompression);
+                doReWriteAndClose(rewriter, partition, bucket, toCompact);
+                return Collections.singletonList(rewriter.result());
+            }
+        };
+    }
+
+    private void doReWriteAndClose(
+            FileWriter<InternalRow, ?> rewriter,
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> toCompact)
+            throws Exception {
+        try {
             rewriter.write(
                     new RecordReaderIterator<>(
                             read.createReader(
@@ -155,9 +184,9 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                                             bucket,
                                             toCompact,
                                             false))));
-            rewriter.close();
-            return rewriter.result();
-        };
+        } finally {
+            IOUtils.closeQuietly(rewriter);
+        }
     }
 
     // AppendOnlyCompactWorker need rewriter to execute compaction task
