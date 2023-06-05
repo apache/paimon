@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
@@ -245,6 +247,32 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY c DATE"))
                 .hasMessageContaining(
                         "Could not execute ALTER TABLE PAIMON.default.T\n" + "  MODIFY `c` DATE");
+
+        sql("ALTER TABLE T ADD f TIMESTAMP(3)");
+        String timestampString = "2023-06-05 12:34:56.233";
+        sql(
+                "INSERT INTO T VALUES('spark', 'hhh', 15, 5, 't5', TIMESTAMP '"
+                        + timestampString
+                        + "' )");
+        Timestamp timestamp = DateTimeUtils.parseTimestampData(timestampString, 3);
+
+        // change type: TIMESTAMP to INT
+        sql("ALTER TABLE T MODIFY f INT");
+        result = sql("SELECT * FROM T");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[apache, fff, 13, 3, test, null], +I[flink, ddd, 12, 4, 6.7, null], +I[paimon, bbb, 11, 1, 3.4, null], +I[spark, hhh, 15, 5, t5, "
+                                + DateTimeUtils.unixTimestamp(timestamp.getMillisecond())
+                                + "], +I[store, ggg, 14, 4, t1, null]]");
+
+        // change type: TIMESTAMP to STRING
+        sql("ALTER TABLE T MODIFY f STRING");
+        result = sql("SELECT * FROM T");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[apache, fff, 13, 3, test, null], +I[flink, ddd, 12, 4, 6.7, null], +I[paimon, bbb, 11, 1, 3.4, null], +I[spark, hhh, 15, 5, t5, "
+                                + timestamp
+                                + "], +I[store, ggg, 14, 4, t1, null]]");
     }
 
     @Test

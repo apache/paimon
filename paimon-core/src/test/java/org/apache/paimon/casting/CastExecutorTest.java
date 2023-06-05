@@ -37,9 +37,11 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.DecimalUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.utils.DateTimeUtils.unixTimestamp;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link CastExecutor}. */
@@ -337,6 +339,61 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new TimestampType(5), new TimeType(2)),
                 Timestamp.fromEpochMillis(mills),
                 (int) (mills % DateTimeUtils.MILLIS_PER_DAY));
+
+        // timestamp to byte
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new TinyIntType(false)),
+                Timestamp.fromEpochMillis(mills),
+                (byte) unixTimestamp(mills));
+
+        // timestamp to short
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new SmallIntType(false)),
+                Timestamp.fromEpochMillis(mills),
+                (short) unixTimestamp(mills));
+
+        // timestamp to int
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new IntType(false)),
+                Timestamp.fromEpochMillis(mills),
+                (int) unixTimestamp(mills));
+
+        // timestamp to bigint
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new BigIntType(false)),
+                Timestamp.fromEpochMillis(mills),
+                unixTimestamp(mills));
+
+        // timestamp to float
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new FloatType(false)),
+                Timestamp.fromEpochMillis(mills),
+                (float) unixTimestamp(mills));
+
+        // timestamp to double
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new DoubleType(false)),
+                Timestamp.fromEpochMillis(mills),
+                (double) unixTimestamp(mills));
+
+        // timestamp to decimal
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new DecimalType(10, 5)),
+                Timestamp.fromEpochMillis(mills),
+                DecimalUtils.castFrom(mills, 10, 5));
+
+        // timestamp to string
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new CharType(25)),
+                Timestamp.fromEpochMillis(mills),
+                StringUtils.concat(
+                        BinaryString.fromString(timestamp.toString()),
+                        BinaryString.blankString(2)));
+
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), new VarCharType(25)),
+                Timestamp.fromEpochMillis(mills),
+                BinaryString.fromString(timestamp.toString()));
     }
 
     @SuppressWarnings("rawtypes")
