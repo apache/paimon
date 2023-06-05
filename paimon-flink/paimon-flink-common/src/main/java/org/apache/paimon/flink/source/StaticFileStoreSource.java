@@ -35,7 +35,6 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
 
@@ -97,11 +96,12 @@ public class StaticFileStoreSource extends FlinkSource {
         }
     }
 
-    private static Map<Integer, Queue<FileStoreSourceSplit>> createSplitAssignment(
+    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
         List<List<FileStoreSourceSplit>> assignmentList =
-                BinPacking.packForFixedBinNumber(splits, split -> split.split().rowCount(), numReaders);
-        Map<Integer, Queue<FileStoreSourceSplit>> assignment = new HashMap<>();
+                BinPacking.packForFixedBinNumber(
+                        splits, split -> split.split().rowCount(), numReaders);
+        Map<Integer, LinkedList<FileStoreSourceSplit>> assignment = new HashMap<>();
         for (int i = 0; i < assignmentList.size(); i++) {
             assignment.put(i, new LinkedList<>(assignmentList.get(i)));
         }

@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.ListIterator;
 import java.util.Map;
 import java.util.Queue;
 
@@ -38,10 +39,11 @@ public class FairSplitAssigner implements SplitAssigner {
     /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final int splitBatchSize;
 
-    private final Map<Integer, Queue<FileStoreSourceSplit>> pendingSplitAssignment;
+    private final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
 
     public FairSplitAssigner(
-            int splitBatchSize, Map<Integer, Queue<FileStoreSourceSplit>> pendingSplitAssignment) {
+            int splitBatchSize,
+            Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment) {
         this.splitBatchSize = splitBatchSize;
         this.pendingSplitAssignment = pendingSplitAssignment;
     }
@@ -61,7 +63,12 @@ public class FairSplitAssigner implements SplitAssigner {
 
     @Override
     public void addSplits(int subtask, List<FileStoreSourceSplit> splits) {
-        pendingSplitAssignment.computeIfAbsent(subtask, k -> new LinkedList<>()).addAll(splits);
+        LinkedList<FileStoreSourceSplit> remainingSplits =
+                pendingSplitAssignment.computeIfAbsent(subtask, k -> new LinkedList<>());
+        ListIterator<FileStoreSourceSplit> iterator = splits.listIterator(splits.size());
+        while (iterator.hasPrevious()) {
+            remainingSplits.addFirst(iterator.previous());
+        }
     }
 
     @Override
