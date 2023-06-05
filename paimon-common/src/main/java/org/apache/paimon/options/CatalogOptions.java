@@ -45,6 +45,11 @@ public class CatalogOptions {
                     .noDefaultValue()
                     .withDescription("Uri of metastore server.");
 
+    public static final ConfigOption<String> PROXY_USER =
+            ConfigOptions.key("fileIO.hadoop.proxy.user")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("the proxy user of fileIO");
     public static final ConfigOption<TableType> TABLE_TYPE =
             ConfigOptions.key("table.type")
                     .enumType(TableType.class)

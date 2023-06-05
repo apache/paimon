@@ -27,6 +27,8 @@ import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
+import org.apache.paimon.fs.FileIOLoader;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -151,8 +153,17 @@ public abstract class AbstractFlinkTableFactory
     }
 
     static CatalogContext createCatalogContext(DynamicTableFactory.Context context) {
-        return CatalogContext.create(
-                Options.fromMap(context.getCatalogTable().getOptions()), new FlinkFileIOLoader());
+        Options options = Options.fromMap(context.getCatalogTable().getOptions());
+        return createCatalogContextWithOption(options);
+    }
+
+    static CatalogContext createCatalogContextWithOption(Options options) {
+        String proxyUser = options.get(CatalogOptions.PROXY_USER);
+        FileIOLoader loader = null;
+        if (proxyUser == null) {
+            loader = new FlinkFileIOLoader();
+        }
+        return CatalogContext.create(options, loader);
     }
 
     static Table buildPaimonTable(DynamicTableFactory.Context context) {
