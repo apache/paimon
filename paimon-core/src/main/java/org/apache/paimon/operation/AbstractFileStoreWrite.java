@@ -67,7 +67,7 @@ public abstract class AbstractFileStoreWrite<T>
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
 
     private ExecutorService lazyCompactExecutor;
-    private boolean overwrite = false;
+    private boolean emptyWriter = false;
 
     protected AbstractFileStoreWrite(
             String commitUser, SnapshotManager snapshotManager, FileStoreScan scan) {
@@ -89,8 +89,9 @@ public abstract class AbstractFileStoreWrite<T>
         return this;
     }
 
-    public void withOverwrite(boolean overwrite) {
-        this.overwrite = overwrite;
+    @Override
+    public void fromEmptyWriter(boolean emptyWriter) {
+        this.emptyWriter = emptyWriter;
     }
 
     @Override
@@ -286,7 +287,7 @@ public abstract class AbstractFileStoreWrite<T>
             writers.put(partition.copy(), buckets);
         }
         return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket, overwrite));
+                bucket, k -> createWriterContainer(partition.copy(), bucket, emptyWriter));
     }
 
     @VisibleForTesting
