@@ -92,7 +92,7 @@ public class FlinkConnectorOptions {
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "Defines a custom parallelism for the sink. "
+                            "Defines a custom parallelism for the compaction job. "
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration.");
 
