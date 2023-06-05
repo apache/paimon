@@ -291,7 +291,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-bundle</include>
-                                    <include>com.alibaba.druid:druid</include>
+                                    <include>com.alibaba:druid</include>
                                 </includes>
                             </artifactSet>
                             <relocations>
