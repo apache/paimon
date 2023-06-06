@@ -15,6 +15,22 @@ Copyright 2018-2023 The Apache Software Foundation
 
 ----------------------------------------------------------
 
+This project bundles the following dependencies under the MIT license.
+See bundled license files for details.
+
+- font-awesome:4.6.3 (css) (https://fontawesome.com/) - Created by Dave Gandy
+    -> css in "docs/static/font-awesome/css"
+
+----------------------------------------------------------
+
+This project bundles the following dependencies under SIL OFL 1.1 license (https://opensource.org/licenses/OFL-1.1).
+See bundled license files for details.
+
+- font-awesome:4.6.3 (Font) (https://fontawesome.com/) - Created by Dave Gandy
+    -> fonts in "docs/static/font-awesome/fonts"
+
+----------------------------------------------------------
+
 AWS SDK for Java
 Copyright 2010-2014 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
