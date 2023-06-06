@@ -18,10 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
+
+import org.apache.flink.api.java.tuple.Tuple2;
 
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -43,7 +43,8 @@ public class PostgreSqlSchema {
     private final LinkedHashMap<String, Tuple2<DataType, String>> fields;
     private final List<String> primaryKeys;
 
-    public PostgreSqlSchema(DatabaseMetaData metaData, String databaseName, String schemaName, String tableName)
+    public PostgreSqlSchema(
+            DatabaseMetaData metaData, String databaseName, String schemaName, String tableName)
             throws Exception {
         this.databaseName = databaseName;
         this.schemaName = schemaName;

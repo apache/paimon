@@ -18,18 +18,19 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import com.ververica.cdc.connectors.postgres.PostgreSQLSource;
-import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
-import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+
+import com.ververica.cdc.connectors.postgres.PostgreSQLSource;
+import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
+import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -105,7 +106,9 @@ public class PostgreSqlActionUtils {
                         !postgreSqlFields.containsKey(fieldName.toLowerCase()),
                         String.format(
                                 "Duplicate key '%s' in table '%s.%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, postgreSqlSchema.schemaName(), postgreSqlSchema.tableName()));
+                                fieldName,
+                                postgreSqlSchema.schemaName(),
+                                postgreSqlSchema.tableName()));
                 postgreSqlFields.put(fieldName.toLowerCase(), entry.getValue());
             }
             postgreSqlPrimaryKeys =
@@ -164,6 +167,14 @@ public class PostgreSqlActionUtils {
                 .schemaList(schemaName)
                 .tableList(schemaName + "." + tableName);
 
+        postgreSqlConfig
+                .getOptional(PostgreSqlSourceOptions.DECODING_PLUGIN_NAME)
+                .ifPresent(sourceBuilder::decodingPluginName);
+
+        postgreSqlConfig
+                .getOptional(PostgreSqlSourceOptions.SLOT_NAME)
+                .ifPresent(sourceBuilder::slotName);
+
         Map<String, Object> customConverterConfigs = new HashMap<>();
         customConverterConfigs.put(JsonConverterConfig.DECIMAL_FORMAT_CONFIG, "numeric");
         JsonDebeziumDeserializationSchema schema =
@@ -175,17 +186,20 @@ public class PostgreSqlActionUtils {
         checkArgument(
                 postgreSqlConfig.get(PostgreSqlSourceOptions.HOSTNAME) != null,
                 String.format(
-                        "postgresql-conf [%s] must be specified.", PostgreSqlSourceOptions.HOSTNAME.key()));
+                        "postgresql-conf [%s] must be specified.",
+                        PostgreSqlSourceOptions.HOSTNAME.key()));
 
         checkArgument(
                 postgreSqlConfig.get(PostgreSqlSourceOptions.USERNAME) != null,
                 String.format(
-                        "postgresql-conf [%s] must be specified.", PostgreSqlSourceOptions.USERNAME.key()));
+                        "postgresql-conf [%s] must be specified.",
+                        PostgreSqlSourceOptions.USERNAME.key()));
 
         checkArgument(
                 postgreSqlConfig.get(PostgreSqlSourceOptions.PASSWORD) != null,
                 String.format(
-                        "postgresql-conf [%s] must be specified.", PostgreSqlSourceOptions.PASSWORD.key()));
+                        "postgresql-conf [%s] must be specified.",
+                        PostgreSqlSourceOptions.PASSWORD.key()));
 
         checkArgument(
                 postgreSqlConfig.get(PostgreSqlSourceOptions.DATABASE_NAME) != null,
@@ -202,6 +216,7 @@ public class PostgreSqlActionUtils {
         checkArgument(
                 postgreSqlConfig.get(PostgreSqlSourceOptions.TABLE_NAME) != null,
                 String.format(
-                        "postgresql-conf [%s] must be specified.", PostgreSqlSourceOptions.TABLE_NAME.key()));
+                        "postgresql-conf [%s] must be specified.",
+                        PostgreSqlSourceOptions.TABLE_NAME.key()));
     }
 }

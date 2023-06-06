@@ -20,17 +20,30 @@ package org.apache.paimon.flink.action.cdc.postgresql;
 
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Preconditions;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
+
+import com.esri.core.geometry.ogc.OGCGeometry;
 
 import javax.annotation.Nullable;
 
-/**
- * Converts from MySQL type to {@link DataType}.
- */
+import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+
+/** Converts from PostgreSQL type to {@link DataType}. */
 public class PostgreSqlTypeUtils {
 
     private static final String BOOLEAN = "BOOLEAN";
     private static final String BOOL = "BOOL";
+    private static final String BIT = "BIT";
+    private static final String VARBIT = "VARBIT";
     private static final String SMALLINT = "SMALLINT";
     private static final String SMALLSERIAL = "SMALLSERIAL";
     private static final String SERIAL_2 = "SERIAL2";
@@ -38,6 +51,7 @@ public class PostgreSqlTypeUtils {
     private static final String INT_4 = "INT4";
     private static final String INTEGER = "INTEGER";
     private static final String INT = "INT";
+    private static final String MONEY = "MONEY";
     private static final String SERIAL = "SERIAL";
     private static final String SERIAL_4 = "SERIAL4";
     private static final String BIGINT = "BIGINT";
@@ -50,15 +64,40 @@ public class PostgreSqlTypeUtils {
     private static final String DOUBLE_PRECISION = "DOUBLE PRECISION";
     private static final String CHAR = "CHAR";
     private static final String VARCHAR = "VARCHAR";
+    private static final String BPCHAR = "BPCHAR";
     private static final String INET = "INET";
     private static final String TEXT = "TEXT";
+    private static final String JSON = "JSON";
+    private static final String XML = "XML";
+    private static final String UUID = "UUID";
+    private static final String POLYGON = "POLYGON";
+    private static final String POINT = "POINT";
+    private static final String BOX = "BOX";
+    private static final String CIRCLE = "CIRCLE";
+    private static final String CIDR = "CIDR";
+    private static final String LINE = "LINE";
+    private static final String LSEG = "LSEG";
+    private static final String MACADDR = "MACADDR";
+    private static final String MACADDR8 = "MACADDR8";
+    private static final String PATH = "PATH";
+    private static final String DATE = "DATE";
+    private static final String TIMESTAMP = "TIMESTAMP";
+    private static final String TIMESTAMPTZ = "TIMESTAMPTZ";
+    private static final String TIME = "TIME";
+    private static final String TIMETZ = "TIMETZ";
+    private static final String NUMERIC = "NUMERIC";
+    private static final String DECIMAL = "DECIMAL";
+    private static final String BYTEA = "BYTEA";
+
+    private static final int JDBC_TIMESTAMP_BASE_LENGTH = 19;
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public static DataType toDataType(
             String type, @Nullable Integer length, @Nullable Integer scale) {
         switch (type.toUpperCase()) {
             case BOOLEAN:
             case BOOL:
-                return DataTypes.BOOLEAN();
             case SMALLINT:
             case INT_2:
             case SMALLSERIAL:
@@ -69,6 +108,7 @@ public class PostgreSqlTypeUtils {
             case INTEGER:
             case SERIAL:
             case SERIAL_4:
+            case MONEY:
                 return DataTypes.INT();
             case BIGINT:
             case INT_8:
@@ -84,13 +124,101 @@ public class PostgreSqlTypeUtils {
             case CHAR:
                 return DataTypes.CHAR(Preconditions.checkNotNull(length));
             case VARCHAR:
+            case BPCHAR:
                 return DataTypes.VARCHAR(Preconditions.checkNotNull(length));
             case TEXT:
             case INET:
+            case JSON:
+            case XML:
+            case UUID:
+            case POLYGON:
+            case POINT:
+            case BOX:
+            case CIRCLE:
+            case CIDR:
+            case LINE:
+            case LSEG:
+            case MACADDR:
+            case MACADDR8:
+            case PATH:
+            case VARBIT:
                 return DataTypes.STRING();
+            case DATE:
+                return DataTypes.DATE();
+            case TIMESTAMP:
+                if (length == 0) {
+                    return DataTypes.TIMESTAMP(0);
+                } else if (length >= JDBC_TIMESTAMP_BASE_LENGTH) {
+                    if (length > JDBC_TIMESTAMP_BASE_LENGTH + 1) {
+                        return DataTypes.TIMESTAMP(length - JDBC_TIMESTAMP_BASE_LENGTH - 1);
+                    } else {
+                        return DataTypes.TIMESTAMP(0);
+                    }
+                } else if (length >= 0 && length <= TimestampType.MAX_PRECISION) {
+                    return DataTypes.TIMESTAMP(length);
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Unsupported length "
+                                    + length
+                                    + " for PostgreSQL DATETIME and TIMESTAMP types");
+                }
+            case TIMESTAMPTZ:
+                if (length == 0) {
+                    return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0);
+                } else if (length >= JDBC_TIMESTAMP_BASE_LENGTH) {
+                    if (length > JDBC_TIMESTAMP_BASE_LENGTH + 1) {
+                        return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(
+                                length - JDBC_TIMESTAMP_BASE_LENGTH - 1);
+                    } else {
+                        return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0);
+                    }
+                } else if (length >= 0 && length <= TimestampType.MAX_PRECISION) {
+                    return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(length);
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Unsupported length "
+                                    + length
+                                    + " for PostgreSQL DATETIME and TIMESTAMPZ types");
+                }
+            case TIME:
+            case TIMETZ:
+                return DataTypes.TIME();
+            case NUMERIC:
+            case DECIMAL:
+                return length != null && length <= 38
+                        ? DataTypes.DECIMAL(length, scale != null && scale >= 0 ? scale : 0)
+                        : DataTypes.STRING();
+            case BIT:
+                if (length > 1) {
+                    return DataTypes.BOOLEAN();
+                } else {
+                    return DataTypes.STRING();
+                }
+            case BYTEA:
+                return DataTypes.BYTES();
             default:
                 throw new UnsupportedOperationException(
                         String.format("Don't support PostgreSQL type '%s' yet.", type));
         }
+    }
+
+    public static String convertWkbArray(byte[] wkb) throws JsonProcessingException {
+        String geoJson = OGCGeometry.fromBinary(ByteBuffer.wrap(wkb)).asGeoJson();
+        JsonNode originGeoNode = objectMapper.readTree(geoJson);
+
+        Optional<Integer> srid =
+                Optional.ofNullable(
+                        originGeoNode.has("srid") ? originGeoNode.get("srid").intValue() : null);
+        Map<String, Object> geometryInfo = new HashMap<>();
+        String geometryType = originGeoNode.get("type").asText();
+        geometryInfo.put("type", geometryType);
+        if (geometryType.equalsIgnoreCase("GeometryCollection")) {
+            geometryInfo.put("geometries", originGeoNode.get("geometries"));
+        } else {
+            geometryInfo.put("coordinates", originGeoNode.get("coordinates"));
+        }
+        geometryInfo.put("srid", srid.orElse(0));
+        ObjectWriter objectWriter = objectMapper.writer();
+        return objectWriter.writeValueAsString(geometryInfo);
     }
 }

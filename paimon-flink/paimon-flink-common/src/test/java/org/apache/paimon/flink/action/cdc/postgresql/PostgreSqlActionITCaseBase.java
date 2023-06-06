@@ -18,28 +18,23 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import org.apache.flink.api.common.JobStatus;
-import org.apache.flink.core.execution.JobClient;
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+
+import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.MountableFile;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -58,7 +53,8 @@ public class PostgreSqlActionITCaseBase extends ActionITCaseBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(PostgreSqlActionITCaseBase.class);
 
-    protected static final PostgreSqlContainer POSTGRE_SQL_CONTAINER = createPostgreSqlContainer(PostgreSqlVersion.V_12);
+    protected static final PostgreSqlContainer POSTGRE_SQL_CONTAINER =
+            createPostgreSqlContainer(PostgreSqlVersion.V_12);
 
     private static final String USER = "postgres";
     private static final String PASSWORD = "password";
@@ -77,19 +73,29 @@ public class PostgreSqlActionITCaseBase extends ActionITCaseBase {
         LOG.info("Containers are stopped.");
     }
 
-    private static PostgreSqlContainer createPostgreSqlContainer(PostgreSqlVersion postgreSqlVersion) {
-        PostgreSqlContainer postgresContainer =  (PostgreSqlContainer) new PostgreSqlContainer(postgreSqlVersion)
-                .withSetupSQL("postgresql/setup.sql")
-                .withUsername(USER)
-                .withPassword(PASSWORD)
-                .withEnv("TZ", "America/Los_Angeles")
-                .withLogConsumer(new Slf4jLogConsumer(LOG));
+    private static PostgreSqlContainer createPostgreSqlContainer(
+            PostgreSqlVersion postgreSqlVersion) {
+        PostgreSqlContainer postgresContainer =
+                (PostgreSqlContainer)
+                        new PostgreSqlContainer(postgreSqlVersion)
+                                .withSetupSQL("postgresql/setup.sql")
+                                .withUsername(USER)
+                                .withPassword(PASSWORD)
+                                .withEnv("TZ", "America/Los_Angeles")
+                                .withLogConsumer(new Slf4jLogConsumer(LOG));
 
-       /* postgresContainer.withCopyFileToContainer(
+        /* postgresContainer.withCopyFileToContainer(
+                MountableFile.forClasspathResource("postgresql/set-wal-level.sql"),
+                "/docker-entrypoint-initdb.d/set-wal-level.sql");
+
+        postgresContainer.withCommand("postgres -c config_file=/etc/postgresql/postgresql.conf");*/
+
+        postgresContainer.withCopyFileToContainer(
                 MountableFile.forClasspathResource("postgresql/postgresql.conf"),
-                "/var/lib/postgresql/data");*/
+                "/usr/local/etc/postgresql/postgresql.conf");
 
-        postgresContainer.withCommand("postgres -c wal_level=logical");
+        postgresContainer.withCommand(
+                "postgres", "-c", "config_file=/usr/local/etc/postgresql/postgresql.conf");
 
         postgresContainer.withInitScript("postgresql/setup.sql");
 
@@ -163,11 +169,13 @@ public class PostgreSqlActionITCaseBase extends ActionITCaseBase {
     public static void main(String[] args) throws SQLException {
         PostgreSqlContainer postgreSqlContainer = createPostgreSqlContainer(PostgreSqlVersion.V_12);
         postgreSqlContainer.withInitScript("postgresql/setup.sql");
-        //Startables.deepStart(Stream.of(postgreSqlContainer)).join();
+        // Startables.deepStart(Stream.of(postgreSqlContainer)).join();
         postgreSqlContainer.start();
         Connection connection = postgreSqlContainer.createConnection("");
         Statement statement = connection.createStatement();
-        ResultSet resultSet = statement.executeQuery("SELECT table_name FROM information_schema.tables WHERE table_schema = 'paimon_sync_database_including';");
+        ResultSet resultSet =
+                statement.executeQuery(
+                        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'paimon_sync_database_including';");
         while (resultSet.next()) {
             System.out.println(resultSet.getString(1));
         }

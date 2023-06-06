@@ -18,11 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-/**
- * PostgreSql version enum.
- */
+/** PostgreSql version enum. */
 public enum PostgreSqlVersion {
-
     V9_6("9.6"),
     V_10("10"),
     V_11("10"),

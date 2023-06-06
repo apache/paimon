@@ -123,6 +123,27 @@ CREATE TABLE t2 (
     PRIMARY KEY (k2)
 );
 
+-- ################################################################################
+--  PostgreSqlSyncDatabaseActionITCase#testIgnoreIncompatibleTables
+-- ################################################################################
+DROP SCHEMA IF EXISTS paimon_sync_database_ignore_incompatible CASCADE;
+CREATE SCHEMA paimon_sync_database_ignore_incompatible;
+SET search_path TO paimon_sync_database_ignore_incompatible;
+
+CREATE TABLE incompatible (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE compatible (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
 
 
 

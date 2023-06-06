@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncTableAction;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseAction;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
+import org.apache.paimon.flink.action.cdc.postgresql.PostgreSqlSyncDatabaseAction;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
@@ -123,6 +124,7 @@ public interface Action {
         // cdc actions
         private static final String MYSQL_SYNC_TABLE = "mysql-sync-table";
         private static final String MYSQL_SYNC_DATABASE = "mysql-sync-database";
+        private static final String POSTGRESQL_SYNC_DATABASE = "postgresql-sync-database";
 
         private static final String KAFKA_SYNC_TABLE = "kafka-sync-table";
 
@@ -147,6 +149,8 @@ public interface Action {
                     return MySqlSyncDatabaseAction.create(actionArgs);
                 case KAFKA_SYNC_TABLE:
                     return KafkaSyncTableAction.create(actionArgs);
+                case POSTGRESQL_SYNC_DATABASE:
+                    return PostgreSqlSyncDatabaseAction.create(actionArgs);
                 default:
                     System.err.println("Unknown action \"" + action + "\"");
                     printHelp();
@@ -165,6 +169,7 @@ public interface Action {
             System.out.println("  " + MERGE_INTO);
             System.out.println("  " + MYSQL_SYNC_TABLE);
             System.out.println("  " + MYSQL_SYNC_DATABASE);
+            System.out.println("  " + POSTGRESQL_SYNC_DATABASE);
 
             System.out.println("For detailed options of each action, run <action> --help");
         }

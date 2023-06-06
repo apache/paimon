@@ -23,22 +23,20 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.apache.kafka.connect.json.JsonConverterConfig;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -64,7 +62,7 @@ public class PostgreSqlDebeziumJsonEventParser implements EventParser<String> {
     private final List<ComputedColumn> computedColumns;
 
     private JsonNode payload;
-    private Map<String, String> mySqlFieldTypes;
+    private Map<String, String> postgreSqlFieldTypes;
     private Map<String, String> fieldClassNames;
 
     public PostgreSqlDebeziumJsonEventParser(
@@ -113,7 +111,7 @@ public class PostgreSqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     private void updateFieldTypes(JsonNode schema) {
-        mySqlFieldTypes = new HashMap<>();
+        postgreSqlFieldTypes = new HashMap<>();
         fieldClassNames = new HashMap<>();
         JsonNode arrayNode = schema.get("fields");
         for (int i = 0; i < arrayNode.size(); i++) {
@@ -125,7 +123,7 @@ public class PostgreSqlDebeziumJsonEventParser implements EventParser<String> {
                     JsonNode innerElementNode = innerArrayNode.get(j);
                     String fieldName = innerElementNode.get("field").asText();
                     String fieldType = innerElementNode.get("type").asText();
-                    mySqlFieldTypes.put(fieldName, fieldType);
+                    postgreSqlFieldTypes.put(fieldName, fieldType);
                     if (innerElementNode.get("name") != null) {
                         String className = innerElementNode.get("name").asText();
                         fieldClassNames.put(fieldName, className);
@@ -169,7 +167,7 @@ public class PostgreSqlDebeziumJsonEventParser implements EventParser<String> {
         }
 
         Map<String, String> resultMap = new HashMap<>();
-        for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
+        for (Map.Entry<String, String> field : postgreSqlFieldTypes.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue();
             Object objectValue = jsonMap.get(fieldName);
@@ -260,7 +258,7 @@ public class PostgreSqlDebeziumJsonEventParser implements EventParser<String> {
                 JsonNode jsonNode = recordRow.get(fieldName);
                 try {
                     byte[] wkb = jsonNode.get("wkb").binaryValue();
-                    newValue = MySqlTypeUtils.convertWkbArray(wkb);
+                    newValue = PostgreSqlTypeUtils.convertWkbArray(wkb);
                 } catch (Exception e) {
                     throw new IllegalArgumentException(
                             String.format("Failed to convert %s to geometry JSON.", jsonNode), e);
