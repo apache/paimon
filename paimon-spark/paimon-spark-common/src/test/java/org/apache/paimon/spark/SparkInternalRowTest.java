@@ -74,6 +74,7 @@ public class SparkInternalRowTest {
                         23567222L,
                         "varbinary_v".getBytes(StandardCharsets.UTF_8),
                         Timestamp.fromLocalDateTime(LocalDateTime.parse("2007-12-03T10:15:30")),
+                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2023-12-03T10:15:30")),
                         DateTimeUtils.toInternal(LocalDate.parse("2022-05-02")),
                         Decimal.fromBigDecimal(BigDecimal.valueOf(0.21), 2, 2),
                         Decimal.fromBigDecimal(BigDecimal.valueOf(65782123123.01), 38, 2),
@@ -100,6 +101,7 @@ public class SparkInternalRowTest {
                         + "\"bigint\":23567222,"
                         + "\"bytes\":\"dmFyYmluYXJ5X3Y=\","
                         + "\"timestamp\":\"2007-12-03 10:15:30\","
+                        + "\"timestampNTZ\":\"2023-12-03 10:15:30\","
                         + "\"date\":\"2022-05-02\","
                         + "\"decimal\":0.21,"
                         + "\"decimal2\":65782123123.01,"

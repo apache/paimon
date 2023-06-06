@@ -285,7 +285,8 @@ public class SparkTypeUtils {
                 return new CharType(((org.apache.spark.sql.types.CharType) atomic).length());
             } else if (atomic instanceof org.apache.spark.sql.types.DateType) {
                 return new DateType();
-            } else if (atomic instanceof org.apache.spark.sql.types.TimestampType) {
+            } else if (atomic instanceof org.apache.spark.sql.types.TimestampType
+                    || atomic instanceof org.apache.spark.sql.types.TimestampNTZType) {
                 return new TimestampType();
             } else if (atomic instanceof org.apache.spark.sql.types.DecimalType) {
                 return new DecimalType(

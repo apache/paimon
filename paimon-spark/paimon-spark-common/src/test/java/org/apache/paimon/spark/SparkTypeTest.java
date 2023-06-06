@@ -21,9 +21,11 @@ package org.apache.paimon.spark;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.spark.sql.Row;
 import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.spark.SparkTypeUtils.fromPaimonRowType;
@@ -31,7 +33,7 @@ import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkTypeUtils}. */
-public class SparkTypeTest {
+public class SparkTypeTest extends SparkReadTestBase {
 
     public static final RowType ALL_TYPES =
             RowType.builder(
@@ -64,6 +66,7 @@ public class SparkTypeTest {
                     .field("bigint", DataTypes.BIGINT())
                     .field("bytes", DataTypes.BYTES())
                     .field("timestamp", DataTypes.TIMESTAMP())
+                    .field("timestampNTZ", DataTypes.TIMESTAMP())
                     .field("date", DataTypes.DATE())
                     .field("decimal", DataTypes.DECIMAL(2, 2))
                     .field("decimal2", DataTypes.DECIMAL(38, 2))
@@ -91,6 +94,7 @@ public class SparkTypeTest {
                         + "StructField(bigint,LongType,true),"
                         + "StructField(bytes,BinaryType,true),"
                         + "StructField(timestamp,TimestampType,true),"
+                        + "StructField(timestampNTZ,TimestampType,true),"
                         + "StructField(date,DateType,true),"
                         + "StructField(decimal,DecimalType(2,2),true),"
                         + "StructField(decimal2,DecimalType(38,2),true),"
@@ -100,5 +104,13 @@ public class SparkTypeTest {
         assertThat(sparkType.toString().replace(", ", ",")).isEqualTo(expected);
 
         assertThat(toPaimonType(sparkType)).isEqualTo(ALL_TYPES);
+    }
+
+    @Test
+    public void testTimestampNTZ() {
+        spark.sql("CREATE TABLE  testTimestampNTZ(id INT, ts TIMESTAMP_NTZ)");
+        spark.sql("INSERT INTO testTimestampNTZ SELECT 1, TIMESTAMP_NTZ '2023-06-06T00:00:00.0'");
+        List<Row> rowList = spark.sql("SELECT * FROM testTimestampNTZ").collectAsList();
+        assertThat(rowList.toString()).isEqualTo("[[1,2023-06-06 00:00:00.0]]");
     }
 }
