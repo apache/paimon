@@ -70,6 +70,38 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         assertTasks(files, 100 / 3);
     }
 
+    @Test
+    public void testEliminatePartitionCoordinator() {
+        List<DataFileMeta> files = generateNewFiles(1, 0);
+        compactionCoordinator.notifyNewFiles(partition, files);
+
+        for (int i = 0; i < AppendOnlyTableCompactionCoordinator.REMOVE_AGE; i++) {
+            Assertions.assertEquals(compactionCoordinator.compactPlan().size(), 0);
+            Assertions.assertEquals(compactionCoordinator.partitionCompactCoordinators.size(), 1);
+        }
+
+        // age enough, eliminate partitionCoordinator
+        Assertions.assertEquals(compactionCoordinator.compactPlan().size(), 0);
+        Assertions.assertEquals(compactionCoordinator.partitionCompactCoordinators.size(), 0);
+    }
+
+    @Test
+    public void testCompactLessFile() {
+        List<DataFileMeta> files = generateNewFiles(2, 0);
+        compactionCoordinator.notifyNewFiles(partition, files);
+
+        for (int i = 0; i < AppendOnlyTableCompactionCoordinator.COMPACT_AGE; i++) {
+            Assertions.assertEquals(compactionCoordinator.compactPlan().size(), 0);
+            Assertions.assertEquals(compactionCoordinator.partitionCompactCoordinators.size(), 1);
+        }
+
+        // age enough, generate less file comaction
+        List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
+        Assertions.assertEquals(tasks.size(), 1);
+        Assertions.assertIterableEquals(files, tasks.get(0).compactBefore());
+        Assertions.assertEquals(compactionCoordinator.partitionCompactCoordinators.size(), 0);
+    }
+
     private void assertTasks(List<DataFileMeta> files, int taskNum) {
         compactionCoordinator.notifyNewFiles(partition, files);
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
