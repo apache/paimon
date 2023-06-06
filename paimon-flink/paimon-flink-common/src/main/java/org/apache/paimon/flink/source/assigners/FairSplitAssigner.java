@@ -19,11 +19,15 @@
 package org.apache.paimon.flink.source.assigners;
 
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
+import org.apache.paimon.utils.BinPacking;
+
+import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
@@ -43,9 +47,10 @@ public class FairSplitAssigner implements SplitAssigner {
 
     public FairSplitAssigner(
             int splitBatchSize,
-            Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment) {
+            SplitEnumeratorContext<FileStoreSourceSplit> context,
+            Collection<FileStoreSourceSplit> splits) {
         this.splitBatchSize = splitBatchSize;
-        this.pendingSplitAssignment = pendingSplitAssignment;
+        this.pendingSplitAssignment = createSplitAssignment(splits, context.currentParallelism());
     }
 
     @Override
@@ -76,5 +81,17 @@ public class FairSplitAssigner implements SplitAssigner {
         List<FileStoreSourceSplit> splits = new ArrayList<>();
         pendingSplitAssignment.values().forEach(splits::addAll);
         return splits;
+    }
+
+    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createSplitAssignment(
+            Collection<FileStoreSourceSplit> splits, int numReaders) {
+        List<List<FileStoreSourceSplit>> assignmentList =
+                BinPacking.packForFixedBinNumber(
+                        splits, split -> split.split().rowCount(), numReaders);
+        Map<Integer, LinkedList<FileStoreSourceSplit>> assignment = new HashMap<>();
+        for (int i = 0; i < assignmentList.size(); i++) {
+            assignment.put(i, new LinkedList<>(assignmentList.get(i)));
+        }
+        return assignment;
     }
 }
