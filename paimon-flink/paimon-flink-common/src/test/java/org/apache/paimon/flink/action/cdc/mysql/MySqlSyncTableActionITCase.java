@@ -47,7 +47,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,10 +70,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(
                         mySqlConfig,
