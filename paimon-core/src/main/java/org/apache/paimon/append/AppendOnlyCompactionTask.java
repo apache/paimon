@@ -59,7 +59,7 @@ public class AppendOnlyCompactionTask implements Serializable {
 
     public AppendOnlyCompactionTask(BinaryRow partition, List<DataFileMeta> files) {
         Preconditions.checkArgument(
-                files != null && files.size() > 0,
+                files != null && files.size() > 1,
                 "AppendOnlyCompactionTask need more than one file input.");
         this.partition = partition;
         compactBefore = new ArrayList<>(files);
