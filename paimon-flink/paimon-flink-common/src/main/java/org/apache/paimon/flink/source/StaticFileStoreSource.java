@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.source.assigners.FairSplitAssigner;
+import org.apache.paimon.flink.source.assigners.PreemptiveSplitAssigner;
+import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.source.ReadBuilder;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -27,7 +30,10 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import javax.annotation.Nullable;
 
 import java.util.Collection;
+import java.util.LinkedList;
 import java.util.List;
+
+import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
 
 /** Bounded {@link FlinkSource} for reading records. It does not monitor new snapshots. */
 public class StaticFileStoreSource extends FlinkSource {
@@ -36,10 +42,16 @@ public class StaticFileStoreSource extends FlinkSource {
 
     private final int splitBatchSize;
 
+    private final SplitAssignMode splitAssignMode;
+
     public StaticFileStoreSource(
-            ReadBuilder readBuilder, @Nullable Long limit, int splitBatchSize) {
+            ReadBuilder readBuilder,
+            @Nullable Long limit,
+            int splitBatchSize,
+            SplitAssignMode splitAssignMode) {
         super(readBuilder, limit);
         this.splitBatchSize = splitBatchSize;
+        this.splitAssignMode = splitAssignMode;
     }
 
     @Override
@@ -53,11 +65,29 @@ public class StaticFileStoreSource extends FlinkSource {
             PendingSplitsCheckpoint checkpoint) {
         Collection<FileStoreSourceSplit> splits =
                 checkpoint == null ? getSplits() : checkpoint.splits();
-        return new StaticFileStoreSplitEnumerator(context, null, splits, splitBatchSize);
+        SplitAssigner splitAssigner =
+                createSplitAssigner(context, splitBatchSize, splitAssignMode, splits);
+        return new StaticFileStoreSplitEnumerator(context, null, splitAssigner);
     }
 
     private List<FileStoreSourceSplit> getSplits() {
         FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
         return splitGenerator.createSplits(readBuilder.newScan().plan());
+    }
+
+    public static SplitAssigner createSplitAssigner(
+            SplitEnumeratorContext<FileStoreSourceSplit> context,
+            int splitBatchSize,
+            SplitAssignMode splitAssignMode,
+            Collection<FileStoreSourceSplit> splits) {
+        switch (splitAssignMode) {
+            case FAIR:
+                return new FairSplitAssigner(splitBatchSize, context, splits);
+            case PREEMPTIVE:
+                return new PreemptiveSplitAssigner(new LinkedList<>(splits));
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported assign mode " + splitAssignMode.toString());
+        }
     }
 }
