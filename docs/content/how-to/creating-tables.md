@@ -123,7 +123,7 @@ CREATE TABLE MyTable (
 Inserting jobs on the table should be stopped prior to dropping tables, or table files couldn't be deleted completely.
 {{< /hint >}}
 
-### Partitioned Tables
+## Partitioned Tables
 
 The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys.
 
@@ -347,7 +347,7 @@ CREATE TABLE MyTableAllAs PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt
 {{< /tabs >}}
 
 
-### Create Table Like
+## Create Table Like
 
 {{< tabs "create-table-like" >}}
 
@@ -372,7 +372,7 @@ CREATE TABLE MyTableLike LIKE MyTable;
 
 {{< /tabs >}}
 
-### Table Properties
+## Table Properties
 
 Users can specify table properties to enable features or improve performance of Paimon. For a complete list of such properties, see [configurations]({{< ref "maintenance/configurations" >}}).
 
