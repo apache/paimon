@@ -117,7 +117,6 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
                             rowType);
             List<String> sortedActual = new ArrayList<>(result);
             Collections.sort(sortedActual);
-            System.out.println(sortedActual);
             if (sortedExpected.equals(sortedActual)) {
                 break;
             }
