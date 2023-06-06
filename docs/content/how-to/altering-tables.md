@@ -257,8 +257,6 @@ ALTER TABLE my_table DROP COLUMN c1;
 
 {{< /tabs >}}
 
-> When using HiveCatalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false`. see [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
-
 ## Changing Column Nullability
 
 The following SQL changes nullability of column `coupon_info`.
