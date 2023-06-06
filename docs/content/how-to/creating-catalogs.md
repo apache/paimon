@@ -80,7 +80,7 @@ USE paimon.default;
 
 By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
 
-To use Hive catalog, Database name, Table name and Field names should be lower case.
+To use Hive catalog, Database name, Table name and Field names should be **lower** case.
 
 {{< tabs "hive-metastore-example" >}}
 
@@ -132,6 +132,8 @@ USE paimon.default;
 {{< /tab >}}
 
 {{< /tabs >}}
+
+> When using hive catalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false`. see [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
 
 If you are using an object storage , and you don't want that the location of paimon table/database is accessed by the filesystem of hive,
 which may lead to the error such as "No FileSystem for scheme: s3a".

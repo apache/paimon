@@ -46,6 +46,7 @@ import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_SUPPORT_CONCURR
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.LOCALSCRATCHDIR;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORE_DISALLOW_INCOMPATIBLE_COL_TYPE_CHANGES;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORE_VALIDATE_COLUMNS;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORE_VALIDATE_CONSTRAINTS;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORE_VALIDATE_TABLES;
@@ -180,12 +181,14 @@ public class PaimonEmbeddedHiveServerContext implements HiveServerContext {
         hiveConf.setBoolVar(METASTORE_VALIDATE_TABLES, true);
 
         // disable authorization to avoid NPE
-        hiveConf.set(
-                HIVE_AUTHORIZATION_MANAGER.varname,
+        hiveConf.setVar(
+                HIVE_AUTHORIZATION_MANAGER,
                 "org.apache.hive.hcatalog.storagehandler.DummyHCatAuthProvider");
 
         // disable notification event poll
         hiveConf.set("hive.notification.event.poll.interval", "0s");
+
+        hiveConf.setBoolVar(METASTORE_DISALLOW_INCOMPATIBLE_COL_TYPE_CHANGES, false);
     }
 
     private void configureFileSystem() {
