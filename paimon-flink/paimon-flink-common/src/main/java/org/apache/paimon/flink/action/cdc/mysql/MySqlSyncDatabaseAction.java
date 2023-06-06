@@ -224,16 +224,24 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 !monitoredTables.isEmpty(),
                 "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
+        String tableList;
 
-        // First excluding all tables that failed the excludingPattern and those does not
-        //     have a primary key. Then including other table using regex so that newly
-        //     added table DDLs and DMLs during job runtime will be captured
-        String tableList =
-                excludedTables.stream()
-                                .map(t -> String.format("(?!(%s))", t))
-                                .collect(Collectors.joining(""))
-                        + includingTables;
+        if (mode == MySqlDatabaseSyncMode.DYNAMIC) {
+            // First excluding all tables that failed the excludingPattern and those does not
+            //     have a primary key. Then including other table using regex so that newly
+            //     added table DDLs and DMLs during job runtime will be captured
+            tableList =
+                    excludedTables.stream()
+                                    .map(t -> String.format("(?!(%s))", t))
+                                    .collect(Collectors.joining(""))
+                            + includingTables;
+        } else {
+            tableList = "(" + String.join("|", monitoredTables) + ")";
+        }
         mySqlConfig.set(MySqlSourceOptions.TABLE_NAME, tableList);
+        if (mode == MySqlDatabaseSyncMode.DYNAMIC) {
+            mySqlConfig.set(MySqlSourceOptions.SCAN_NEWLY_ADDED_TABLE_ENABLED, true);
+        }
         MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
@@ -241,7 +249,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         EventParser.Factory<String> parserFactory =
                 () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, tableNameConverter);
 
-        Options catalogOptions = this.catalogOptions;
         String database = this.database;
         MySqlDatabaseSyncMode mode = this.mode;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =

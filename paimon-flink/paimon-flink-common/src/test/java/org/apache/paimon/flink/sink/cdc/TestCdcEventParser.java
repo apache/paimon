@@ -57,7 +57,7 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
-    public Optional<Schema> parseNewSchema(String databaseName) {
+    public Optional<Schema> parseNewTable(String databaseName) {
         return Optional.empty();
     }
 }

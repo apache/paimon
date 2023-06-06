@@ -183,7 +183,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         return result;
     }
 
-    public Optional<Schema> parseNewSchema(String databaseName) {
+    @Override
+    public Optional<Schema> parseNewTable(String databaseName) {
         JsonNode historyRecord = payload.get("historyRecord");
         if (historyRecord == null) {
             return Optional.empty();

@@ -109,7 +109,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
         String tableName = parser.parseTableName();
 
         // check for newly added table
-        parser.parseNewSchema(database)
+        parser.parseNewTable(database)
                 .ifPresent(
                         schema -> {
                             Identifier identifier =

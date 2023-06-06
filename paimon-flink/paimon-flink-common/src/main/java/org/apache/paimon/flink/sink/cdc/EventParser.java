@@ -66,7 +66,7 @@ public interface EventParser<T> {
      * @param databaseName
      * @return empty if there is no newly added table
      */
-    default Optional<Schema> parseNewSchema(String databaseName) {
+    default Optional<Schema> parseNewTable(String databaseName) {
         return Optional.empty();
     }
 
