@@ -37,7 +37,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
@@ -107,17 +106,6 @@ public class AppendOnlyTableCompactionCoordinatorTest {
 
     @Test
     public void testAgeGrowUp() {
-        appendOnlyFileStoreTable =
-                (AppendOnlyFileStoreTable)
-                        appendOnlyFileStoreTable.copy(
-                                new HashMap<String, String>() {
-                                    {
-                                        put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "5");
-                                        put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "50");
-                                    }
-                                });
-        compactionCoordinator = new AppendOnlyTableCompactionCoordinator(appendOnlyFileStoreTable);
-
         List<DataFileMeta> files = generateNewFiles(1, 0);
         compactionCoordinator.notifyNewFiles(partition, files);
 
