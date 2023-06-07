@@ -52,6 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ContinuousAppendAndCompactFollowUpScanner}. */
 public class ContinuousAppendAndCompactFollowUpScannerTest extends ScannerTestBase {
+    
     private static final RowType ROW_TYPE =
             RowType.of(
                     new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
