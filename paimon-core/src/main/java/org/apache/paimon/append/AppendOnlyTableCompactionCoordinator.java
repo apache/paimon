@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 
 import java.util.ArrayList;
@@ -59,21 +60,27 @@ public class AppendOnlyTableCompactionCoordinator {
 
     public List<AppendOnlyCompactionTask> run() {
         // scan files in snapshot
-        scan();
+        if (scan()) {
+            // do plan compact tasks
+            return compactPlan();
+        }
 
-        // do plan compact tasks
-        return compactPlan();
+        return Collections.emptyList();
     }
 
     @VisibleForTesting
-    void scan() {
-        scan.plan()
-                .splits()
-                .forEach(
-                        split -> {
-                            DataSplit dataSplit = (DataSplit) split;
-                            notifyNewFiles(dataSplit.partition(), dataSplit.files());
-                        });
+    boolean scan() {
+        List<Split> splits = scan.plan().splits();
+        boolean hasResult = !splits.isEmpty();
+        while (!splits.isEmpty()) {
+            splits.forEach(
+                    split -> {
+                        DataSplit dataSplit = (DataSplit) split;
+                        notifyNewFiles(dataSplit.partition(), dataSplit.files());
+                    });
+            splits = scan.plan().splits();
+        }
+        return hasResult;
     }
 
     @VisibleForTesting
