@@ -23,11 +23,13 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
@@ -42,12 +44,11 @@ import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** IT cases for {@link MySqlSyncDatabaseAction}. */
@@ -66,10 +67,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
                         mySqlConfig,
@@ -283,10 +281,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
                         mySqlConfig,
@@ -351,10 +346,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
                         mySqlConfig,
@@ -528,10 +520,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
                         mySqlConfig,
@@ -551,6 +540,83 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         // check paimon tables
         assertTableExists(existedTables);
         assertTableNotExists(notExistedTables);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testIgnoreCase() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "paimon_ignore_CASE");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+
+        Map<String, String> catalogConfig =
+                Collections.singletonMap(CatalogOptions.METASTORE.key(), "test-case-insensitive");
+
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig, warehouse, database, false, catalogConfig, tableConfig);
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        // check table schema
+        FileStoreTable table = getFileStoreTable("t");
+        assertEquals(
+                "[{\"id\":0,\"name\":\"k\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
+                        + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\",\"description\":\"\"}]",
+                JsonSerdeUtil.toFlatJson(table.schema().fields()));
+
+        // check sync schema changes and records
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+            statement.executeUpdate("USE paimon_ignore_CASE");
+            statement.executeUpdate("INSERT INTO T VALUES (1, 'Hi')");
+            RowType rowType1 =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(20)},
+                            new String[] {"k", "uppercase_v0"});
+            waitForResult(
+                    Collections.singletonList("+I[1, Hi]"),
+                    table,
+                    rowType1,
+                    Collections.singletonList("k"));
+
+            statement.executeUpdate("ALTER TABLE T MODIFY COLUMN UPPERCASE_V0 VARCHAR(30)");
+            statement.executeUpdate("INSERT INTO T VALUES (2, 'Paimon')");
+            RowType rowType2 =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(30)},
+                            new String[] {"k", "uppercase_v0"});
+            waitForResult(
+                    Arrays.asList("+I[1, Hi]", "+I[2, Paimon]"),
+                    table,
+                    rowType2,
+                    Collections.singletonList("k"));
+
+            statement.executeUpdate("ALTER TABLE T ADD COLUMN UPPERCASE_V1 DOUBLE");
+            statement.executeUpdate("INSERT INTO T VALUES (3, 'Test', 0.5)");
+            RowType rowType3 =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(30), DataTypes.DOUBLE()
+                            },
+                            new String[] {"k", "uppercase_v0", "uppercase_v1"});
+            waitForResult(
+                    Arrays.asList("+I[1, Hi, NULL]", "+I[2, Paimon, NULL]", "+I[3, Test, 0.5]"),
+                    table,
+                    rowType3,
+                    Collections.singletonList("k"));
+        }
     }
 
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {

@@ -36,7 +36,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Produce a computation result for computed column. */
 public interface Expression extends Serializable {
 
-    List<String> SUPPORTED_EXPRESSION = Arrays.asList("year", "substring", "truncate");
+    List<String> SUPPORTED_EXPRESSION =
+            Arrays.asList("year", "month", "day", "hour", "substring", "truncate");
 
     /** Return name of referenced field. */
     String fieldReference();
@@ -52,6 +53,12 @@ public interface Expression extends Serializable {
         switch (exprName) {
             case "year":
                 return year(fieldReference);
+            case "month":
+                return month(fieldReference);
+            case "day":
+                return day(fieldReference);
+            case "hour":
+                return hour(fieldReference);
             case "substring":
                 return substring(fieldReference, literals);
             case "truncate":
@@ -67,6 +74,18 @@ public interface Expression extends Serializable {
 
     static Expression year(String fieldReference) {
         return new YearComputer(fieldReference);
+    }
+
+    static Expression month(String fieldReference) {
+        return new MonthComputer(fieldReference);
+    }
+
+    static Expression day(String fieldReference) {
+        return new DayComputer(fieldReference);
+    }
+
+    static Expression hour(String fieldReference) {
+        return new HourComputer(fieldReference);
     }
 
     static Expression substring(String fieldReference, String... literals) {
@@ -133,6 +152,90 @@ public interface Expression extends Serializable {
         public String eval(String input) {
             LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getYear());
+        }
+    }
+
+    /** Compute month from a time input. */
+    final class MonthComputer implements Expression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String fieldReference;
+
+        private MonthComputer(String fieldReference) {
+            this.fieldReference = fieldReference;
+        }
+
+        @Override
+        public String fieldReference() {
+            return fieldReference;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.INT();
+        }
+
+        @Override
+        public String eval(String input) {
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
+            return String.valueOf(localDateTime.getMonthValue());
+        }
+    }
+
+    /** Compute day from a time input. */
+    final class DayComputer implements Expression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String fieldReference;
+
+        private DayComputer(String fieldReference) {
+            this.fieldReference = fieldReference;
+        }
+
+        @Override
+        public String fieldReference() {
+            return fieldReference;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.INT();
+        }
+
+        @Override
+        public String eval(String input) {
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
+            return String.valueOf(localDateTime.getDayOfMonth());
+        }
+    }
+
+    /** Compute hour from a time input. */
+    final class HourComputer implements Expression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String fieldReference;
+
+        private HourComputer(String fieldReference) {
+            this.fieldReference = fieldReference;
+        }
+
+        @Override
+        public String fieldReference() {
+            return fieldReference;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.INT();
+        }
+
+        @Override
+        public String eval(String input) {
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
+            return String.valueOf(localDateTime.getHour());
         }
     }
 

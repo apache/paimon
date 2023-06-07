@@ -41,6 +41,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -220,6 +221,46 @@ public class SnapshotManager implements Serializable {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Traversal snapshots from latest to earliest safely, this is applied on the writer side
+     * because the committer may delete obsolete snapshots, which may cause the writer to encounter
+     * unreadable snapshots.
+     */
+    public void traversalSnapshotsFromLatestSafely(Function<Snapshot, Boolean> consumer) {
+        Long latestId = latestSnapshotId();
+        if (latestId == null) {
+            return;
+        }
+        Long earliestId = earliestSnapshotId();
+        if (earliestId == null) {
+            return;
+        }
+
+        for (long id = latestId; id >= earliestId; id--) {
+            Snapshot snapshot;
+            try {
+                snapshot = snapshot(id);
+            } catch (Exception e) {
+                Long newEarliestId = earliestSnapshotId();
+                if (newEarliestId == null) {
+                    return;
+                }
+
+                // this is a valid snapshot, should not throw exception
+                if (id >= newEarliestId) {
+                    throw e;
+                }
+
+                // ok, this is an expired snapshot
+                return;
+            }
+
+            if (consumer.apply(snapshot)) {
+                return;
+            }
+        }
     }
 
     private @Nullable Long findLatest() throws IOException {

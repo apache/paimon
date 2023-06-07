@@ -25,11 +25,40 @@ import java.util.function.Function;
 
 import static java.util.Comparator.comparingLong;
 
-/** A bin packing implementation for fixed bin number. */
-public class FixBinPacking {
-    private FixBinPacking() {}
+/** Contains bin packing implementations. */
+public class BinPacking {
+    private BinPacking() {}
 
-    public static <T> List<List<T>> pack(
+    /** Ordered packing for input items. */
+    public static <T> List<List<T>> packForOrdered(
+            Iterable<T> items, Function<T, Long> weightFunc, long targetWeight) {
+        List<List<T>> packed = new ArrayList<>();
+
+        List<T> binItems = new ArrayList<>();
+        long binWeight = 0L;
+
+        for (T item : items) {
+            long weight = weightFunc.apply(item);
+            // when get a much big item or total weight enough, we check the binItems size. If
+            // greater than zero, we pack it
+            if (binWeight + weight > targetWeight && binItems.size() > 0) {
+                packed.add(binItems);
+                binItems = new ArrayList<>();
+                binWeight = 0;
+            }
+
+            binWeight += weight;
+            binItems.add(item);
+        }
+
+        if (binItems.size() > 0) {
+            packed.add(binItems);
+        }
+        return packed;
+    }
+
+    /** A bin packing implementation for fixed bin number. */
+    public static <T> List<List<T>> packForFixedBinNumber(
             Iterable<T> items, Function<T, Long> weightFunc, int binNumber) {
         // 1. sort items first
         List<T> sorted = new ArrayList<>();
@@ -37,10 +66,10 @@ public class FixBinPacking {
         sorted.sort(comparingLong(weightFunc::apply));
 
         // 2. packing
-        PriorityQueue<Bin<T>> bins = new PriorityQueue<>();
+        PriorityQueue<FixedNumberBin<T>> bins = new PriorityQueue<>();
         for (T item : sorted) {
             long weight = weightFunc.apply(item);
-            Bin<T> bin = bins.size() < binNumber ? new Bin<>() : bins.poll();
+            FixedNumberBin<T> bin = bins.size() < binNumber ? new FixedNumberBin<>() : bins.poll();
             bin.add(item, weight);
             bins.add(bin);
         }
@@ -51,7 +80,7 @@ public class FixBinPacking {
         return packed;
     }
 
-    private static class Bin<T> implements Comparable<Bin<T>> {
+    private static class FixedNumberBin<T> implements Comparable<FixedNumberBin<T>> {
         private final List<T> items = new ArrayList<>();
         private long binWeight = 0L;
 
@@ -61,7 +90,7 @@ public class FixBinPacking {
         }
 
         @Override
-        public int compareTo(Bin<T> other) {
+        public int compareTo(FixedNumberBin<T> other) {
             return Long.compare(binWeight, other.binWeight);
         }
     }

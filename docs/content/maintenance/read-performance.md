@@ -31,9 +31,6 @@ under the License.
 Configure 'full-compaction.delta-commits' perform full-compaction periodically in Flink writing.
 And it can ensure that partitions are full compacted before writing ends.
 
-It is not recommended to set a value that exceeds the snapshot expiration time (default 1 hour). For example,
-if your checkpoint interval is 1 minute, it is recommended to set the 'full-compaction.delta-commits' to 30.
-
 ### Primary Key Table
 
 For Primary Key Table, it's a 'MergeOnRead' technology. When reading data, multiple layers of LSM data are merged,

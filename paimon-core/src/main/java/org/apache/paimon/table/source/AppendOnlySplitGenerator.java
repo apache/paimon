@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.utils.OrderedPacking;
+import org.apache.paimon.utils.BinPacking;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +43,6 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
         List<DataFileMeta> files = new ArrayList<>(input);
         files.sort(fileComparator(false));
         Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
-        return OrderedPacking.pack(files, weightFunc, targetSplitSize);
+        return BinPacking.packForOrdered(files, weightFunc, targetSplitSize);
     }
 }
