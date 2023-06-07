@@ -36,6 +36,7 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** Serializer for {@link AppendOnlyCompactionTask}. */
 public class CompactionTaskSerializer implements VersionedSerializer<AppendOnlyCompactionTask> {
+
     private static final int CURRENT_VERSION = 2;
 
     private final DataFileMetaSerializer dataFileSerializer;

@@ -36,6 +36,7 @@ import java.util.Objects;
  * AppendOnlyTableCompactionWorker}.
  */
 public class AppendOnlyCompactionTask {
+
     private BinaryRow partition;
     private transient List<DataFileMeta> compactBefore;
     private transient List<DataFileMeta> compactAfter;

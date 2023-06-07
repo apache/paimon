@@ -50,12 +50,14 @@ import java.util.UUID;
 
 /** Tests for {@link AppendOnlyTableCompactionWorker}. */
 public class AppendOnlyTableCompactionWorkerTest {
+
+    private static final Random RANDOM = new Random();
+
     @TempDir Path tempDir;
     private AppendOnlyFileStoreTable appendOnlyFileStoreTable;
     private AppendOnlyTableCompactionCoordinator compactionCoordinator;
     private AppendOnlyTableCompactionWorker compactionWorker;
     private BinaryRow partition;
-    private static final Random random = new Random();
     private final String commitUser = UUID.randomUUID().toString();
 
     @Test
@@ -145,10 +147,10 @@ public class AppendOnlyTableCompactionWorkerTest {
 
     private InternalRow randomRow() {
         return GenericRow.of(
-                random.nextInt(100),
-                BinaryString.fromString("A" + random.nextInt(100)),
-                BinaryString.fromString("B" + random.nextInt(100)),
-                BinaryString.fromString("C" + random.nextInt(100)));
+                RANDOM.nextInt(100),
+                BinaryString.fromString("A" + RANDOM.nextInt(100)),
+                BinaryString.fromString("B" + RANDOM.nextInt(100)),
+                BinaryString.fromString("C" + RANDOM.nextInt(100)));
     }
 
     @BeforeEach

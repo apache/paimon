@@ -30,6 +30,7 @@ import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.ro
 
 /** Tests for {@link CompactionTaskSerializer}. */
 public class CompactionTaskSerializerTest {
+
     @Test
     public void testCompactionTaskSerializer() throws IOException {
         CompactionTaskSerializer serializer = new CompactionTaskSerializer();

@@ -36,7 +36,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/** {@link AppendOnlyFileStoreTable} compact coordinator. */
+/**
+ * {@link AppendOnlyFileStoreTable} compact coordinator.
+ *
+ * <p>Note: AppendOnlyTableCompactionCoordinator scan files in snapshot, read APPEND and COMPACT
+ * snapshot then load those new files. It will try it best to generate compaction task for the
+ * restored files scanned in snapshot, but to reduce memory usage, it won't remain single file for a
+ * long time. After ten times scan, single file with one partition will be ignored and removed from
+ * memory, which means, it will not participate in compaction again until restart the compaction
+ * job.
+ *
+ * <p>When a third task delete file in latest snapshot(including batch delete/update and overwrite),
+ * the file in coordinator will still remain and participate in compaction task. When this happens,
+ * compaction job will fail in commit stage, and fail-over to rescan the restored files in latest
+ * snapshot.
+ */
 public class AppendOnlyTableCompactionCoordinator {
 
     protected static final int REMOVE_AGE = 10;
@@ -70,15 +84,15 @@ public class AppendOnlyTableCompactionCoordinator {
 
     @VisibleForTesting
     boolean scan() {
-        List<Split> splits = scan.plan().splits();
-        boolean hasResult = !splits.isEmpty();
-        while (!splits.isEmpty()) {
+        List<Split> splits;
+        boolean hasResult = false;
+        while (!(splits = scan.plan().splits()).isEmpty()) {
+            hasResult = true;
             splits.forEach(
                     split -> {
                         DataSplit dataSplit = (DataSplit) split;
                         notifyNewFiles(dataSplit.partition(), dataSplit.files());
                     });
-            splits = scan.plan().splits();
         }
         return hasResult;
     }
