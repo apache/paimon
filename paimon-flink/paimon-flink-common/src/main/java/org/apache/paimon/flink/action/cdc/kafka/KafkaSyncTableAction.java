@@ -41,12 +41,12 @@ import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -229,12 +229,13 @@ public class KafkaSyncTableAction extends ActionBase {
             computedColumnArgs = new ArrayList<>(params.getMultiParameter("computed-column"));
         }
 
-        Map<String, String> kafkaConfig = getConfigMap(params, "kafka-conf");
-        Map<String, String> catalogConfig = getConfigMap(params, "catalog-conf");
-        Map<String, String> paimonConfig = getConfigMap(params, "paimon-conf");
-        if (kafkaConfig == null || paimonConfig == null) {
+        if (!params.has("kafka-conf")) {
             return Optional.empty();
         }
+
+        Map<String, String> kafkaConfig = optionalConfigMap(params, "kafka-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> paimonConfig = optionalConfigMap(params, "paimon-conf");
 
         return Optional.of(
                 new KafkaSyncTableAction(
@@ -247,23 +248,6 @@ public class KafkaSyncTableAction extends ActionBase {
                         computedColumnArgs,
                         catalogConfig,
                         paimonConfig));
-    }
-
-    private static Map<String, String> getConfigMap(MultipleParameterTool params, String key) {
-        Map<String, String> map = new HashMap<>();
-
-        for (String param : params.getMultiParameter(key)) {
-            String[] kv = param.split("=");
-            if (kv.length == 2) {
-                map.put(kv[0], kv[1]);
-                continue;
-            }
-
-            System.err.println(
-                    "Invalid " + key + " " + param + ".\nRun kafka-sync-table --help for help.");
-            return null;
-        }
-        return map;
     }
 
     private static void printHelp() {

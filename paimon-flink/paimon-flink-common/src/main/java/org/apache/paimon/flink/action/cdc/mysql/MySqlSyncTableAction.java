@@ -51,7 +51,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.Action.getConfigMap;
+import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -290,24 +290,25 @@ public class MySqlSyncTableAction extends ActionBase {
             computedColumnArgs = new ArrayList<>(params.getMultiParameter("computed-column"));
         }
 
-        Optional<Map<String, String>> mySqlConfig = getConfigMap(params, "mysql-conf");
-        Optional<Map<String, String>> catalogConfig = getConfigMap(params, "catalog-conf");
-        Optional<Map<String, String>> tableConfig = getConfigMap(params, "table-conf");
-        if (!mySqlConfig.isPresent()) {
+        if (!params.has("mysql-conf")) {
             return Optional.empty();
         }
 
+        Map<String, String> mySqlConfig = optionalConfigMap(params, "mysql-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> tableConfig = optionalConfigMap(params, "table-conf");
+
         return Optional.of(
                 new MySqlSyncTableAction(
-                        mySqlConfig.get(),
+                        mySqlConfig,
                         tablePath.f0,
                         tablePath.f1,
                         tablePath.f2,
                         partitionKeys,
                         primaryKeys,
                         computedColumnArgs,
-                        catalogConfig.orElse(Collections.emptyMap()),
-                        tableConfig.orElse(Collections.emptyMap())));
+                        catalogConfig,
+                        tableConfig));
     }
 
     private static void printHelp() {

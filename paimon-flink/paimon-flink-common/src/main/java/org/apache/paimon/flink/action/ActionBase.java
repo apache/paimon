@@ -41,11 +41,8 @@ public abstract class ActionBase implements Action {
 
     protected final String catalogName = "paimon-" + UUID.randomUUID();
 
-    public ActionBase(String warehouse, Map<String, String> catalogOptions) {
-        this(warehouse, Options.fromMap(catalogOptions));
-    }
-
-    public ActionBase(String warehouse, Options catalogOptions) {
+    public ActionBase(String warehouse, Map<String, String> catalogConfig) {
+        Options catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog);
