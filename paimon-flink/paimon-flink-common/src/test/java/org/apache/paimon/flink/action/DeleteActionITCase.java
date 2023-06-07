@@ -71,7 +71,8 @@ public class DeleteActionITCase extends ActionITCaseBase {
             throws Exception {
         prepareTable(hasPk);
 
-        DeleteAction action = new DeleteAction(warehouse, database, tableName, "k = 1");
+        DeleteAction action =
+                new DeleteAction(warehouse, database, tableName, "k = 1", Collections.emptyMap());
 
         BlockingIterator<Row, Row> iterator =
                 testStreamingRead(buildSimpleQuery(tableName), initialRecords);
@@ -108,7 +109,8 @@ public class DeleteActionITCase extends ActionITCaseBase {
                     }
                 });
 
-        DeleteAction action = new DeleteAction(warehouse, database, tableName, "k < 3");
+        DeleteAction action =
+                new DeleteAction(warehouse, database, tableName, "k < 3", Collections.emptyMap());
 
         insertInto(
                 tableName, "(1, 'Say', 'A'), (2, 'Hi', 'B'), (3, 'To', 'C'), (4, 'Paimon', 'D')");

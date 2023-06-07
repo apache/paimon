@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -41,9 +40,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.Action.getConfigMap;
 import static org.apache.paimon.flink.action.Action.getPartitions;
 import static org.apache.paimon.flink.action.Action.getTablePath;
+import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 
 /** Table compact action for Flink. */
 public class CompactAction extends TableActionBase {
@@ -54,12 +53,15 @@ public class CompactAction extends TableActionBase {
     private final CompactorSinkBuilder sinkBuilder;
 
     public CompactAction(String warehouse, String database, String tableName) {
-        this(warehouse, database, tableName, new Options());
+        this(warehouse, database, tableName, Collections.emptyMap());
     }
 
     public CompactAction(
-            String warehouse, String database, String tableName, Options catalogOptions) {
-        super(warehouse, database, tableName, catalogOptions);
+            String warehouse,
+            String database,
+            String tableName,
+            Map<String, String> catalogConfig) {
+        super(warehouse, database, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -111,12 +113,10 @@ public class CompactAction extends TableActionBase {
             return Optional.empty();
         }
 
-        Optional<Map<String, String>> catalogConfigOption = getConfigMap(params, "catalog-conf");
-        Options catalogOptions =
-                Options.fromMap(catalogConfigOption.orElse(Collections.emptyMap()));
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 
         CompactAction action =
-                new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogOptions);
+                new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
 
         if (params.has("partition")) {
             List<Map<String, String>> partitions = getPartitions(params);
