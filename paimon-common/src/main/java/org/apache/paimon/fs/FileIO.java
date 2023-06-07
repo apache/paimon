@@ -250,13 +250,25 @@ public interface FileIO extends Serializable {
 
         // load fallbackIO
         FileIOLoader fallbackIO = config.fallbackIO();
+
+        IOException localFileIOException = null;
+        IOException hadoopIOException = null;
+
         if (loader == null) {
-            loader = checkAccess(fallbackIO, path, config);
+            try {
+                loader = checkAccess(fallbackIO, path, config);
+            } catch (IOException ioException) {
+                localFileIOException = ioException;
+            }
         }
 
         // load hadoopIO
         if (loader == null) {
-            loader = checkAccess(new HadoopFileIOLoader(), path, config);
+            try {
+                loader = checkAccess(new HadoopFileIOLoader(), path, config);
+            } catch (IOException ioException) {
+                hadoopIOException = ioException;
+            }
         }
 
         if (loader == null) {
@@ -267,11 +279,20 @@ public interface FileIO extends Serializable {
                                 + fallbackIO.getClass().getSimpleName()
                                 + " also cannot access this path.";
             }
-            throw new UnsupportedSchemeException(
-                    String.format(
-                            "Could not find a file io implementation for scheme '%s' in the classpath."
-                                    + "%s Hadoop FileSystem also cannot access this path '%s'.",
-                            uri.getScheme(), fallbackMsg, path));
+            UnsupportedSchemeException ex =
+                    new UnsupportedSchemeException(
+                            String.format(
+                                    "Could not find a file io implementation for scheme '%s' in the classpath."
+                                            + "%s Hadoop FileSystem also cannot access this path '%s'.",
+                                    uri.getScheme(), fallbackMsg, path));
+
+            if (localFileIOException != null) {
+                ex.addSuppressed(localFileIOException);
+            }
+            if (hadoopIOException != null) {
+                ex.addSuppressed(hadoopIOException);
+            }
+            throw ex;
         }
 
         FileIO fileIO = loader.load(path);
