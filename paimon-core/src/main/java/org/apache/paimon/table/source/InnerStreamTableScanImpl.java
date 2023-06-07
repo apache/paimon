@@ -158,12 +158,17 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     }
 
     private FollowUpScanner createFollowUpScanner() {
-        if (options.toConfiguration().get(CoreOptions.STREAMING_COMPACT)
-                == CoreOptions.StreamingCompactionType.NORMAL) {
-            return new ContinuousCompactorFollowUpScanner();
-        } else if (options.toConfiguration().get(CoreOptions.STREAMING_COMPACT)
-                == CoreOptions.StreamingCompactionType.NON_BUCKET) {
-            return new ContinuousAppendAndCompactFollowUpScanner();
+        CoreOptions.StreamingCompactionType type =
+                options.toConfiguration().get(CoreOptions.STREAMING_COMPACT);
+        switch (type) {
+            case NORMAL:
+                {
+                    return new ContinuousCompactorFollowUpScanner();
+                }
+            case NON_BUCKET:
+                {
+                    return new ContinuousAppendAndCompactFollowUpScanner();
+                }
         }
 
         CoreOptions.ChangelogProducer changelogProducer = options.changelogProducer();
