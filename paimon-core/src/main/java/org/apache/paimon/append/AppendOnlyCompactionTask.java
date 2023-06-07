@@ -24,7 +24,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.utils.BucketUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -69,7 +68,7 @@ public class AppendOnlyCompactionTask {
                 new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
         return new CommitMessageImpl(
                 partition,
-                BucketUtils.NON_BUCKET_BUCKET,
+                0, // bucket 0 is temp bucket for non-bucket table
                 NewFilesIncrement.emptyIncrement(),
                 compactIncrement);
     }

@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 
 /** {@link AppendOnlyFileStoreTable} compact coordinator. */
 public class AppendOnlyTableCompactionCoordinator {
+
     protected static final int REMOVE_AGE = 10;
     protected static final int COMPACT_AGE = 5;
 
@@ -45,7 +46,7 @@ public class AppendOnlyTableCompactionCoordinator {
     private final int minFileNum;
     private final int maxFileNum;
 
-    protected final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
+    final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
             new HashMap<>();
 
     public AppendOnlyTableCompactionCoordinator(AppendOnlyFileStoreTable table) {
@@ -56,7 +57,16 @@ public class AppendOnlyTableCompactionCoordinator {
         this.maxFileNum = coreOptions.compactionMaxFileNum();
     }
 
-    public void invokeScan() {
+    public List<AppendOnlyCompactionTask> run() {
+        // scan files in snapshot
+        scan();
+
+        // do plan compact tasks
+        return compactPlan();
+    }
+
+    @VisibleForTesting
+    void scan() {
         scan.plan()
                 .splits()
                 .forEach(
@@ -66,7 +76,8 @@ public class AppendOnlyTableCompactionCoordinator {
                         });
     }
 
-    protected void notifyNewFiles(BinaryRow partition, List<DataFileMeta> files) {
+    @VisibleForTesting
+    void notifyNewFiles(BinaryRow partition, List<DataFileMeta> files) {
         partitionCompactCoordinators
                 .computeIfAbsent(partition, PartitionCompactCoordinator::new)
                 .addFiles(
@@ -75,8 +86,9 @@ public class AppendOnlyTableCompactionCoordinator {
                                 .collect(Collectors.toList()));
     }
 
+    @VisibleForTesting
     // generate compaction task to the next stage
-    public List<AppendOnlyCompactionTask> compactPlan() {
+    List<AppendOnlyCompactionTask> compactPlan() {
         // first loop to found compaction tasks
         List<AppendOnlyCompactionTask> tasks =
                 partitionCompactCoordinators.values().stream()
@@ -93,17 +105,6 @@ public class AppendOnlyTableCompactionCoordinator {
         return tasks;
     }
 
-    @VisibleForTesting
-    public HashSet<DataFileMeta> listRestoredFiles() {
-        HashSet<DataFileMeta> sets = new HashSet<>();
-        partitionCompactCoordinators
-                .values()
-                .forEach(
-                        partitionCompactCoordinator ->
-                                sets.addAll(partitionCompactCoordinator.getToCompact()));
-        return sets;
-    }
-
     private Map<String, String> compactScanType() {
         return new HashMap<String, String>() {
             {
@@ -113,10 +114,10 @@ public class AppendOnlyTableCompactionCoordinator {
     }
 
     /** Coordinator for a single partition. */
-    private class PartitionCompactCoordinator {
+    class PartitionCompactCoordinator {
 
-        BinaryRow partition;
-        HashSet<DataFileMeta> toCompact = new HashSet<>();
+        private final BinaryRow partition;
+        private final HashSet<DataFileMeta> toCompact = new HashSet<>();
         int age = 0;
 
         public PartitionCompactCoordinator(BinaryRow partition) {
@@ -125,10 +126,6 @@ public class AppendOnlyTableCompactionCoordinator {
 
         public List<AppendOnlyCompactionTask> plan() {
             return pickCompact();
-        }
-
-        public HashSet<DataFileMeta> getToCompact() {
-            return toCompact;
         }
 
         public BinaryRow partition() {
@@ -143,6 +140,9 @@ public class AppendOnlyTableCompactionCoordinator {
         }
 
         public void addFiles(List<DataFileMeta> dataFileMetas) {
+            // reset age
+            age = 0;
+            // add to compact
             toCompact.addAll(dataFileMetas);
         }
 
@@ -160,9 +160,6 @@ public class AppendOnlyTableCompactionCoordinator {
                     toCompact.clear();
                     packed = Collections.singletonList(all);
                 }
-            } else {
-                // reset age
-                age = 0;
             }
 
             return packed;

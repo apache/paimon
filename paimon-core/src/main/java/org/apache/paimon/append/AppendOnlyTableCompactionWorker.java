@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.utils.BucketUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,11 +30,9 @@ import java.util.Map;
 
 /** {@link AppendOnlyFileStoreTable} compact worker. */
 public class AppendOnlyTableCompactionWorker {
+
     private final List<AppendOnlyCompactionTask> tasks = new ArrayList<>();
-    private final List<CommitMessage> result = new ArrayList<>();
     private final AppendOnlyFileStoreWrite write;
-    private final Map<BinaryRow, AppendOnlyCompactManager.CompactRewriter> rewriters =
-            new HashMap<>();
 
     public AppendOnlyTableCompactionWorker(AppendOnlyFileStoreTable table, String commitUser) {
         this.write = table.store().newWrite(commitUser);
@@ -52,18 +49,18 @@ public class AppendOnlyTableCompactionWorker {
     }
 
     public List<CommitMessage> doCompact() throws Exception {
+        List<CommitMessage> result = new ArrayList<>();
+        Map<BinaryRow, AppendOnlyCompactManager.CompactRewriter> rewriters = new HashMap<>();
         for (AppendOnlyCompactionTask task : tasks) {
             AppendOnlyCompactManager.CompactRewriter rewriter =
                     rewriters.computeIfAbsent(task.partition(), this::buildRewriter);
             result.add(task.doCompact(rewriter));
         }
-        ArrayList<CommitMessage> resultReturn = new ArrayList<>(result);
-        result.clear();
         tasks.clear();
-        return resultReturn;
+        return result;
     }
 
     private AppendOnlyCompactManager.CompactRewriter buildRewriter(BinaryRow partition) {
-        return write.compactRewriter(partition, BucketUtils.NON_BUCKET_BUCKET);
+        return write.compactRewriter(partition, 0);
     }
 }
