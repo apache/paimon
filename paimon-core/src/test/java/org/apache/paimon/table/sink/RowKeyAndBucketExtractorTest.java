@@ -38,8 +38,8 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
-/** Test for {@link InternalRowKeyAndBucketExtractor}. */
-public class InternalRowKeyAndBucketExtractorTest {
+/** Test for {@link RowKeyAndBucketExtractor}. */
+public class RowKeyAndBucketExtractorTest {
 
     @Test
     public void testInvalidBucket() {
@@ -65,16 +65,16 @@ public class InternalRowKeyAndBucketExtractorTest {
         assertThat(bucket(extractor("", "a,b,c"), row)).isEqualTo(40);
     }
 
-    private int bucket(InternalRowKeyAndBucketExtractor extractor, InternalRow row) {
+    private int bucket(RowKeyAndBucketExtractor extractor, InternalRow row) {
         extractor.setRecord(row);
         return extractor.bucket();
     }
 
-    private InternalRowKeyAndBucketExtractor extractor(String bk, String pk) {
+    private RowKeyAndBucketExtractor extractor(String bk, String pk) {
         return extractor("", bk, pk);
     }
 
-    private InternalRowKeyAndBucketExtractor extractor(String partK, String bk, String pk) {
+    private RowKeyAndBucketExtractor extractor(String partK, String bk, String pk) {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
@@ -96,6 +96,6 @@ public class InternalRowKeyAndBucketExtractorTest {
                         "".equals(pk) ? Collections.emptyList() : Arrays.asList(pk.split(",")),
                         options,
                         "");
-        return new InternalRowKeyAndBucketExtractor(schema);
+        return new RowKeyAndBucketExtractor(schema);
     }
 }
