@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
@@ -129,8 +130,14 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
+        AppendOnlyFileStoreWrite writer = store().newWrite(commitUser, manifestFilter);
+        // if this table is non-bucket table, we skip compaction and restored files searching
+        if (bucketMode() == BucketMode.UNAWARE) {
+            writer.skipCompaction();
+            writer.fromEmptyWriter(true);
+        }
         return new TableWriteImpl<>(
-                store().newWrite(commitUser, manifestFilter),
+                writer,
                 createRowKeyExtractor(),
                 record -> {
                     Preconditions.checkState(

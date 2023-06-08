@@ -51,6 +51,30 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCreateNonBucketTableWithPrimaryKey() {
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "CREATE TABLE pk_table (id INT PRIMARY KEY NOT ENFORCED, data STRING) "
+                                                + "WITH ('bucket' = '-1')"))
+                .hasRootCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage(
+                        "Cannot define 'bucket-key' or 'primary-key' in non-bucket mode.");
+    }
+
+    @Test
+    public void testCreateNonBucketTableWithBucketKey() {
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "CREATE TABLE pk_table (id INT, data STRING) "
+                                                + "WITH ('bucket' = '-1', 'bucket-key' = 'id')"))
+                .hasRootCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage(
+                        "Cannot define 'bucket-key' or 'primary-key' in non-bucket mode.");
+    }
+
+    @Test
     public void testReadEmpty() {
         assertThat(batchSql("SELECT * FROM append_table")).isEmpty();
     }

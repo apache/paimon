@@ -126,6 +126,17 @@ public class AppendOnlyTableCompactionCoordinator {
         return tasks;
     }
 
+    @VisibleForTesting
+    HashSet<DataFileMeta> listRestoredFiles() {
+        HashSet<DataFileMeta> sets = new HashSet<>();
+        partitionCompactCoordinators
+                .values()
+                .forEach(
+                        partitionCompactCoordinator ->
+                                sets.addAll(partitionCompactCoordinator.toCompact));
+        return sets;
+    }
+
     private Map<String, String> compactScanType() {
         return new HashMap<String, String>() {
             {
