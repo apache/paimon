@@ -88,6 +88,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             case FIXED:
                 return new FixedBucketRowKeyExtractor(schema());
             case DYNAMIC:
+                // todo: dynamic bucket table need to check current bucket, when full, return the
+                // next one.
+                throw new UnsupportedOperationException("Not supported yet.");
             case UNAWARE:
                 return new UnawareBucketRowKeyExtractor(schema());
             default:

@@ -145,10 +145,9 @@ public class SchemaValidation {
                             + "still want to keep the primary key definition.");
         }
 
-        if (options.bucket() == -1
-                && schema.primaryKeys().isEmpty()
-                && options.toMap().get(BUCKET_KEY.key()) != null) {
-            throw new RuntimeException("Cannot define 'bucket-key' in unaware bucket mode.");
+        if (options.bucket() == -1 && options.toMap().get(BUCKET_KEY.key()) != null) {
+            throw new RuntimeException(
+                    "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
         }
 
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
