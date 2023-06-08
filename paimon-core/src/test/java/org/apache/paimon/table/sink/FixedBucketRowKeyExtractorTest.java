@@ -38,8 +38,8 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
-/** Test for {@link RowKeyAndBucketExtractor}. */
-public class RowKeyAndBucketExtractorTest {
+/** Test for {@link FixedBucketRowKeyExtractor}. */
+public class FixedBucketRowKeyExtractorTest {
 
     @Test
     public void testInvalidBucket() {
@@ -65,16 +65,27 @@ public class RowKeyAndBucketExtractorTest {
         assertThat(bucket(extractor("", "a,b,c"), row)).isEqualTo(40);
     }
 
-    private int bucket(RowKeyAndBucketExtractor extractor, InternalRow row) {
+    @Test
+    public void testIllegalBucket() {
+        assertThatThrownBy(() -> extractor("", "", "a", -1))
+                .hasMessageContaining("Num bucket is illegal");
+    }
+
+    private int bucket(FixedBucketRowKeyExtractor extractor, InternalRow row) {
         extractor.setRecord(row);
         return extractor.bucket();
     }
 
-    private RowKeyAndBucketExtractor extractor(String bk, String pk) {
+    private FixedBucketRowKeyExtractor extractor(String bk, String pk) {
         return extractor("", bk, pk);
     }
 
-    private RowKeyAndBucketExtractor extractor(String partK, String bk, String pk) {
+    private FixedBucketRowKeyExtractor extractor(String partK, String bk, String pk) {
+        return extractor(partK, bk, pk, 100);
+    }
+
+    private FixedBucketRowKeyExtractor extractor(
+            String partK, String bk, String pk, int numBucket) {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
@@ -84,7 +95,7 @@ public class RowKeyAndBucketExtractorTest {
         List<DataField> fields = TableSchema.newFields(rowType);
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET_KEY.key(), bk);
-        options.put(BUCKET.key(), "100");
+        options.put(BUCKET.key(), String.valueOf(numBucket));
         TableSchema schema =
                 new TableSchema(
                         0,
@@ -96,6 +107,6 @@ public class RowKeyAndBucketExtractorTest {
                         "".equals(pk) ? Collections.emptyList() : Arrays.asList(pk.split(",")),
                         options,
                         "");
-        return new RowKeyAndBucketExtractor(schema);
+        return new FixedBucketRowKeyExtractor(schema);
     }
 }
