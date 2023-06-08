@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /** Delete snapshot files. */
@@ -77,11 +78,17 @@ public class SnapshotDeletion {
      *
      * @param manifestListName name of manifest list
      * @param deletionBuckets partition-buckets of which some data files have been deleted
+     * @param skippingTester a tester that if the test result of a data file's manifest entry is
+     *     true, the data file will be skipped
      */
     public void deleteExpiredDataFiles(
-            String manifestListName, Map<BinaryRow, Set<Integer>> deletionBuckets) {
+            String manifestListName,
+            Map<BinaryRow, Set<Integer>> deletionBuckets,
+            Predicate<ManifestEntry> skippingTester) {
         doDeleteExpiredDataFiles(
-                getManifestEntriesFromManifestList(manifestListName), deletionBuckets);
+                getManifestEntriesFromManifestList(manifestListName),
+                deletionBuckets,
+                skippingTester);
     }
 
     /**
@@ -149,8 +156,10 @@ public class SnapshotDeletion {
      *
      * @param skipped manifest file deletion skipping set, deleted manifest file will be added to
      *     this set too.
+     * @param deleteDataManifestList whether to delete the manifest list files of data.
      */
-    public void deleteManifestFiles(Set<ManifestFileMeta> skipped, Snapshot snapshot) {
+    public void deleteManifestFiles(
+            Set<ManifestFileMeta> skipped, Snapshot snapshot, boolean deleteDataManifestList) {
         // cannot call `toExpire.dataManifests` directly, it is possible that a job is
         // killed during expiration, so some manifest files may have been deleted
         List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
@@ -172,8 +181,10 @@ public class SnapshotDeletion {
         }
 
         // delete manifest lists
-        manifestList.delete(snapshot.baseManifestList());
-        manifestList.delete(snapshot.deltaManifestList());
+        if (deleteDataManifestList) {
+            manifestList.delete(snapshot.baseManifestList());
+            manifestList.delete(snapshot.deltaManifestList());
+        }
         if (snapshot.changelogManifestList() != null) {
             manifestList.delete(snapshot.changelogManifestList());
         }
@@ -192,7 +203,9 @@ public class SnapshotDeletion {
 
     @VisibleForTesting
     void doDeleteExpiredDataFiles(
-            Iterable<ManifestEntry> dataFileLog, Map<BinaryRow, Set<Integer>> deletionBuckets) {
+            Iterable<ManifestEntry> dataFileLog,
+            Map<BinaryRow, Set<Integer>> deletionBuckets,
+            Predicate<ManifestEntry> skippingTester) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
         // data file path -> (partition, bucket, extra file paths)
@@ -205,6 +218,11 @@ public class SnapshotDeletion {
                     dataFileToDelete.remove(dataFilePath);
                     break;
                 case DELETE:
+                    // check whether we should skip the data file
+                    if (skippingTester.test(entry)) {
+                        break;
+                    }
+
                     List<Path> extraFiles = new ArrayList<>(entry.file().extraFiles().size());
                     for (String file : entry.file().extraFiles()) {
                         extraFiles.add(new Path(bucketPath, file));
@@ -228,7 +246,7 @@ public class SnapshotDeletion {
                 });
     }
 
-    private Iterable<ManifestEntry> getManifestEntriesFromManifestList(String manifestListName) {
+    Iterable<ManifestEntry> getManifestEntriesFromManifestList(String manifestListName) {
         Queue<String> files =
                 tryReadManifestList(manifestListName).stream()
                         .map(ManifestFileMeta::fileName)
@@ -253,6 +271,14 @@ public class SnapshotDeletion {
                                         }
                                     }
                                 });
+    }
+
+    List<ManifestEntry> getAddEntries(Snapshot snapshot) {
+        return snapshot.dataManifests(manifestList).stream()
+                .map(ManifestFileMeta::fileName)
+                .flatMap(file -> manifestFile.read(file).stream())
+                .filter(entry -> entry.kind() == FileKind.ADD)
+                .collect(Collectors.toList());
     }
 
     private boolean tryDeleteEmptyDirectory(Path path) {

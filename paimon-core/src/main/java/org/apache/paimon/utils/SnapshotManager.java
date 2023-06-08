@@ -372,7 +372,7 @@ public class SnapshotManager implements Serializable {
         Set<ManifestFileMeta> manifestSkipped =
                 new HashSet<>(snapshot(snapshotId).dataManifests(deletion.manifestList()));
         for (Snapshot snapshot : snapshots) {
-            deletion.deleteManifestFiles(manifestSkipped, snapshot);
+            deletion.deleteManifestFiles(manifestSkipped, snapshot, true);
         }
     }
 }

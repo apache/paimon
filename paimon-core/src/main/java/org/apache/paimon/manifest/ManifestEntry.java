@@ -178,6 +178,12 @@ public class ManifestEntry {
             this.fileName = fileName;
         }
 
+        public boolean equalsIgnoreLevel(Identifier that) {
+            return Objects.equals(partition, that.partition)
+                    && bucket == that.bucket
+                    && Objects.equals(fileName, that.fileName);
+        }
+
         @Override
         public boolean equals(Object o) {
             if (!(o instanceof Identifier)) {
