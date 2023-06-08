@@ -141,11 +141,6 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public BucketMode bucketMode() {
-        return numBucket() == -1 ? BucketMode.DYNAMIC : BucketMode.FIXED;
-    }
-
-    @Override
     public TableWriteImpl<KeyValue> newWrite(String commitUser) {
         return newWrite(commitUser, null);
     }

@@ -69,8 +69,8 @@ public abstract class ScanBucketFilter {
         return selector == null || selector.select(bucket, numBucket);
     }
 
-    private static Optional<ScanBucketSelector> create(
-            Predicate bucketPredicate, RowType bucketKeyType) {
+    @VisibleForTesting
+    static Optional<ScanBucketSelector> create(Predicate bucketPredicate, RowType bucketKeyType) {
         @SuppressWarnings("unchecked")
         List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
 
@@ -165,18 +165,19 @@ public abstract class ScanBucketFilter {
             this.hashCodes = hashCodes;
         }
 
-        public boolean select(int bucket, int numBucket) {
+        @VisibleForTesting
+        boolean select(int bucket, int numBucket) {
             return buckets.computeIfAbsent(numBucket, k -> createBucketSet(numBucket))
                     .contains(bucket);
         }
 
         @VisibleForTesting
-        public int[] hashCodes() {
+        int[] hashCodes() {
             return hashCodes;
         }
 
         @VisibleForTesting
-        public Set<Integer> createBucketSet(int numBucket) {
+        Set<Integer> createBucketSet(int numBucket) {
             ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
             for (int hash : hashCodes) {
                 builder.add(KeyAndBucketExtractor.bucket(hash, numBucket));

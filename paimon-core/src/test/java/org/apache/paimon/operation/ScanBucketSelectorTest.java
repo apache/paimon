@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.predicate;
+package org.apache.paimon.operation;
 
-import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.operation.ScanBucketFilter.ScanBucketSelector;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 

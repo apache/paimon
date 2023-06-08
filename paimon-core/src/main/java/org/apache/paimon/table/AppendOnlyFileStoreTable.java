@@ -123,11 +123,6 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public BucketMode bucketMode() {
-        return numBucket() == -1 ? BucketMode.UNAWARE : BucketMode.FIXED;
-    }
-
-    @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser) {
         return newWrite(commitUser, null);
     }
