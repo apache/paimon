@@ -140,7 +140,9 @@ public class AppendOnlyTableCompactionCoordinator {
     private Map<String, String> compactScanType() {
         return new HashMap<String, String>() {
             {
-                put(CoreOptions.STREAMING_COMPACT.key(), "non-bucket");
+                put(
+                        CoreOptions.STREAMING_COMPACT.key(),
+                        CoreOptions.StreamingCompactionType.UNAWARE.getValue());
             }
         };
     }

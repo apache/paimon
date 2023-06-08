@@ -1203,9 +1203,10 @@ public class CoreOptions implements Serializable {
 
     /** Compaction type when trigger a compaction action. */
     public enum StreamingCompactionType implements DescribedEnum {
-        NONE("none", "not a streaming compaction."),
-        NORMAL("normal", "Traditional bucket table compaction."),
-        NON_BUCKET("non-bucket", "Compaction for non-bucket table.");
+        NONE("none", "Not a streaming compaction."),
+        FIX("fix", "Compaction for fix bucket table."),
+        DYNAMIC("dynamic", "Compaction for dynamic bucket table."),
+        UNAWARE("unaware", "Compaction for unaware bucket table.");
 
         private final String value;
         private final String description;

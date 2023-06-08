@@ -161,11 +161,11 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         CoreOptions.StreamingCompactionType type =
                 options.toConfiguration().get(CoreOptions.STREAMING_COMPACT);
         switch (type) {
-            case NORMAL:
+            case FIX:
                 {
                     return new ContinuousCompactorFollowUpScanner();
                 }
-            case NON_BUCKET:
+            case UNAWARE:
                 {
                     return new ContinuousAppendAndCompactFollowUpScanner();
                 }
