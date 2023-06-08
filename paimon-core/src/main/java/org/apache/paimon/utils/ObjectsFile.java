@@ -18,15 +18,23 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.reader.RecordReader;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 
 import static org.apache.paimon.utils.FileUtils.createFormatReader;
@@ -37,6 +45,7 @@ public abstract class ObjectsFile<T> {
     protected final FileIO fileIO;
     protected final ObjectSerializer<T> serializer;
     protected final FormatReaderFactory readerFactory;
+    protected final FormatWriterFactory writerFactory;
     protected final PathFactory pathFactory;
 
     @Nullable private final ObjectsCache<String, T> cache;
@@ -45,14 +54,24 @@ public abstract class ObjectsFile<T> {
             FileIO fileIO,
             ObjectSerializer<T> serializer,
             FormatReaderFactory readerFactory,
+            FormatWriterFactory writerFactory,
             PathFactory pathFactory,
             @Nullable SegmentsCache<String> cache) {
         this.fileIO = fileIO;
         this.serializer = serializer;
         this.readerFactory = readerFactory;
+        this.writerFactory = writerFactory;
         this.pathFactory = pathFactory;
         this.cache =
                 cache == null ? null : new ObjectsCache<>(cache, serializer, this::createIterator);
+    }
+
+    public long fileSize(String fileName) {
+        try {
+            return fileIO.getFileSize(pathFactory.toPath(fileName));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     public List<T> read(String fileName) {
@@ -76,6 +95,33 @@ public abstract class ObjectsFile<T> {
             return result;
         } catch (IOException e) {
             throw new RuntimeException("Failed to read manifest list " + fileName, e);
+        }
+    }
+
+    public String writeWithoutRolling(Collection<T> records) {
+        return writeWithoutRolling(records.iterator());
+    }
+
+    public String writeWithoutRolling(Iterator<T> records) {
+        Path path = pathFactory.newPath();
+        try {
+            try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
+                FormatWriter writer =
+                        writerFactory.create(out, CoreOptions.FILE_COMPRESSION.defaultValue());
+                try {
+                    while (records.hasNext()) {
+                        writer.addElement(serializer.toRow(records.next()));
+                    }
+                } finally {
+                    writer.flush();
+                    writer.finish();
+                }
+            }
+            return path.getName();
+        } catch (Throwable e) {
+            fileIO.deleteQuietly(path);
+            throw new RuntimeException(
+                    "Exception occurs when writing records to " + path + ". Clean up.", e);
         }
     }
 

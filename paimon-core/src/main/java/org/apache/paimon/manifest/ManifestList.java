@@ -18,14 +18,10 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ObjectsFile;
@@ -52,7 +48,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
             FormatWriterFactory writerFactory,
             PathFactory pathFactory,
             @Nullable SegmentsCache<String> cache) {
-        super(fileIO, serializer, readerFactory, pathFactory, cache);
+        super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
         this.writerFactory = writerFactory;
     }
 
@@ -62,26 +58,7 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
      * <p>NOTE: This method is atomic.
      */
     public String write(List<ManifestFileMeta> metas) {
-        Path path = pathFactory.newPath();
-        try {
-            try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
-                FormatWriter writer =
-                        writerFactory.create(out, CoreOptions.FILE_COMPRESSION.defaultValue());
-                try {
-                    for (ManifestFileMeta record : metas) {
-                        writer.addElement(serializer.toRow(record));
-                    }
-                } finally {
-                    writer.flush();
-                    writer.finish();
-                }
-            }
-            return path.getName();
-        } catch (Throwable e) {
-            fileIO.deleteQuietly(path);
-            throw new RuntimeException(
-                    "Exception occurs when writing manifest list " + path + ". Clean up.", e);
-        }
+        return super.writeWithoutRolling(metas);
     }
 
     /** Creator of {@link ManifestList}. */
