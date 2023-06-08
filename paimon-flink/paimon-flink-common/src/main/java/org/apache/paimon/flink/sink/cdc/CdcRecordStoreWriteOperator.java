@@ -19,23 +19,18 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
-import org.apache.paimon.flink.sink.StateUtils;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.flink.sink.StoreSinkWriteState;
+import org.apache.paimon.flink.sink.TableWriteOperator;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
-import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.IOException;
 import java.time.Duration;
-import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
@@ -44,7 +39,7 @@ import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
  * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
  * known schema does not fit record schema, this operator will wait for schema changes.
  */
-public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord, Committable> {
+public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
 
@@ -53,54 +48,26 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
                     .durationType()
                     .defaultValue(Duration.ofMillis(500));
 
-    private FileStoreTable table;
-    private final StoreSinkWrite.Provider storeSinkWriteProvider;
-    private final String initialCommitUser;
     private final long retrySleepMillis;
-
-    private transient StoreSinkWriteState state;
-    private transient StoreSinkWrite write;
 
     public CdcRecordStoreWriteOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
-        super(Options.fromMap(table.options()));
-        this.table = table;
-        this.storeSinkWriteProvider = storeSinkWriteProvider;
-        this.initialCommitUser = initialCommitUser;
+        super(table, storeSinkWriteProvider, initialCommitUser);
         this.retrySleepMillis =
                 table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
     }
 
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
-        super.initializeState(context);
-
-        // Each job can only have one user name and this name must be consistent across restarts.
-        // We cannot use job id as commit user name here because user may change job id by creating
-        // a savepoint, stop the job and then resume from savepoint.
-        String commitUser =
-                StateUtils.getSingleValueFromState(
-                        context, "commit_user_state", String.class, initialCommitUser);
-
-        CdcRecordChannelComputer channelComputer = new CdcRecordChannelComputer(table.schema());
-        channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
-        state =
-                new StoreSinkWriteState(
-                        context,
-                        (tableName, partition, bucket) ->
-                                channelComputer.channel(partition, bucket)
-                                        == getRuntimeContext().getIndexOfThisSubtask());
-
         table = table.copyWithLatestSchema();
-        write =
-                storeSinkWriteProvider.provide(
-                        table,
-                        commitUser,
-                        state,
-                        getContainingTask().getEnvironment().getIOManager(),
-                        memoryPool);
+        super.initializeState(context);
+    }
+
+    @Override
+    protected boolean containLogSystem() {
+        return false;
     }
 
     @Override
@@ -124,25 +91,5 @@ public class CdcRecordStoreWriteOperator extends PrepareCommitOperator<CdcRecord
         } catch (Exception e) {
             throw new IOException(e);
         }
-    }
-
-    @Override
-    public void snapshotState(StateSnapshotContext context) throws Exception {
-        super.snapshotState(context);
-
-        write.snapshotState();
-        state.snapshotState();
-    }
-
-    @Override
-    public void close() throws Exception {
-        super.close();
-        write.close();
-    }
-
-    @Override
-    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
-            throws IOException {
-        return write.prepareCommit(doCompaction, checkpointId);
     }
 }
