@@ -19,12 +19,14 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.serializer.VersionedSerializer;
+import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.io.NewFilesIncrement;
 
 import java.io.ByteArrayOutputStream;
@@ -41,9 +43,11 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     private static final int CURRENT_VERSION = 2;
 
     private final DataFileMetaSerializer dataFileSerializer;
+    private final IndexFileMetaSerializer indexEntrySerializer;
 
     public CommitMessageSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
+        this.indexEntrySerializer = new IndexFileMetaSerializer();
     }
 
     @Override
@@ -75,6 +79,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         dataFileSerializer.serializeList(message.compactIncrement().compactBefore(), view);
         dataFileSerializer.serializeList(message.compactIncrement().compactAfter(), view);
         dataFileSerializer.serializeList(message.compactIncrement().changelogFiles(), view);
+        indexEntrySerializer.serializeList(message.indexIncrement().newIndexFiles(), view);
     }
 
     @Override
@@ -116,6 +121,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                 new CompactIncrement(
                         dataFileSerializer.deserializeList(view),
                         dataFileSerializer.deserializeList(view),
-                        dataFileSerializer.deserializeList(view)));
+                        dataFileSerializer.deserializeList(view)),
+                new IndexIncrement(indexEntrySerializer.deserializeList(view)));
     }
 }

@@ -21,6 +21,9 @@ package org.apache.paimon;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.HashIndexFile;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreCommitImpl;
@@ -116,6 +119,18 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 forWrite ? writeManifestCache : null);
     }
 
+    protected IndexManifestFile.Factory indexManifestFileFactory() {
+        return new IndexManifestFile.Factory(fileIO, options.manifestFormat(), pathFactory());
+    }
+
+    @Override
+    public IndexFileHandler newIndexFileHandler() {
+        HashIndexFile hashIndex =
+                new HashIndexFile.Factory(fileIO, options.fileFormat(), pathFactory()).create();
+        return new IndexFileHandler(
+                snapshotManager(), indexManifestFileFactory().create(), hashIndex);
+    }
+
     @Override
     public RowType partitionType() {
         return partitionType;
@@ -137,6 +152,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 snapshotManager(),
                 manifestFileFactory(),
                 manifestListFactory(),
+                indexManifestFileFactory(),
                 newScan(),
                 options.bucket(),
                 options.manifestTargetSize(),
