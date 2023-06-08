@@ -146,10 +146,9 @@ public class SchemaValidation {
         }
 
         if (options.bucket() == -1
-                && (options.toMap().get(BUCKET_KEY.key()) != null
-                        || !schema.primaryKeys().isEmpty())) {
-            throw new RuntimeException(
-                    "Cannot define 'bucket-key' or 'primary-key' in non-bucket mode.");
+                && schema.primaryKeys().isEmpty()
+                && options.toMap().get(BUCKET_KEY.key()) != null) {
+            throw new RuntimeException("Cannot define 'bucket-key' in unaware bucket mode.");
         }
 
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
