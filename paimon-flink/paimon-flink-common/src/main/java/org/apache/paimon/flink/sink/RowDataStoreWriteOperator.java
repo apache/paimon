@@ -26,6 +26,7 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.streaming.api.graph.StreamConfig;
@@ -72,6 +73,15 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<RowData> {
         super.setup(containingTask, config, output);
         if (logSinkFunction != null) {
             FunctionUtils.setFunctionRuntimeContext(logSinkFunction, getRuntimeContext());
+        }
+    }
+
+    @Override
+    public void initializeState(StateInitializationContext context) throws Exception {
+        super.initializeState(context);
+
+        if (logSinkFunction != null) {
+            StreamingFunctionUtils.restoreFunctionState(context, logSinkFunction);
         }
     }
 
