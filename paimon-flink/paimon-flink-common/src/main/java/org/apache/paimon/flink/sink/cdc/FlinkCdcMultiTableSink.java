@@ -34,6 +34,7 @@ import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableFunction;
 
@@ -72,8 +73,9 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     private StoreSinkWrite.Provider createWriteProvider(CheckpointConfig checkpointConfig) {
         // for now, no compaction for multiplexed sink
-        return (table, commitUser, state, ioManager) ->
-                new StoreSinkWriteImpl(table, commitUser, state, ioManager, isOverwrite, false);
+        return (table, commitUser, state, ioManager, memoryPool) ->
+                new StoreSinkWriteImpl(
+                        table, commitUser, state, ioManager, isOverwrite, false, memoryPool);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<CdcMultiplexRecord> input) {
@@ -142,7 +144,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     protected OneInputStreamOperator<CdcMultiplexRecord, MultiTableCommittable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
-        return new CdcRecordStoreMultiWriteOperator(catalogLoader, writeProvider, commitUser);
+        return new CdcRecordStoreMultiWriteOperator(
+                catalogLoader, writeProvider, commitUser, new Options());
     }
 
     // Table committers are dynamically created at runtime
