@@ -28,24 +28,16 @@ import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
-import java.util.List;
-
-import static org.apache.paimon.predicate.PredicateBuilder.and;
-import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
-import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
-    private final RowType rowType;
     private final FieldStatsConverters fieldStatsConverters;
 
     private Predicate filter;
 
     public AppendOnlyFileStoreScan(
             RowType partitionType,
-            RowType bucketKeyType,
-            RowType rowType,
+            ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             long schemaId,
@@ -56,7 +48,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             Integer scanManifestParallelism) {
         super(
                 partitionType,
-                bucketKeyType,
+                bucketFilter,
                 snapshotManager,
                 schemaManager,
                 manifestFileFactory,
@@ -64,22 +56,13 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 numOfBuckets,
                 checkNumOfBuckets,
                 scanManifestParallelism);
-        this.rowType = rowType;
         this.fieldStatsConverters =
                 new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schemaId);
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
         this.filter = predicate;
-
-        List<Predicate> bucketFilters =
-                pickTransformFieldMapping(
-                        splitAnd(predicate),
-                        rowType.getFieldNames(),
-                        bucketKeyType.getFieldNames());
-        if (bucketFilters.size() > 0) {
-            withBucketKeyFilter(and(bucketFilters));
-        }
+        this.bucketFilter.pushdown(predicate);
         return this;
     }
 

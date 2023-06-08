@@ -18,19 +18,19 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
+
+import static org.apache.paimon.flink.sink.BucketingStreamPartitioner.createPartitionTransformation;
 
 /** Builder for {@link FileStoreSink}. */
 public class FlinkSinkBuilder {
@@ -42,8 +42,6 @@ public class FlinkSinkBuilder {
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
-    @Nullable private String commitUser;
-    @Nullable private StoreSinkWrite.Provider sinkProvider;
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -74,29 +72,26 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    @VisibleForTesting
-    public FlinkSinkBuilder withSinkProvider(
-            String commitUser, StoreSinkWrite.Provider sinkProvider) {
-        this.commitUser = commitUser;
-        this.sinkProvider = sinkProvider;
-        return this;
+    public DataStreamSink<?> build() {
+        BucketMode bucketMode = table.bucketMode();
+        switch (bucketMode) {
+            case FIXED:
+                return buildForFixedBucket();
+            case DYNAMIC:
+            case UNAWARE:
+            default:
+                throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
+        }
     }
 
-    public DataStreamSink<?> build() {
-        BucketingStreamPartitioner<RowData> partitioner =
-                new BucketingStreamPartitioner<>(
-                        new RowDataChannelComputer(table.schema(), logSinkFunction != null));
-        PartitionTransformation<RowData> partitioned =
-                new PartitionTransformation<>(input.getTransformation(), partitioner);
-        if (parallelism != null) {
-            partitioned.setParallelism(parallelism);
-        }
-
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
+    private DataStreamSink<?> buildForFixedBucket() {
+        DataStream<RowData> partitioned =
+                createPartitionTransformation(
+                        input,
+                        new RowDataChannelComputer(table.schema(), logSinkFunction != null),
+                        parallelism);
         FileStoreSink sink =
                 new FileStoreSink(table, lockFactory, overwritePartition, logSinkFunction);
-        return commitUser != null && sinkProvider != null
-                ? sink.sinkFrom(new DataStream<>(env, partitioned), commitUser, sinkProvider)
-                : sink.sinkFrom(new DataStream<>(env, partitioned));
+        return sink.sinkFrom(partitioned);
     }
 }
