@@ -108,11 +108,10 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private final boolean ignoreIncompatible;
     private final String tablePrefix;
     private final String tableSuffix;
-    @Nullable private final Pattern includingPattern;
+    private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final Map<String, String> tableConfig;
     private final String includingTables;
-    private final List<String> excludedTables;
     private final Options catalogOptions;
     private final MySqlDatabaseSyncMode mode;
 
@@ -158,7 +157,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         this.includingTables = includingTables == null ? ".*" : includingTables;
         this.includingPattern = Pattern.compile(this.includingTables);
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
-        this.excludedTables = new LinkedList<>();
         this.catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         this.tableConfig = tableConfig;
@@ -178,7 +176,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             validateCaseInsensitive();
         }
 
-        List<MySqlSchema> mySqlSchemas = getMySqlSchemaList();
+        List<String> excludedTables = new LinkedList<>();
+        List<MySqlSchema> mySqlSchemas = getMySqlSchemaList(excludedTables);
         String mySqlDatabase = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
         checkArgument(
                 mySqlSchemas.size() > 0,
@@ -289,7 +288,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         tableSuffix));
     }
 
-    private List<MySqlSchema> getMySqlSchemaList() throws Exception {
+    private List<MySqlSchema> getMySqlSchemaList(List<String> excludedTables) throws Exception {
         String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
         List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
         try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
@@ -316,10 +315,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     }
 
     private boolean shouldMonitorTable(String mySqlTableName) {
-        boolean shouldMonitor = true;
-        if (includingPattern != null) {
-            shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
-        }
+        boolean shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
         if (excludingPattern != null) {
             shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
         }
