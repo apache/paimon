@@ -23,6 +23,7 @@ import org.apache.paimon.flink.sink.BucketingStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
@@ -85,6 +86,20 @@ public class CdcSinkBuilder<T> {
                     "Table should be a data table, but is: " + table.getClass().getName());
         }
 
+        FileStoreTable dataTable = (FileStoreTable) table;
+
+        BucketMode bucketMode = dataTable.bucketMode();
+        switch (bucketMode) {
+            case FIXED:
+                return buildForFixedBucket();
+            case DYNAMIC:
+            case UNAWARE:
+            default:
+                throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
+        }
+    }
+
+    private DataStreamSink<?> buildForFixedBucket() {
         FileStoreTable dataTable = (FileStoreTable) table;
 
         SingleOutputStreamOperator<CdcRecord> parsed =
