@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.sink.BucketingStreamPartitioner;
+import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
@@ -119,8 +119,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
-        BucketingStreamPartitioner<CdcRecord> partitioner =
-                new BucketingStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
+        FlinkStreamPartitioner<CdcRecord> partitioner =
+                new FlinkStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
         PartitionTransformation<CdcRecord> partitioned =
                 new PartitionTransformation<>(
                         SingleOutputStreamOperatorUtils.getSideOutput(

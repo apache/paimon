@@ -30,7 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
-import static org.apache.paimon.flink.sink.BucketingStreamPartitioner.createPartitionTransformation;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.createPartitionTransformation;
 
 /** Builder for {@link FileStoreSink}. */
 public class FlinkSinkBuilder {
