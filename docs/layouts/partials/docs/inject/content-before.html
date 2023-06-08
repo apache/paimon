@@ -23,14 +23,14 @@ under the License.
 {{ if $.Site.Params.ShowOutDatedWarning }}
 <article class="markdown">
     <blockquote style="border-color:#f66">
-        {{ markdownify "This documentation is for an out-of-date version of Apache Paimon. We recommend you use the latest [stable version](https://ci.apache.org/projects/flink/flink-table-store-docs-stable/)."}}
+        {{ markdownify (printf "This documentation is for an out-of-date version of Apache Paimon. We recommend you use the latest [stable version](%s)." $.Site.Params.StableDocs) }}
     </blockquote>
 </article>
 {{ end }}
 {{ if (not $.Site.Params.IsStable) }}
 <article class="markdown">
     <blockquote style="border-color:#f66">
-        {{ markdownify "This documentation is for an unreleased version of Apache Paimon. We recommend you use the latest [stable version](https://ci.apache.org/projects/flink/flink-table-store-docs-stable/)."}}
+        {{ markdownify (printf "This documentation is for an unreleased version of Apache Paimon. We recommend you use the latest [stable version](%s)." $.Site.Params.StableDocs) }}
     </blockquote>
 </article>
 {{ end }}
