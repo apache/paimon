@@ -63,8 +63,8 @@ public class CompactorSinkBuilder {
     }
 
     private DataStreamSink<?> buildForBucketAware() {
-        BucketingStreamPartitioner<RowData> partitioner =
-                new BucketingStreamPartitioner<>(new BucketsRowChannelComputer());
+        FlinkStreamPartitioner<RowData> partitioner =
+                new FlinkStreamPartitioner<>(new BucketsRowChannelComputer());
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
 

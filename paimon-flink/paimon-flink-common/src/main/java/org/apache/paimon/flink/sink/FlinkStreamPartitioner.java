@@ -25,17 +25,12 @@ import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
-/**
- * A {@link StreamPartitioner} which sends records from the same bucket to the same downstream
- * channel.
- *
- * @param <T> type of record
- */
-public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
+/** A {@link StreamPartitioner} which wraps a {@link ChannelComputer}. */
+public class FlinkStreamPartitioner<T> extends StreamPartitioner<T> {
 
     private final ChannelComputer<T> channelComputer;
 
-    public BucketingStreamPartitioner(ChannelComputer<T> channelComputer) {
+    public FlinkStreamPartitioner(ChannelComputer<T> channelComputer) {
         this.channelComputer = channelComputer;
     }
 
@@ -72,8 +67,7 @@ public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
 
     public static <T> DataStream<T> createPartitionTransformation(
             DataStream<T> input, ChannelComputer<T> channelComputer, Integer parallelism) {
-        BucketingStreamPartitioner<T> partitioner =
-                new BucketingStreamPartitioner<>(channelComputer);
+        FlinkStreamPartitioner<T> partitioner = new FlinkStreamPartitioner<>(channelComputer);
         PartitionTransformation<T> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
         if (parallelism != null) {
