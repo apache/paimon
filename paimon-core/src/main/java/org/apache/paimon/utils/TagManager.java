@@ -114,7 +114,7 @@ public class TagManager {
             return Arrays.stream(statuses)
                     .map(FileStatus::getPath)
                     .map(path -> Snapshot.fromPath(fileIO, path))
-                    .sorted(Comparator.comparingLong(Snapshot::timeMillis))
+                    .sorted(Comparator.comparingLong(Snapshot::id))
                     .collect(Collectors.toList());
         } catch (IOException e) {
             throw new RuntimeException(
