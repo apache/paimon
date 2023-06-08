@@ -63,7 +63,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             PathFactory pathFactory,
             long suggestedFileSize,
             @Nullable SegmentsCache<String> cache) {
-        super(fileIO, serializer, readerFactory, pathFactory, cache);
+        super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;

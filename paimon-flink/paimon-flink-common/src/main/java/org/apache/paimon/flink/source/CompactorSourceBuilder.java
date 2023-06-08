@@ -129,7 +129,7 @@ public class CompactorSourceBuilder {
         // set 'streaming-compact' and remove 'scan.bounded.watermark'
         return new HashMap<String, String>() {
             {
-                put(CoreOptions.STREAMING_COMPACT.key(), "true");
+                put(CoreOptions.STREAMING_COMPACT.key(), "normal");
                 put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), null);
             }
         };

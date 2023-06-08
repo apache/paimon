@@ -18,10 +18,11 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.sink.BucketingStreamPartitioner;
+import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
@@ -91,33 +92,48 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         .setParallelism(input.getParallelism());
 
         for (FileStoreTable table : tables) {
-            DataStream<Void> schemaChangeProcessFunction =
-                    SingleOutputStreamOperatorUtils.getSideOutput(
-                                    parsed,
-                                    CdcMultiTableParsingProcessFunction
-                                            .createUpdatedDataFieldsOutputTag(table.name()))
-                            .process(
-                                    new UpdatedDataFieldsProcessFunction(
-                                            new SchemaManager(table.fileIO(), table.location())));
-            schemaChangeProcessFunction.getTransformation().setParallelism(1);
-            schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
-
-            BucketingStreamPartitioner<CdcRecord> partitioner =
-                    new BucketingStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
-            PartitionTransformation<CdcRecord> partitioned =
-                    new PartitionTransformation<>(
-                            SingleOutputStreamOperatorUtils.getSideOutput(
-                                            parsed,
-                                            CdcMultiTableParsingProcessFunction
-                                                    .createRecordOutputTag(table.name()))
-                                    .getTransformation(),
-                            partitioner);
-            if (parallelism != null) {
-                partitioned.setParallelism(parallelism);
+            BucketMode bucketMode = table.bucketMode();
+            switch (bucketMode) {
+                case FIXED:
+                    buildForFixedBucket(table, parsed);
+                    break;
+                case DYNAMIC:
+                case UNAWARE:
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported bucket mode: " + bucketMode);
             }
-
-            FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory);
-            sink.sinkFrom(new DataStream<>(env, partitioned));
         }
+    }
+
+    private void buildForFixedBucket(
+            FileStoreTable table, SingleOutputStreamOperator<Void> parsed) {
+        DataStream<Void> schemaChangeProcessFunction =
+                SingleOutputStreamOperatorUtils.getSideOutput(
+                                parsed,
+                                CdcMultiTableParsingProcessFunction
+                                        .createUpdatedDataFieldsOutputTag(table.name()))
+                        .process(
+                                new UpdatedDataFieldsProcessFunction(
+                                        new SchemaManager(table.fileIO(), table.location())));
+        schemaChangeProcessFunction.getTransformation().setParallelism(1);
+        schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
+
+        FlinkStreamPartitioner<CdcRecord> partitioner =
+                new FlinkStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
+        PartitionTransformation<CdcRecord> partitioned =
+                new PartitionTransformation<>(
+                        SingleOutputStreamOperatorUtils.getSideOutput(
+                                        parsed,
+                                        CdcMultiTableParsingProcessFunction.createRecordOutputTag(
+                                                table.name()))
+                                .getTransformation(),
+                        partitioner);
+        if (parallelism != null) {
+            partitioned.setParallelism(parallelism);
+        }
+
+        FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory);
+        sink.sinkFrom(new DataStream<>(parsed.getExecutionEnvironment(), partitioned));
     }
 }

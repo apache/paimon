@@ -29,24 +29,16 @@ import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
-import java.util.List;
-
-import static org.apache.paimon.predicate.PredicateBuilder.and;
-import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
-import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
-
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final FieldStatsConverters fieldStatsConverters;
-    private final RowType keyType;
 
     private Predicate keyFilter;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
-            RowType bucketKeyType,
-            RowType keyType,
+            ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             long schemaId,
@@ -58,7 +50,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             Integer scanManifestParallelism) {
         super(
                 partitionType,
-                bucketKeyType,
+                bucketFilter,
                 snapshotManager,
                 schemaManager,
                 manifestFileFactory,
@@ -69,20 +61,11 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         this.fieldStatsConverters =
                 new FieldStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)), schemaId);
-        this.keyType = keyType;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
         this.keyFilter = predicate;
-
-        List<Predicate> bucketFilters =
-                pickTransformFieldMapping(
-                        splitAnd(predicate),
-                        keyType.getFieldNames(),
-                        bucketKeyType.getFieldNames());
-        if (bucketFilters.size() > 0) {
-            withBucketKeyFilter(and(bucketFilters));
-        }
+        this.bucketFilter.pushdown(predicate);
         return this;
     }
 

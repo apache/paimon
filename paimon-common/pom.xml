@@ -119,6 +119,12 @@ under the License.
             <version>${antlr4.version}</version>
         </dependency>
 
+        <dependency>
+            <groupId>it.unimi.dsi</groupId>
+            <artifactId>fastutil</artifactId>
+            <version>8.5.12</version>
+        </dependency>
+
         <!-- Test -->
 
         <dependency>
@@ -249,6 +255,7 @@ under the License.
                                 <includes combine.children="append">
                                     <include>org.antlr:antlr4-runtime</include>
                                     <include>org.codehaus.janino:*</include>
+                                    <include>it.unimi.dsi:fastutil</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -274,6 +281,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.codehaus.commons</pattern>
                                     <shadedPattern>org.apache.paimon.shade.org.codehaus.commons</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>it.unimi.dsi.fastutil</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.it.unimi.dsi.fastutil</shadedPattern>
                                 </relocation>
                             </relocations>
                         </configuration>

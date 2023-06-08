@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.action.Action.getTablePath;
+import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 import static org.apache.paimon.flink.action.Action.parseKeyValues;
 
 /**
@@ -122,7 +123,15 @@ public class MergeIntoAction extends TableActionBase {
     @Nullable private String notMatchedInsertValues;
 
     MergeIntoAction(String warehouse, String database, String tableName) {
-        super(warehouse, database, tableName);
+        this(warehouse, database, tableName, Collections.emptyMap());
+    }
+
+    MergeIntoAction(
+            String warehouse,
+            String database,
+            String tableName,
+            Map<String, String> catalogConfig) {
+        super(warehouse, database, tableName, catalogConfig);
 
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
@@ -228,7 +237,10 @@ public class MergeIntoAction extends TableActionBase {
             return Optional.empty();
         }
 
-        MergeIntoAction action = new MergeIntoAction(tablePath.f0, tablePath.f1, tablePath.f2);
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+
+        MergeIntoAction action =
+                new MergeIntoAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
 
         if (params.has("target-as")) {
             action.withTargetAlias(params.get("target-as"));

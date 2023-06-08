@@ -35,6 +35,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.flink.action.Action.getPartitions;
 import static org.apache.paimon.flink.action.Action.getTablePath;
+import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 
 /** Table drop partition action for Flink. */
 public class DropPartitionAction extends TableActionBase {
@@ -48,8 +49,9 @@ public class DropPartitionAction extends TableActionBase {
             String warehouse,
             String databaseName,
             String tableName,
-            List<Map<String, String>> partitions) {
-        super(warehouse, databaseName, tableName);
+            List<Map<String, String>> partitions,
+            Map<String, String> catalogConfig) {
+        super(warehouse, databaseName, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -95,8 +97,11 @@ public class DropPartitionAction extends TableActionBase {
             return Optional.empty();
         }
 
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+
         return Optional.of(
-                new DropPartitionAction(tablePath.f0, tablePath.f1, tablePath.f2, partitions));
+                new DropPartitionAction(
+                        tablePath.f0, tablePath.f1, tablePath.f2, partitions, catalogConfig));
     }
 
     private static void printHelp() {

@@ -66,7 +66,8 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("World")));
         writeData(rowData(2L, BinaryString.fromString("Flink")));
 
-        RollbackToAction action = new RollbackToAction(warehouse, database, tableName, 2);
+        RollbackToAction action =
+                new RollbackToAction(warehouse, database, tableName, 2, Collections.emptyMap());
         action.run();
 
         testBatchRead(

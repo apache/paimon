@@ -27,14 +27,22 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
+import org.apache.paimon.operation.ScanBucketFilter;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.Supplier;
+
+import static org.apache.paimon.predicate.PredicateBuilder.and;
+import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
+import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
@@ -68,6 +76,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
         this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
+    }
+
+    @Override
+    public BucketMode bucketMode() {
+        return options.bucket() == -1 ? BucketMode.DYNAMIC : BucketMode.FIXED;
     }
 
     @Override
@@ -115,10 +128,27 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     private KeyValueFileStoreScan newScan(boolean forWrite) {
+        ScanBucketFilter bucketFilter =
+                new ScanBucketFilter(bucketKeyType) {
+                    @Override
+                    public void pushdown(Predicate keyFilter) {
+                        if (bucketMode() != BucketMode.FIXED) {
+                            return;
+                        }
+
+                        List<Predicate> bucketFilters =
+                                pickTransformFieldMapping(
+                                        splitAnd(keyFilter),
+                                        keyType.getFieldNames(),
+                                        bucketKeyType.getFieldNames());
+                        if (bucketFilters.size() > 0) {
+                            setBucketKeyFilter(and(bucketFilters));
+                        }
+                    }
+                };
         return new KeyValueFileStoreScan(
                 partitionType,
-                bucketKeyType,
-                keyType,
+                bucketFilter,
                 snapshotManager(),
                 schemaManager,
                 schemaId,

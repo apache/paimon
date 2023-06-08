@@ -57,7 +57,8 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                         warehouse,
                         database,
                         tableName,
-                        Collections.singletonList(Collections.singletonMap("partKey0", "0")))
+                        Collections.singletonList(Collections.singletonMap("partKey0", "0")),
+                        Collections.emptyMap())
                 .run();
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -104,7 +105,11 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         partitions1.put("partKey1", "0");
 
         new DropPartitionAction(
-                        warehouse, database, tableName, Arrays.asList(partitions0, partitions1))
+                        warehouse,
+                        database,
+                        tableName,
+                        Arrays.asList(partitions0, partitions1),
+                        Collections.emptyMap())
                 .run();
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());

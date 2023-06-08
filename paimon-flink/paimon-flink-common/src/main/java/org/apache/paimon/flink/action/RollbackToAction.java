@@ -25,9 +25,11 @@ import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.action.Action.getTablePath;
+import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 
 /** Rollback to specific snapshot action for Flink. */
 public class RollbackToAction extends TableActionBase {
@@ -37,8 +39,12 @@ public class RollbackToAction extends TableActionBase {
     private final long snapshotId;
 
     public RollbackToAction(
-            String warehouse, String databaseName, String tableName, long snapshotId) {
-        super(warehouse, databaseName, tableName);
+            String warehouse,
+            String databaseName,
+            String tableName,
+            long snapshotId,
+            Map<String, String> catalogConfig) {
+        super(warehouse, databaseName, tableName, catalogConfig);
         this.snapshotId = snapshotId;
     }
 
@@ -63,9 +69,15 @@ public class RollbackToAction extends TableActionBase {
             throw new IllegalArgumentException("Please specific snapshot.");
         }
 
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+
         RollbackToAction action =
                 new RollbackToAction(
-                        tablePath.f0, tablePath.f1, tablePath.f2, Long.parseLong(snapshot));
+                        tablePath.f0,
+                        tablePath.f1,
+                        tablePath.f2,
+                        Long.parseLong(snapshot),
+                        catalogConfig);
 
         return Optional.of(action);
     }

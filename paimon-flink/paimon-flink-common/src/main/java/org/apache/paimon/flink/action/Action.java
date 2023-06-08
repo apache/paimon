@@ -30,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -170,9 +171,9 @@ public interface Action {
         }
     }
 
-    static Optional<Map<String, String>> getConfigMap(MultipleParameterTool params, String key) {
+    static Map<String, String> optionalConfigMap(MultipleParameterTool params, String key) {
         if (!params.has(key)) {
-            return Optional.empty();
+            return Collections.emptyMap();
         }
 
         Map<String, String> map = new HashMap<>();
@@ -183,9 +184,10 @@ public interface Action {
                 continue;
             }
 
-            System.err.println("Invalid key " + key + ". Please use format 'key=value'");
-            return Optional.empty();
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid argument '%s %s'. Please use format 'key=value'", key, param));
         }
-        return Optional.of(map);
+        return map;
     }
 }

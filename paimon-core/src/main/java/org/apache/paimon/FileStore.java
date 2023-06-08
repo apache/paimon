@@ -26,6 +26,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -45,6 +46,8 @@ public interface FileStore<T> extends Serializable {
     RowType partitionType();
 
     CoreOptions options();
+
+    BucketMode bucketMode();
 
     FileStoreScan newScan();
 

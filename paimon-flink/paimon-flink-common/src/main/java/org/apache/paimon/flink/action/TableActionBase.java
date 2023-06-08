@@ -25,7 +25,6 @@ import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.utils.TableEnvironmentUtils;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataType;
@@ -59,13 +58,12 @@ public abstract class TableActionBase extends ActionBase {
 
     protected Table table;
 
-    TableActionBase(String warehouse, String databaseName, String tableName) {
-        this(warehouse, databaseName, tableName, new Options());
-    }
-
     TableActionBase(
-            String warehouse, String databaseName, String tableName, Options catalogOptions) {
-        super(warehouse, catalogOptions);
+            String warehouse,
+            String databaseName,
+            String tableName,
+            Map<String, String> catalogConfig) {
+        super(warehouse, catalogConfig);
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         batchTEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
 

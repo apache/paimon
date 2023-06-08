@@ -46,7 +46,8 @@ public class FlinkActionITCase extends CatalogITCaseBase {
     public void testDeleteAction() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 'Hi'), (2, 'Hello'), (3, 'World')");
 
-        DeleteAction action = new DeleteAction(path, "default", "T", "k = 1");
+        DeleteAction action =
+                new DeleteAction(path, "default", "T", "k = 1", Collections.emptyMap());
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(sEnv.executeSql("SELECT * FROM T").collect());

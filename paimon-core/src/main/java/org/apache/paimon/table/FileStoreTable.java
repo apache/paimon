@@ -70,6 +70,8 @@ public interface FileStoreTable extends DataTable {
 
     TableSchema schema();
 
+    BucketMode bucketMode();
+
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
 
