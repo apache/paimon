@@ -19,8 +19,8 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.kafka.KafkaLogStoreFactory;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
+import org.apache.paimon.flink.pulsar.PulsarLogStoreFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.Path;
@@ -111,6 +111,6 @@ public class ChangelogModeTest {
     public void testInputChangelogProducerWithLog() throws Exception {
         Options options = new Options();
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
-        test(options, ChangelogMode.upsert(), ChangelogMode.all(), new KafkaLogStoreFactory());
+        test(options, ChangelogMode.upsert(), ChangelogMode.all(), new PulsarLogStoreFactory());
     }
 }
