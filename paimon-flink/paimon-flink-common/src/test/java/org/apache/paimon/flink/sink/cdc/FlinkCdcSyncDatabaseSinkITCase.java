@@ -53,6 +53,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Supplier;
 
 /** IT cases for {@link FlinkCdcSyncDatabaseSinkBuilder}. */
 public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
@@ -65,6 +66,16 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
+        innerTestRandomCdcEvents(() -> ThreadLocalRandom.current().nextInt(5) + 1);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testRandomCdcEventsDynamicBucket() throws Exception {
+        innerTestRandomCdcEvents(() -> -1);
+    }
+
+    private void innerTestRandomCdcEvents(Supplier<Integer> bucket) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numTables = random.nextInt(3) + 1;
@@ -74,7 +85,6 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         int maxSchemaChanges = 10;
         int maxPartitions = 3;
         int maxKeys = 150;
-        int maxBuckets = 5;
 
         String failingName = UUID.randomUUID().toString();
 
@@ -121,7 +131,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                             testTable.initialRowType(),
                             Collections.singletonList("pt"),
                             Arrays.asList("pt", "k"),
-                            random.nextInt(maxBuckets) + 1);
+                            bucket.get());
             fileStoreTables.add(fileStoreTable);
         }
 

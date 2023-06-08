@@ -22,35 +22,29 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.TableWriteOperator;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.DynamicBucketRow;
 
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
 import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
 
 /**
- * A {@link PrepareCommitOperator} to write {@link CdcRecord}. Record schema may change. If current
- * known schema does not fit record schema, this operator will wait for schema changes.
+ * A {@link PrepareCommitOperator} to write {@link CdcRecord} with bucket. Record schema is fixed.
  */
-public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
+public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<CdcRecord, Integer>> {
 
     private static final long serialVersionUID = 1L;
 
-    public static final ConfigOption<Duration> RETRY_SLEEP_TIME =
-            ConfigOptions.key("cdc.retry-sleep-time")
-                    .durationType()
-                    .defaultValue(Duration.ofMillis(500));
-
     private final long retrySleepMillis;
 
-    public CdcRecordStoreWriteOperator(
+    public CdcDynamicBucketWriteOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
@@ -71,13 +65,13 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
     }
 
     @Override
-    public void processElement(StreamRecord<CdcRecord> element) throws Exception {
-        CdcRecord record = element.getValue();
-        Optional<GenericRow> optionalConverted = toGenericRow(record, table.schema().fields());
+    public void processElement(StreamRecord<Tuple2<CdcRecord, Integer>> element) throws Exception {
+        Tuple2<CdcRecord, Integer> record = element.getValue();
+        Optional<GenericRow> optionalConverted = toGenericRow(record.f0, table.schema().fields());
         if (!optionalConverted.isPresent()) {
             while (true) {
                 table = table.copyWithLatestSchema();
-                optionalConverted = toGenericRow(record, table.schema().fields());
+                optionalConverted = toGenericRow(record.f0, table.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;
                 }
@@ -87,7 +81,7 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
         }
 
         try {
-            write.write(optionalConverted.get());
+            write.write(new DynamicBucketRow(optionalConverted.get(), record.f1));
         } catch (Exception e) {
             throw new IOException(e);
         }
