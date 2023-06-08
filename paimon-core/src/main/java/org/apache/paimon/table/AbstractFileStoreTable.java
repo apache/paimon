@@ -29,6 +29,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
@@ -78,6 +80,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public BucketMode bucketMode() {
         return store().bucketMode();
+    }
+
+    public RowKeyExtractor createRowKeyExtractor() {
+        switch (bucketMode()) {
+            case FIXED:
+                return new FixedBucketRowKeyExtractor(schema());
+            case DYNAMIC:
+            case UNAWARE:
+            default:
+                throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
+        }
     }
 
     @Override
