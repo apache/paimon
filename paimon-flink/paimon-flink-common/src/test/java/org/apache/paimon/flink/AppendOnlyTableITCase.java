@@ -59,7 +59,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                                 + "WITH ('bucket' = '-1')"))
                 .hasRootCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
-                        "Cannot define 'bucket-key' or 'primary-key' in non-bucket mode.");
+                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
     }
 
     @Test
@@ -71,7 +71,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                                                 + "WITH ('bucket' = '-1', 'bucket-key' = 'id')"))
                 .hasRootCauseInstanceOf(RuntimeException.class)
                 .hasRootCauseMessage(
-                        "Cannot define 'bucket-key' or 'primary-key' in non-bucket mode.");
+                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
     }
 
     @Test
