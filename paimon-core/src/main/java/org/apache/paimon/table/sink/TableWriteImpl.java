@@ -38,7 +38,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * @param <T> type of record to write into {@link FileStore}.
  */
 public class TableWriteImpl<T>
-        implements InnerTableWrite, Restorable<List<AbstractFileStoreWrite.State>> {
+        implements InnerTableWrite, Restorable<List<AbstractFileStoreWrite.State<T>>> {
 
     private final AbstractFileStoreWrite<T> write;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
@@ -146,12 +146,12 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public List<AbstractFileStoreWrite.State> checkpoint() {
+    public List<AbstractFileStoreWrite.State<T>> checkpoint() {
         return write.checkpoint();
     }
 
     @Override
-    public void restore(List<AbstractFileStoreWrite.State> state) {
+    public void restore(List<AbstractFileStoreWrite.State<T>> state) {
         write.restore(state);
     }
 

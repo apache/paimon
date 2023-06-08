@@ -29,6 +29,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -92,9 +93,10 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
+            @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
             CoreOptions options,
             KeyValueFieldsExtractor extractor) {
-        super(commitUser, snapshotManager, scan, options);
+        super(commitUser, snapshotManager, scan, options, indexFactory);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;
