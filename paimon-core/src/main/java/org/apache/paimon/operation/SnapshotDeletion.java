@@ -273,14 +273,6 @@ public class SnapshotDeletion {
                                 });
     }
 
-    List<ManifestEntry> getAddEntries(Snapshot snapshot) {
-        return snapshot.dataManifests(manifestList).stream()
-                .map(ManifestFileMeta::fileName)
-                .flatMap(file -> manifestFile.read(file).stream())
-                .filter(entry -> entry.kind() == FileKind.ADD)
-                .collect(Collectors.toList());
-    }
-
     private boolean tryDeleteEmptyDirectory(Path path) {
         try {
             fileIO.delete(path, false);
