@@ -288,8 +288,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     }
 
     private List<ManifestEntry> getAddEntries(int index, Snapshot snapshot) {
-        manifestEntries.computeIfAbsent(index, i -> snapshotDeletion.getAddEntries(snapshot));
-        return manifestEntries.get(index);
+        return manifestEntries.computeIfAbsent(
+                index, i -> snapshotDeletion.getAddEntries(snapshot));
     }
 
     private Set<ManifestFileMeta> buildManifestSkippingSet(

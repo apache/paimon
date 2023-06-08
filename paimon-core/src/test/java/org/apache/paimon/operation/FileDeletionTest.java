@@ -294,7 +294,7 @@ public class FileDeletionTest {
     }
 
     @Test
-    public void testExpiringWithUpgradeAndTags() throws Exception {
+    public void testExpireWithUpgradeAndTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
         TagManager tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();

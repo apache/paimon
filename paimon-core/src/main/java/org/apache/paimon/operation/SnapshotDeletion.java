@@ -246,7 +246,7 @@ public class SnapshotDeletion {
                 });
     }
 
-    Iterable<ManifestEntry> getManifestEntriesFromManifestList(String manifestListName) {
+    private Iterable<ManifestEntry> getManifestEntriesFromManifestList(String manifestListName) {
         Queue<String> files =
                 tryReadManifestList(manifestListName).stream()
                         .map(ManifestFileMeta::fileName)
