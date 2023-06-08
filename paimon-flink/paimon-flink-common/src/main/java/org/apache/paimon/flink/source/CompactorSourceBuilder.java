@@ -131,7 +131,7 @@ public class CompactorSourceBuilder {
             {
                 put(
                         CoreOptions.STREAMING_COMPACT.key(),
-                        CoreOptions.StreamingCompactionType.FIX.getValue());
+                        CoreOptions.StreamingCompactionType.NORMAL.getValue());
                 put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), null);
             }
         };

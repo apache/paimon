@@ -142,7 +142,7 @@ public class AppendOnlyTableCompactionCoordinator {
             {
                 put(
                         CoreOptions.STREAMING_COMPACT.key(),
-                        CoreOptions.StreamingCompactionType.UNAWARE.getValue());
+                        CoreOptions.StreamingCompactionType.BUCKET_UNAWARE.getValue());
             }
         };
     }

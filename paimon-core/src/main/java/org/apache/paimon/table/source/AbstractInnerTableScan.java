@@ -68,14 +68,14 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
         CoreOptions.StreamingCompactionType type =
                 options.toConfiguration().get(CoreOptions.STREAMING_COMPACT);
         switch (type) {
-            case FIX:
+            case NORMAL:
                 {
                     Preconditions.checkArgument(
                             isStreaming,
                             "Set 'streaming-compact' in batch mode. This is unexpected.");
                     return new ContinuousCompactorStartingScanner();
                 }
-            case UNAWARE:
+            case BUCKET_UNAWARE:
                 {
                     return new FullStartingScanner();
                 }
