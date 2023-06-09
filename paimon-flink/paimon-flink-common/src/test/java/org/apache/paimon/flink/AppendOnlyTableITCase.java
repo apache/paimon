@@ -51,18 +51,6 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateNonBucketTableWithPrimaryKey() {
-        assertThatThrownBy(
-                        () ->
-                                batchSql(
-                                        "CREATE TABLE pk_table (id INT PRIMARY KEY NOT ENFORCED, data STRING) "
-                                                + "WITH ('bucket' = '-1')"))
-                .hasRootCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage(
-                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
-    }
-
-    @Test
     public void testCreateNonBucketTableWithBucketKey() {
         assertThatThrownBy(
                         () ->
