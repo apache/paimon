@@ -22,10 +22,11 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamTableScan;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -56,7 +57,7 @@ public class AppendOnlyTableCompactionCoordinator {
     protected static final int REMOVE_AGE = 10;
     protected static final int COMPACT_AGE = 5;
 
-    private final StreamTableScan scan;
+    private final InnerStreamTableScan scan;
     private final long targetFileSize;
     private final int minFileNum;
     private final int maxFileNum;
@@ -80,6 +81,10 @@ public class AppendOnlyTableCompactionCoordinator {
         }
 
         return Collections.emptyList();
+    }
+
+    public void withFilter(Predicate filter) {
+        scan.withFilter(filter);
     }
 
     @VisibleForTesting
