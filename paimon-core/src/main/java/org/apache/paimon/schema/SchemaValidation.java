@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
@@ -142,6 +143,11 @@ public class SchemaValidation {
             throw new RuntimeException(
                     "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
                             + "still want to keep the primary key definition.");
+        }
+
+        if (options.bucket() == -1 && options.toMap().get(BUCKET_KEY.key()) != null) {
+            throw new RuntimeException(
+                    "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
         }
 
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {

@@ -75,7 +75,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                             "Set 'streaming-compact' in batch mode. This is unexpected.");
                     return new ContinuousCompactorStartingScanner();
                 }
-            case NON_BUCKET:
+            case BUCKET_UNAWARE:
                 {
                     return new FullStartingScanner();
                 }

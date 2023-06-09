@@ -32,6 +32,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
 import org.apache.paimon.table.source.InnerTableScan;
@@ -87,7 +88,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             case FIXED:
                 return new FixedBucketRowKeyExtractor(schema());
             case DYNAMIC:
+                // todo: dynamic bucket table need to check current bucket, when full, return the
+                // next one.
+                throw new UnsupportedOperationException("Not supported yet.");
             case UNAWARE:
+                return new UnawareBucketRowKeyExtractor(schema());
             default:
                 throw new UnsupportedOperationException("Unsupported mode: " + bucketMode());
         }
