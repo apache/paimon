@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,7 @@ import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -61,6 +63,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
 
+    private final TagFileKeeper tagFileKeeper;
+
     private Lock lock;
 
     public FileStoreExpireImpl(
@@ -81,7 +85,11 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                         fileIO,
                         pathFactory,
                         manifestFileFactory.create(),
-                        manifestListFactory.create()));
+                        manifestListFactory.create()),
+                new TagFileKeeper(
+                        manifestListFactory.create(),
+                        manifestFileFactory.create(),
+                        new TagManager(fileIO, snapshotManager.tablePath())));
     }
 
     public FileStoreExpireImpl(
@@ -89,7 +97,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             int numRetainedMax,
             long millisRetained,
             SnapshotManager snapshotManager,
-            SnapshotDeletion snapshotDeletion) {
+            SnapshotDeletion snapshotDeletion,
+            TagFileKeeper tagFileKeeper) {
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
@@ -97,6 +106,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.snapshotDeletion = snapshotDeletion;
+        this.tagFileKeeper = tagFileKeeper;
     }
 
     @Override
@@ -171,6 +181,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
         }
 
+        tagFileKeeper.reloadTags();
+
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
@@ -181,7 +193,10 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             // expire merge tree files and collect changed buckets
-            snapshotDeletion.deleteExpiredDataFiles(snapshot.deltaManifestList(), deletionBuckets);
+            snapshotDeletion.deleteExpiredDataFiles(
+                    snapshot.deltaManifestList(),
+                    deletionBuckets,
+                    tagFileKeeper.tagDataFileSkipper(id));
         }
 
         // delete changelog files
@@ -201,11 +216,13 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         snapshotDeletion.tryDeleteDirectories(deletionBuckets);
 
         // delete manifests
-        Set<ManifestFileMeta> skipDeletion =
-                new HashSet<>(
-                        snapshotManager
-                                .snapshot(endExclusiveId)
-                                .dataManifests(snapshotDeletion.manifestList()));
+        Set<String> skipDeletion =
+                snapshotManager.snapshot(endExclusiveId)
+                        .dataManifests(snapshotDeletion().manifestList()).stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toCollection(HashSet::new));
+        skipDeletion.addAll(
+                tagFileKeeper.collectManifestSkippingSet(beginInclusiveId, endExclusiveId));
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete manifests in snapshot #" + id);
