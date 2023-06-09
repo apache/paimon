@@ -90,7 +90,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
         // expire
         expire.snapshotDeletion()
-                .doDeleteExpiredDataFiles(Arrays.asList(add, delete), new HashMap<>(), e -> false);
+                .doDeleteExpiredDataFiles(Arrays.asList(add, delete), new HashMap<>(), f -> false);
 
         // check
         assertThat(fileIO.exists(myDataFile)).isFalse();

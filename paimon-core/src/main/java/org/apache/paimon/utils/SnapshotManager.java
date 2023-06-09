@@ -43,6 +43,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
@@ -369,10 +370,12 @@ public class SnapshotManager implements Serializable {
         deletion.tryDeleteDirectories(deletionBuckets);
 
         // delete manifest files.
-        Set<ManifestFileMeta> manifestSkipped =
-                new HashSet<>(snapshot(snapshotId).dataManifests(deletion.manifestList()));
+        Set<String> manifestSkipped =
+                snapshot(snapshotId).dataManifests(deletion.manifestList()).stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toCollection(HashSet::new));
         for (Snapshot snapshot : snapshots) {
-            deletion.deleteManifestFiles(manifestSkipped, snapshot, true);
+            deletion.deleteManifestFiles(manifestSkipped, snapshot);
         }
     }
 }

@@ -35,7 +35,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -64,7 +63,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
 
-    private final TagDataFileList tagDataFileList;
+    private final TagFileKeeper tagFileKeeper;
 
     private Lock lock;
 
@@ -87,7 +86,10 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                         pathFactory,
                         manifestFileFactory.create(),
                         manifestListFactory.create()),
-                new TagDataFileList(manifestListFactory.create(), manifestFileFactory.create()));
+                new TagFileKeeper(
+                        manifestListFactory.create(),
+                        manifestFileFactory.create(),
+                        new TagManager(fileIO, snapshotManager.tablePath())));
     }
 
     public FileStoreExpireImpl(
@@ -96,7 +98,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             long millisRetained,
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
-            TagDataFileList tagDataFileList) {
+            TagFileKeeper tagFileKeeper) {
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
@@ -104,7 +106,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.snapshotDeletion = snapshotDeletion;
-        this.tagDataFileList = tagDataFileList;
+        this.tagFileKeeper = tagFileKeeper;
     }
 
     @Override
@@ -174,18 +176,12 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 break;
             }
         }
-
-        TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
-
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
-            LOG.debug(
-                    "Current tagged snapshots are: {}",
-                    taggedSnapshots.stream().map(Snapshot::id).collect(Collectors.toList()));
         }
+
+        tagFileKeeper.reloadTags();
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
@@ -197,14 +193,10 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             // expire merge tree files and collect changed buckets
-            int index = findPreviousTag(id, taggedSnapshots);
-            if (index >= 0) {
-                tagDataFileList.tryRefresh(taggedSnapshots.get(index));
-            }
             snapshotDeletion.deleteExpiredDataFiles(
                     snapshot.deltaManifestList(),
                     deletionBuckets,
-                    entry -> index >= 0 && tagDataFileList.contains(entry));
+                    tagFileKeeper.tagDataFileSkipper(id));
         }
 
         // delete changelog files
@@ -224,21 +216,20 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         snapshotDeletion.tryDeleteDirectories(deletionBuckets);
 
         // delete manifests
-        Set<ManifestFileMeta> skipDeletion =
-                new HashSet<>(
-                        snapshotManager
-                                .snapshot(endExclusiveId)
-                                .dataManifests(snapshotDeletion.manifestList()));
+        Set<String> skipDeletion =
+                snapshotManager.snapshot(endExclusiveId)
+                        .dataManifests(snapshotDeletion().manifestList()).stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toCollection(HashSet::new));
         skipDeletion.addAll(
-                collectManifestFilesFromTags(beginInclusiveId, endExclusiveId, taggedSnapshots));
+                tagFileKeeper.collectManifestSkippingSet(beginInclusiveId, endExclusiveId));
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete manifests in snapshot #" + id);
             }
 
             Snapshot snapshot = snapshotManager.snapshot(id);
-            snapshotDeletion.deleteManifestFiles(
-                    skipDeletion, snapshot, !taggedSnapshots.contains(snapshot));
+            snapshotDeletion.deleteManifestFiles(skipDeletion, snapshot);
 
             // delete snapshot last
             snapshotManager.fileIO().deleteQuietly(snapshotManager.snapshotPath(id));
@@ -270,37 +261,5 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     @VisibleForTesting
     SnapshotDeletion snapshotDeletion() {
         return snapshotDeletion;
-    }
-
-    private int findPreviousOrEqualTag(long targetSnapshotId, List<Snapshot> taggedSnapshots) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() <= targetSnapshotId) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private int findPreviousTag(long targetSnapshotId, List<Snapshot> taggedSnapshots) {
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() < targetSnapshotId) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private Set<ManifestFileMeta> collectManifestFilesFromTags(
-            long beginInclusive, long endExclusive, List<Snapshot> taggedSnapshots) {
-        Set<ManifestFileMeta> manifests = new HashSet<>();
-        int right = findPreviousTag(endExclusive, taggedSnapshots);
-        if (right >= 0) {
-            int left = Math.max(findPreviousOrEqualTag(beginInclusive, taggedSnapshots), 0);
-            for (int i = left; i <= right; i++) {
-                Snapshot snapshot = taggedSnapshots.get(i);
-                manifests.addAll(snapshot.dataManifests(snapshotDeletion().manifestList()));
-            }
-        }
-        return manifests;
     }
 }
