@@ -105,7 +105,8 @@ public class UnawareBucketCompactionTopologyBuilder implements Serializable {
         source.withScanInterval(scanInterval);
         source.withFilter(getPartitionFilter());
 
-        final StreamSource sourceOperator = new StreamSource(source);
+        final StreamSource<AppendOnlyCompactionTask, UnawareBucketSourceFunction> sourceOperator =
+                new StreamSource<>(source);
         return new DataStreamSource<>(
                 env,
                 new CompactionTaskTypeInfo(),
