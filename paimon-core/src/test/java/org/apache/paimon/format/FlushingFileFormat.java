@@ -69,6 +69,11 @@ public class FlushingFileFormat extends FileFormat {
                 public void finish() throws IOException {
                     wrapped.finish();
                 }
+
+                @Override
+                public long length() throws IOException {
+                    return wrapped.length();
+                }
             };
         };
     }

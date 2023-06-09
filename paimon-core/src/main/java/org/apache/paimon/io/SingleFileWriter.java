@@ -119,7 +119,7 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         if (closed) {
             return length;
         } else {
-            return out.getPos();
+            return writer.length();
         }
     }
 

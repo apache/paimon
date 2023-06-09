@@ -20,11 +20,22 @@ package org.apache.paimon.format.orc.writer;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.format.orc.EstimateOrcAvgWidthVisitor;
+import org.apache.paimon.format.orc.OrcSchemaVisitor;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
+import org.apache.orc.OrcProto;
+import org.apache.orc.OrcUtils;
+import org.apache.orc.StripeInformation;
 import org.apache.orc.Writer;
+import org.apache.orc.impl.writer.TreeWriter;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.Collections;
+import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -34,6 +45,9 @@ public class OrcBulkWriter implements FormatWriter {
     private final Writer writer;
     private final Vectorizer<InternalRow> vectorizer;
     private final VectorizedRowBatch rowBatch;
+    private final int avgRowByteSize;
+    private final TreeWriter treeWriter;
+    private final List<OrcProto.StripeInformation> stripes;
 
     public OrcBulkWriter(Vectorizer<InternalRow> vectorizer, Writer writer) {
         this.vectorizer = checkNotNull(vectorizer);
@@ -43,6 +57,14 @@ public class OrcBulkWriter implements FormatWriter {
         // Configure the vectorizer with the writer so that users can add
         // metadata on the fly through the Vectorizer#vectorize(...) method.
         this.vectorizer.setWriter(this.writer);
+        this.avgRowByteSize =
+                OrcSchemaVisitor.visitSchema(writer.getSchema(), new EstimateOrcAvgWidthVisitor())
+                        .stream()
+                        .reduce(Integer::sum)
+                        .orElse(0);
+        // TODO: Turn to access these hidden field directly after upgrade to ORC 1.7.4
+        this.treeWriter = getHiddenFiledInORC("treeWriter");
+        this.stripes = getHiddenFiledInORC("stripes");
     }
 
     @Override
@@ -66,5 +88,44 @@ public class OrcBulkWriter implements FormatWriter {
     public void finish() throws IOException {
         flush();
         writer.close();
+    }
+
+    @Override
+    public long length() throws IOException {
+        long estimateMemory = treeWriter.estimateMemory();
+
+        long dataLength = 0;
+        List<StripeInformation> stripes =
+                Collections.unmodifiableList(OrcUtils.convertProtoStripesToStripes(this.stripes));
+        if (!stripes.isEmpty()) {
+            StripeInformation stripeInformation = stripes.get(stripes.size() - 1);
+            dataLength =
+                    stripeInformation != null
+                            ? stripeInformation.getOffset() + stripeInformation.getLength()
+                            : 0;
+        }
+
+        // This value is estimated, not actual.
+        return (long)
+                Math.ceil(
+                        dataLength
+                                + (estimateMemory + (long) rowBatch.size * avgRowByteSize) * 0.2);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T getHiddenFiledInORC(String fieldName) {
+        try {
+            Field treeWriterField = writer.getClass().getDeclaredField(fieldName);
+            AccessController.doPrivileged(
+                    (PrivilegedAction<Void>)
+                            () -> {
+                                treeWriterField.setAccessible(true);
+                                return null;
+                            });
+            return (T) treeWriterField.get(writer);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Cannot get " + fieldName + " from " + writer.getClass().getName(), e);
+        }
     }
 }

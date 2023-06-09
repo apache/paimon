@@ -30,13 +30,14 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.File;
 import java.io.IOException;
 
+import static org.apache.paimon.CoreOptions.FileFormatType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link RollingFileWriter}. */
@@ -55,9 +56,8 @@ public class RollingFileWriterTest {
 
     private RollingFileWriter<InternalRow, DataFileMeta> rollingFileWriter;
 
-    @BeforeEach
-    public void beforeEach() {
-        FileFormat fileFormat = FileFormat.fromIdentifier("avro", new Options());
+    public void initialize(String identifier) {
+        FileFormat fileFormat = FileFormat.fromIdentifier(identifier, new Options());
         rollingFileWriter =
                 new RollingFileWriter<>(
                         () ->
@@ -80,8 +80,10 @@ public class RollingFileWriterTest {
                         TARGET_FILE_SIZE);
     }
 
-    @Test
-    public void testRolling() throws IOException {
+    @ParameterizedTest
+    @EnumSource(FileFormatType.class)
+    public void testRolling(FileFormatType formatType) throws IOException {
+        initialize(formatType.toString());
         for (int i = 0; i < 3000; i++) {
             rollingFileWriter.write(GenericRow.of(i));
             if (i < 1000) {

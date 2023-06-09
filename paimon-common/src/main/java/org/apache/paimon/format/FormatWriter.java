@@ -60,4 +60,13 @@ public interface FormatWriter {
      * @throws IOException Thrown if the finalization fails.
      */
     void finish() throws IOException;
+
+    /**
+     * Returns the number of bytes that were currently written by this writer.
+     *
+     * <p>NOTE: This is an estimated value.
+     *
+     * @return the number of written bytes
+     */
+    long length() throws IOException;
 }
