@@ -165,7 +165,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 {
                     return new ContinuousCompactorFollowUpScanner();
                 }
-            case NON_BUCKET:
+            case BUCKET_UNAWARE:
                 {
                     return new ContinuousAppendAndCompactFollowUpScanner();
                 }
