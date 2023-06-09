@@ -59,8 +59,9 @@ import java.util.UUID;
  */
 public class UnawareBucketCompactionTopologyBuilder {
 
+    private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
     private static final String COMPACTION_WORKER_NAME = "Compaction Worker";
-    private static final String GLOBAL_COMMITTER_NAME = "Compaction Committer";
+    private static final String COMPACTION_COMMITTER_NAME = "Compaction Committer";
 
     private transient StreamExecutionEnvironment env;
     private final String tableIdentifier;
@@ -102,7 +103,7 @@ public class UnawareBucketCompactionTopologyBuilder {
         source.withFilter(getPartitionFilter());
         return env.addSource(
                         source,
-                        "Compaction Coordinator Source -> " + tableIdentifier,
+                        COMPACTION_COORDINATOR_NAME + " -> " + tableIdentifier,
                         new CompactionTaskTypeInfo())
                 .setParallelism(1);
     }
@@ -141,7 +142,7 @@ public class UnawareBucketCompactionTopologyBuilder {
         SingleOutputStreamOperator<?> committed =
                 compacted
                         .transform(
-                                GLOBAL_COMMITTER_NAME + " -> " + table.name(),
+                                COMPACTION_COMMITTER_NAME + " -> " + table.name(),
                                 committableTypeInfo,
                                 new CommitterOperator(
                                         streamingCheckpointEnabled,
