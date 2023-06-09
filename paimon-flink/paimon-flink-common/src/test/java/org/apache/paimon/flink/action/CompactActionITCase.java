@@ -264,7 +264,7 @@ public class CompactActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testNonBucketBatchCompact() throws Exception {
+    public void testUnawareBucketBatchCompact() throws Exception {
         Map<String, String> options = new HashMap<>();
         // test that dedicated compact job will expire snapshots
         options.put(CoreOptions.BUCKET.key(), "-1");

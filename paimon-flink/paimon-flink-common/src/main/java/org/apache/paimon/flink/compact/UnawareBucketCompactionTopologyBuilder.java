@@ -36,14 +36,17 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.utils.SerializableFunction;
 
+import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
+import org.apache.flink.streaming.api.operators.StreamSource;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -57,7 +60,7 @@ import java.util.UUID;
  * snapshot. We need to enable checkpoint for this compaction job, checkpoint will trigger committer
  * stage to commit all the compacted files.
  */
-public class UnawareBucketCompactionTopologyBuilder {
+public class UnawareBucketCompactionTopologyBuilder implements Serializable {
 
     private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
     private static final String COMPACTION_WORKER_NAME = "Compaction Worker";
@@ -101,11 +104,15 @@ public class UnawareBucketCompactionTopologyBuilder {
         source.withStreaming(isContinuous);
         source.withScanInterval(scanInterval);
         source.withFilter(getPartitionFilter());
-        return env.addSource(
-                        source,
-                        COMPACTION_COORDINATOR_NAME + " -> " + tableIdentifier,
-                        new CompactionTaskTypeInfo())
-                .setParallelism(1);
+
+        final StreamSource sourceOperator = new StreamSource(source);
+        return new DataStreamSource<>(
+                env,
+                new CompactionTaskTypeInfo(),
+                sourceOperator,
+                false,
+                COMPACTION_COORDINATOR_NAME + " -> " + tableIdentifier,
+                isContinuous ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED);
     }
 
     private void sinkFromSource(DataStreamSource<AppendOnlyCompactionTask> input) {
@@ -121,9 +128,6 @@ public class UnawareBucketCompactionTopologyBuilder {
                 isContinuous && checkpointConfig.isCheckpointingEnabled();
         if (streamingCheckpointEnabled) {
             FlinkSink.assertCheckpointConfiguration(env);
-        } else {
-            throw new RuntimeException(
-                    "We must enable checkpoint in unaware bucket compaction job.");
         }
 
         // compaction worker stage, to execute compaction tasks
