@@ -84,7 +84,7 @@ public class SnapshotDeletion {
     public void deleteExpiredDataFiles(
             String manifestListName,
             Map<BinaryRow, Set<Integer>> deletionBuckets,
-            Predicate<TagFileKeeper.DataFileInfo> dataFileSkipper) {
+            Predicate<ManifestEntry> dataFileSkipper) {
         doDeleteExpiredDataFiles(
                 getManifestEntriesFromManifestList(manifestListName),
                 deletionBuckets,
@@ -206,11 +206,11 @@ public class SnapshotDeletion {
     void doDeleteExpiredDataFiles(
             Iterable<ManifestEntry> dataFileLog,
             Map<BinaryRow, Set<Integer>> deletionBuckets,
-            Predicate<TagFileKeeper.DataFileInfo> dataFileSkipper) {
+            Predicate<ManifestEntry> dataFileSkipper) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
-        // data file path -> (data file info, extra file paths)
-        Map<Path, Pair<TagFileKeeper.DataFileInfo, List<Path>>> dataFileToDelete = new HashMap<>();
+        // data file path -> (original manifest entry, extra file paths)
+        Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete = new HashMap<>();
         for (ManifestEntry entry : dataFileLog) {
             Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
             Path dataFilePath = new Path(bucketPath, entry.file().fileName());
@@ -223,9 +223,7 @@ public class SnapshotDeletion {
                     for (String file : entry.file().extraFiles()) {
                         extraFiles.add(new Path(bucketPath, file));
                     }
-                    dataFileToDelete.put(
-                            dataFilePath,
-                            Pair.of(TagFileKeeper.DataFileInfo.of(entry), extraFiles));
+                    dataFileToDelete.put(dataFilePath, Pair.of(entry, extraFiles));
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -235,16 +233,16 @@ public class SnapshotDeletion {
 
         dataFileToDelete.forEach(
                 (path, pair) -> {
-                    TagFileKeeper.DataFileInfo info = pair.getLeft();
+                    ManifestEntry entry = pair.getLeft();
                     // check whether we should skip the data file
-                    if (!dataFileSkipper.test(info)) {
+                    if (!dataFileSkipper.test(entry)) {
                         // delete data files
                         fileIO.deleteQuietly(path);
                         pair.getRight().forEach(fileIO::deleteQuietly);
                         // record changed buckets
                         deletionBuckets
-                                .computeIfAbsent(info.partition, p -> new HashSet<>())
-                                .add(info.bucket);
+                                .computeIfAbsent(entry.partition(), p -> new HashSet<>())
+                                .add(entry.bucket());
                     }
                 });
     }

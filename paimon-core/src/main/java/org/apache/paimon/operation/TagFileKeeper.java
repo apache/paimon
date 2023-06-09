@@ -60,12 +60,12 @@ public class TagFileKeeper {
         taggedSnapshots = tagManager.taggedSnapshots();
     }
 
-    public Predicate<DataFileInfo> tagDataFileSkipper(long expiringSnapshotId) {
+    public Predicate<ManifestEntry> tagDataFileSkipper(long expiringSnapshotId) {
         int index = findPreviousTag(expiringSnapshotId, taggedSnapshots);
         if (index >= 0) {
             tryRefresh(taggedSnapshots.get(index));
         }
-        return dataFileInfo -> index >= 0 && contains(dataFileInfo);
+        return entry -> index >= 0 && contains(entry);
     }
 
     public Set<String> collectManifestSkippingSet(long beginInclusive, long endExclusive) {
@@ -114,12 +114,12 @@ public class TagFileKeeper {
         }
     }
 
-    private boolean contains(DataFileInfo dataFileInfo) {
-        Map<Integer, Set<String>> buckets = cachedTagDataFiles.get(dataFileInfo.partition);
+    private boolean contains(ManifestEntry entry) {
+        Map<Integer, Set<String>> buckets = cachedTagDataFiles.get(entry.partition());
         if (buckets != null) {
-            Set<String> fileNames = buckets.get(dataFileInfo.bucket);
+            Set<String> fileNames = buckets.get(entry.bucket());
             if (fileNames != null) {
-                return fileNames.contains(dataFileInfo.fileName);
+                return fileNames.contains(entry.file().fileName());
             }
         }
         return false;
@@ -141,26 +141,5 @@ public class TagFileKeeper {
             }
         }
         return -1;
-    }
-
-    /** To accommodate information of a data file. */
-    static class DataFileInfo {
-
-        public final BinaryRow partition;
-        public final int bucket;
-        public final String fileName;
-
-        DataFileInfo(BinaryRow partition, int bucket, String fileName) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.fileName = fileName;
-        }
-
-        static DataFileInfo of(ManifestEntry manifestEntry) {
-            return new DataFileInfo(
-                    manifestEntry.partition(),
-                    manifestEntry.bucket(),
-                    manifestEntry.file().fileName());
-        }
     }
 }
