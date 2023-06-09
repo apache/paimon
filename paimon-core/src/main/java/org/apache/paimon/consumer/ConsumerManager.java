@@ -109,10 +109,12 @@ public class ConsumerManager implements Serializable {
             }
 
             for (FileStatus status : statuses) {
-                LocalDateTime modificationTime =
-                        DateTimeUtils.toLocalDateTime(status.getModificationTime());
-                if (expireDateTime.isAfter(modificationTime)) {
-                    fileIO.deleteQuietly(status.getPath());
+                if (isConsumerFile(status.getPath().getName())) {
+                    LocalDateTime modificationTime =
+                            DateTimeUtils.toLocalDateTime(status.getModificationTime());
+                    if (expireDateTime.isAfter(modificationTime)) {
+                        fileIO.deleteQuietly(status.getPath());
+                    }
                 }
             }
         } catch (IOException e) {
@@ -126,5 +128,9 @@ public class ConsumerManager implements Serializable {
 
     private Path consumerPath(String consumerId) {
         return new Path(tablePath + "/consumer/" + CONSUMER_PREFIX + consumerId);
+    }
+
+    private boolean isConsumerFile(String file) {
+        return file.startsWith(CONSUMER_PREFIX);
     }
 }

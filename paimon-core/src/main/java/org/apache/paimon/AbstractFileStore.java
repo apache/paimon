@@ -19,12 +19,10 @@
 package org.apache.paimon;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.operation.ConsumerExpire;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
@@ -182,18 +180,5 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.partitionTimestampFormatter(),
                 newScan(),
                 newCommit(commitUser));
-    }
-
-    @Override
-    public ConsumerExpire newConsumerExpire() {
-        Duration consumerExpireTime = options.consumerExpireTime();
-        if (consumerExpireTime == null) {
-            return null;
-        }
-
-        return new ConsumerExpire(
-                consumerExpireTime,
-                options.consumerExpireCheckInterval(),
-                new ConsumerManager(fileIO, options.path()));
     }
 }

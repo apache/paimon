@@ -648,12 +648,6 @@ public class CoreOptions implements Serializable {
                             "The expiration interval of consumer files. A consumer file will be expired if "
                                     + "it's lifetime after last modification is over this value.");
 
-    public static final ConfigOption<Duration> CONSUMER_EXPIRATION_CHECK_INTERVAL =
-            key("consumer.expiration-check-interval")
-                    .durationType()
-                    .defaultValue(Duration.ofHours(1))
-                    .withDescription("The check interval of consumer files expiration.");
-
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -942,10 +936,6 @@ public class CoreOptions implements Serializable {
 
     public Duration consumerExpireTime() {
         return options.get(CONSUMER_EXPIRATION_TIME);
-    }
-
-    public Duration consumerExpireCheckInterval() {
-        return options.get(CONSUMER_EXPIRATION_CHECK_INTERVAL);
     }
 
     /** Specifies the merge engine for table with primary key. */
