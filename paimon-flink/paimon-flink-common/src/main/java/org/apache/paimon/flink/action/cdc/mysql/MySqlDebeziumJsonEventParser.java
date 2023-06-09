@@ -33,7 +33,6 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,12 +66,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
 
+    private JsonNode root;
     private JsonNode payload;
-
-    // key is tableName,value is a map:key is columnName value is columnType.
-    private Map<String, Map<String, String>> mySqlFieldTypesMap = Maps.newConcurrentMap();
-    // key is tableName,value is a map:key is columnName value is columnClass.
-    private Map<String, Map<String, String>> fieldClassNamesMap = Maps.newConcurrentMap();
 
     public MySqlDebeziumJsonEventParser(
             ZoneId serverTimeZone, boolean caseSensitive, List<ComputedColumn> computedColumns) {
@@ -98,18 +93,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     @Override
     public void setRawEvent(String rawEvent) {
         try {
-            JsonNode root = objectMapper.readValue(rawEvent, JsonNode.class);
-            JsonNode schema =
-                    Preconditions.checkNotNull(
-                            root.get("schema"),
-                            "MySqlDebeziumJsonEventParser only supports debezium JSON with schema. "
-                                    + "Please make sure that `includeSchema` is true "
-                                    + "in the JsonDebeziumDeserializationSchema you created");
+            root = objectMapper.readValue(rawEvent, JsonNode.class);
             payload = root.get("payload");
-
-            if (!mySqlFieldTypesMap.containsKey(parseTableName())) {
-                updateFieldTypes(schema);
-            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -119,31 +104,6 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     public String parseTableName() {
         String tableName = payload.get("source").get("table").asText();
         return tableNameConverter.convert(tableName);
-    }
-
-    private void updateFieldTypes(JsonNode schema) {
-        Map<String, String> mySqlFieldTypes = new HashMap<>();
-        Map<String, String> fieldClassNames = new HashMap<>();
-        JsonNode arrayNode = schema.get("fields");
-        for (int i = 0; i < arrayNode.size(); i++) {
-            JsonNode elementNode = arrayNode.get(i);
-            String field = elementNode.get("field").asText();
-            if ("before".equals(field) || "after".equals(field)) {
-                JsonNode innerArrayNode = elementNode.get("fields");
-                for (int j = 0; j < innerArrayNode.size(); j++) {
-                    JsonNode innerElementNode = innerArrayNode.get(j);
-                    String fieldName = innerElementNode.get("field").asText();
-                    String fieldType = innerElementNode.get("type").asText();
-                    mySqlFieldTypes.put(fieldName, fieldType);
-                    if (innerElementNode.get("name") != null) {
-                        String className = innerElementNode.get("name").asText();
-                        fieldClassNames.put(fieldName, className);
-                    }
-                }
-            }
-        }
-        mySqlFieldTypesMap.put(parseTableName(), mySqlFieldTypes);
-        fieldClassNamesMap.put(parseTableName(), fieldClassNames);
     }
 
     private boolean isSchemaChange() {
@@ -198,8 +158,6 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String fieldName = column.get("name").asText();
             result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
         }
-        mySqlFieldTypesMap.remove(parseTableName());
-        fieldClassNamesMap.remove(parseTableName());
         return result;
     }
 
@@ -227,6 +185,34 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
+        JsonNode schema =
+                Preconditions.checkNotNull(
+                        root.get("schema"),
+                        "MySqlDebeziumJsonEventParser only supports debezium JSON with schema. "
+                                + "Please make sure that `includeSchema` is true "
+                                + "in the JsonDebeziumDeserializationSchema you created");
+
+        Map<String, String> mySqlFieldTypes = new HashMap<>();
+        Map<String, String> fieldClassNames = new HashMap<>();
+        JsonNode arrayNode = schema.get("fields");
+        for (int i = 0; i < arrayNode.size(); i++) {
+            JsonNode elementNode = arrayNode.get(i);
+            String field = elementNode.get("field").asText();
+            if ("before".equals(field) || "after".equals(field)) {
+                JsonNode innerArrayNode = elementNode.get("fields");
+                for (int j = 0; j < innerArrayNode.size(); j++) {
+                    JsonNode innerElementNode = innerArrayNode.get(j);
+                    String fieldName = innerElementNode.get("field").asText();
+                    String fieldType = innerElementNode.get("type").asText();
+                    mySqlFieldTypes.put(fieldName, fieldType);
+                    if (innerElementNode.get("name") != null) {
+                        String className = innerElementNode.get("name").asText();
+                        fieldClassNames.put(fieldName, className);
+                    }
+                }
+            }
+        }
+
         // the geometry, point type can not be converted to string, so we convert it to Object
         // first.
         Map<String, Object> jsonMap =
@@ -234,8 +220,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         if (jsonMap == null) {
             return new HashMap<>();
         }
-        Map<String, String> mySqlFieldTypes = mySqlFieldTypesMap.get(parseTableName());
-        Map<String, String> fieldClassNames = fieldClassNamesMap.get(parseTableName());
+
         Map<String, String> resultMap = new HashMap<>();
         for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
             String fieldName = field.getKey();
