@@ -640,7 +640,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         try (Connection conn =
                 DriverManager.getConnection(
-                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                        MYSQL_CONTAINER.getJdbcUrl("paimon_sync_database_newly_added_tables"),
                         MYSQL_CONTAINER.getUsername(),
                         MYSQL_CONTAINER.getPassword())) {
             try (Statement statement = conn.createStatement()) {
@@ -659,7 +659,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         FileStoreTable table1 = getFileStoreTable("t1");
         FileStoreTable table2 = getFileStoreTable("t2");
 
-        statement.executeUpdate("USE paimon_sync_database");
+        statement.executeUpdate("USE paimon_sync_database_newly_added_tables");
 
         statement.executeUpdate("INSERT INTO t1 VALUES (1, 'one')");
         statement.executeUpdate("INSERT INTO t2 VALUES (2, 'two', 20, 200)");
@@ -831,7 +831,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             throws Exception {
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("database-name", "paimon_sync_database_newly_added_tables");
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(2);
         env.enableCheckpointing(1000);
