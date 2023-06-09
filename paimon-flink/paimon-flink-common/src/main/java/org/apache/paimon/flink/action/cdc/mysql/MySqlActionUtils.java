@@ -254,7 +254,11 @@ class MySqlActionUtils {
         customConverterConfigs.put(JsonConverterConfig.DECIMAL_FORMAT_CONFIG, "numeric");
         JsonDebeziumDeserializationSchema schema =
                 new JsonDebeziumDeserializationSchema(true, customConverterConfigs);
-        return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
+        return sourceBuilder
+                .deserializer(schema)
+                .includeSchemaChanges(true)
+                .scanNewlyAddedTableEnabled(true)
+                .build();
     }
 
     private static void validateMySqlConfig(Configuration mySqlConfig) {
