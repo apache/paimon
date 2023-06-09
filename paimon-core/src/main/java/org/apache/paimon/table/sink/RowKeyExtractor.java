@@ -27,8 +27,7 @@ import org.apache.paimon.schema.TableSchema;
 /** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
 public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalRow> {
 
-    private final Projection partitionProjection;
-    private final Projection trimmedPrimaryKeyProjection;
+    private final RowPartitionKeyExtractor partitionKeyExtractor;
     private final Projection logPrimaryKeyProjection;
 
     protected InternalRow record;
@@ -38,12 +37,7 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     private BinaryRow logPrimaryKey;
 
     public RowKeyExtractor(TableSchema schema) {
-        partitionProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.partitionKeys()));
-        trimmedPrimaryKeyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.trimmedPrimaryKeys()));
+        partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
         logPrimaryKeyProjection =
                 CodeGenUtils.newProjection(
                         schema.logicalRowType(), schema.projection(schema.primaryKeys()));
@@ -60,7 +54,7 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     @Override
     public BinaryRow partition() {
         if (partition == null) {
-            partition = partitionProjection.apply(record);
+            partition = partitionKeyExtractor.partition(record);
         }
         return partition;
     }
@@ -68,7 +62,7 @@ public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalR
     @Override
     public BinaryRow trimmedPrimaryKey() {
         if (trimmedPrimaryKey == null) {
-            trimmedPrimaryKey = trimmedPrimaryKeyProjection.apply(record);
+            trimmedPrimaryKey = partitionKeyExtractor.trimmedPrimaryKey(record);
         }
         return trimmedPrimaryKey;
     }
