@@ -271,9 +271,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
                 // for implementation
                 LocalDateTime localDateTime =
-                        Instant.ofEpochMilli(Long.parseLong(oldValue))
-                                .atZone(ZoneOffset.UTC)
-                                .toLocalDateTime();
+                        DateTimeUtils.toLocalDateTime(Long.parseLong(oldValue), ZoneOffset.UTC);
                 newValue = DateTimeUtils.formatLocalDateTime(localDateTime, 3);
             } else if ("io.debezium.time.MicroTimestamp".equals(className)) {
                 // MySQL datetime (precision 4-6)

@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.operation.ConsumerExpire;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.FileStoreRead;
@@ -65,4 +66,7 @@ public interface FileStore<T> extends Serializable {
 
     @Nullable
     PartitionExpire newPartitionExpire(String commitUser);
+
+    @Nullable
+    ConsumerExpire newConsumerExpire();
 }

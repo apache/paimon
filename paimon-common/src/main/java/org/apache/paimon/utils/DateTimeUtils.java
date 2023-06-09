@@ -21,9 +21,11 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.Timestamp;
 
 import java.time.DateTimeException;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.TemporalAccessor;
@@ -414,6 +416,14 @@ public class DateTimeUtils {
             throws DateTimeException {
         return Timestamp.fromLocalDateTime(
                 fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision));
+    }
+
+    public static LocalDateTime toLocalDateTime(long timeMills) {
+        return toLocalDateTime(timeMills, ZoneId.systemDefault());
+    }
+
+    public static LocalDateTime toLocalDateTime(long timeMills, ZoneId zoneId) {
+        return Instant.ofEpochMilli(timeMills).atZone(zoneId).toLocalDateTime();
     }
 
     public static LocalDateTime toLocalDateTime(String dateStr, int precision) {

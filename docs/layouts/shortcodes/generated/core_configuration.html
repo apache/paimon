@@ -99,6 +99,18 @@ under the License.
             <td>Consumer id for recording the offset of consumption in the storage.</td>
         </tr>
         <tr>
+            <td><h5>consumer.expiration-check-interval</h5></td>
+            <td style="word-wrap: break-word;">1 h</td>
+            <td>Duration</td>
+            <td>The check interval of consumer files expiration.</td>
+        </tr>
+        <tr>
+            <td><h5>consumer.expiration-time</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The expiration interval of consumer files. A consumer file will be expired if it's lifetime after last modification is over this value.</td>
+        </tr>
+        <tr>
             <td><h5>continuous.discovery-interval</h5></td>
             <td style="word-wrap: break-word;">10 s</td>
             <td>Duration</td>

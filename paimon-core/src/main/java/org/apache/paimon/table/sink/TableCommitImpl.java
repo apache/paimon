@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.operation.ConsumerExpire;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
@@ -43,6 +44,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final FileStoreCommit commit;
     @Nullable private final FileStoreExpire expire;
     @Nullable private final PartitionExpire partitionExpire;
+    @Nullable private final ConsumerExpire consumerExpire;
 
     @Nullable private Map<String, String> overwritePartition = null;
     @Nullable private Lock lock;
@@ -52,10 +54,12 @@ public class TableCommitImpl implements InnerTableCommit {
     public TableCommitImpl(
             FileStoreCommit commit,
             @Nullable FileStoreExpire expire,
-            @Nullable PartitionExpire partitionExpire) {
+            @Nullable PartitionExpire partitionExpire,
+            @Nullable ConsumerExpire consumerExpire) {
         this.commit = commit;
         this.expire = expire;
         this.partitionExpire = partitionExpire;
+        this.consumerExpire = consumerExpire;
     }
 
     @Override
@@ -143,6 +147,10 @@ public class TableCommitImpl implements InnerTableCommit {
 
         if (partitionExpire != null) {
             partitionExpire.expire(partitionExpireIdentifier);
+        }
+
+        if (consumerExpire != null) {
+            consumerExpire.expire();
         }
     }
 

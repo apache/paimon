@@ -640,6 +640,20 @@ public class CoreOptions implements Serializable {
                                                             + ": Read from the data of table log store."))
                                     .build());
 
+    public static final ConfigOption<Duration> CONSUMER_EXPIRATION_TIME =
+            key("consumer.expiration-time")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The expiration interval of consumer files. A consumer file will be expired if "
+                                    + "it's lifetime after last modification is over this value.");
+
+    public static final ConfigOption<Duration> CONSUMER_EXPIRATION_CHECK_INTERVAL =
+            key("consumer.expiration-check-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription("The check interval of consumer files expiration.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -924,6 +938,14 @@ public class CoreOptions implements Serializable {
 
     public static StreamingReadMode streamReadType(Options options) {
         return options.get(STREAMING_READ_MODE);
+    }
+
+    public Duration consumerExpireTime() {
+        return options.get(CONSUMER_EXPIRATION_TIME);
+    }
+
+    public Duration consumerExpireCheckInterval() {
+        return options.get(CONSUMER_EXPIRATION_CHECK_INTERVAL);
     }
 
     /** Specifies the merge engine for table with primary key. */
