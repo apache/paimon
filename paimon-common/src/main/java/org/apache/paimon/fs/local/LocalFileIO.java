@@ -337,5 +337,10 @@ public class LocalFileIO implements FileIO {
         public Path getPath() {
             return new Path(scheme + ":" + file.toURI().getPath());
         }
+
+        @Override
+        public long getModificationTime() {
+            return file.lastModified();
+        }
     }
 }

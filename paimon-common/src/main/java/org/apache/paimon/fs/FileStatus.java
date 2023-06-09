@@ -48,4 +48,12 @@ public interface FileStatus {
      * @return the corresponding Path to the FileStatus
      */
     Path getPath();
+
+    /**
+     * Get the last modification time of the file.
+     *
+     * @return A long value representing the time the file was last modified, measured in
+     *     milliseconds since the epoch (UTC January 1, 1970).
+     */
+    long getModificationTime();
 }

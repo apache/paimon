@@ -120,7 +120,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
                     throw new OutOfRangeException(
                             String.format(
-                                    "The snapshot with id %d has expired., You can: "
+                                    "The snapshot with id %d has expired. You can: "
                                             + "1. increase the snapshot expiration time. "
                                             + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
                                     nextSnapshotId));

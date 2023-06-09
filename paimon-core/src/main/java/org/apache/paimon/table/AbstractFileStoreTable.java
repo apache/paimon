@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreScan;
@@ -228,7 +229,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         return new TableCommitImpl(
                 store().newCommit(commitUser),
                 coreOptions().writeOnly() ? null : store().newExpire(),
-                coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser));
+                coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
+                CoreOptions.fromMap(options()).consumerExpireTime(),
+                new ConsumerManager(fileIO, path));
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
