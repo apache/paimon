@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.ServiceLoader;
+import java.util.function.Function;
 
 /**
  * Factory class which creates reader and writer factories for specific file format.
@@ -75,7 +76,8 @@ public abstract class FileFormat {
         return createReaderFactory(rowType, projection, new ArrayList<>());
     }
 
-    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
+    public Optional<Function<ColumnStatisticsCollectSkipper, FileStatsExtractor>>
+            createStatsExtractorSupplier(RowType type) {
         return Optional.empty();
     }
 

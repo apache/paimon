@@ -95,7 +95,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 pathFactory(),
                 snapshotManager(),
                 newScan(true).withManifestCacheFilter(manifestFilter),
-                options);
+                options,
+                columnStatisticsCollectSkipper);
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite) {

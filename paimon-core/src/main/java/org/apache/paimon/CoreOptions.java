@@ -156,6 +156,13 @@ public class CoreOptions implements Serializable {
                             "The default partition name in case the dynamic partition"
                                     + " column value is null/empty string.");
 
+    public static final ConfigOption<String> STATISTICS_SKIP_COLUMNS =
+            key("statistics.skip.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify the column name which skipping the statistics,"
+                                    + "you can use commas to separate multiple columns");
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MIN =
             key("snapshot.num-retained.min")
                     .intType()
@@ -896,6 +903,10 @@ public class CoreOptions implements Serializable {
 
     public boolean writeOnly() {
         return options.get(WRITE_ONLY);
+    }
+
+    public String skipStaticsColumn() {
+        return options.get(STATISTICS_SKIP_COLUMNS);
     }
 
     public boolean streamingReadOverwrite() {

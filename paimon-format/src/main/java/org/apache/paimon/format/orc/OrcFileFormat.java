@@ -20,6 +20,7 @@ package org.apache.paimon.format.orc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FileStatsExtractor;
@@ -51,6 +52,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
@@ -86,8 +88,9 @@ public class OrcFileFormat extends FileFormat {
     }
 
     @Override
-    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
-        return Optional.of(new OrcFileStatsExtractor(type));
+    public Optional<Function<ColumnStatisticsCollectSkipper, FileStatsExtractor>>
+            createStatsExtractorSupplier(RowType type) {
+        return Optional.of(statSkipper -> new OrcFileStatsExtractor(type, statSkipper));
     }
 
     @Override

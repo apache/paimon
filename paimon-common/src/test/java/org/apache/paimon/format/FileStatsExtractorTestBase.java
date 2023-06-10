@@ -88,7 +88,8 @@ public abstract class FileStatsExtractorTestBase {
         }
         FieldStats[] expected = collector.extract();
 
-        FileStatsExtractor extractor = format.createStatsExtractor(rowType).get();
+        FileStatsExtractor extractor =
+                format.createStatsExtractorSupplier(rowType).get().apply(null);
         assertThat(extractor).isNotNull();
         FieldStats[] actual = extractor.extract(fileIO, path);
         for (int i = 0; i < expected.length; i++) {

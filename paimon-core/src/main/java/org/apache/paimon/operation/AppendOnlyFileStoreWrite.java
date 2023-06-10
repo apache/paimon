@@ -26,6 +26,7 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -66,6 +67,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final boolean assertDisorder;
     private final String fileCompression;
 
+    private ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper;
+
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
             AppendOnlyFileStoreRead read,
@@ -75,7 +78,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            CoreOptions options) {
+            CoreOptions options,
+            @Nullable ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
         super(commitUser, snapshotManager, scan);
         this.fileIO = fileIO;
         this.read = read;
@@ -90,6 +94,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         this.skipCompaction = options.writeOnly();
         this.assertDisorder = options.toConfiguration().get(APPEND_ONLY_ASSERT_DISORDER);
         this.fileCompression = options.fileCompression();
+        this.columnStatisticsCollectSkipper = columnStatisticsCollectSkipper;
     }
 
     @Override
@@ -126,7 +131,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 commitForceCompact,
                 factory,
                 restoreIncrement,
-                fileCompression);
+                fileCompression,
+                columnStatisticsCollectSkipper);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -144,7 +150,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                             rowType,
                             pathFactory.createDataFilePathFactory(partition, bucket),
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
-                            fileCompression);
+                            fileCompression,
+                            columnStatisticsCollectSkipper);
             rewriter.write(
                     new RecordReaderIterator<>(
                             read.createReader(

@@ -27,6 +27,7 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -93,7 +94,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            KeyValueFieldsExtractor extractor) {
+            KeyValueFieldsExtractor extractor,
+            ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
         super(commitUser, snapshotManager, scan, options);
         this.fileIO = fileIO;
         this.keyType = keyType;
@@ -116,7 +118,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         valueType,
                         options.fileFormat(),
                         pathFactory,
-                        options.targetFileSize());
+                        options.targetFileSize(),
+                        columnStatisticsCollectSkipper);
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.valueEqualiserSupplier = valueEqualiserSupplier;
         this.mfFactory = mfFactory;

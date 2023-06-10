@@ -233,7 +233,8 @@ public class LookupLevelsTest {
                         rowType,
                         new FlushingFileFormat("avro"),
                         new FileStorePathFactory(path),
-                        TARGET_FILE_SIZE.defaultValue().getBytes())
+                        TARGET_FILE_SIZE.defaultValue().getBytes(),
+                        null)
                 .build(BinaryRow.EMPTY_ROW, 0, null, null);
     }
 

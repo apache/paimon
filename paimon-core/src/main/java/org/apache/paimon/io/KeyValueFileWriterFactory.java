@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -33,6 +34,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import javax.annotation.Nullable;
 
 import java.util.Map;
+import java.util.function.Function;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
@@ -42,11 +44,15 @@ public class KeyValueFileWriterFactory {
     private final RowType keyType;
     private final RowType valueType;
     private final FormatWriterFactory writerFactory;
-    @Nullable private final FileStatsExtractor fileStatsExtractor;
+
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
     private final Map<Integer, String> levelCompressions;
     private final String fileCompression;
+
+    private ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper;
+
+    private Function<ColumnStatisticsCollectSkipper, FileStatsExtractor> fileStatsExtractorSupplier;
 
     private KeyValueFileWriterFactory(
             FileIO fileIO,
@@ -54,21 +60,25 @@ public class KeyValueFileWriterFactory {
             RowType keyType,
             RowType valueType,
             FormatWriterFactory writerFactory,
-            @Nullable FileStatsExtractor fileStatsExtractor,
+            @Nullable
+                    Function<ColumnStatisticsCollectSkipper, FileStatsExtractor>
+                            fileStatsExtractorSupplier,
             DataFilePathFactory pathFactory,
             long suggestedFileSize,
             Map<Integer, String> levelCompressions,
-            String fileCompression) {
+            String fileCompression,
+            @Nullable ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.keyType = keyType;
         this.valueType = valueType;
         this.writerFactory = writerFactory;
-        this.fileStatsExtractor = fileStatsExtractor;
+        this.fileStatsExtractorSupplier = fileStatsExtractorSupplier;
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
         this.levelCompressions = levelCompressions;
         this.fileCompression = fileCompression;
+        this.columnStatisticsCollectSkipper = columnStatisticsCollectSkipper;
     }
 
     public RowType keyType() {
@@ -115,10 +125,11 @@ public class KeyValueFileWriterFactory {
                 kvSerializer::toRow,
                 keyType,
                 valueType,
-                fileStatsExtractor,
+                fileStatsExtractorSupplier,
                 schemaId,
                 level,
-                compression);
+                compression,
+                columnStatisticsCollectSkipper);
     }
 
     public void deleteFile(String filename) {
@@ -132,9 +143,17 @@ public class KeyValueFileWriterFactory {
             RowType valueType,
             FileFormat fileFormat,
             FileStorePathFactory pathFactory,
-            long suggestedFileSize) {
+            long suggestedFileSize,
+            ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
         return new Builder(
-                fileIO, schemaId, keyType, valueType, fileFormat, pathFactory, suggestedFileSize);
+                fileIO,
+                schemaId,
+                keyType,
+                valueType,
+                fileFormat,
+                pathFactory,
+                suggestedFileSize,
+                columnStatisticsCollectSkipper);
     }
 
     /** Builder of {@link KeyValueFileWriterFactory}. */
@@ -148,6 +167,8 @@ public class KeyValueFileWriterFactory {
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
 
+        private final ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper;
+
         private Builder(
                 FileIO fileIO,
                 long schemaId,
@@ -155,7 +176,8 @@ public class KeyValueFileWriterFactory {
                 RowType valueType,
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
-                long suggestedFileSize) {
+                long suggestedFileSize,
+                @Nullable ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
             this.fileIO = fileIO;
             this.schemaId = schemaId;
             this.keyType = keyType;
@@ -163,6 +185,7 @@ public class KeyValueFileWriterFactory {
             this.fileFormat = fileFormat;
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
+            this.columnStatisticsCollectSkipper = columnStatisticsCollectSkipper;
         }
 
         public KeyValueFileWriterFactory build(
@@ -171,17 +194,19 @@ public class KeyValueFileWriterFactory {
                 Map<Integer, String> levelCompressions,
                 String fileCompression) {
             RowType recordType = KeyValue.schema(keyType, valueType);
+
             return new KeyValueFileWriterFactory(
                     fileIO,
                     schemaId,
                     keyType,
                     valueType,
                     fileFormat.createWriterFactory(recordType),
-                    fileFormat.createStatsExtractor(recordType).orElse(null),
+                    fileFormat.createStatsExtractorSupplier(recordType).orElse(null),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     suggestedFileSize,
                     levelCompressions,
-                    fileCompression);
+                    fileCompression,
+                    columnStatisticsCollectSkipper);
         }
     }
 }

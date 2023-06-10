@@ -73,10 +73,13 @@ public class RollingFileWriterTest {
                                                                 .toString())
                                                 .newPath(),
                                         SCHEMA,
-                                        fileFormat.createStatsExtractor(SCHEMA).orElse(null),
+                                        fileFormat
+                                                .createStatsExtractorSupplier(SCHEMA)
+                                                .orElse(null),
                                         0L,
                                         new LongCounter(0),
-                                        CoreOptions.FILE_COMPRESSION.defaultValue()),
+                                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                                        null),
                         TARGET_FILE_SIZE);
     }
 

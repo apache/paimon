@@ -177,7 +177,8 @@ public abstract class MergeTreeTestBase {
                         valueType,
                         flushingAvro,
                         pathFactory,
-                        options.targetFileSize());
+                        options.targetFileSize(),
+                        null);
         writerFactory =
                 writerFactoryBuilder.build(
                         BinaryRow.EMPTY_ROW,

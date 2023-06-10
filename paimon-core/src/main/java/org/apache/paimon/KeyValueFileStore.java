@@ -124,7 +124,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 snapshotManager(),
                 newScan(true).withManifestCacheFilter(manifestFilter),
                 options,
-                keyValueFieldsExtractor);
+                keyValueFieldsExtractor,
+                columnStatisticsCollectSkipper);
     }
 
     private KeyValueFileStoreScan newScan(boolean forWrite) {

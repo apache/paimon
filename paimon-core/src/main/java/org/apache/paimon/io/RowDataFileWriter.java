@@ -20,6 +20,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
@@ -49,10 +50,12 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             FormatWriterFactory factory,
             Path path,
             RowType writeSchema,
-            @Nullable FileStatsExtractor fileStatsExtractor,
+            @Nullable
+                    Function<ColumnStatisticsCollectSkipper, FileStatsExtractor> fileStatsExtractor,
             long schemaId,
             LongCounter seqNumCounter,
-            String fileCompression) {
+            String fileCompression,
+            ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
         super(
                 fileIO,
                 factory,
@@ -60,7 +63,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 Function.identity(),
                 writeSchema,
                 fileStatsExtractor,
-                fileCompression);
+                fileCompression,
+                columnStatisticsCollectSkipper);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);

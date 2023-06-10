@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.fs.FileIO;
@@ -58,6 +59,7 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
     private final RowType rowType;
     private static final OffsetDateTime EPOCH = Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC);
     private static final LocalDate EPOCH_DAY = EPOCH.toLocalDate();
+    private ColumnStatisticsCollectSkipper skipper;
 
     public ParquetFileStatsExtractor(RowType rowType) {
         this.rowType = rowType;
@@ -71,17 +73,22 @@ public class ParquetFileStatsExtractor implements FileStatsExtractor {
                 .mapToObj(
                         i -> {
                             DataField field = rowType.getFields().get(i);
-                            return toFieldStats(field, stats.get(field.name()));
+                            return toFieldStats(field, stats.get(field.name()), i);
                         })
                 .toArray(FieldStats[]::new);
     }
 
-    private FieldStats toFieldStats(DataField field, Statistics<?> stats) {
+    private FieldStats toFieldStats(DataField field, Statistics<?> stats, int index) {
         if (stats == null) {
             return new FieldStats(null, null, null);
         }
+
         long nullCount = stats.getNumNulls();
         if (!stats.hasNonNullValue()) {
+            return new FieldStats(null, null, nullCount);
+        }
+
+        if (skipper.skipStatistics(index)) {
             return new FieldStats(null, null, nullCount);
         }
 

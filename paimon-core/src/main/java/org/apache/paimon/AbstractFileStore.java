@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -30,6 +31,8 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagFileKeeper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
@@ -39,7 +42,11 @@ import org.apache.paimon.utils.TagManager;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Base {@link FileStore} implementation.
@@ -53,6 +60,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final long schemaId;
     protected final CoreOptions options;
     protected final RowType partitionType;
+    protected final ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper;
 
     @Nullable private final SegmentsCache<String> writeManifestCache;
 
@@ -72,6 +80,29 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 writeManifestCache.getBytes() == 0
                         ? null
                         : new SegmentsCache<>(options.pageSize(), writeManifestCache);
+
+        columnStatisticsCollectSkipper =
+                getColumnStatCollectSkipper(schemaManager, schemaId, options);
+    }
+
+    private ColumnStatisticsCollectSkipper getColumnStatCollectSkipper(
+            SchemaManager schemaManager, long schemaId, CoreOptions options) {
+        ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper =
+                new ColumnStatisticsCollectSkipper();
+
+        String skipStaticsColumns = options.skipStaticsColumn();
+        if (skipStaticsColumns != null) {
+            Set<String> columns =
+                    Arrays.stream(skipStaticsColumns.split(",")).collect(Collectors.toSet());
+            TableSchema schema = schemaManager.schema(schemaId);
+            List<DataField> fields = schema.fields();
+            for (DataField field : fields) {
+                if (columns.contains(field.name())) {
+                    columnStatisticsCollectSkipper.addSkipColumnIndex(field.id());
+                }
+            }
+        }
+        return columnStatisticsCollectSkipper;
     }
 
     public FileStorePathFactory pathFactory() {

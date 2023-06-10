@@ -24,6 +24,8 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
+import javax.annotation.Nullable;
+
 /** Collector to extract statistics of each fields from a series of records. */
 public class FieldStatsCollector {
 
@@ -33,13 +35,20 @@ public class FieldStatsCollector {
     private final RowDataToObjectArrayConverter converter;
     private final Serializer<Object>[] fieldSerializers;
 
+    private ColumnStatisticsCollectSkipper skipper;
+
     public FieldStatsCollector(RowType rowType) {
+        this(rowType, null);
+    }
+
+    public FieldStatsCollector(RowType rowType, @Nullable ColumnStatisticsCollectSkipper skipper) {
         int numFields = rowType.getFieldCount();
         this.minValues = new Object[numFields];
         this.maxValues = new Object[numFields];
         this.nullCounts = new long[numFields];
         this.converter = new RowDataToObjectArrayConverter(rowType);
         this.fieldSerializers = new Serializer[numFields];
+        this.skipper = skipper;
         for (int i = 0; i < numFields; i++) {
             fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
         }
@@ -64,12 +73,17 @@ public class FieldStatsCollector {
             if (!(obj instanceof Comparable)) {
                 continue;
             }
-            Comparable<Object> c = (Comparable<Object>) obj;
-            if (minValues[i] == null || c.compareTo(minValues[i]) < 0) {
-                minValues[i] = fieldSerializers[i].copy(c);
-            }
-            if (maxValues[i] == null || c.compareTo(maxValues[i]) > 0) {
-                maxValues[i] = fieldSerializers[i].copy(c);
+
+            if (skipper != null && skipper.skipStatistics(i)) {
+                minValues[i] = maxValues[i] = null;
+            } else {
+                Comparable<Object> c = (Comparable<Object>) obj;
+                if (minValues[i] == null || c.compareTo(minValues[i]) < 0) {
+                    minValues[i] = fieldSerializers[i].copy(c);
+                }
+                if (maxValues[i] == null || c.compareTo(maxValues[i]) > 0) {
+                    maxValues[i] = fieldSerializers[i].copy(c);
+                }
             }
         }
     }

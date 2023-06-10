@@ -20,6 +20,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.types.RowType;
@@ -36,7 +37,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             LongCounter seqNumCounter,
-            String fileCompression) {
+            String fileCompression,
+            ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -44,10 +46,11 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileFormat.createWriterFactory(writeSchema),
                                 pathFactory.newPath(),
                                 writeSchema,
-                                fileFormat.createStatsExtractor(writeSchema).orElse(null),
+                                fileFormat.createStatsExtractorSupplier(writeSchema).orElse(null),
                                 schemaId,
                                 seqNumCounter,
-                                fileCompression),
+                                fileCompression,
+                                columnStatisticsCollectSkipper),
                 targetFileSize);
     }
 }

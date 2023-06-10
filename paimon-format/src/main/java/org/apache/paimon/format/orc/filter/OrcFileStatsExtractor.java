@@ -21,6 +21,7 @@ package org.apache.paimon.format.orc.filter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.orc.OrcReaderFactory;
@@ -44,6 +45,8 @@ import org.apache.orc.StringColumnStatistics;
 import org.apache.orc.TimestampColumnStatistics;
 import org.apache.orc.TypeDescription;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.sql.Date;
 import java.util.List;
@@ -54,8 +57,12 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
 
     private final RowType rowType;
 
-    public OrcFileStatsExtractor(RowType rowType) {
+    private ColumnStatisticsCollectSkipper skipper;
+
+    public OrcFileStatsExtractor(
+            RowType rowType, @Nullable ColumnStatisticsCollectSkipper skipper) {
         this.rowType = rowType;
+        this.skipper = skipper;
     }
 
     @Override
@@ -74,18 +81,21 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
                                 DataField field = rowType.getFields().get(i);
                                 int fieldIdx = columnNames.indexOf(field.name());
                                 int colId = columnTypes.get(fieldIdx).getId();
-                                return toFieldStats(field, columnStatistics[colId], rowCount);
+                                return toFieldStats(field, columnStatistics[colId], rowCount, i);
                             })
                     .toArray(FieldStats[]::new);
         }
     }
 
-    private FieldStats toFieldStats(DataField field, ColumnStatistics stats, long rowCount) {
+    private FieldStats toFieldStats(
+            DataField field, ColumnStatistics stats, long rowCount, int index) {
         long nullCount = rowCount - stats.getNumberOfValues();
-        if (nullCount == rowCount) {
+
+        if (nullCount == rowCount || (skipper != null && skipper.skipStatistics(index))) {
             // all nulls
             return new FieldStats(null, null, nullCount);
         }
+
         Preconditions.checkState(
                 (nullCount > 0) == stats.hasNull(),
                 "Bug in OrcFileStatsExtractor: nullCount is "

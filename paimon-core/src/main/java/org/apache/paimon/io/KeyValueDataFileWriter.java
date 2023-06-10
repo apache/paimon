@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.ColumnStatisticsCollectSkipper;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -73,10 +74,12 @@ public class KeyValueDataFileWriter
             Function<KeyValue, InternalRow> converter,
             RowType keyType,
             RowType valueType,
-            @Nullable FileStatsExtractor fileStatsExtractor,
+            @Nullable
+                    Function<ColumnStatisticsCollectSkipper, FileStatsExtractor> fileStatsExtractor,
             long schemaId,
             int level,
-            String compression) {
+            String compression,
+            ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
         super(
                 fileIO,
                 factory,
@@ -84,7 +87,8 @@ public class KeyValueDataFileWriter
                 converter,
                 KeyValue.schema(keyType, valueType),
                 fileStatsExtractor,
-                compression);
+                compression,
+                columnStatisticsCollectSkipper);
 
         this.keyType = keyType;
         this.valueType = valueType;

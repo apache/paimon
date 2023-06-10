@@ -27,6 +27,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 /** An avro {@link FileFormat} for test. It provides a {@link FileStatsExtractor}. */
 public class FileStatsExtractingAvroFormat extends FileFormat {
@@ -55,7 +56,8 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
     }
 
     @Override
-    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
-        return Optional.of(new TestFileStatsExtractor(this, type));
+    public Optional<Function<ColumnStatisticsCollectSkipper, FileStatsExtractor>>
+            createStatsExtractorSupplier(RowType type) {
+        return Optional.of(statSkip -> new TestFileStatsExtractor(this, type));
     }
 }
