@@ -47,7 +47,7 @@ import java.util.Map;
  * snapshot. We need to enable checkpoint for this compaction job, checkpoint will trigger committer
  * stage to commit all the compacted files.
  */
-public class UnawareBucketCompactionJob {
+public class UnawareBucketCompactionTopoBuilder {
 
     private final transient StreamExecutionEnvironment env;
     private final String tableIdentifier;
@@ -55,7 +55,7 @@ public class UnawareBucketCompactionJob {
     @Nullable private List<Map<String, String>> specifiedPartitions = null;
     private boolean isContinuous = false;
 
-    public UnawareBucketCompactionJob(
+    public UnawareBucketCompactionTopoBuilder(
             StreamExecutionEnvironment env,
             String tableIdentifier,
             AppendOnlyFileStoreTable table) {
