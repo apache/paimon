@@ -26,7 +26,6 @@ import org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
@@ -127,8 +126,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader));
 
         FlinkStreamPartitioner<CdcMultiplexRecord> partitioner =
-                new FlinkStreamPartitioner<>(
-                        new CdcMultiplexRecordChannelComputer(catalogLoader));
+                new FlinkStreamPartitioner<>(new CdcMultiplexRecordChannelComputer(catalogLoader));
         PartitionTransformation<CdcMultiplexRecord> partitioned =
                 new PartitionTransformation<>(
                         newlyAddedTableStream.getTransformation(), partitioner);
