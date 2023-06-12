@@ -208,7 +208,7 @@ public class CompactActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void tesUnawareBucketStreamingCompact() throws Exception {
+    public void testUnawareBucketStreamingCompact() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
         // test that dedicated compact job will expire snapshots
