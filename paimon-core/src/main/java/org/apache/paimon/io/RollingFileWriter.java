@@ -67,9 +67,8 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     @VisibleForTesting
     boolean rollingFile() throws IOException {
-        // query writer's length per 1000 records
-        return recordCount % CHECK_ROLLING_RECORD_CNT == 0
-                && currentWriter.length() >= targetFileSize;
+        return currentWriter.reachTargetSize(
+                recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     @Override

@@ -67,6 +67,20 @@ public interface FormatWriter {
      * <p>NOTE: This is an estimated value.
      *
      * @return the number of written bytes
+     * @throws IOException Thrown if calculating the length fails.
      */
     long length() throws IOException;
+
+    /**
+     * Check if the writer has reached the <code>targetSize</code>.
+     *
+     * @param suggestedCheck Whether it needs to be checked, but subclasses can also decide whether
+     *     to check it themselves.
+     * @param targetSize The size of the target.
+     * @return true if the target size was reached, otherwise false.
+     * @throws IOException Thrown if calculating the length fails.
+     */
+    default boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
+        return suggestedCheck && length() >= targetSize;
+    }
 }
