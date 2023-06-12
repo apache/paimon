@@ -18,36 +18,34 @@
 
 package org.apache.paimon.utils;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.Function;
+import org.junit.jupiter.api.Test;
 
-/** Ordered packing for input items. */
-public class OrderedPacking {
-    private OrderedPacking() {}
+import java.util.HashSet;
+import java.util.Random;
+import java.util.Set;
 
-    public static <T> List<List<T>> pack(
-            Iterable<T> items, Function<T, Long> weightFunc, long targetWeight) {
-        List<List<T>> packed = new ArrayList<>();
+import static org.assertj.core.api.Assertions.assertThat;
 
-        List<T> binItems = new ArrayList<>();
-        long binWeight = 0L;
+/** Test for {@link IntHashSet}. */
+public class IntHashSetTest {
 
-        for (T item : items) {
-            long weight = weightFunc.apply(item);
-            if (binWeight + weight > targetWeight) {
-                packed.add(binItems);
-                binItems = new ArrayList<>();
-                binWeight = 0;
-            }
-
-            binWeight += weight;
-            binItems.add(item);
+    @Test
+    public void testRandom() {
+        Set<Integer> values = new HashSet<>();
+        Random rnd = new Random();
+        for (int i = 0; i < rnd.nextInt(100); i++) {
+            values.add(rnd.nextInt());
+        }
+        if (rnd.nextBoolean()) {
+            values.add(0);
+            values.add(-1);
+            values.add(1);
         }
 
-        if (binItems.size() > 0) {
-            packed.add(binItems);
-        }
-        return packed;
+        IntHashSet set = new IntHashSet();
+        values.forEach(set::add);
+
+        int[] expected = values.stream().mapToInt(Integer::intValue).sorted().toArray();
+        assertThat(set.toSortedInts()).containsExactly(expected);
     }
 }

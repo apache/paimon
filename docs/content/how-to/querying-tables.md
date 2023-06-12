@@ -59,7 +59,7 @@ Produces the latest snapshot on the table upon first startup, and continues to r
 <tr>
 <td>compacted-full</td>
 <td>
-Produces the snapshot after the latest <a href="{{< ref "concepts/file-layouts#lsm-trees#compactions" >}}">compaction</a>.
+Produces the snapshot after the latest <a href="{{< ref "concepts/file-layouts#compaction" >}}">compaction</a>.
 </td>
 <td>
 Produces the snapshot after the latest compaction on the table upon first startup, and continues to read the following changes.
@@ -103,8 +103,11 @@ Currently, Paimon supports time travel for Flink and Spark 3 (requires Spark 3.3
 you can use [dynamic table options](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#dynamic-table-options) to specify scan mode and from where to start:
 
 ```sql
--- travel to snapshot with id 1L
+-- travel to snapshot with id 1L with 'scan.mode'='from-snapshot' by default
 SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
+
+-- travel to snapshot with id 1L with 'scan.mode'='from-snapshot-full'
+SELECT * FROM t /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '1') */;
 
 -- travel to specified timestamp with a long value in milliseconds
 SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
@@ -159,8 +162,8 @@ When stream read Paimon tables, the next snapshot id to be recorded into the fil
    and if there are consumers that still depend on this snapshot, then this snapshot will not be deleted by expiration.
 
 {{< hint info >}}
-NOTE: If there is a consumer that will not be used anymore, please delete it, otherwise it will affect the expiration
-of the snapshot. The consumer file is in `${table-path}/consumer/consumer-${consumer-id}`.
+NOTE: The consumer will prevent expiration of the snapshot. You can specify 'consumer.expiration-time' to manage the 
+lifetime of consumers.
 {{< /hint >}}
 
 ## System Tables

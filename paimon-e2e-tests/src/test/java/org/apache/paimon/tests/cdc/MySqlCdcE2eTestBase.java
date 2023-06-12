@@ -56,11 +56,6 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
     protected String useCatalogCmd;
 
     protected MySqlCdcE2eTestBase(MySqlVersion mySqlVersion) {
-        this(mySqlVersion, false);
-    }
-
-    protected MySqlCdcE2eTestBase(MySqlVersion mySqlVersion, boolean withHive) {
-        super(false, withHive);
         this.mySqlVersion = mySqlVersion;
     }
 

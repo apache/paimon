@@ -23,10 +23,15 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -80,5 +85,97 @@ public class SnapshotManagerTest {
         // larger than the second snapshot return the second snapshot
         assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
                 .isEqualTo(millis + 1000);
+    }
+
+    @Test
+    public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 10 snapshots
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot =
+                    new Snapshot(
+                            i,
+                            0L,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0L,
+                            Snapshot.CommitKind.APPEND,
+                            i * 1000,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null);
+            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // read all
+        List<Long> read = new ArrayList<>();
+        snapshotManager.traversalSnapshotsFromLatestSafely(
+                snapshot -> {
+                    read.add(snapshot.id());
+                    return false;
+                });
+        assertThat(read).containsExactly(9L, 8L, 7L, 6L, 5L, 4L, 3L, 2L, 1L, 0L);
+
+        // test quit if return true
+        snapshotManager.traversalSnapshotsFromLatestSafely(
+                snapshot -> {
+                    if (snapshot.id() == 5) {
+                        return true;
+                    } else if (snapshot.id() < 5) {
+                        Assertions.fail();
+                    }
+                    return false;
+                });
+
+        // test safely
+        Function<Snapshot, Boolean> func =
+                snapshot -> {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException ignored) {
+                    }
+                    return false;
+                };
+        AtomicReference<Exception> exception = new AtomicReference<>();
+        Thread thread =
+                new Thread(
+                        () -> {
+                            try {
+                                snapshotManager.traversalSnapshotsFromLatestSafely(func);
+                            } catch (Exception e) {
+                                exception.set(e);
+                            }
+                        });
+
+        thread.start();
+        Thread.sleep(100);
+        localFileIO.deleteQuietly(snapshotManager.snapshotPath(0));
+        thread.join();
+
+        assertThat(exception.get()).isNull();
+
+        // test throw exception
+        thread =
+                new Thread(
+                        () -> {
+                            try {
+                                snapshotManager.traversalSnapshotsFromLatestSafely(func);
+                            } catch (Exception e) {
+                                exception.set(e);
+                            }
+                        });
+
+        thread.start();
+        Thread.sleep(100);
+        localFileIO.deleteQuietly(snapshotManager.snapshotPath(3));
+        thread.join();
+
+        assertThat(exception.get()).hasMessageContaining("Fails to read snapshot from path");
     }
 }

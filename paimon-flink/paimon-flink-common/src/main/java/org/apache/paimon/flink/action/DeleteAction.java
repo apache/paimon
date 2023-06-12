@@ -31,10 +31,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.Action.getTablePath;
+import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 
 /** Delete from table action for Flink. */
 public class DeleteAction extends TableActionBase {
@@ -43,8 +45,13 @@ public class DeleteAction extends TableActionBase {
 
     private final String filter;
 
-    public DeleteAction(String warehouse, String databaseName, String tableName, String filter) {
-        super(warehouse, databaseName, tableName);
+    public DeleteAction(
+            String warehouse,
+            String databaseName,
+            String tableName,
+            String filter,
+            Map<String, String> catalogConfig) {
+        super(warehouse, databaseName, tableName, catalogConfig);
         changeIgnoreMergeEngine();
         this.filter = filter;
     }
@@ -70,7 +77,10 @@ public class DeleteAction extends TableActionBase {
             return Optional.empty();
         }
 
-        DeleteAction action = new DeleteAction(tablePath.f0, tablePath.f1, tablePath.f2, filter);
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+
+        DeleteAction action =
+                new DeleteAction(tablePath.f0, tablePath.f1, tablePath.f2, filter, catalogConfig);
 
         return Optional.of(action);
     }

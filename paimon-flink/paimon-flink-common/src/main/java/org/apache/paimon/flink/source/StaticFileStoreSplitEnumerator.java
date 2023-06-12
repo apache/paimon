@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.utils.FixBinPacking;
+import org.apache.paimon.flink.source.assigners.SplitAssigner;
 
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -27,14 +27,8 @@ import org.apache.flink.api.connector.source.SplitsAssignment;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
-import java.util.Queue;
 
 /** A {@link SplitEnumerator} implementation for {@link StaticFileStoreSource} input. */
 public class StaticFileStoreSplitEnumerator
@@ -44,31 +38,15 @@ public class StaticFileStoreSplitEnumerator
 
     @Nullable private final Snapshot snapshot;
 
-    /** Default batch splits size to avoid exceed `akka.framesize`. */
-    private final int splitBatchSize;
-
-    private final Map<Integer, Queue<FileStoreSourceSplit>> pendingSplitAssignment;
+    private final SplitAssigner splitAssigner;
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             @Nullable Snapshot snapshot,
-            Collection<FileStoreSourceSplit> splits,
-            int splitBatchSize) {
+            SplitAssigner splitAssigner) {
         this.context = context;
         this.snapshot = snapshot;
-        this.pendingSplitAssignment = createSplitAssignment(splits, context.currentParallelism());
-        this.splitBatchSize = splitBatchSize;
-    }
-
-    private static Map<Integer, Queue<FileStoreSourceSplit>> createSplitAssignment(
-            Collection<FileStoreSourceSplit> splits, int numReaders) {
-        List<List<FileStoreSourceSplit>> assignmentList =
-                FixBinPacking.pack(splits, split -> split.split().rowCount(), numReaders);
-        Map<Integer, Queue<FileStoreSourceSplit>> assignment = new HashMap<>();
-        for (int i = 0; i < assignmentList.size(); i++) {
-            assignment.put(i, new LinkedList<>(assignmentList.get(i)));
-        }
-        return assignment;
+        this.splitAssigner = splitAssigner;
     }
 
     @Override
@@ -83,14 +61,7 @@ public class StaticFileStoreSplitEnumerator
             return;
         }
 
-        // The following batch assignment operation is for two purposes:
-        // To distribute splits evenly when batch reading to prevent a few tasks from reading all
-        // the data (for example, the current resource can only schedule part of the tasks).
-        Queue<FileStoreSourceSplit> taskSplits = pendingSplitAssignment.get(subtask);
-        List<FileStoreSourceSplit> assignment = new ArrayList<>();
-        while (taskSplits != null && !taskSplits.isEmpty() && assignment.size() < splitBatchSize) {
-            assignment.add(taskSplits.poll());
-        }
+        List<FileStoreSourceSplit> assignment = splitAssigner.getNext(subtask, hostname);
         if (assignment.size() > 0) {
             context.assignSplits(
                     new SplitsAssignment<>(Collections.singletonMap(subtask, assignment)));
@@ -101,9 +72,7 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> backSplits, int subtaskId) {
-        pendingSplitAssignment
-                .computeIfAbsent(subtaskId, k -> new LinkedList<>())
-                .addAll(backSplits);
+        splitAssigner.addSplits(subtaskId, backSplits);
     }
 
     @Override
@@ -113,9 +82,8 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public PendingSplitsCheckpoint snapshotState(long checkpointId) {
-        List<FileStoreSourceSplit> splits = new ArrayList<>();
-        pendingSplitAssignment.values().forEach(splits::addAll);
-        return new PendingSplitsCheckpoint(splits, snapshot == null ? null : snapshot.id());
+        return new PendingSplitsCheckpoint(
+                splitAssigner.remainingSplits(), snapshot == null ? null : snapshot.id());
     }
 
     @Override

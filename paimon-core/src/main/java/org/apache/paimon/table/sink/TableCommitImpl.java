@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
@@ -26,6 +27,8 @@ import org.apache.paimon.operation.PartitionExpire;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -43,6 +46,8 @@ public class TableCommitImpl implements InnerTableCommit {
     private final FileStoreCommit commit;
     @Nullable private final FileStoreExpire expire;
     @Nullable private final PartitionExpire partitionExpire;
+    @Nullable private final Duration consumerExpireTime;
+    private final ConsumerManager consumerManager;
 
     @Nullable private Map<String, String> overwritePartition = null;
     @Nullable private Lock lock;
@@ -52,10 +57,14 @@ public class TableCommitImpl implements InnerTableCommit {
     public TableCommitImpl(
             FileStoreCommit commit,
             @Nullable FileStoreExpire expire,
-            @Nullable PartitionExpire partitionExpire) {
+            @Nullable PartitionExpire partitionExpire,
+            @Nullable Duration consumerExpireTime,
+            ConsumerManager consumerManager) {
         this.commit = commit;
         this.expire = expire;
         this.partitionExpire = partitionExpire;
+        this.consumerExpireTime = consumerExpireTime;
+        this.consumerManager = consumerManager;
     }
 
     @Override
@@ -137,6 +146,11 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     private void expire(long partitionExpireIdentifier) {
+        // expire consumer first to avoid preventing snapshot expiration
+        if (consumerExpireTime != null) {
+            consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
+        }
+
         if (expire != null) {
             expire.expire();
         }

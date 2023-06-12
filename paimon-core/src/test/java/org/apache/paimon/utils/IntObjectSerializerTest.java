@@ -18,22 +18,18 @@
 
 package org.apache.paimon.utils;
 
-import org.junit.jupiter.api.Test;
+import java.util.concurrent.ThreadLocalRandom;
 
-import java.util.Arrays;
-import java.util.List;
+/** Test for {@link IntObjectSerializer}. */
+public class IntObjectSerializerTest extends ObjectSerializerTestBase<Integer> {
 
-import static org.assertj.core.api.Assertions.assertThat;
+    @Override
+    protected ObjectSerializer<Integer> serializer() {
+        return new IntObjectSerializer();
+    }
 
-/** Test for {@link FixBinPacking}. */
-public class FixBinPackingTest {
-
-    @Test
-    public void test() {
-        List<List<Integer>> pack =
-                FixBinPacking.pack(Arrays.asList(1, 5, 1, 2, 3, 6, 2), Integer::longValue, 3);
-        assertThat(pack)
-                .containsExactlyInAnyOrder(
-                        Arrays.asList(1, 3), Arrays.asList(2, 5), Arrays.asList(1, 2, 6));
+    @Override
+    protected Integer object() {
+        return ThreadLocalRandom.current().nextInt();
     }
 }

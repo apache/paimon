@@ -160,44 +160,39 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
     }
 
     private void checkSuccessfulFullCompaction() {
-        Long latestId = snapshotManager.latestSnapshotId();
-        if (latestId == null) {
-            return;
-        }
-        Long earliestId = snapshotManager.earliestSnapshotId();
-        if (earliestId == null) {
+        if (commitIdentifiersToCheck.isEmpty()) {
             return;
         }
 
-        for (long id = latestId; id >= earliestId; id--) {
-            Snapshot snapshot = snapshotManager.snapshot(id);
-            if (snapshot.commitUser().equals(commitUser)
-                    && snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
-                long commitIdentifier = snapshot.commitIdentifier();
-                if (commitIdentifiersToCheck.contains(commitIdentifier)) {
-                    // We found a full compaction snapshot triggered by `submitFullCompaction`
-                    // method.
-                    //
-                    // Because `submitFullCompaction` will compact all buckets in `writtenBuckets`,
-                    // thus a successful commit indicates that all previous buckets have been
-                    // compacted.
-                    //
-                    // We must make sure that the compact snapshot is triggered by
-                    // `submitFullCompaction`, because normal compaction may also trigger full
-                    // compaction, but that only compacts a specific bucket, not all buckets
-                    // recorded in `writtenBuckets`.
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug(
-                                "Found full compaction snapshot #{} with identifier {}",
-                                id,
-                                commitIdentifier);
-                    }
-                    writtenBuckets.headMap(commitIdentifier, true).clear();
-                    commitIdentifiersToCheck.headSet(commitIdentifier).clear();
-                    break;
+        snapshotManager.traversalSnapshotsFromLatestSafely(this::checkSuccessfulFullCompaction);
+    }
+
+    private boolean checkSuccessfulFullCompaction(Snapshot snapshot) {
+        if (snapshot.commitUser().equals(commitUser)
+                && snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+            long commitIdentifier = snapshot.commitIdentifier();
+            if (commitIdentifiersToCheck.contains(commitIdentifier)) {
+                // We found a full compaction snapshot triggered by `submitFullCompaction` method.
+                //
+                // Because `submitFullCompaction` will compact all buckets in `writtenBuckets`, thus
+                // a successful commit indicates that all previous buckets have been compacted.
+                //
+                // We must make sure that the compact snapshot is triggered by
+                // `submitFullCompaction`, because normal compaction may also trigger full
+                // compaction, but that only compacts a specific bucket, not all buckets recorded in
+                // `writtenBuckets`.
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Found full compaction snapshot #{} with identifier {}",
+                            snapshot.id(),
+                            commitIdentifier);
                 }
+                writtenBuckets.headMap(commitIdentifier, true).clear();
+                commitIdentifiersToCheck.headSet(commitIdentifier).clear();
+                return true;
             }
         }
+        return false;
     }
 
     private void submitFullCompaction(long currentCheckpointId) {

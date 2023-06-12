@@ -130,5 +130,9 @@ public class InternalRowUtilsTest {
                         InternalRowUtils.compare(
                                 xTimestamp, yTimestamp, DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE))
                 .isEqualTo(0);
+
+        // test TIME_WITHOUT_TIME_ZONE data type
+        assertThat(InternalRowUtils.compare(165, 168, DataTypeRoot.TIME_WITHOUT_TIME_ZONE))
+                .isLessThan(0);
     }
 }

@@ -38,13 +38,14 @@ public class SystemTableSource extends FlinkTableSource {
 
     private final boolean isStreamingMode;
     private final int splitBatchSize;
+    private final FlinkConnectorOptions.SplitAssignMode splitAssignMode;
 
     public SystemTableSource(Table table, boolean isStreamingMode) {
         super(table);
         this.isStreamingMode = isStreamingMode;
-        this.splitBatchSize =
-                Options.fromMap(table.options())
-                        .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE);
+        Options options = Options.fromMap(table.options());
+        this.splitBatchSize = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE);
+        this.splitAssignMode = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE);
     }
 
     public SystemTableSource(
@@ -53,10 +54,12 @@ public class SystemTableSource extends FlinkTableSource {
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
-            int splitBatchSize) {
+            int splitBatchSize,
+            FlinkConnectorOptions.SplitAssignMode splitAssignMode) {
         super(table, predicate, projectFields, limit);
         this.isStreamingMode = isStreamingMode;
         this.splitBatchSize = splitBatchSize;
+        this.splitAssignMode = splitAssignMode;
     }
 
     @Override
@@ -73,7 +76,7 @@ public class SystemTableSource extends FlinkTableSource {
         if (isStreamingMode && table instanceof DataTable) {
             source = new ContinuousFileStoreSource(readBuilder, table.options(), limit);
         } else {
-            source = new StaticFileStoreSource(readBuilder, limit, splitBatchSize);
+            source = new StaticFileStoreSource(readBuilder, limit, splitBatchSize, splitAssignMode);
         }
         return SourceProvider.of(source);
     }
@@ -81,7 +84,13 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public DynamicTableSource copy() {
         return new SystemTableSource(
-                table, isStreamingMode, predicate, projectFields, limit, splitBatchSize);
+                table,
+                isStreamingMode,
+                predicate,
+                projectFields,
+                limit,
+                splitBatchSize,
+                splitAssignMode);
     }
 
     @Override

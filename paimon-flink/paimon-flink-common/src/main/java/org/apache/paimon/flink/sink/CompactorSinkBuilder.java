@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -50,8 +51,20 @@ public class CompactorSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
-        BucketingStreamPartitioner<RowData> partitioner =
-                new BucketingStreamPartitioner<>(new BucketsRowChannelComputer());
+        BucketMode bucketMode = table.bucketMode();
+        switch (bucketMode) {
+            case FIXED:
+            case DYNAMIC:
+                return buildForBucketAware();
+            case UNAWARE:
+            default:
+                throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
+        }
+    }
+
+    private DataStreamSink<?> buildForBucketAware() {
+        FlinkStreamPartitioner<RowData> partitioner =
+                new FlinkStreamPartitioner<>(new BucketsRowChannelComputer());
         PartitionTransformation<RowData> partitioned =
                 new PartitionTransformation<>(input.getTransformation(), partitioner);
 

@@ -123,12 +123,13 @@ public class FlinkSourceBuilder {
     }
 
     private DataStream<RowData> buildStaticFileSource() {
+        Options options = Options.fromMap(table.options());
         return toDataStream(
                 new StaticFileStoreSource(
                         createReadBuilder(),
                         limit,
-                        Options.fromMap(table.options())
-                                .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE)));
+                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE)));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {

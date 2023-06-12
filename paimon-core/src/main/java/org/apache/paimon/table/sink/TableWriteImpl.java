@@ -56,8 +56,8 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public TableWriteImpl<T> withOverwrite(boolean overwrite) {
-        write.withOverwrite(overwrite);
+    public TableWriteImpl<T> fromEmptyWriter(boolean emptyWriter) {
+        write.fromEmptyWriter(emptyWriter);
         return this;
     }
 

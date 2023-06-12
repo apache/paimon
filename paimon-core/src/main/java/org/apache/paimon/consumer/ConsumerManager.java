@@ -22,12 +22,14 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -90,11 +92,45 @@ public class ConsumerManager implements Serializable {
         }
     }
 
+    public void expire(LocalDateTime expireDateTime) {
+        try {
+            Path directory = consumerDirectory();
+            if (!fileIO.exists(directory)) {
+                return;
+            }
+
+            FileStatus[] statuses = fileIO.listStatus(directory);
+
+            if (statuses == null) {
+                throw new RuntimeException(
+                        String.format(
+                                "The return value is null of the listStatus for the '%s' directory.",
+                                directory));
+            }
+
+            for (FileStatus status : statuses) {
+                if (isConsumerFile(status.getPath().getName())) {
+                    LocalDateTime modificationTime =
+                            DateTimeUtils.toLocalDateTime(status.getModificationTime());
+                    if (expireDateTime.isAfter(modificationTime)) {
+                        fileIO.deleteQuietly(status.getPath());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private Path consumerDirectory() {
         return new Path(tablePath + "/consumer");
     }
 
     private Path consumerPath(String consumerId) {
         return new Path(tablePath + "/consumer/" + CONSUMER_PREFIX + consumerId);
+    }
+
+    private boolean isConsumerFile(String file) {
+        return file.startsWith(CONSUMER_PREFIX);
     }
 }

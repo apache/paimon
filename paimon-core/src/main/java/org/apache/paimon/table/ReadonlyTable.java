@@ -94,4 +94,12 @@ public interface ReadonlyTable extends InnerTable {
                         "Readonly Table %s does not support rollbackTo snapshot.",
                         this.getClass().getSimpleName()));
     }
+
+    @Override
+    default void createTag(String tagName, long fromSnapshotId) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support createTag.",
+                        this.getClass().getSimpleName()));
+    }
 }

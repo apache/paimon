@@ -124,7 +124,7 @@ Only tables with primary keys will be synchronized.
 
 For each MySQL table to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
 
-Example
+Example 1: synchronize entire database
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -141,6 +141,55 @@ Example
     --table-conf bucket=4 \
     --table-conf changelog-producer=input \
     --table-conf sink.parallelism=4
+```
+
+Example 2: synchronize newly added tables under database
+
+Let's say at first a Flink job is synchronizing tables [product, user, address] 
+under database `source_db`. The command to submit the job looks like:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mysql-sync-database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --mysql-conf hostname=127.0.0.1 \
+    --mysql-conf username=root \
+    --mysql-conf password=123456 \
+    --mysql-conf database-name=source_db \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4 \
+    --including-tables 'product|user|address'
+```
+
+At a later point we would like the job to also synchronize tables [order, custom], 
+which contains history data. We can achieve this by recovering from the previous
+snapshot of the job and thus reusing existing state of the job. The recovered job will 
+first snapshot newly added tables, and then continue reading changelog from previous 
+position automatically.
+
+The command to recover from previous snapshot and add new tables to synchronize looks like:
+
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    --fromSavepoint {{< savepointPath >}} \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mysql-sync-database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --mysql-conf hostname=127.0.0.1 \
+    --mysql-conf username=root \
+    --mysql-conf password=123456 \
+    --mysql-conf database-name=source_db \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --including-tables 'product|user|address|order|custom'
 ```
 
 ## Kafka

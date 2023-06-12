@@ -56,10 +56,12 @@ public class LogHybridSourceFactory
     public Source<RowData, ?, ?> create(
             HybridSource.SourceSwitchContext<StaticFileStoreSplitEnumerator> context) {
         StaticFileStoreSplitEnumerator enumerator = context.getPreviousEnumerator();
-        Snapshot snapshot = enumerator.snapshot();
         Map<Integer, Long> logOffsets = null;
-        if (snapshot != null) {
-            logOffsets = snapshot.logOffsets();
+        if (enumerator != null) {
+            Snapshot snapshot = enumerator.snapshot();
+            if (snapshot != null) {
+                logOffsets = snapshot.logOffsets();
+            }
         }
         return provider.createSource(logOffsets);
     }
@@ -126,8 +128,11 @@ public class LogHybridSourceFactory
             return new StaticFileStoreSplitEnumerator(
                     context,
                     snapshot,
-                    splits,
-                    options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE));
+                    StaticFileStoreSource.createSplitAssigner(
+                            context,
+                            options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
+                            options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
+                            splits));
         }
     }
 }

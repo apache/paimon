@@ -230,9 +230,9 @@ Run the following command to submit a drop-partition job for the table.
     drop-partition \
     --warehouse <warehouse-path> \
     --database <database-name> \
-    --table <table-name>
-    --partition <partition_spec>
-    [--partition <partition_spec> ...]
+    --table <table-name> \
+    [--partition <partition_spec> [--partition <partition_spec> ...]] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
 
 partition_spec:
 key1=value1,key2=value2...
@@ -307,8 +307,9 @@ Run the following command to submit a 'delete' job for the table.
     delete \
     --warehouse <warehouse-path> \
     --database <database-name> \
-    --table <table-name>
-    --where <filter_spec>
+    --table <table-name> \
+    --where <filter_spec> \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
     
 filter_spec is equal to the 'WHERE' clause in SQL DELETE statement. Examples:
     age >= 18 AND age <= 60
@@ -418,7 +419,8 @@ Run the following command to submit a 'merge-into' job for the table.
     --not-matched-insert-values <insert-values> \
     --not-matched-by-source-upsert-condition <not-matched-by-source-condition> \
     --not-matched-by-source-upsert-set <not-matched-upsert-changes> \
-    --not-matched-by-source-delete-condition <not-matched-by-source-condition>
+    --not-matched-by-source-delete-condition <not-matched-by-source-condition> \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
     
 You can pass sqls by '--source-sql <sql> [, --source-sql <sql> ...]' to config environment and create source table at runtime.
     

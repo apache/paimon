@@ -24,6 +24,7 @@ import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousAppendAndCompactFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
@@ -119,7 +120,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
                     throw new OutOfRangeException(
                             String.format(
-                                    "The snapshot with id %d has expired., You can: "
+                                    "The snapshot with id %d has expired. You can: "
                                             + "1. increase the snapshot expiration time. "
                                             + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
                                     nextSnapshotId));
@@ -157,8 +158,17 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     }
 
     private FollowUpScanner createFollowUpScanner() {
-        if (options.toConfiguration().get(CoreOptions.STREAMING_COMPACT)) {
-            return new ContinuousCompactorFollowUpScanner();
+        CoreOptions.StreamingCompactionType type =
+                options.toConfiguration().get(CoreOptions.STREAMING_COMPACT);
+        switch (type) {
+            case NORMAL:
+                {
+                    return new ContinuousCompactorFollowUpScanner();
+                }
+            case BUCKET_UNAWARE:
+                {
+                    return new ContinuousAppendAndCompactFollowUpScanner();
+                }
         }
 
         CoreOptions.ChangelogProducer changelogProducer = options.changelogProducer();

@@ -257,6 +257,7 @@ public class InternalRowUtils {
                 break;
             case INTEGER:
             case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
                 ret = Integer.compare((int) x, (int) y);
                 break;
             case BIGINT:

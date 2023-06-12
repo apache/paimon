@@ -101,6 +101,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final FileStoreScan scan;
     private final int numBucket;
     private final MemorySize manifestTargetSize;
+    private final MemorySize manifestFullCompactionSize;
     private final int manifestMergeMinCount;
     private final boolean dynamicPartitionOverwrite;
     @Nullable private final Comparator<InternalRow> keyComparator;
@@ -120,6 +121,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             FileStoreScan scan,
             int numBucket,
             MemorySize manifestTargetSize,
+            MemorySize manifestFullCompactionSize,
             int manifestMergeMinCount,
             boolean dynamicPartitionOverwrite,
             @Nullable Comparator<InternalRow> keyComparator) {
@@ -135,6 +137,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.scan = scan;
         this.numBucket = numBucket;
         this.manifestTargetSize = manifestTargetSize;
+        this.manifestFullCompactionSize = manifestFullCompactionSize;
         this.manifestMergeMinCount = manifestMergeMinCount;
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.keyComparator = keyComparator;
@@ -571,7 +574,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             oldMetas,
                             manifestFile,
                             manifestTargetSize.getBytes(),
-                            manifestMergeMinCount));
+                            manifestMergeMinCount,
+                            manifestFullCompactionSize.getBytes(),
+                            partitionType));
             previousChangesListName = manifestList.write(newMetas);
 
             // write new changes into manifest files

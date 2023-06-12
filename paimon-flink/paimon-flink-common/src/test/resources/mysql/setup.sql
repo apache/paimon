@@ -443,3 +443,39 @@ CREATE TABLE test (
     k INT,
     PRIMARY KEY (k)
 );
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testIgnoreCase
+-- ################################################################################
+
+CREATE DATABASE paimon_ignore_CASE;
+USE paimon_ignore_CASE;
+
+CREATE TABLE T (
+    k INT,
+    UPPERCASE_V0 VARCHAR(20),
+    PRIMARY KEY (k)
+);
+
+
+-- ################################################################################
+--  MySqlSyncDatabaseActionITCase#testTableAffix
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_database_newly_added_tables;
+USE paimon_sync_database_newly_added_tables;
+
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);

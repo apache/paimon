@@ -27,12 +27,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.InternalRowKeyAndBucketExtractor;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.DataSplit;
@@ -130,9 +130,15 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
+        AppendOnlyFileStoreWrite writer = store().newWrite(commitUser, manifestFilter);
+        // if this table is non-bucket table, we skip compaction and restored files searching
+        if (bucketMode() == BucketMode.UNAWARE) {
+            writer.skipCompaction();
+            writer.fromEmptyWriter(true);
+        }
         return new TableWriteImpl<>(
-                store().newWrite(commitUser, manifestFilter),
-                new InternalRowKeyAndBucketExtractor(tableSchema),
+                writer,
+                createRowKeyExtractor(),
                 record -> {
                     Preconditions.checkState(
                             record.row().getRowKind() == RowKind.INSERT,

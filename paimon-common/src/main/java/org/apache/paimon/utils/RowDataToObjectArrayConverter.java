@@ -18,9 +18,14 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.RowType;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.stream.IntStream;
 
 /** Convert {@link InternalRow} to object array. */
@@ -54,5 +59,16 @@ public class RowDataToObjectArrayConverter {
             result[i] = fieldGetters[i].getFieldOrNull(rowData);
         }
         return result;
+    }
+
+    public Predicate createEqualPredicate(BinaryRow binaryRow) {
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<Predicate> fieldPredicates = new ArrayList<>();
+        Object[] partitionObjects = convert(binaryRow);
+        for (int i = 0; i < getArity(); i++) {
+            Object o = partitionObjects[i];
+            fieldPredicates.add(builder.equal(i, o));
+        }
+        return PredicateBuilder.and(fieldPredicates);
     }
 }

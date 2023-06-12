@@ -50,11 +50,14 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -463,6 +466,97 @@ public abstract class HiveCatalogITCaseBase {
         // we should upgrade it to the 6.0 later ,and  update the test case for query.
         assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM t3"))
                 .hasMessageContaining("SQL validation failed. There is no paimond in");
+    }
+
+    @Test
+    public void testAlterTable() throws Exception {
+        tEnv.executeSql("CREATE TABLE t1 (a INT, b STRING, c TIMESTAMP(3))").await();
+        List<String> result =
+                collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactly(
+                        "+I[a, INT, true, null, null, null]",
+                        "+I[b, STRING, true, null, null, null]",
+                        "+I[c, TIMESTAMP(3), true, null, null, null]");
+
+        // Dropping Columns
+        assertThatCode(() -> tEnv.executeSql("ALTER TABLE t1 DROP b")).doesNotThrowAnyException();
+        result = collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactly(
+                        "+I[a, INT, true, null, null, null]",
+                        "+I[c, TIMESTAMP(3), true, null, null, null]");
+
+        // Adding New Columns
+        assertThatCode(() -> tEnv.executeSql("ALTER TABLE t1 ADD (d BIGINT, e CHAR(5))"))
+                .doesNotThrowAnyException();
+        result = collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactly(
+                        "+I[a, INT, true, null, null, null]",
+                        "+I[c, TIMESTAMP(3), true, null, null, null]",
+                        "+I[d, BIGINT, true, null, null, null]",
+                        "+I[e, CHAR(5), true, null, null, null]");
+
+        // Adding Column Position
+        assertThatCode(() -> tEnv.executeSql("ALTER TABLE t1 ADD f INT AFTER a"))
+                .doesNotThrowAnyException();
+        result = collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactly(
+                        "+I[a, INT, true, null, null, null]",
+                        "+I[f, INT, true, null, null, null]",
+                        "+I[c, TIMESTAMP(3), true, null, null, null]",
+                        "+I[d, BIGINT, true, null, null, null]",
+                        "+I[e, CHAR(5), true, null, null, null]");
+
+        // Changing Column Position
+        assertThatCode(() -> tEnv.executeSql("ALTER TABLE t1 MODIFY f INT AFTER e"))
+                .doesNotThrowAnyException();
+        result = collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactly(
+                        "+I[a, INT, true, null, null, null]",
+                        "+I[c, TIMESTAMP(3), true, null, null, null]",
+                        "+I[d, BIGINT, true, null, null, null]",
+                        "+I[e, CHAR(5), true, null, null, null]",
+                        "+I[f, INT, true, null, null, null]");
+
+        // Renaming Column Name
+        assertThatCode(() -> tEnv.executeSql("ALTER TABLE t1 RENAME a TO g"))
+                .doesNotThrowAnyException();
+        result = collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactly(
+                        "+I[g, INT, true, null, null, null]",
+                        "+I[c, TIMESTAMP(3), true, null, null, null]",
+                        "+I[d, BIGINT, true, null, null, null]",
+                        "+I[e, CHAR(5), true, null, null, null]",
+                        "+I[f, INT, true, null, null, null]");
+
+        // Changing Column Type
+        assertThatCode(() -> tEnv.executeSql("ALTER TABLE t1 MODIFY d DOUBLE"))
+                .doesNotThrowAnyException();
+        result = collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactly(
+                        "+I[g, INT, true, null, null, null]",
+                        "+I[c, TIMESTAMP(3), true, null, null, null]",
+                        "+I[d, DOUBLE, true, null, null, null]",
+                        "+I[e, CHAR(5), true, null, null, null]",
+                        "+I[f, INT, true, null, null, null]");
+
+        // Changing Column Comment
+        assertThatCode(() -> tEnv.executeSql("ALTER TABLE t1 MODIFY g INT COMMENT 'test comment'"))
+                .doesNotThrowAnyException();
+        result = collect("DESC t1").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactly(
+                        "+I[g, INT, true, null, null, null, test comment]",
+                        "+I[c, TIMESTAMP(3), true, null, null, null, null]",
+                        "+I[d, DOUBLE, true, null, null, null, null]",
+                        "+I[e, CHAR(5), true, null, null, null, null]",
+                        "+I[f, INT, true, null, null, null, null]");
     }
 
     @Test

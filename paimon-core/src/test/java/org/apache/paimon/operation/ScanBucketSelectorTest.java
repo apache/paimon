@@ -16,8 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.predicate;
+package org.apache.paimon.operation;
 
+import org.apache.paimon.operation.ScanBucketFilter.ScanBucketSelector;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
@@ -30,8 +33,8 @@ import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.or;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link BucketSelector}. */
-public class BucketSelectorTest {
+/** Test for {@link ScanBucketSelector}. */
+public class ScanBucketSelectorTest {
 
     private final RowType rowType = RowType.of(new IntType(), new IntType(), new IntType());
 
@@ -65,7 +68,7 @@ public class BucketSelectorTest {
 
     @Test
     public void testNormal() {
-        BucketSelector selector =
+        ScanBucketSelector selector =
                 newSelector(and(builder.equal(0, 0), builder.equal(1, 1), builder.equal(2, 2)))
                         .get();
         assertThat(selector.hashCodes()).containsExactly(1141287431);
@@ -74,7 +77,7 @@ public class BucketSelectorTest {
 
     @Test
     public void testIn() {
-        BucketSelector selector =
+        ScanBucketSelector selector =
                 newSelector(
                                 and(
                                         builder.in(0, Arrays.asList(5, 6, 7)),
@@ -87,7 +90,7 @@ public class BucketSelectorTest {
 
     @Test
     public void testOr() {
-        BucketSelector selector =
+        ScanBucketSelector selector =
                 newSelector(
                                 and(
                                         or(
@@ -103,7 +106,7 @@ public class BucketSelectorTest {
 
     @Test
     public void testInNull() {
-        BucketSelector selector =
+        ScanBucketSelector selector =
                 newSelector(
                                 and(
                                         builder.in(0, Arrays.asList(5, 6, 7, null)),
@@ -116,7 +119,7 @@ public class BucketSelectorTest {
 
     @Test
     public void testMultipleIn() {
-        BucketSelector selector =
+        ScanBucketSelector selector =
                 newSelector(
                                 and(
                                         builder.in(0, Arrays.asList(5, 6, 7)),
@@ -131,7 +134,7 @@ public class BucketSelectorTest {
 
     @Test
     public void testMultipleOr() {
-        BucketSelector selector =
+        ScanBucketSelector selector =
                 newSelector(
                                 and(
                                         or(
@@ -147,7 +150,7 @@ public class BucketSelectorTest {
         assertThat(selector.createBucketSet(20)).containsExactly(7, 17, 14, 9, 10, 19);
     }
 
-    private Optional<BucketSelector> newSelector(Predicate predicate) {
-        return BucketSelector.create(predicate, rowType);
+    private Optional<ScanBucketSelector> newSelector(Predicate predicate) {
+        return ScanBucketFilter.create(predicate, rowType);
     }
 }

@@ -19,12 +19,14 @@
 package org.apache.paimon.consumer;
 
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -60,5 +62,26 @@ public class ConsumerManagerTest {
         assertThat(consumer).map(Consumer::nextSnapshot).get().isEqualTo(8L);
 
         assertThat(manager.minNextSnapshot()).isEqualTo(OptionalLong.of(5L));
+    }
+
+    @Test
+    public void testExpire() throws Exception {
+        manager.recordConsumer("id1", new Consumer(1));
+        Thread.sleep(1000);
+        LocalDateTime expireDateTime = DateTimeUtils.toLocalDateTime(System.currentTimeMillis());
+        Thread.sleep(1000);
+        manager.recordConsumer("id2", new Consumer(2));
+
+        // check expire
+        manager.expire(expireDateTime);
+        assertThat(manager.consumer("id1")).isEmpty();
+        assertThat(manager.consumer("id2")).map(Consumer::nextSnapshot).get().isEqualTo(2L);
+
+        // check last modification
+        expireDateTime = DateTimeUtils.toLocalDateTime(System.currentTimeMillis());
+        Thread.sleep(1000);
+        manager.recordConsumer("id2", new Consumer(3));
+        manager.expire(expireDateTime);
+        assertThat(manager.consumer("id2")).map(Consumer::nextSnapshot).get().isEqualTo(3L);
     }
 }

@@ -27,7 +27,6 @@ import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.predicate.BucketSelector;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
@@ -58,7 +57,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final FieldStatsArraySerializer partitionStatsConverter;
     private final RowDataToObjectArrayConverter partitionConverter;
-    protected final RowType bucketKeyType;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
     private final ManifestList manifestList;
@@ -67,10 +65,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private final ConcurrentMap<Long, TableSchema> tableSchemas;
     private final SchemaManager schemaManager;
+    protected final ScanBucketFilter bucketFilter;
 
     private Predicate partitionFilter;
-    private BucketSelector bucketSelector;
-
     private Long specifiedSnapshotId = null;
     private Integer specifiedBucket = null;
     private List<ManifestFileMeta> specifiedManifests = null;
@@ -78,11 +75,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Filter<Integer> levelFilter = null;
 
     private ManifestCacheFilter manifestCacheFilter = null;
-    private Integer scanManifestParallelism;
+    private final Integer scanManifestParallelism;
 
     public AbstractFileStoreScan(
             RowType partitionType,
-            RowType bucketKeyType,
+            ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
             ManifestFile.Factory manifestFileFactory,
@@ -92,8 +89,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             Integer scanManifestParallelism) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionConverter = new RowDataToObjectArrayConverter(partitionType);
-        checkArgument(bucketKeyType.getFieldCount() > 0, "The bucket keys should not be empty.");
-        this.bucketKeyType = bucketKeyType;
+        this.bucketFilter = bucketFilter;
         this.snapshotManager = snapshotManager;
         this.schemaManager = schemaManager;
         this.manifestFileFactory = manifestFileFactory;
@@ -110,28 +106,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         return this;
     }
 
-    protected FileStoreScan withBucketKeyFilter(Predicate predicate) {
-        this.bucketSelector = BucketSelector.create(predicate, bucketKeyType).orElse(null);
-        return this;
-    }
-
     @Override
     public FileStoreScan withPartitionFilter(List<BinaryRow> partitions) {
-        PredicateBuilder builder = new PredicateBuilder(partitionConverter.rowType());
-        Function<BinaryRow, Predicate> partitionToPredicate =
-                p -> {
-                    List<Predicate> fieldPredicates = new ArrayList<>();
-                    Object[] partitionObjects = partitionConverter.convert(p);
-                    for (int i = 0; i < partitionConverter.getArity(); i++) {
-                        Object partition = partitionObjects[i];
-                        fieldPredicates.add(builder.equal(i, partition));
-                    }
-                    return PredicateBuilder.and(fieldPredicates);
-                };
         List<Predicate> predicates =
                 partitions.stream()
                         .filter(p -> p.getFieldCount() > 0)
-                        .map(partitionToPredicate)
+                        .map(partitionConverter::createEqualPredicate)
                         .collect(Collectors.toList());
         if (predicates.isEmpty()) {
             return this;
@@ -329,8 +309,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     private boolean filterByBucketSelector(ManifestEntry entry) {
-        return (bucketSelector == null
-                || bucketSelector.select(entry.bucket(), entry.totalBuckets()));
+        return bucketFilter.select(entry.bucket(), entry.totalBuckets());
     }
 
     /** Note: Keep this thread-safe. */

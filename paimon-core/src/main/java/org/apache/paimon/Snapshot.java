@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * This file is the entrance to all data committed at some specific time point.
@@ -385,6 +386,49 @@ public class Snapshot {
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);
         }
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(
+                version,
+                id,
+                schemaId,
+                baseManifestList,
+                deltaManifestList,
+                changelogManifestList,
+                commitUser,
+                commitIdentifier,
+                commitKind,
+                timeMillis,
+                logOffsets,
+                totalRecordCount,
+                deltaRecordCount,
+                changelogRecordCount,
+                watermark);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (!(o instanceof Snapshot)) {
+            return false;
+        }
+        Snapshot that = (Snapshot) o;
+        return Objects.equals(version, that.version)
+                && id == that.id
+                && schemaId == that.schemaId
+                && Objects.equals(baseManifestList, that.baseManifestList)
+                && Objects.equals(deltaManifestList, that.deltaManifestList)
+                && Objects.equals(changelogManifestList, that.changelogManifestList)
+                && Objects.equals(commitUser, that.commitUser)
+                && commitIdentifier == that.commitIdentifier
+                && commitKind == that.commitKind
+                && timeMillis == that.timeMillis
+                && Objects.equals(logOffsets, that.logOffsets)
+                && Objects.equals(totalRecordCount, that.totalRecordCount)
+                && Objects.equals(deltaRecordCount, that.deltaRecordCount)
+                && Objects.equals(changelogRecordCount, that.changelogRecordCount)
+                && Objects.equals(watermark, that.watermark);
     }
 
     /** Type of changes in this snapshot. */

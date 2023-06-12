@@ -47,7 +47,7 @@ under the License.
     </tr>
     <tr>
         <td><h5>--computed-column</h5></td>
-        <td>The definitions of computed columns. The argument field is from MySQL table field name. <br /><br />Supported expressions are: <ul><li>year(date-column): Extract year from a DATE, DATETIME or TIMESTAMP. Output is an INT value represent the year.</li><li>substring(column,beginInclusive): Get column.substring(beginInclusive). Output is a STRING.</li><li>substring(column,beginInclusive,endExclusive): Get column.substring(beginInclusive,endExclusive). Output is a STRING.</li><li>truncate(column,width): truncate column by width. Output type is same with column.<ul><li>If the column is a STRING, truncate(column,width) will truncate the string to width characters, namely "value.substring(0, width)".</li><li>If the column is an INT or LONG, truncate(column,width) will truncate the number with the algorithm "v - (((v % W) + W) % W)". The "redundant" compute part is to keep the result always positive.</li><li>If the column is a DECIMAL, truncate(column,width) will truncate the decimal with the algorithm: let "scaled_W = decimal(W, scale(v))", then return "v - (v % scaled_W)".</li></ul></li></ul></td>
+        <td>The definitions of computed columns. The argument field is from MySQL table field name. See <a href="#computed-functions">here</a> for a complete list of configurations. </td>
     </tr>
     <tr>
         <td><h5>--mysql-conf</h5></td>

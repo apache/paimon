@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
@@ -26,37 +25,19 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 
 /** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
-public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<InternalRow> {
+public abstract class RowKeyExtractor implements KeyAndBucketExtractor<InternalRow> {
 
-    private final int numBuckets;
-    private final boolean sameBucketKeyAndTrimmedPrimaryKey;
-
-    private final Projection partitionProjection;
-    private final Projection bucketKeyProjection;
-    private final Projection trimmedPrimaryKeyProjection;
+    private final RowPartitionKeyExtractor partitionKeyExtractor;
     private final Projection logPrimaryKeyProjection;
 
-    private InternalRow record;
+    protected InternalRow record;
 
     private BinaryRow partition;
-    private BinaryRow bucketKey;
-    private Integer bucket;
     private BinaryRow trimmedPrimaryKey;
     private BinaryRow logPrimaryKey;
 
-    public InternalRowKeyAndBucketExtractor(TableSchema schema) {
-        numBuckets = new CoreOptions(schema.options()).bucket();
-        sameBucketKeyAndTrimmedPrimaryKey = schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
-
-        partitionProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.partitionKeys()));
-        bucketKeyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.bucketKeys()));
-        trimmedPrimaryKeyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.trimmedPrimaryKeys()));
+    public RowKeyExtractor(TableSchema schema) {
+        partitionKeyExtractor = new RowPartitionKeyExtractor(schema);
         logPrimaryKeyProjection =
                 CodeGenUtils.newProjection(
                         schema.logicalRowType(), schema.projection(schema.primaryKeys()));
@@ -65,10 +46,7 @@ public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<I
     @Override
     public void setRecord(InternalRow record) {
         this.record = record;
-
         this.partition = null;
-        this.bucketKey = null;
-        this.bucket = null;
         this.trimmedPrimaryKey = null;
         this.logPrimaryKey = null;
     }
@@ -76,34 +54,15 @@ public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<I
     @Override
     public BinaryRow partition() {
         if (partition == null) {
-            partition = partitionProjection.apply(record);
+            partition = partitionKeyExtractor.partition(record);
         }
         return partition;
     }
 
     @Override
-    public int bucket() {
-        if (bucketKey == null) {
-            bucketKey = bucketKeyProjection.apply(record);
-            if (sameBucketKeyAndTrimmedPrimaryKey) {
-                trimmedPrimaryKey = bucketKey;
-            }
-        }
-        if (bucket == null) {
-            bucket =
-                    KeyAndBucketExtractor.bucket(
-                            KeyAndBucketExtractor.bucketKeyHashCode(bucketKey), numBuckets);
-        }
-        return bucket;
-    }
-
-    @Override
     public BinaryRow trimmedPrimaryKey() {
         if (trimmedPrimaryKey == null) {
-            trimmedPrimaryKey = trimmedPrimaryKeyProjection.apply(record);
-            if (sameBucketKeyAndTrimmedPrimaryKey) {
-                bucketKey = trimmedPrimaryKey;
-            }
+            trimmedPrimaryKey = partitionKeyExtractor.trimmedPrimaryKey(record);
         }
         return trimmedPrimaryKey;
     }
@@ -111,7 +70,6 @@ public class InternalRowKeyAndBucketExtractor implements KeyAndBucketExtractor<I
     @Override
     public BinaryRow logPrimaryKey() {
         if (logPrimaryKey == null) {
-            assert logPrimaryKeyProjection != null;
             logPrimaryKey = logPrimaryKeyProjection.apply(record);
         }
         return logPrimaryKey;

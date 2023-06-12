@@ -182,6 +182,13 @@ public class FlinkConnectorOptions {
                             "How many splits should assign to subtask per batch in StaticFileStoreSplitEnumerator "
                                     + "to avoid exceed `akka.framesize` limit.");
 
+    public static final ConfigOption<SplitAssignMode> SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE =
+            key("scan.split-enumerator.mode")
+                    .enumType(SplitAssignMode.class)
+                    .defaultValue(SplitAssignMode.FAIR)
+                    .withDescription(
+                            "The mode used by StaticFileStoreSplitEnumerator to assign splits.");
+
     /* Sink writer allocate segments from managed memory. */
     public static final ConfigOption<Boolean> SINK_USE_MANAGED_MEMORY =
             ConfigOptions.key("sink.use-managed-memory-allocator")
@@ -230,6 +237,36 @@ public class FlinkConnectorOptions {
         private final String description;
 
         WatermarkEmitStrategy(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /**
+     * Split assign mode for {@link org.apache.paimon.flink.source.StaticFileStoreSplitEnumerator}.
+     */
+    public enum SplitAssignMode implements DescribedEnum {
+        FAIR(
+                "fair",
+                "Distribute splits evenly when batch reading to prevent a few tasks from reading all."),
+        PREEMPTIVE(
+                "preemptive",
+                "Distribute splits preemptively according to the consumption speed of the task.");
+
+        private final String value;
+        private final String description;
+
+        SplitAssignMode(String value, String description) {
             this.value = value;
             this.description = description;
         }

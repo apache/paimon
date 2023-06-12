@@ -18,26 +18,17 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
-import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
-import org.apache.paimon.utils.FileStorePathFactory;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -45,8 +36,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -56,18 +48,12 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestFileMeta}. */
-public class ManifestFileMetaTest {
+public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
     private static final RowType PARTITION_TYPE = RowType.of(new IntType());
 
-    private final FileFormat avro;
-
     @TempDir java.nio.file.Path tempDir;
     private ManifestFile manifestFile;
-
-    public ManifestFileMetaTest() {
-        this.avro = FileFormat.fromIdentifier("avro", new Options());
-    }
 
     @BeforeEach
     public void beforeEach() {
@@ -76,12 +62,15 @@ public class ManifestFileMetaTest {
 
     @ParameterizedTest
     @ValueSource(ints = {2, 3, 4})
-    public void testMerge(int numLastBits) {
+    public void testMergeWithoutFullCompaction(int numLastBits) {
         List<ManifestFileMeta> input = new ArrayList<>();
         List<ManifestFileMeta> expected = new ArrayList<>();
         createData(numLastBits, input, expected);
 
-        List<ManifestFileMeta> actual = ManifestFileMeta.merge(input, manifestFile, 500, 3);
+        // no trigger Full Compaction
+        List<ManifestFileMeta> actual =
+                ManifestFileMeta.merge(
+                        input, manifestFile, 500, 3, Long.MAX_VALUE, getPartitionType());
         assertThat(actual).hasSameSizeAs(expected);
 
         // these two manifest files are merged from the input
@@ -98,29 +87,28 @@ public class ManifestFileMetaTest {
         }
     }
 
-    private void assertSameContent(
-            ManifestFileMeta expected, ManifestFileMeta actual, ManifestFile manifestFile) {
-        // check meta
-        assertThat(actual.numAddedFiles()).isEqualTo(expected.numAddedFiles());
-        assertThat(actual.numDeletedFiles()).isEqualTo(expected.numDeletedFiles());
-        assertThat(actual.partitionStats()).isEqualTo(expected.partitionStats());
-
-        // check content
-        assertThat(manifestFile.read(actual.fileName()))
-                .isEqualTo(manifestFile.read(expected.fileName()));
-    }
-
     @RepeatedTest(10)
     public void testCleanUpForException() throws IOException {
-        String failingName = UUID.randomUUID().toString();
-        FailingFileIO.reset(failingName, 1, 10);
         List<ManifestFileMeta> input = new ArrayList<>();
         createData(ThreadLocalRandom.current().nextInt(5), input, null);
+        // merge without fullcompaction
+        testCleanUp(input, Long.MAX_VALUE);
+    }
+
+    private void testCleanUp(List<ManifestFileMeta> input, long fullCompactionThreshold)
+            throws IOException {
+        String failingName = UUID.randomUUID().toString();
+        FailingFileIO.reset(failingName, 1, 10);
         ManifestFile failingManifestFile =
                 createManifestFile(FailingFileIO.getFailingPath(failingName, tempDir.toString()));
-
         try {
-            ManifestFileMeta.merge(input, failingManifestFile, 500, 3);
+            ManifestFileMeta.merge(
+                    input,
+                    failingManifestFile,
+                    500,
+                    3,
+                    fullCompactionThreshold,
+                    getPartitionType());
         } catch (Throwable e) {
             assertThat(e).hasRootCauseExactlyInstanceOf(FailingFileIO.ArtificialException.class);
             // old files should be kept untouched, while new files should be cleaned up
@@ -138,22 +126,169 @@ public class ManifestFileMetaTest {
         }
     }
 
-    private ManifestFile createManifestFile(String pathStr) {
-        Path path = new Path(pathStr);
-        FileIO fileIO = FileIOFinder.find(path);
-        return new ManifestFile.Factory(
-                        fileIO,
-                        new SchemaManager(fileIO, path),
-                        PARTITION_TYPE,
-                        avro,
-                        new FileStorePathFactory(
-                                path,
-                                PARTITION_TYPE,
-                                "default",
-                                CoreOptions.FILE_FORMAT.defaultValue().toString()),
-                        Long.MAX_VALUE,
-                        null)
-                .create();
+    @RepeatedTest(10)
+    public void testCleanUpWithFullCompaction() throws IOException {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        createData(ThreadLocalRandom.current().nextInt(5), input, null);
+        testCleanUp(input, 0L);
+    }
+
+    @Test
+    public void testMerge() {
+        List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
+        // delta with delete apply parititon 1,2
+        addDeltaManifests(input, true);
+        // trigger full compaction
+        List<ManifestFileMeta> merged =
+                ManifestFileMeta.merge(input, manifestFile, 500, 3, 200, getPartitionType());
+
+        // 1st Manifest don't need to Merge
+        assertSameContent(input.get(0), merged.get(0), manifestFile);
+
+        // after merge the entry is equivalent
+        assertEquivalentEntries(input, merged);
+    }
+
+    @Test
+    public void testMergeWithoutDelta() {
+
+        // base
+        List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMeta.merge(input, manifestFile, 500, 3, 200, getPartitionType());
+
+        assertEquivalentEntries(input, merged);
+        assertThat(merged).hasSameElementsAs(input);
+
+        // Delete and Add are completely neutralized in  delta.
+        List<ManifestFileMeta> base = createBaseManifestFileMetas(true);
+        List<ManifestFileMeta> input1 = new ArrayList<>(base);
+        ManifestFileMeta delta = makeManifest(makeEntry(true, "A", 1), makeEntry(false, "A", 1));
+        input1.add(delta);
+
+        List<ManifestFileMeta> merged1 =
+                ManifestFileMeta.merge(input1, manifestFile, 500, 3, 200, getPartitionType());
+
+        assertThat(base).hasSameElementsAs(merged1);
+        assertEquivalentEntries(input1, merged1);
+    }
+
+    @Test
+    public void testMergeWithoutBase() {
+        List<ManifestFileMeta> input = new ArrayList<>();
+        addDeltaManifests(input, true);
+        List<ManifestFileMeta> merged =
+                ManifestFileMeta.merge(input, manifestFile, 500, 3, 200, getPartitionType());
+        assertEquivalentEntries(input, merged);
+    }
+
+    @Test
+    public void testMergeWithoutDeleteFile() {
+        // entries are All ADD.
+        List<ManifestFileMeta> input = new ArrayList<>();
+        // base
+        for (int j = 0; j < 6; j++) {
+            List<ManifestEntry> entrys = new ArrayList<>();
+            for (int i = 1; i < 16; i++) {
+                entrys.add(makeEntry(true, String.format(manifestFileNameTemplate, j, i), j));
+            }
+            input.add(makeManifest(entrys.toArray(new ManifestEntry[0])));
+        }
+        // delta
+        input.add(makeManifest(makeEntry(true, "A")));
+        input.add(makeManifest(makeEntry(true, "B")));
+        input.add(makeManifest(makeEntry(true, "C")));
+        input.add(makeManifest(makeEntry(true, "D")));
+        input.add(makeManifest(makeEntry(true, "E")));
+        input.add(makeManifest(makeEntry(true, "F")));
+        input.add(makeManifest(makeEntry(true, "G")));
+
+        List<ManifestFileMeta> merged =
+                ManifestFileMeta.merge(input, manifestFile, 500, 3, 200, getPartitionType());
+        assertEquivalentEntries(input, merged);
+    }
+
+    @Test
+    public void testTriggerFullCompaction() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            entries.add(makeEntry(true, String.valueOf(i)));
+        }
+
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // base manifest
+        input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+
+        // delta manifest
+        input.add(makeManifest(makeEntry(true, "A"), makeEntry(true, "B"), makeEntry(true, "C")));
+        input.add(makeManifest(makeEntry(true, "D")));
+        input.add(makeManifest(makeEntry(false, "A"), makeEntry(false, "B"), makeEntry(true, "F")));
+        input.add(makeManifest(makeEntry(false, "14"), makeEntry(false, "15")));
+        input.add(
+                makeManifest(
+                        makeEntry(false, "C"),
+                        makeEntry(false, "D"),
+                        makeEntry(false, "F"),
+                        makeEntry(true, "G")));
+
+        // no trigger for delta size
+        List<ManifestFileMeta> newMetas2 = new ArrayList<>();
+        Optional<List<ManifestFileMeta>> fullCompacted =
+                ManifestFileMeta.tryFullCompaction(
+                        input, newMetas2, manifestFile, 500, Long.MAX_VALUE, getPartitionType());
+        assertThat(fullCompacted).isEmpty();
+        assertThat(newMetas2).isEmpty();
+
+        // trigger full compaction
+        List<ManifestFileMeta> newMetas3 = new ArrayList<>();
+        List<ManifestFileMeta> merged =
+                ManifestFileMeta.tryFullCompaction(
+                                input, newMetas3, manifestFile, 500, 100, getPartitionType())
+                        .get();
+
+        List<String> entryFileNameExptected = new ArrayList<>();
+        entryFileNameExptected.add("ADD-G");
+        for (int i = 0; i < 14; i++) {
+            entryFileNameExptected.add("ADD-" + i);
+        }
+
+        containSameEntryFile(merged, entryFileNameExptected);
+
+        assertThat(newMetas3).isNotEmpty();
+    }
+
+    @Test
+    public void testMultiPartitionsFullCompaction() {
+
+        List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
+
+        // delta with delete apply partition 1,2
+        addDeltaManifests(input, true);
+
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        List<ManifestFileMeta> mergedManifest =
+                ManifestFileMeta.tryFullCompaction(
+                                input, newMetas, manifestFile, 500, 100, getPartitionType())
+                        .get();
+
+        List<String> expected = Lists.newArrayList("ADD-C2", "ADD-D2", "ADD-G");
+        HashMap<Integer, Integer> partitionAndFileLimit =
+                new HashMap<Integer, Integer>() {
+                    {
+                        this.put(0, 16);
+                        this.put(1, 14);
+                        this.put(2, 14);
+                    }
+                };
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < partitionAndFileLimit.get(i); j++) {
+                expected.add(String.format("ADD-" + manifestFileNameTemplate, i, j));
+            }
+        }
+
+        containSameEntryFile(mergedManifest, expected);
     }
 
     private void createData(
@@ -217,41 +352,12 @@ public class ManifestFileMetaTest {
         }
     }
 
-    private ManifestFileMeta makeManifest(ManifestEntry... entries) {
-        ManifestFileMeta writtenMeta = manifestFile.write(Arrays.asList(entries)).get(0);
-        return new ManifestFileMeta(
-                writtenMeta.fileName(),
-                entries.length * 100, // for testing purpose
-                writtenMeta.numAddedFiles(),
-                writtenMeta.numDeletedFiles(),
-                writtenMeta.partitionStats(),
-                0);
+    public RowType getPartitionType() {
+        return PARTITION_TYPE;
     }
 
-    private ManifestEntry makeEntry(boolean isAdd, String fileName) {
-        BinaryRow binaryRow = new BinaryRow(1);
-        BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
-        writer.writeInt(0, 0);
-        writer.complete();
-
-        return new ManifestEntry(
-                isAdd ? FileKind.ADD : FileKind.DELETE,
-                binaryRow, // not used
-                0, // not used
-                0, // not used
-                new DataFileMeta(
-                        fileName,
-                        0, // not used
-                        0, // not used
-                        binaryRow, // not useds
-                        binaryRow, // not used
-                        StatsTestUtils.newEmptyTableStats(), // not used
-                        StatsTestUtils.newEmptyTableStats(), // not used
-                        0, // not used
-                        0, // not used
-                        0, // not used
-                        0, // not used
-                        Collections.emptyList(),
-                        Timestamp.fromEpochMillis(200000)));
+    @Override
+    ManifestFile getManifestFile() {
+        return manifestFile;
     }
 }

@@ -54,7 +54,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
-import static org.apache.paimon.flink.action.Action.getConfigMap;
+import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -331,22 +331,25 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         String includingTables = params.get("including-tables");
         String excludingTables = params.get("excluding-tables");
 
-        Optional<Map<String, String>> mySqlConfigOption = getConfigMap(params, "mysql-conf");
-        Optional<Map<String, String>> catalogConfigOption = getConfigMap(params, "catalog-conf");
-        Optional<Map<String, String>> tableConfigOption = getConfigMap(params, "table-conf");
-        return mySqlConfigOption.map(
-                mySqlConfig ->
-                        new MySqlSyncDatabaseAction(
-                                mySqlConfig,
-                                warehouse,
-                                database,
-                                ignoreIncompatible,
-                                tablePrefix,
-                                tableSuffix,
-                                includingTables,
-                                excludingTables,
-                                catalogConfigOption.orElse(Collections.emptyMap()),
-                                tableConfigOption.orElse(Collections.emptyMap())));
+        if (!params.has("mysql-conf")) {
+            return Optional.empty();
+        }
+
+        Map<String, String> mySqlConfig = optionalConfigMap(params, "mysql-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> tableConfig = optionalConfigMap(params, "table-conf");
+        return Optional.of(
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        ignoreIncompatible,
+                        tablePrefix,
+                        tableSuffix,
+                        includingTables,
+                        excludingTables,
+                        catalogConfig,
+                        tableConfig));
     }
 
     private static void printHelp() {

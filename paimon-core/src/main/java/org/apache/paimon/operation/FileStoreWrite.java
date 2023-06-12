@@ -47,11 +47,11 @@ public interface FileStoreWrite<T> {
     FileStoreWrite<T> withMemoryPool(MemorySegmentPool memoryPool);
 
     /**
-     * If overwrite is true, the writer will overwrite the store, otherwise it won't.
+     * Set writer to be empty, the writer will not search restored files.
      *
-     * @param overwrite the overwrite flag
+     * @param emptyWriter set flag to tag the writer is empty.
      */
-    void withOverwrite(boolean overwrite);
+    void fromEmptyWriter(boolean emptyWriter);
 
     /**
      * Write the data to the store according to the partition and bucket.

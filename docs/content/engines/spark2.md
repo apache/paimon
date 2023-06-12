@@ -30,7 +30,7 @@ This documentation is a guide for using Paimon in Spark2.
 
 ## Version
 
-Paimon supports Spark 2.4+. It is highly recommended to use Spark 2.4+ version with many improvements.
+Paimon supports Spark 2.4+. It is highly recommended to use Spark 2.4+ version with much improvement.
 
 ## Preparing Paimon Jar File
 

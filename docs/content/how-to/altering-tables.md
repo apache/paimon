@@ -177,35 +177,6 @@ ALTER TABLE my_table ADD COLUMN c1 VARCHAR;
 
 {{< /tabs >}}
 
-## Adding Column Position
-
-To add a new column with specified position, use FIRST or AFTER col_name.
-
-{{< tabs "add-column-position" >}}
-
-
-{{< tab "Flink" >}}
-
-```sql
-ALTER TABLE my_table ADD c INT FIRST;
-
-ALTER TABLE my_table ADD c INT AFTER b;
-```
-
-{{< /tab >}}
-
-{{< tab "Spark3" >}}
-
-```sql
-ALTER TABLE my_table ADD COLUMN c INT FIRST;
-
-ALTER TABLE my_table ADD COLUMN c INT AFTER b;
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
 ## Renaming Column Name
 The following SQL renames column `c0` in table `my_table` to `c1`.
 
@@ -349,7 +320,34 @@ ALTER TABLE my_table ALTER COLUMN buy_count COMMENT 'buy count';
 
 {{< /tabs >}}
 
+## Adding Column Position
 
+To add a new column with specified position, use FIRST or AFTER col_name.
+
+{{< tabs "add-column-position" >}}
+
+
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table ADD c INT FIRST;
+
+ALTER TABLE my_table ADD c INT AFTER b;
+```
+
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table ADD COLUMN c INT FIRST;
+
+ALTER TABLE my_table ADD COLUMN c INT AFTER b;
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ## Changing Column Position
 
@@ -360,9 +358,9 @@ To modify an existent column to a new position, use FIRST or AFTER col_name.
 {{< tab "Flink" >}}
 
 ```sql
-ALTER TABLE my_table ALTER col_a FIRST;
+ALTER TABLE my_table MODIFY col_a DOUBLE FIRST;
 
-ALTER TABLE my_table ALTER col_a AFTER col_b;
+ALTER TABLE my_table MODIFY col_a DOUBLE AFTER col_b;
 ```
 
 {{< /tab >}}
@@ -378,6 +376,7 @@ ALTER TABLE my_table ALTER COLUMN col_a AFTER col_b;
 {{< /tab >}}
 
 {{< /tabs >}}
+
 ## Changing Column Type
 
 The following SQL changes type of column `col_a` to `DOUBLE`.

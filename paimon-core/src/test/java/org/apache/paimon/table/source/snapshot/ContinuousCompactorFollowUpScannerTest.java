@@ -67,7 +67,7 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
 
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "1");
-        write = table.newWrite(commitUser).withOverwrite(true);
+        write = table.newWrite(commitUser).fromEmptyWriter(true);
         commit = table.newCommit(commitUser).withOverwrite(overwritePartition);
         write.write(rowData(1, 10, 101L));
         write.write(rowData(1, 20, 201L));
