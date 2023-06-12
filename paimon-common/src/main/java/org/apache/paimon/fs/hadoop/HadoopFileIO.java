@@ -284,5 +284,10 @@ public class HadoopFileIO implements FileIO {
         public Path getPath() {
             return new Path(status.getPath().toUri());
         }
+
+        @Override
+        public long getModificationTime() {
+            return status.getModificationTime();
+        }
     }
 }

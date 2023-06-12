@@ -20,9 +20,15 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -35,6 +41,11 @@ public class TagManager {
     public TagManager(FileIO fileIO, Path tablePath) {
         this.fileIO = fileIO;
         this.tablePath = tablePath;
+    }
+
+    /** Return the root Directory of tags. */
+    public Path tagDirectory() {
+        return new Path(tablePath + "/tag");
     }
 
     /** Return the path of a tag. */
@@ -81,5 +92,35 @@ public class TagManager {
     public Snapshot taggedSnapshot(String tagName) {
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
         return Snapshot.fromPath(fileIO, tagPath(tagName));
+    }
+
+    /** Get all tagged snapshots sorted by commit time. */
+    public List<Snapshot> taggedSnapshots() {
+        Path tagDirectory = tagDirectory();
+        try {
+            if (!fileIO.exists(tagDirectory)) {
+                return Collections.emptyList();
+            }
+
+            FileStatus[] statuses = fileIO.listStatus(tagDirectory);
+
+            if (statuses == null) {
+                throw new RuntimeException(
+                        String.format(
+                                "The return value is null of the listStatus for the '%s' directory.",
+                                tagDirectory));
+            }
+
+            return Arrays.stream(statuses)
+                    .map(FileStatus::getPath)
+                    .map(path -> Snapshot.fromPath(fileIO, path))
+                    .sorted(Comparator.comparingLong(Snapshot::id))
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format(
+                            "Failed to get tagged snapshots in tag directory '%s'.", tagDirectory),
+                    e);
+        }
     }
 }

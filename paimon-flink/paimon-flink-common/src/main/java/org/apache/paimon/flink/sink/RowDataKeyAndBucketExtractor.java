@@ -21,7 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.InternalRowKeyAndBucketExtractor;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
 import org.apache.flink.table.data.RowData;
@@ -29,10 +29,10 @@ import org.apache.flink.table.data.RowData;
 /** {@link KeyAndBucketExtractor} for {@link RowData}. */
 public class RowDataKeyAndBucketExtractor implements KeyAndBucketExtractor<RowData> {
 
-    private final InternalRowKeyAndBucketExtractor wrapped;
+    private final FixedBucketRowKeyExtractor wrapped;
 
     public RowDataKeyAndBucketExtractor(TableSchema schema) {
-        wrapped = new InternalRowKeyAndBucketExtractor(schema);
+        wrapped = new FixedBucketRowKeyExtractor(schema);
     }
 
     @Override

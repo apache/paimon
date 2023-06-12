@@ -25,19 +25,16 @@ import java.io.IOException;
 /** Utils for {@link FileIO}. */
 public class FileIOUtils {
 
-    public static FileIOLoader checkAccess(FileIOLoader fileIO, Path path, CatalogContext config) {
-        try {
-            if (fileIO == null) {
-                return null;
-            }
-
-            // check access
-            FileIO io = fileIO.load(path);
-            io.configure(config);
-            io.exists(path);
-            return fileIO;
-        } catch (IOException ignore) {
+    public static FileIOLoader checkAccess(FileIOLoader fileIO, Path path, CatalogContext config)
+            throws IOException {
+        if (fileIO == null) {
             return null;
         }
+
+        // check access
+        FileIO io = fileIO.load(path);
+        io.configure(config);
+        io.exists(path);
+        return fileIO;
     }
 }

@@ -65,10 +65,20 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
     }
 
     protected StartingScanner createStartingScanner(boolean isStreaming) {
-        if (options.toConfiguration().get(CoreOptions.STREAMING_COMPACT)) {
-            Preconditions.checkArgument(
-                    isStreaming, "Set 'streaming-compact' in batch mode. This is unexpected.");
-            return new ContinuousCompactorStartingScanner();
+        CoreOptions.StreamingCompactionType type =
+                options.toConfiguration().get(CoreOptions.STREAMING_COMPACT);
+        switch (type) {
+            case NORMAL:
+                {
+                    Preconditions.checkArgument(
+                            isStreaming,
+                            "Set 'streaming-compact' in batch mode. This is unexpected.");
+                    return new ContinuousCompactorStartingScanner();
+                }
+            case BUCKET_UNAWARE:
+                {
+                    return new FullStartingScanner();
+                }
         }
 
         // read from consumer id

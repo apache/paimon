@@ -151,9 +151,9 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             return;
         }
 
-        List<AbstractFileStoreWrite.State> states = write.checkpoint();
+        List<? extends AbstractFileStoreWrite.State<?>> states = write.checkpoint();
         write.close();
         write = newTableWrite(newTable);
-        write.restore(states);
+        write.restore((List) states);
     }
 }

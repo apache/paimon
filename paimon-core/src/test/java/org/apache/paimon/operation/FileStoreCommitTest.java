@@ -26,6 +26,9 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -56,12 +59,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -501,6 +506,7 @@ public class FileStoreCommitTest {
                 false,
                 null,
                 null,
+                Collections.emptyList(),
                 (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
         assertThat(store.snapshotManager().latestSnapshotId()).isEqualTo(snapshot.id());
 
@@ -512,6 +518,7 @@ public class FileStoreCommitTest {
                 false,
                 null,
                 null,
+                Collections.emptyList(),
                 (commit, committable) -> {
                     commit.ignoreEmptyCommit(false);
                     commit.commit(committable, Collections.emptyMap());
@@ -533,6 +540,7 @@ public class FileStoreCommitTest {
                     false,
                     (long) i,
                     null,
+                    Collections.emptyList(),
                     (commit, committable) -> {
                         commit.commit(committable, Collections.emptyMap());
                         committables.add(committable);
@@ -677,6 +685,95 @@ public class FileStoreCommitTest {
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Partitions list cannot be empty."));
+    }
+
+    @Test
+    public void testIndexFiles() throws Exception {
+        TestFileStore store = createStore(false, 2);
+        IndexFileHandler indexFileHandler = store.newIndexFileHandler();
+
+        KeyValue record1 = gen.next();
+        BinaryRow part1 = gen.getPartition(record1);
+        KeyValue record2 = record1;
+        BinaryRow part2 = part1;
+        while (part1.equals(part2)) {
+            record2 = gen.next();
+            part2 = gen.getPartition(record2);
+        }
+
+        // init write
+        store.commitDataIndex(
+                record1,
+                gen::getPartition,
+                0,
+                indexFileHandler.writeHashIndex(new int[] {1, 2, 5}));
+        store.commitDataIndex(
+                record1, gen::getPartition, 1, indexFileHandler.writeHashIndex(new int[] {6, 8}));
+        store.commitDataIndex(
+                record2, gen::getPartition, 2, indexFileHandler.writeHashIndex(new int[] {3, 5}));
+
+        Snapshot snapshot = store.snapshotManager().latestSnapshot();
+
+        // assert part1
+        List<IndexManifestEntry> part1Index =
+                indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
+        assertThat(part1Index.size()).isEqualTo(2);
+
+        assertThat(part1Index.get(0).bucket()).isEqualTo(0);
+        assertThat(indexFileHandler.readHashIndexList(part1Index.get(0).indexFile()))
+                .containsExactlyInAnyOrder(1, 2, 5);
+
+        assertThat(part1Index.get(1).bucket()).isEqualTo(1);
+        assertThat(indexFileHandler.readHashIndexList(part1Index.get(1).indexFile()))
+                .containsExactlyInAnyOrder(6, 8);
+
+        // assert part2
+        List<IndexManifestEntry> part2Index =
+                indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2);
+        assertThat(part2Index.size()).isEqualTo(1);
+        assertThat(part2Index.get(0).bucket()).isEqualTo(2);
+        assertThat(indexFileHandler.readHashIndexList(part2Index.get(0).indexFile()))
+                .containsExactlyInAnyOrder(3, 5);
+
+        // update part1
+        store.commitDataIndex(
+                record1, gen::getPartition, 0, indexFileHandler.writeHashIndex(new int[] {1, 4}));
+        snapshot = store.snapshotManager().latestSnapshot();
+
+        // assert update part1
+        part1Index = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1);
+        assertThat(part1Index.size()).isEqualTo(2);
+
+        assertThat(part1Index.get(0).bucket()).isEqualTo(0);
+        assertThat(indexFileHandler.readHashIndexList(part1Index.get(0).indexFile()))
+                .containsExactlyInAnyOrder(1, 4);
+
+        assertThat(part1Index.get(1).bucket()).isEqualTo(1);
+        assertThat(indexFileHandler.readHashIndexList(part1Index.get(1).indexFile()))
+                .containsExactlyInAnyOrder(6, 8);
+
+        // assert scan one bucket
+        Optional<IndexFileMeta> file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1, 0);
+        assertThat(file).isPresent();
+        assertThat(indexFileHandler.readHashIndexList(file.get())).containsExactlyInAnyOrder(1, 4);
+
+        // overwrite one partition
+        store.options().toConfiguration().set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, true);
+        store.overwriteData(
+                Collections.singletonList(record1), gen::getPartition, kv -> 0, new HashMap<>());
+        snapshot = store.snapshotManager().latestSnapshot();
+        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part1, 0);
+        assertThat(file).isEmpty();
+        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2, 2);
+        assertThat(file).isPresent();
+
+        // overwrite all partitions
+        store.options().toConfiguration().set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false);
+        store.overwriteData(
+                Collections.singletonList(record1), gen::getPartition, kv -> 0, new HashMap<>());
+        snapshot = store.snapshotManager().latestSnapshot();
+        file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2, 2);
+        assertThat(file).isEmpty();
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

@@ -49,6 +49,7 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -629,6 +630,26 @@ public abstract class FileStoreTableTestBase {
         result = getResult(read, scan.plan().splits(), STREAMING_ROW_TO_STRING);
         assertThat(result)
                 .containsExactlyInAnyOrder("+1|40|400|binary|varbinary|mapKey:mapVal|multiset");
+
+        // expire consumer and then test snapshot expiration
+        Thread.sleep(1000);
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.CONSUMER_EXPIRATION_TIME.key(), "1 s"));
+        // commit to trigger expiration
+        writeBuilder = table.newStreamWriteBuilder();
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        write.write(rowData(1, 100, 1000L));
+        commit.commit(9, write.prepareCommit(true, 9));
+
+        StreamTableScan finalScan = scan;
+        assertThatThrownBy(finalScan::plan)
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                OutOfRangeException.class, "The snapshot with id 5 has expired."));
 
         write.close();
     }

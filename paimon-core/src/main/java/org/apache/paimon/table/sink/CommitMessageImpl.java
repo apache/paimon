@@ -18,15 +18,18 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.io.NewFilesIncrement;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.Collections;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
@@ -44,16 +47,33 @@ public class CommitMessageImpl implements CommitMessage {
     private transient int bucket;
     private transient NewFilesIncrement newFilesIncrement;
     private transient CompactIncrement compactIncrement;
+    private transient IndexIncrement indexIncrement;
 
+    @VisibleForTesting
     public CommitMessageImpl(
             BinaryRow partition,
             int bucket,
             NewFilesIncrement newFilesIncrement,
             CompactIncrement compactIncrement) {
+        this(
+                partition,
+                bucket,
+                newFilesIncrement,
+                compactIncrement,
+                new IndexIncrement(Collections.emptyList()));
+    }
+
+    public CommitMessageImpl(
+            BinaryRow partition,
+            int bucket,
+            NewFilesIncrement newFilesIncrement,
+            CompactIncrement compactIncrement,
+            IndexIncrement indexIncrement) {
         this.partition = partition;
         this.bucket = bucket;
         this.newFilesIncrement = newFilesIncrement;
         this.compactIncrement = compactIncrement;
+        this.indexIncrement = indexIncrement;
     }
 
     @Override
@@ -74,8 +94,14 @@ public class CommitMessageImpl implements CommitMessage {
         return compactIncrement;
     }
 
+    public IndexIncrement indexIncrement() {
+        return indexIncrement;
+    }
+
     public boolean isEmpty() {
-        return newFilesIncrement.isEmpty() && compactIncrement.isEmpty();
+        return newFilesIncrement.isEmpty()
+                && compactIncrement.isEmpty()
+                && indexIncrement.isEmpty();
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -94,6 +120,7 @@ public class CommitMessageImpl implements CommitMessage {
         this.bucket = message.bucket;
         this.newFilesIncrement = message.newFilesIncrement;
         this.compactIncrement = message.compactIncrement;
+        this.indexIncrement = message.indexIncrement;
     }
 
     @Override
@@ -109,12 +136,13 @@ public class CommitMessageImpl implements CommitMessage {
         return bucket == that.bucket
                 && Objects.equals(partition, that.partition)
                 && Objects.equals(newFilesIncrement, that.newFilesIncrement)
-                && Objects.equals(compactIncrement, that.compactIncrement);
+                && Objects.equals(compactIncrement, that.compactIncrement)
+                && Objects.equals(indexIncrement, that.indexIncrement);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, newFilesIncrement, compactIncrement);
+        return Objects.hash(partition, bucket, newFilesIncrement, compactIncrement, indexIncrement);
     }
 
     @Override
@@ -124,7 +152,8 @@ public class CommitMessageImpl implements CommitMessage {
                         + "partition = %s, "
                         + "bucket = %d, "
                         + "newFilesIncrement = %s, "
-                        + "compactIncrement = %s}",
-                partition, bucket, newFilesIncrement, compactIncrement);
+                        + "compactIncrement = %s, "
+                        + "indexIncrement = %s}",
+                partition, bucket, newFilesIncrement, compactIncrement, indexIncrement);
     }
 }

@@ -62,7 +62,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final int compactionMinFileNum;
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
-    private final boolean skipCompaction;
+    private boolean skipCompaction;
     private final boolean assertDisorder;
     private final String fileCompression;
 
@@ -76,7 +76,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options) {
-        super(commitUser, snapshotManager, scan);
+        super(commitUser, snapshotManager, scan, null);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
@@ -129,7 +129,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 fileCompression);
     }
 
-    private AppendOnlyCompactManager.CompactRewriter compactRewriter(
+    public AppendOnlyCompactManager.CompactRewriter compactRewriter(
             BinaryRow partition, int bucket) {
         return toCompact -> {
             if (toCompact.isEmpty()) {
@@ -157,5 +157,9 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             rewriter.close();
             return rewriter.result();
         };
+    }
+
+    public void skipCompaction() {
+        skipCompaction = true;
     }
 }

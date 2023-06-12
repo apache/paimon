@@ -73,6 +73,7 @@ public class Snapshot {
     private static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
     private static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
     private static final String FIELD_CHANGELOG_MANIFEST_LIST = "changelogManifestList";
+    private static final String FIELD_INDEX_MANIFEST = "indexManifest";
     private static final String FIELD_COMMIT_USER = "commitUser";
     private static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
     private static final String FIELD_COMMIT_KIND = "commitKind";
@@ -109,6 +110,12 @@ public class Snapshot {
     @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST)
     @Nullable
     private final String changelogManifestList;
+
+    // a manifest recording all index files of this table
+    // null if no index file
+    @JsonProperty(FIELD_INDEX_MANIFEST)
+    @Nullable
+    private final String indexManifest;
 
     @JsonProperty(FIELD_COMMIT_USER)
     private final String commitUser;
@@ -164,6 +171,7 @@ public class Snapshot {
             String baseManifestList,
             String deltaManifestList,
             @Nullable String changelogManifestList,
+            @Nullable String indexManifest,
             String commitUser,
             long commitIdentifier,
             CommitKind commitKind,
@@ -180,6 +188,7 @@ public class Snapshot {
                 baseManifestList,
                 deltaManifestList,
                 changelogManifestList,
+                indexManifest,
                 commitUser,
                 commitIdentifier,
                 commitKind,
@@ -199,6 +208,7 @@ public class Snapshot {
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
             @JsonProperty(FIELD_CHANGELOG_MANIFEST_LIST) @Nullable String changelogManifestList,
+            @JsonProperty(FIELD_INDEX_MANIFEST) @Nullable String indexManifest,
             @JsonProperty(FIELD_COMMIT_USER) String commitUser,
             @JsonProperty(FIELD_COMMIT_IDENTIFIER) long commitIdentifier,
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
@@ -214,6 +224,7 @@ public class Snapshot {
         this.baseManifestList = baseManifestList;
         this.deltaManifestList = deltaManifestList;
         this.changelogManifestList = changelogManifestList;
+        this.indexManifest = indexManifest;
         this.commitUser = commitUser;
         this.commitIdentifier = commitIdentifier;
         this.commitKind = commitKind;
@@ -255,6 +266,12 @@ public class Snapshot {
     @Nullable
     public String changelogManifestList() {
         return changelogManifestList;
+    }
+
+    @JsonGetter(FIELD_INDEX_MANIFEST)
+    @Nullable
+    public String indexManifest() {
+        return indexManifest;
     }
 
     @JsonGetter(FIELD_COMMIT_USER)
@@ -397,6 +414,7 @@ public class Snapshot {
                 baseManifestList,
                 deltaManifestList,
                 changelogManifestList,
+                indexManifest,
                 commitUser,
                 commitIdentifier,
                 commitKind,
@@ -420,6 +438,7 @@ public class Snapshot {
                 && Objects.equals(baseManifestList, that.baseManifestList)
                 && Objects.equals(deltaManifestList, that.deltaManifestList)
                 && Objects.equals(changelogManifestList, that.changelogManifestList)
+                && Objects.equals(indexManifest, that.indexManifest)
                 && Objects.equals(commitUser, that.commitUser)
                 && commitIdentifier == that.commitIdentifier
                 && commitKind == that.commitKind

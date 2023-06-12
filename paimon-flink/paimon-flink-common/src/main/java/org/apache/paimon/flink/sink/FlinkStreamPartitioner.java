@@ -20,20 +20,17 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.flink.runtime.io.network.api.writer.SubtaskStateMapper;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
-/**
- * A {@link StreamPartitioner} which sends records from the same bucket to the same downstream
- * channel.
- *
- * @param <T> type of record
- */
-public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
+/** A {@link StreamPartitioner} which wraps a {@link ChannelComputer}. */
+public class FlinkStreamPartitioner<T> extends StreamPartitioner<T> {
 
     private final ChannelComputer<T> channelComputer;
 
-    public BucketingStreamPartitioner(ChannelComputer<T> channelComputer) {
+    public FlinkStreamPartitioner(ChannelComputer<T> channelComputer) {
         this.channelComputer = channelComputer;
     }
 
@@ -66,5 +63,16 @@ public class BucketingStreamPartitioner<T> extends StreamPartitioner<T> {
     @Override
     public String toString() {
         return channelComputer.toString();
+    }
+
+    public static <T> DataStream<T> createPartitionTransformation(
+            DataStream<T> input, ChannelComputer<T> channelComputer, Integer parallelism) {
+        FlinkStreamPartitioner<T> partitioner = new FlinkStreamPartitioner<>(channelComputer);
+        PartitionTransformation<T> partitioned =
+                new PartitionTransformation<>(input.getTransformation(), partitioner);
+        if (parallelism != null) {
+            partitioned.setParallelism(parallelism);
+        }
+        return new DataStream<>(input.getExecutionEnvironment(), partitioned);
     }
 }

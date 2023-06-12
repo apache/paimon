@@ -52,15 +52,14 @@ public class CdcRecordStoreMultiWriteOperator
         extends PrepareCommitOperator<CdcMultiplexRecord, MultiTableCommittable> {
 
     private static final long serialVersionUID = 1L;
-    private final long retrySleepMillis;
+
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final Catalog.Loader catalogLoader;
+
     protected Catalog catalog;
-    protected FileStoreTable table;
     protected Map<Identifier, FileStoreTable> tables;
     protected StoreSinkWriteState state;
-    protected StoreSinkWrite write;
     protected Map<Identifier, StoreSinkWrite> writes;
     protected String commitUser;
 
@@ -73,7 +72,6 @@ public class CdcRecordStoreMultiWriteOperator
         this.catalogLoader = catalogLoader;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;
-        this.retrySleepMillis = RETRY_SLEEP_TIME.defaultValue().toMillis();
     }
 
     @Override
@@ -103,22 +101,9 @@ public class CdcRecordStoreMultiWriteOperator
         String tableName = record.tableName();
         Identifier tableId = Identifier.create(databaseName, tableName);
 
-        table = tables.get(tableId);
-        if (table == null) {
-            while (true) {
-                try {
-                    table = (FileStoreTable) catalog.getTable(tableId);
-                    tables.put(tableId, table);
-                    break;
-                } catch (Catalog.TableNotExistException e) {
-                    // table not found, waiting until table is created by
-                    //     upstream operators
-                }
-                Thread.sleep(retrySleepMillis);
-            }
-        }
+        FileStoreTable table = getTable(tableId);
 
-        write =
+        StoreSinkWrite write =
                 writes.computeIfAbsent(
                         tableId,
                         id ->
@@ -132,16 +117,22 @@ public class CdcRecordStoreMultiWriteOperator
         Optional<GenericRow> optionalConverted =
                 toGenericRow(record.record(), table.schema().fields());
         if (!optionalConverted.isPresent()) {
+            FileStoreTable latestTable = table;
             while (true) {
-                table = table.copyWithLatestSchema();
-                optionalConverted = toGenericRow(record.record(), table.schema().fields());
+                latestTable = latestTable.copyWithLatestSchema();
+                tables.put(tableId, latestTable);
+                optionalConverted = toGenericRow(record.record(), latestTable.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;
                 }
                 Thread.sleep(
-                        table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis());
+                        latestTable
+                                .coreOptions()
+                                .toConfiguration()
+                                .get(RETRY_SLEEP_TIME)
+                                .toMillis());
             }
-            write.replace(table);
+            write.replace(latestTable);
         }
 
         try {
@@ -149,6 +140,24 @@ public class CdcRecordStoreMultiWriteOperator
         } catch (Exception e) {
             throw new IOException(e);
         }
+    }
+
+    private FileStoreTable getTable(Identifier tableId) throws InterruptedException {
+        FileStoreTable table = tables.get(tableId);
+        if (table == null) {
+            while (true) {
+                try {
+                    table = (FileStoreTable) catalog.getTable(tableId);
+                    tables.put(tableId, table);
+                    break;
+                } catch (Catalog.TableNotExistException e) {
+                    // table not found, waiting until table is created by
+                    //     upstream operators
+                }
+                Thread.sleep(RETRY_SLEEP_TIME.defaultValue().toMillis());
+            }
+        }
+        return table;
     }
 
     @Override

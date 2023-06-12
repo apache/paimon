@@ -16,12 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.predicate;
+package org.apache.paimon.operation;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.In;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import org.apache.paimon.types.RowType;
 
@@ -29,7 +33,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
 
 import javax.annotation.concurrent.ThreadSafe;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -43,42 +46,31 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 import static org.apache.paimon.predicate.PredicateBuilder.splitOr;
 
-/** Selector to select bucket from {@link Predicate}. */
-@ThreadSafe
-public class BucketSelector implements Serializable {
+/** Bucket filter push down in scan to skip files. */
+public abstract class ScanBucketFilter {
 
     public static final int MAX_VALUES = 1000;
 
-    private static final long serialVersionUID = 1L;
+    private final RowType bucketKeyType;
 
-    private final int[] hashCodes;
+    private ScanBucketSelector selector;
 
-    private final Map<Integer, Set<Integer>> buckets = new ConcurrentHashMap<>();
+    public ScanBucketFilter(RowType bucketKeyType) {
+        this.bucketKeyType = bucketKeyType;
+    }
 
-    public BucketSelector(int[] hashCodes) {
-        this.hashCodes = hashCodes;
+    public abstract void pushdown(Predicate predicate);
+
+    public void setBucketKeyFilter(Predicate predicate) {
+        this.selector = create(predicate, bucketKeyType).orElse(null);
     }
 
     public boolean select(int bucket, int numBucket) {
-        return buckets.computeIfAbsent(numBucket, k -> createBucketSet(numBucket)).contains(bucket);
+        return selector == null || selector.select(bucket, numBucket);
     }
 
     @VisibleForTesting
-    int[] hashCodes() {
-        return hashCodes;
-    }
-
-    @VisibleForTesting
-    Set<Integer> createBucketSet(int numBucket) {
-        ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
-        for (int hash : hashCodes) {
-            builder.add(KeyAndBucketExtractor.bucket(hash, numBucket));
-        }
-        return builder.build();
-    }
-
-    public static Optional<BucketSelector> create(
-            Predicate bucketPredicate, RowType bucketKeyType) {
+    static Optional<ScanBucketSelector> create(Predicate bucketPredicate, RowType bucketKeyType) {
         @SuppressWarnings("unchecked")
         List<Object>[] bucketValues = new List[bucketKeyType.getFieldCount()];
 
@@ -135,7 +127,7 @@ public class BucketSelector implements Serializable {
                 new ArrayList<>(),
                 0);
 
-        return Optional.of(new BucketSelector(hashCodes.stream().mapToInt(i -> i).toArray()));
+        return Optional.of(new ScanBucketSelector(hashCodes.stream().mapToInt(i -> i).toArray()));
     }
 
     private static int hash(List<Object> columns, InternalRowSerializer serializer) {
@@ -158,6 +150,39 @@ public class BucketSelector implements Serializable {
                 assembleRows(rowValues, consumer, stack, columnIndex + 1);
             }
             stack.remove(stack.size() - 1);
+        }
+    }
+
+    /** Selector to select bucket from {@link Predicate}. */
+    @ThreadSafe
+    public static class ScanBucketSelector {
+
+        private final int[] hashCodes;
+
+        private final Map<Integer, Set<Integer>> buckets = new ConcurrentHashMap<>();
+
+        public ScanBucketSelector(int[] hashCodes) {
+            this.hashCodes = hashCodes;
+        }
+
+        @VisibleForTesting
+        boolean select(int bucket, int numBucket) {
+            return buckets.computeIfAbsent(numBucket, k -> createBucketSet(numBucket))
+                    .contains(bucket);
+        }
+
+        @VisibleForTesting
+        int[] hashCodes() {
+            return hashCodes;
+        }
+
+        @VisibleForTesting
+        Set<Integer> createBucketSet(int numBucket) {
+            ImmutableSet.Builder<Integer> builder = new ImmutableSet.Builder<>();
+            for (int hash : hashCodes) {
+                builder.add(KeyAndBucketExtractor.bucket(hash, numBucket));
+            }
+            return builder.build();
         }
     }
 }

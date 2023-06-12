@@ -29,7 +29,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.Triple;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 
@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /** Delete snapshot files. */
@@ -77,11 +78,17 @@ public class SnapshotDeletion {
      *
      * @param manifestListName name of manifest list
      * @param deletionBuckets partition-buckets of which some data files have been deleted
+     * @param dataFileSkipper if the test result of a data file is true, the data file will be
+     *     skipped when deleting
      */
     public void deleteExpiredDataFiles(
-            String manifestListName, Map<BinaryRow, Set<Integer>> deletionBuckets) {
+            String manifestListName,
+            Map<BinaryRow, Set<Integer>> deletionBuckets,
+            Predicate<ManifestEntry> dataFileSkipper) {
         doDeleteExpiredDataFiles(
-                getManifestEntriesFromManifestList(manifestListName), deletionBuckets);
+                getManifestEntriesFromManifestList(manifestListName),
+                deletionBuckets,
+                dataFileSkipper);
     }
 
     /**
@@ -148,9 +155,9 @@ public class SnapshotDeletion {
      * file.
      *
      * @param skipped manifest file deletion skipping set, deleted manifest file will be added to
-     *     this set too.
+     *     this set too. NOTE: changelog manifests won't be checked.
      */
-    public void deleteManifestFiles(Set<ManifestFileMeta> skipped, Snapshot snapshot) {
+    public void deleteManifestFiles(Set<String> skipped, Snapshot snapshot) {
         // cannot call `toExpire.dataManifests` directly, it is possible that a job is
         // killed during expiration, so some manifest files may have been deleted
         List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
@@ -159,9 +166,10 @@ public class SnapshotDeletion {
 
         // delete manifest
         for (ManifestFileMeta manifest : toExpireManifests) {
-            if (!skipped.contains(manifest)) {
-                manifestFile.delete(manifest.fileName());
-                skipped.add(manifest);
+            String fileName = manifest.fileName();
+            if (!skipped.contains(fileName)) {
+                manifestFile.delete(fileName);
+                skipped.add(fileName);
             }
         }
         if (snapshot.changelogManifestList() != null) {
@@ -172,8 +180,12 @@ public class SnapshotDeletion {
         }
 
         // delete manifest lists
-        manifestList.delete(snapshot.baseManifestList());
-        manifestList.delete(snapshot.deltaManifestList());
+        if (!skipped.contains(snapshot.baseManifestList())) {
+            manifestList.delete(snapshot.baseManifestList());
+        }
+        if (!skipped.contains(snapshot.deltaManifestList())) {
+            manifestList.delete(snapshot.deltaManifestList());
+        }
         if (snapshot.changelogManifestList() != null) {
             manifestList.delete(snapshot.changelogManifestList());
         }
@@ -192,11 +204,13 @@ public class SnapshotDeletion {
 
     @VisibleForTesting
     void doDeleteExpiredDataFiles(
-            Iterable<ManifestEntry> dataFileLog, Map<BinaryRow, Set<Integer>> deletionBuckets) {
+            Iterable<ManifestEntry> dataFileLog,
+            Map<BinaryRow, Set<Integer>> deletionBuckets,
+            Predicate<ManifestEntry> dataFileSkipper) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
-        // data file path -> (partition, bucket, extra file paths)
-        Map<Path, Triple<BinaryRow, Integer, List<Path>>> dataFileToDelete = new HashMap<>();
+        // data file path -> (original manifest entry, extra file paths)
+        Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete = new HashMap<>();
         for (ManifestEntry entry : dataFileLog) {
             Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
             Path dataFilePath = new Path(bucketPath, entry.file().fileName());
@@ -209,8 +223,7 @@ public class SnapshotDeletion {
                     for (String file : entry.file().extraFiles()) {
                         extraFiles.add(new Path(bucketPath, file));
                     }
-                    dataFileToDelete.put(
-                            dataFilePath, Triple.of(entry.partition(), entry.bucket(), extraFiles));
+                    dataFileToDelete.put(dataFilePath, Pair.of(entry, extraFiles));
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -219,12 +232,18 @@ public class SnapshotDeletion {
         }
 
         dataFileToDelete.forEach(
-                (path, triple) -> {
-                    // delete data files
-                    fileIO.deleteQuietly(path);
-                    triple.f2.forEach(fileIO::deleteQuietly);
-                    // record changed buckets
-                    deletionBuckets.computeIfAbsent(triple.f0, p -> new HashSet<>()).add(triple.f1);
+                (path, pair) -> {
+                    ManifestEntry entry = pair.getLeft();
+                    // check whether we should skip the data file
+                    if (!dataFileSkipper.test(entry)) {
+                        // delete data files
+                        fileIO.deleteQuietly(path);
+                        pair.getRight().forEach(fileIO::deleteQuietly);
+                        // record changed buckets
+                        deletionBuckets
+                                .computeIfAbsent(entry.partition(), p -> new HashSet<>())
+                                .add(entry.bucket());
+                    }
                 });
     }
 

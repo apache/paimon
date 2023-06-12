@@ -168,6 +168,11 @@ public class FailingFileIO extends TraceableFileIO {
         }
 
         @Override
+        public long getModificationTime() {
+            return file.lastModified();
+        }
+
+        @Override
         public String toString() {
             return "FailingLocalFileStatus{file=" + this.file + ", path=" + this.path + '}';
         }

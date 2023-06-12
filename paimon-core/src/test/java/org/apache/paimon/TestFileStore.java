@@ -23,7 +23,9 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -58,6 +60,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -156,6 +159,7 @@ public class TestFileStore extends KeyValueFileStore {
                 false,
                 null,
                 watermark,
+                Collections.emptyList(),
                 (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
     }
 
@@ -172,6 +176,7 @@ public class TestFileStore extends KeyValueFileStore {
                 false,
                 null,
                 null,
+                Collections.emptyList(),
                 (commit, committable) -> {
                     logOffsets.forEach(committable::addLogOffset);
                     commit.commit(committable, Collections.emptyMap());
@@ -191,6 +196,7 @@ public class TestFileStore extends KeyValueFileStore {
                 true,
                 null,
                 null,
+                Collections.emptyList(),
                 (commit, committable) ->
                         commit.overwrite(partition, committable, Collections.emptyMap()));
     }
@@ -212,6 +218,23 @@ public class TestFileStore extends KeyValueFileStore {
         return snapshotManager.snapshot(snapshotIdAfterCommit);
     }
 
+    public List<Snapshot> commitDataIndex(
+            KeyValue kv,
+            Function<KeyValue, BinaryRow> partitionCalculator,
+            int bucket,
+            IndexFileMeta... indexFiles)
+            throws Exception {
+        return commitDataImpl(
+                Collections.singletonList(kv),
+                partitionCalculator,
+                ignore -> bucket,
+                false,
+                null,
+                null,
+                Arrays.asList(indexFiles),
+                (commit, committable) -> commit.commit(committable, Collections.emptyMap()));
+    }
+
     public List<Snapshot> commitDataImpl(
             List<KeyValue> kvs,
             Function<KeyValue, BinaryRow> partitionCalculator,
@@ -219,6 +242,7 @@ public class TestFileStore extends KeyValueFileStore {
             boolean emptyWriter,
             Long identifier,
             Long watermark,
+            List<IndexFileMeta> indexFiles,
             BiConsumer<FileStoreCommit, ManifestCommittable> commitFunction)
             throws Exception {
         AbstractFileStoreWrite<KeyValue> write = newWrite();
@@ -262,7 +286,8 @@ public class TestFileStore extends KeyValueFileStore {
                                 entryWithPartition.getKey(),
                                 entryWithBucket.getKey(),
                                 increment.newFilesIncrement(),
-                                increment.compactIncrement()));
+                                increment.compactIncrement(),
+                                new IndexIncrement(indexFiles)));
             }
         }
 

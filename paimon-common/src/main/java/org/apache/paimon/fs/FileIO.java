@@ -34,8 +34,10 @@ import java.io.OutputStreamWriter;
 import java.io.Serializable;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.UUID;
@@ -250,13 +252,24 @@ public interface FileIO extends Serializable {
 
         // load fallbackIO
         FileIOLoader fallbackIO = config.fallbackIO();
+
+        List<IOException> ioExceptionList = new ArrayList<>();
+
         if (loader == null) {
-            loader = checkAccess(fallbackIO, path, config);
+            try {
+                loader = checkAccess(fallbackIO, path, config);
+            } catch (IOException ioException) {
+                ioExceptionList.add(ioException);
+            }
         }
 
         // load hadoopIO
         if (loader == null) {
-            loader = checkAccess(new HadoopFileIOLoader(), path, config);
+            try {
+                loader = checkAccess(new HadoopFileIOLoader(), path, config);
+            } catch (IOException ioException) {
+                ioExceptionList.add(ioException);
+            }
         }
 
         if (loader == null) {
@@ -267,11 +280,17 @@ public interface FileIO extends Serializable {
                                 + fallbackIO.getClass().getSimpleName()
                                 + " also cannot access this path.";
             }
-            throw new UnsupportedSchemeException(
-                    String.format(
-                            "Could not find a file io implementation for scheme '%s' in the classpath."
-                                    + "%s Hadoop FileSystem also cannot access this path '%s'.",
-                            uri.getScheme(), fallbackMsg, path));
+            UnsupportedSchemeException ex =
+                    new UnsupportedSchemeException(
+                            String.format(
+                                    "Could not find a file io implementation for scheme '%s' in the classpath."
+                                            + "%s Hadoop FileSystem also cannot access this path '%s'.",
+                                    uri.getScheme(), fallbackMsg, path));
+            for (IOException ioException : ioExceptionList) {
+                ex.addSuppressed(ioException);
+            }
+
+            throw ex;
         }
 
         FileIO fileIO = loader.load(path);

@@ -611,13 +611,12 @@ public class CoreOptions implements Serializable {
                             "Full compaction will be constantly triggered after delta commits.");
 
     @ExcludeFromDocumentation("Internal use only")
-    public static final ConfigOption<Boolean> STREAMING_COMPACT =
+    public static final ConfigOption<StreamingCompactionType> STREAMING_COMPACT =
             key("streaming-compact")
-                    .booleanType()
-                    .defaultValue(false)
+                    .enumType(StreamingCompactionType.class)
+                    .defaultValue(StreamingCompactionType.NONE)
                     .withDescription(
-                            "Only used to force TableScan to construct 'ContinuousCompactorStartingScanner' and "
-                                    + "'ContinuousCompactorFollowUpScanner' for dedicated streaming compaction job.");
+                            "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' dedicated streaming compaction job.");
 
     public static final ConfigOption<StreamingReadMode> STREAMING_READ_MODE =
             key("streaming-read-mode")
@@ -640,6 +639,14 @@ public class CoreOptions implements Serializable {
                                                     StreamingReadMode.LOG.getValue()
                                                             + ": Read from the data of table log store."))
                                     .build());
+
+    public static final ConfigOption<Duration> CONSUMER_EXPIRATION_TIME =
+            key("consumer.expiration-time")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The expiration interval of consumer files. A consumer file will be expired if "
+                                    + "it's lifetime after last modification is over this value.");
 
     private final Options options;
 
@@ -927,6 +934,10 @@ public class CoreOptions implements Serializable {
         return options.get(STREAMING_READ_MODE);
     }
 
+    public Duration consumerExpireTime() {
+        return options.get(CONSUMER_EXPIRATION_TIME);
+    }
+
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
         DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
@@ -1199,6 +1210,51 @@ public class CoreOptions implements Serializable {
                             value,
                             StringUtils.join(
                                     Arrays.stream(StreamingReadMode.values()).iterator(), ",")));
+        }
+    }
+
+    /** Compaction type when trigger a compaction action. */
+    public enum StreamingCompactionType implements DescribedEnum {
+        NONE("none", "Not a streaming compaction."),
+        NORMAL("normal", "Compaction for traditional bucket table."),
+        BUCKET_UNAWARE("unaware", "Compaction for unaware bucket table.");
+
+        private final String value;
+        private final String description;
+
+        StreamingCompactionType(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        @VisibleForTesting
+        public static StreamingCompactionType fromValue(String value) {
+            for (StreamingCompactionType formatType : StreamingCompactionType.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(StreamingCompactionType.values()).iterator(),
+                                    ",")));
         }
     }
 

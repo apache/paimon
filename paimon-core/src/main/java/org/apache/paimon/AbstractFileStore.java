@@ -21,18 +21,23 @@ package org.apache.paimon;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.index.HashIndexFile;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.operation.TagFileKeeper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
 
@@ -114,6 +119,18 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 forWrite ? writeManifestCache : null);
     }
 
+    protected IndexManifestFile.Factory indexManifestFileFactory() {
+        return new IndexManifestFile.Factory(fileIO, options.manifestFormat(), pathFactory());
+    }
+
+    @Override
+    public IndexFileHandler newIndexFileHandler() {
+        return new IndexFileHandler(
+                snapshotManager(),
+                indexManifestFileFactory().create(),
+                new HashIndexFile(fileIO, pathFactory().indexFileFactory()));
+    }
+
     @Override
     public RowType partitionType() {
         return partitionType;
@@ -135,6 +152,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 snapshotManager(),
                 manifestFileFactory(),
                 manifestListFactory(),
+                indexManifestFileFactory(),
                 newScan(),
                 options.bucket(),
                 options.manifestTargetSize(),
@@ -151,7 +169,11 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.snapshotNumRetainMax(),
                 options.snapshotTimeRetain().toMillis(),
                 snapshotManager(),
-                newSnapshotDeletion());
+                newSnapshotDeletion(),
+                new TagFileKeeper(
+                        manifestListFactory().create(),
+                        manifestFileFactory().create(),
+                        new TagManager(fileIO, options.path())));
     }
 
     @Override

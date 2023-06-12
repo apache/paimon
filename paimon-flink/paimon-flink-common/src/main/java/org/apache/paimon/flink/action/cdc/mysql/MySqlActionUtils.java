@@ -36,6 +36,8 @@ import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
@@ -57,6 +59,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 class MySqlActionUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
+    public static final ConfigOption<Boolean> SCAN_NEWLY_ADDED_TABLE_ENABLED =
+            ConfigOptions.key("scan.newly-added-table.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether capture the scan the newly added tables or not, by default is true.");
 
     static Connection getConnection(Configuration mySqlConfig) throws Exception {
         return DriverManager.getConnection(
@@ -254,7 +262,14 @@ class MySqlActionUtils {
         customConverterConfigs.put(JsonConverterConfig.DECIMAL_FORMAT_CONFIG, "numeric");
         JsonDebeziumDeserializationSchema schema =
                 new JsonDebeziumDeserializationSchema(true, customConverterConfigs);
-        return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
+
+        boolean scanNewlyAddedTables = mySqlConfig.get(SCAN_NEWLY_ADDED_TABLE_ENABLED);
+
+        return sourceBuilder
+                .deserializer(schema)
+                .includeSchemaChanges(true)
+                .scanNewlyAddedTableEnabled(scanNewlyAddedTables)
+                .build();
     }
 
     private static void validateMySqlConfig(Configuration mySqlConfig) {
