@@ -27,8 +27,11 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+import org.apache.flink.streaming.runtime.partitioner.RebalancePartitioner;
 
 import javax.annotation.Nullable;
 
@@ -44,15 +47,15 @@ import java.util.Map;
  * snapshot. We need to enable checkpoint for this compaction job, checkpoint will trigger committer
  * stage to commit all the compacted files.
  */
-public class UnawareBucketCompactionTopologyBuilder {
+public class UnawareBucketCompactionJob {
 
-    private transient StreamExecutionEnvironment env;
+    private final transient StreamExecutionEnvironment env;
     private final String tableIdentifier;
     private final AppendOnlyFileStoreTable table;
     @Nullable private List<Map<String, String>> specifiedPartitions = null;
     private boolean isContinuous = false;
 
-    public UnawareBucketCompactionTopologyBuilder(
+    public UnawareBucketCompactionJob(
             StreamExecutionEnvironment env,
             String tableIdentifier,
             AppendOnlyFileStoreTable table) {
@@ -91,8 +94,19 @@ public class UnawareBucketCompactionTopologyBuilder {
         Options conf = Options.fromMap(table.options());
         Integer compactionWorkerParallelism =
                 conf.get(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM);
+        PartitionTransformation<AppendOnlyCompactionTask> transformation =
+                new PartitionTransformation<>(
+                        input.getTransformation(), new RebalancePartitioner<>());
+        if (compactionWorkerParallelism != null) {
+            transformation.setParallelism(compactionWorkerParallelism);
+        } else {
+            // cause source function for unaware-bucket table compaction has only one parallelism,
+            // we need to set to default parallelism by hand.
+            transformation.setParallelism(env.getParallelism());
+        }
+        DataStream<AppendOnlyCompactionTask> rebalanced = new DataStream<>(env, transformation);
 
-        UnawareBucketCompactionSink.sink(table, compactionWorkerParallelism, input);
+        UnawareBucketCompactionSink.sink(table, rebalanced);
     }
 
     private Predicate getPartitionFilter() {

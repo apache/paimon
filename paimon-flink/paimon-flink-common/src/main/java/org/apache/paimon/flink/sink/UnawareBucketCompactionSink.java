@@ -25,52 +25,27 @@ import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
 /** Compaction Sink for unaware-bucket table. */
 public class UnawareBucketCompactionSink extends FlinkSink<AppendOnlyCompactionTask> {
 
-    private static final String COMPACTION_WORKER_NAME = "Compaction Worker";
+    private final AppendOnlyFileStoreTable table;
 
-    private AppendOnlyFileStoreTable table;
-    private Integer compactionWorkerParallelism;
-
-    public UnawareBucketCompactionSink(
-            AppendOnlyFileStoreTable table, Integer compactionWorkerParallelism) {
+    public UnawareBucketCompactionSink(AppendOnlyFileStoreTable table) {
         super(table, true);
         this.table = table;
-        this.compactionWorkerParallelism = compactionWorkerParallelism;
-    }
-
-    @Override
-    protected SingleOutputStreamOperator<Committable> handleInput(
-            DataStream<AppendOnlyCompactionTask> input, boolean isStreaming, String commitUser) {
-        CommittableTypeInfo committableTypeInfo = new CommittableTypeInfo();
-        SingleOutputStreamOperator<Committable> compacted =
-                input.transform(
-                        COMPACTION_WORKER_NAME + " -> " + table.name(),
-                        committableTypeInfo,
-                        new AppendOnlyTableCompactionWorkerOperator(table, commitUser));
-
-        if (compactionWorkerParallelism != null) {
-            compacted.setParallelism(compactionWorkerParallelism);
-        }
-
-        return compacted;
     }
 
     public static DataStreamSink<?> sink(
-            AppendOnlyFileStoreTable table,
-            Integer compactionWorkerParallelism,
-            DataStream<AppendOnlyCompactionTask> input) {
-        return new UnawareBucketCompactionSink(table, compactionWorkerParallelism).sinkFrom(input);
+            AppendOnlyFileStoreTable table, DataStream<AppendOnlyCompactionTask> input) {
+        return new UnawareBucketCompactionSink(table).sinkFrom(input);
     }
 
     @Override
     protected OneInputStreamOperator<AppendOnlyCompactionTask, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
-        return null;
+        return new AppendOnlyTableCompactionWorkerOperator(table, commitUser);
     }
 
     @Override

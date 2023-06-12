@@ -33,12 +33,6 @@ under the License.
             <td>When changelog-producer is set to LOOKUP, commit will wait for changelog generation by lookup.</td>
         </tr>
         <tr>
-            <td><h5>compaction.parallelism</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Defines a custom parallelism for the compaction job. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration.</td>
-        </tr>
-        <tr>
             <td><h5>log.system</h5></td>
             <td style="word-wrap: break-word;">"none"</td>
             <td>String</td>
@@ -65,7 +59,7 @@ under the License.
         <tr>
             <td><h5>scan.split-enumerator.mode</h5></td>
             <td style="word-wrap: break-word;">fair</td>
-            <td>Enum</td>
+            <td><p>Enum</p></td>
             <td>The mode used by StaticFileStoreSplitEnumerator to assign splits.<br /><br />Possible values:<ul><li>"fair": Distribute splits evenly when batch reading to prevent a few tasks from reading all.</li><li>"preemptive": Distribute splits preemptively according to the consumption speed of the task.</li></ul></td>
         </tr>
         <tr>
@@ -121,6 +115,12 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>The option to enable return per iterator instead of per record in streaming read.This can ensure that there will be no checkpoint segmentation in iterator consumption.<br />By default, streaming source checkpoint will be performed in any time, this means 'UPDATE_BEFORE' and 'UPDATE_AFTER' can be split into two checkpoint. Downstream can see intermediate state.</td>
+        </tr>
+        <tr>
+            <td><h5>unaware-bucket.compaction.parallelism</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Defines a custom parallelism for the unaware-bucket table compaction job. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration.</td>
         </tr>
     </tbody>
 </table>

@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.compact.UnawareBucketCompactionTopologyBuilder;
+import org.apache.paimon.flink.compact.UnawareBucketCompactionJob;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
@@ -116,12 +116,12 @@ public class CompactAction extends TableActionBase {
 
     private void buildForUnawareBucketCompaction(
             StreamExecutionEnvironment env, AppendOnlyFileStoreTable table, boolean isStreaming) {
-        UnawareBucketCompactionTopologyBuilder unawareBucketCompactionTopologyBuilder =
-                new UnawareBucketCompactionTopologyBuilder(env, identifier.getFullName(), table);
+        UnawareBucketCompactionJob unawareBucketCompactionJob =
+                new UnawareBucketCompactionJob(env, identifier.getFullName(), table);
 
-        unawareBucketCompactionTopologyBuilder.withPartitions(partitions);
-        unawareBucketCompactionTopologyBuilder.withContinuousMode(isStreaming);
-        unawareBucketCompactionTopologyBuilder.build();
+        unawareBucketCompactionJob.withPartitions(partitions);
+        unawareBucketCompactionJob.withContinuousMode(isStreaming);
+        unawareBucketCompactionJob.build();
     }
 
     // ------------------------------------------------------------------------

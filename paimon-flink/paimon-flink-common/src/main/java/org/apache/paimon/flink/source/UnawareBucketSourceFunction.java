@@ -45,11 +45,12 @@ public class UnawareBucketSourceFunction extends RichSourceFunction<AppendOnlyCo
     private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
 
     private final AppendOnlyFileStoreTable table;
-    private transient AppendOnlyTableCompactionCoordinator compactionCoordinator;
-    private volatile boolean isRunning = true;
     private final boolean streaming;
     private final long scanInterval;
     private final Predicate filter;
+    private transient AppendOnlyTableCompactionCoordinator compactionCoordinator;
+    private transient SourceContext<AppendOnlyCompactionTask> ctx;
+    private volatile boolean isRunning = true;
 
     public UnawareBucketSourceFunction(
             AppendOnlyFileStoreTable table,
@@ -69,16 +70,22 @@ public class UnawareBucketSourceFunction extends RichSourceFunction<AppendOnlyCo
 
     @Override
     public void run(SourceContext<AppendOnlyCompactionTask> sourceContext) throws Exception {
+        this.ctx = sourceContext;
         while (isRunning) {
             boolean isEmpty;
-            try {
-                // do scan and plan action, emit append-only compaction tasks.
-                List<AppendOnlyCompactionTask> tasks = compactionCoordinator.run();
-                isEmpty = tasks.isEmpty();
-                tasks.forEach(sourceContext::collect);
-            } catch (EndOfScanException esf) {
-                LOG.info("Catching EndOfStreamException, the stream is finished.");
-                return;
+            synchronized (ctx.getCheckpointLock()) {
+                if (!isRunning) {
+                    return;
+                }
+                try {
+                    // do scan and plan action, emit append-only compaction tasks.
+                    List<AppendOnlyCompactionTask> tasks = compactionCoordinator.run();
+                    isEmpty = tasks.isEmpty();
+                    tasks.forEach(ctx::collect);
+                } catch (EndOfScanException esf) {
+                    LOG.info("Catching EndOfStreamException, the stream is finished.");
+                    return;
+                }
             }
 
             if (isEmpty) {
@@ -89,7 +96,13 @@ public class UnawareBucketSourceFunction extends RichSourceFunction<AppendOnlyCo
 
     @Override
     public void cancel() {
-        isRunning = false;
+        if (ctx != null) {
+            synchronized (ctx.getCheckpointLock()) {
+                isRunning = false;
+            }
+        } else {
+            isRunning = false;
+        }
     }
 
     public static DataStreamSource<AppendOnlyCompactionTask> buildSource(
