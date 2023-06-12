@@ -18,53 +18,86 @@
 
 package org.apache.paimon.index;
 
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.IntObjectSerializer;
-import org.apache.paimon.utils.ObjectsFile;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.PathFactory;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+
 /** Hash index file contains ints. */
-public class HashIndexFile extends ObjectsFile<Integer> {
+public class HashIndexFile {
 
     public static final String HASH_INDEX = "HASH";
 
-    private HashIndexFile(
-            FileIO fileIO,
-            FormatReaderFactory readerFactory,
-            FormatWriterFactory writerFactory,
-            PathFactory pathFactory) {
-        super(fileIO, new IntObjectSerializer(), readerFactory, writerFactory, pathFactory, null);
+    private final FileIO fileIO;
+    private final PathFactory pathFactory;
+
+    public HashIndexFile(FileIO fileIO, PathFactory pathFactory) {
+        this.fileIO = fileIO;
+        this.pathFactory = pathFactory;
     }
 
-    private static RowType schema() {
-        return RowType.of(DataTypes.INT());
+    public long fileSize(String fileName) {
+        try {
+            return fileIO.getFileSize(pathFactory.toPath(fileName));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
-    /** Creator of {@link HashIndexFile}. */
-    public static class Factory {
+    public IntIterator read(String fileName) throws IOException {
+        Path path = pathFactory.toPath(fileName);
+        BufferedInputStream in = new BufferedInputStream(fileIO.newInputStream(path));
+        return new IntIterator() {
 
-        private final FileIO fileIO;
-        private final FileFormat fileFormat;
-        private final FileStorePathFactory pathFactory;
+            @Override
+            public int next() throws IOException {
+                return readInt(in);
+            }
 
-        public Factory(FileIO fileIO, FileFormat fileFormat, FileStorePathFactory pathFactory) {
-            this.fileIO = fileIO;
-            this.fileFormat = fileFormat;
-            this.pathFactory = pathFactory;
+            @Override
+            public void close() throws IOException {
+                in.close();
+            }
+        };
+    }
+
+    public String write(IntIterator input) throws IOException {
+        Path path = pathFactory.newPath();
+        try (BufferedOutputStream out =
+                        new BufferedOutputStream(fileIO.newOutputStream(path, false));
+                IntIterator iterator = input) {
+            while (true) {
+                try {
+                    writeInt(out, iterator.next());
+                } catch (EOFException ignored) {
+                    break;
+                }
+            }
         }
+        return path.getName();
+    }
 
-        public HashIndexFile create() {
-            return new HashIndexFile(
-                    fileIO,
-                    fileFormat.createReaderFactory(schema()),
-                    fileFormat.createWriterFactory(schema()),
-                    pathFactory.indexFileFactory());
+    private int readInt(BufferedInputStream in) throws IOException {
+        int ch1 = in.read();
+        int ch2 = in.read();
+        int ch3 = in.read();
+        int ch4 = in.read();
+        if ((ch1 | ch2 | ch3 | ch4) < 0) {
+            throw new EOFException();
         }
+        return ((ch1 << 24) + (ch2 << 16) + (ch3 << 8) + ch4);
+    }
+
+    private void writeInt(BufferedOutputStream out, int v) throws IOException {
+        out.write((v >>> 24) & 0xFF);
+        out.write((v >>> 16) & 0xFF);
+        out.write((v >>> 8) & 0xFF);
+        out.write(v & 0xFF);
     }
 }

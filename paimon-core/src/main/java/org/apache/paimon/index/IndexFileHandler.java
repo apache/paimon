@@ -22,14 +22,15 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
+import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
@@ -93,17 +94,33 @@ public class IndexFileHandler {
         return result;
     }
 
-    public List<Integer> readHashIndex(IndexFileMeta file) {
+    public List<Integer> readHashIndexList(IndexFileMeta file) {
+        return IntIterator.toIntList(readHashIndex(file));
+    }
+
+    public IntIterator readHashIndex(IndexFileMeta file) {
         if (!file.indexType().equals(HASH_INDEX)) {
             throw new IllegalArgumentException("Input file is not hash index: " + file.indexType());
         }
 
-        return hashIndex.read(file.fileName());
+        try {
+            return hashIndex.read(file.fileName());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     public IndexFileMeta writeHashIndex(int[] ints) {
-        Iterator<Integer> iterator = IntStream.of(ints).boxed().iterator();
-        String file = hashIndex.writeWithoutRolling(iterator);
-        return new IndexFileMeta(HASH_INDEX, file, hashIndex.fileSize(file), ints.length);
+        return writeHashIndex(ints.length, IntIterator.create(ints));
+    }
+
+    public IndexFileMeta writeHashIndex(int size, IntIterator iterator) {
+        String file;
+        try {
+            file = hashIndex.write(iterator);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return new IndexFileMeta(HASH_INDEX, file, hashIndex.fileSize(file), size);
     }
 }

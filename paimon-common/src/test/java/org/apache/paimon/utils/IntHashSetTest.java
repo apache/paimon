@@ -46,6 +46,6 @@ public class IntHashSetTest {
         values.forEach(set::add);
 
         int[] expected = values.stream().mapToInt(Integer::intValue).sorted().toArray();
-        assertThat(set.toSortedInts()).containsExactly(expected);
+        assertThat(set.toInts()).containsExactlyInAnyOrder(expected);
     }
 }

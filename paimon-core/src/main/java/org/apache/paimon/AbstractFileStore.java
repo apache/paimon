@@ -125,10 +125,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public IndexFileHandler newIndexFileHandler() {
-        HashIndexFile hashIndex =
-                new HashIndexFile.Factory(fileIO, options.fileFormat(), pathFactory()).create();
         return new IndexFileHandler(
-                snapshotManager(), indexManifestFileFactory().create(), hashIndex);
+                snapshotManager(),
+                indexManifestFileFactory().create(),
+                new HashIndexFile(fileIO, pathFactory().indexFileFactory()));
     }
 
     @Override

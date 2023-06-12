@@ -18,49 +18,53 @@
 
 package org.apache.paimon.utils;
 
-import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
-
+import java.io.Closeable;
 import java.io.EOFException;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.ArrayList;
+import java.util.List;
 
-/** A hash set for ints. */
-public class IntHashSet {
+/** Iterator for ints. */
+public interface IntIterator extends Closeable {
 
-    private final IntOpenHashSet set;
+    int next() throws IOException;
 
-    public IntHashSet() {
-        this.set = new IntOpenHashSet();
+    static int[] toInts(IntIterator input) {
+        return toIntList(input).stream().mapToInt(Integer::intValue).toArray();
     }
 
-    public IntHashSet(int expected) {
-        this.set = new IntOpenHashSet(expected);
+    static List<Integer> toIntList(IntIterator input) {
+        List<Integer> ints = new ArrayList<>();
+        try (IntIterator iterator = input) {
+            while (true) {
+                try {
+                    ints.add(iterator.next());
+                } catch (EOFException ignored) {
+                    break;
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return ints;
     }
 
-    public void add(int value) {
-        set.add(value);
-    }
-
-    public int size() {
-        return set.size();
-    }
-
-    public IntIterator toIntIterator() {
-        it.unimi.dsi.fastutil.ints.IntIterator iterator = set.intIterator();
+    static IntIterator create(int[] ints) {
         return new IntIterator() {
+
+            int pos = -1;
 
             @Override
             public int next() throws EOFException {
-                if (!iterator.hasNext()) {
+                if (pos >= ints.length - 1) {
                     throw new EOFException();
                 }
-                return iterator.nextInt();
+                return ints[++pos];
             }
 
             @Override
             public void close() {}
         };
-    }
-
-    public int[] toInts() {
-        return set.toIntArray();
     }
 }
