@@ -76,7 +76,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options) {
-        super(commitUser, snapshotManager, scan);
+        super(commitUser, snapshotManager, scan, null);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;

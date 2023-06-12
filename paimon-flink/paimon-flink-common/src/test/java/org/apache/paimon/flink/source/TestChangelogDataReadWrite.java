@@ -185,6 +185,7 @@ public class TestChangelogDataReadWrite {
                                 pathFactory,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
+                                null,
                                 options,
                                 EXTRACTOR)
                         .createWriterContainer(partition, bucket, true)

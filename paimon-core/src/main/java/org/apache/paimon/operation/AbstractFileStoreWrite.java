@@ -22,7 +22,10 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -40,7 +43,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -54,13 +56,14 @@ import java.util.concurrent.Executors;
  * @param <T> type of record to write.
  */
 public abstract class AbstractFileStoreWrite<T>
-        implements FileStoreWrite<T>, Restorable<List<AbstractFileStoreWrite.State>> {
+        implements FileStoreWrite<T>, Restorable<List<AbstractFileStoreWrite.State<T>>> {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
     private final String commitUser;
-    private final SnapshotManager snapshotManager;
+    protected final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
+    @Nullable private final IndexMaintainer.Factory<T> indexFactory;
 
     @Nullable protected IOManager ioManager;
 
@@ -70,10 +73,14 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean emptyWriter = false;
 
     protected AbstractFileStoreWrite(
-            String commitUser, SnapshotManager snapshotManager, FileStoreScan scan) {
+            String commitUser,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            @Nullable IndexMaintainer.Factory<T> indexFactory) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
+        this.indexFactory = indexFactory;
 
         this.writers = new HashMap<>();
     }
@@ -96,8 +103,11 @@ public abstract class AbstractFileStoreWrite<T>
 
     @Override
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
-        RecordWriter<T> writer = getWriterWrapper(partition, bucket).writer;
-        writer.write(data);
+        WriterContainer<T> container = getWriterWrapper(partition, bucket);
+        container.writer.write(data);
+        if (container.indexMaintainer != null) {
+            container.indexMaintainer.notifyNewRecord(data);
+        }
     }
 
     @Override
@@ -165,12 +175,17 @@ public abstract class AbstractFileStoreWrite<T>
                 WriterContainer<T> writerContainer = entry.getValue();
 
                 CommitIncrement increment = writerContainer.writer.prepareCommit(waitCompaction);
+                List<IndexFileMeta> newIndexFiles = new ArrayList<>();
+                if (writerContainer.indexMaintainer != null) {
+                    newIndexFiles = writerContainer.indexMaintainer.prepareCommit();
+                }
                 CommitMessageImpl committable =
                         new CommitMessageImpl(
                                 partition,
                                 bucket,
                                 increment.newFilesIncrement(),
-                                increment.compactIncrement());
+                                increment.compactIncrement(),
+                                new IndexIncrement(newIndexFiles));
                 result.add(committable);
 
                 if (committable.isEmpty()) {
@@ -219,8 +234,8 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public List<State> checkpoint() {
-        List<State> result = new ArrayList<>();
+    public List<State<T>> checkpoint() {
+        List<State<T>> result = new ArrayList<>();
 
         for (Map.Entry<BinaryRow, Map<Integer, WriterContainer<T>>> partitionEntry :
                 writers.entrySet()) {
@@ -245,25 +260,26 @@ public abstract class AbstractFileStoreWrite<T>
                 // compaction result might be updated during prepareCommit
                 Collection<DataFileMeta> dataFiles = writerContainer.writer.dataFiles();
                 result.add(
-                        new State(
+                        new State<>(
                                 partition,
                                 bucket,
                                 writerContainer.baseSnapshotId,
                                 writerContainer.lastModifiedCommitIdentifier,
                                 dataFiles,
+                                writerContainer.indexMaintainer,
                                 increment));
             }
         }
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Extracted state " + result.toString());
+            LOG.debug("Extracted state " + result);
         }
         return result;
     }
 
     @Override
-    public void restore(List<State> states) {
-        for (State state : states) {
+    public void restore(List<State<T>> states) {
+        for (State<T> state : states) {
             RecordWriter<T> writer =
                     createWriter(
                             state.partition,
@@ -273,7 +289,7 @@ public abstract class AbstractFileStoreWrite<T>
                             compactExecutor());
             notifyNewWriter(writer);
             WriterContainer<T> writerContainer =
-                    new WriterContainer<>(writer, state.baseSnapshotId);
+                    new WriterContainer<>(writer, state.indexMaintainer, state.baseSnapshotId);
             writerContainer.lastModifiedCommitIdentifier = state.lastModifiedCommitIdentifier;
             writers.computeIfAbsent(state.partition, k -> new HashMap<>())
                     .put(state.bucket, writerContainer);
@@ -298,38 +314,27 @@ public abstract class AbstractFileStoreWrite<T>
         }
 
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        RecordWriter<T> writer;
-        if (emptyWriter) {
-            writer =
-                    createWriter(
-                            partition.copy(),
-                            bucket,
-                            Collections.emptyList(),
-                            null,
-                            compactExecutor());
-        } else {
-            writer =
-                    createWriter(
-                            partition.copy(),
-                            bucket,
-                            scanExistingFileMetas(latestSnapshotId, partition, bucket),
-                            null,
-                            compactExecutor());
+        List<DataFileMeta> restoreFiles = new ArrayList<>();
+        if (!emptyWriter && latestSnapshotId != null) {
+            restoreFiles = scanExistingFileMetas(latestSnapshotId, partition, bucket);
         }
+        IndexMaintainer<T> indexMaintainer =
+                indexFactory == null
+                        ? null
+                        : indexFactory.createOrRestore(latestSnapshotId, partition, bucket);
+        RecordWriter<T> writer =
+                createWriter(partition.copy(), bucket, restoreFiles, null, compactExecutor());
         notifyNewWriter(writer);
-        return new WriterContainer<>(writer, latestSnapshotId);
+        return new WriterContainer<>(writer, indexMaintainer, latestSnapshotId);
     }
 
     private List<DataFileMeta> scanExistingFileMetas(
-            Long snapshotId, BinaryRow partition, int bucket) {
+            long snapshotId, BinaryRow partition, int bucket) {
         List<DataFileMeta> existingFileMetas = new ArrayList<>();
-        if (snapshotId != null) {
-            // Concat all the DataFileMeta of existing files into existingFileMetas.
-            scan.withSnapshot(snapshotId).withPartitionBucket(partition, bucket).plan().files()
-                    .stream()
-                    .map(ManifestEntry::file)
-                    .forEach(existingFileMetas::add);
-        }
+        // Concat all the DataFileMeta of existing files into existingFileMetas.
+        scan.withSnapshot(snapshotId).withPartitionBucket(partition, bucket).plan().files().stream()
+                .map(ManifestEntry::file)
+                .forEach(existingFileMetas::add);
         return existingFileMetas;
     }
 
@@ -359,11 +364,16 @@ public abstract class AbstractFileStoreWrite<T>
     @VisibleForTesting
     public static class WriterContainer<T> {
         public final RecordWriter<T> writer;
+        @Nullable public final IndexMaintainer<T> indexMaintainer;
         protected final long baseSnapshotId;
         protected long lastModifiedCommitIdentifier;
 
-        protected WriterContainer(RecordWriter<T> writer, Long baseSnapshotId) {
+        protected WriterContainer(
+                RecordWriter<T> writer,
+                @Nullable IndexMaintainer<T> indexMaintainer,
+                Long baseSnapshotId) {
             this.writer = writer;
+            this.indexMaintainer = indexMaintainer;
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
@@ -371,13 +381,14 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     /** Recoverable state of {@link AbstractFileStoreWrite}. */
-    public static class State {
+    public static class State<T> {
         protected final BinaryRow partition;
         protected final int bucket;
 
         protected final long baseSnapshotId;
         protected final long lastModifiedCommitIdentifier;
         protected final List<DataFileMeta> dataFiles;
+        @Nullable protected final IndexMaintainer<T> indexMaintainer;
         protected final CommitIncrement commitIncrement;
 
         protected State(
@@ -386,24 +397,27 @@ public abstract class AbstractFileStoreWrite<T>
                 long baseSnapshotId,
                 long lastModifiedCommitIdentifier,
                 Collection<DataFileMeta> dataFiles,
+                @Nullable IndexMaintainer<T> indexMaintainer,
                 CommitIncrement commitIncrement) {
             this.partition = partition;
             this.bucket = bucket;
             this.baseSnapshotId = baseSnapshotId;
             this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
             this.dataFiles = new ArrayList<>(dataFiles);
+            this.indexMaintainer = indexMaintainer;
             this.commitIncrement = commitIncrement;
         }
 
         @Override
         public String toString() {
             return String.format(
-                    "{%s, %d, %d, %d, %s, %s}",
+                    "{%s, %d, %d, %d, %s, %s, %s}",
                     partition,
                     bucket,
                     baseSnapshotId,
                     lastModifiedCommitIdentifier,
                     dataFiles,
+                    indexMaintainer,
                     commitIncrement);
         }
     }
