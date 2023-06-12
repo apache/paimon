@@ -63,7 +63,7 @@ public interface EventParser<T> {
     /**
      * Parse newly added table schema from event.
      *
-     * @param databaseName
+     * @param databaseName database of the new table
      * @return empty if there is no newly added table
      */
     default Optional<Schema> parseNewTable(String databaseName) {

@@ -108,7 +108,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(
-                                new CdcMultiTableParsingProcessFunction<>(
+                                new CdcDynamicTableParsingProcessFunction<>(
                                         database, catalogLoader, tables, parserFactory, mode))
                         .setParallelism(input.getParallelism());
 
@@ -116,14 +116,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         //     and writes to multiple tables
         DataStream<CdcMultiplexRecord> newlyAddedTableStream =
                 SingleOutputStreamOperatorUtils.getSideOutput(
-                        parsed, CdcMultiTableParsingProcessFunction.DYNAMIC_OUTPUT_TAG);
+                        parsed, CdcDynamicTableParsingProcessFunction.DYNAMIC_OUTPUT_TAG);
         // handles schema change for newly added tables
-        SingleOutputStreamOperator<Void> multipleSchemaChangeProcessFunction =
-                SingleOutputStreamOperatorUtils.getSideOutput(
-                                parsed,
-                                CdcMultiTableParsingProcessFunction
-                                        .DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
-                        .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader));
+        SingleOutputStreamOperatorUtils.getSideOutput(
+                        parsed,
+                        CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
+                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader));
 
         FlinkStreamPartitioner<CdcMultiplexRecord> partitioner =
                 new FlinkStreamPartitioner<>(new CdcMultiplexRecordChannelComputer(catalogLoader));
@@ -152,9 +150,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private void buildStaticCdcSink(StreamExecutionEnvironment env) {
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
-                        .process(
-                                new CdcMultiTableParsingProcessFunction<>(
-                                        database, catalogLoader, tables, parserFactory))
+                        .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))
                         .setParallelism(input.getParallelism());
 
         for (FileStoreTable table : tables) {
