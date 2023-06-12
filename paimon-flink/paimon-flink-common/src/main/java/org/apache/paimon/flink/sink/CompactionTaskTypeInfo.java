@@ -63,7 +63,7 @@ public class CompactionTaskTypeInfo extends TypeInformation<AppendOnlyCompaction
     public TypeSerializer<AppendOnlyCompactionTask> createSerializer(ExecutionConfig config) {
         // we don't need copy for task
         return new SimpleVersionedSerializerTypeSerializerProxy<AppendOnlyCompactionTask>(
-                () -> new SimpleVersionedCompactionTaskSerializer(new CompactionTaskSerializer())) {
+                () -> new CompactionTaskSimpleSerializer(new CompactionTaskSerializer())) {
             @Override
             public AppendOnlyCompactionTask copy(AppendOnlyCompactionTask from) {
                 return from;

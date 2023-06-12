@@ -20,61 +20,91 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
+import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.source.EndOfScanException;
 
+import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.streaming.api.operators.StreamSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.util.List;
 
 /** Source Function for unaware-bucket Compaction. */
 public class UnawareBucketSourceFunction extends RichSourceFunction<AppendOnlyCompactionTask> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(UnawareBucketSourceFunction.class);
+    private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
+
     private final AppendOnlyFileStoreTable table;
     private transient AppendOnlyTableCompactionCoordinator compactionCoordinator;
-    private transient boolean closed = false;
-    private boolean streaming;
-    private long scanInterval = 10_000;
-    private Predicate filter;
+    private volatile boolean isRunning = true;
+    private final boolean streaming;
+    private final long scanInterval;
+    private final Predicate filter;
 
-    public UnawareBucketSourceFunction(AppendOnlyFileStoreTable table) {
+    public UnawareBucketSourceFunction(
+            AppendOnlyFileStoreTable table,
+            boolean isStreaming,
+            long scanInterval,
+            @Nullable Predicate filter) {
         this.table = table;
-    }
-
-    @Override
-    public void open(Configuration parameters) throws Exception {
-        compactionCoordinator = new AppendOnlyTableCompactionCoordinator(table);
-        if (filter != null) {
-            compactionCoordinator.withFilter(filter);
-        }
-    }
-
-    @Override
-    public void run(SourceContext<AppendOnlyCompactionTask> sourceContext) throws Exception {
-        // scan loop
-        do {
-            // do scan and plan action, emit append-only compaction tasks.
-            compactionCoordinator.run().forEach(sourceContext::collect);
-
-            // sleep for scanInterval
-            Thread.sleep(scanInterval);
-        } while (!closed && streaming);
-    }
-
-    public void withStreaming(boolean streaming) {
-        this.streaming = streaming;
-    }
-
-    public void withScanInterval(long scanInterval) {
+        this.streaming = isStreaming;
         this.scanInterval = scanInterval;
-    }
-
-    public void withFilter(Predicate filter) {
-        // we can filter partitions here
         this.filter = filter;
     }
 
     @Override
+    public void open(Configuration parameters) throws Exception {
+        compactionCoordinator = new AppendOnlyTableCompactionCoordinator(table, streaming, filter);
+    }
+
+    @Override
+    public void run(SourceContext<AppendOnlyCompactionTask> sourceContext) throws Exception {
+        while (isRunning) {
+            boolean isEmpty;
+            try {
+                // do scan and plan action, emit append-only compaction tasks.
+                List<AppendOnlyCompactionTask> tasks = compactionCoordinator.run();
+                isEmpty = tasks.isEmpty();
+                tasks.forEach(sourceContext::collect);
+            } catch (EndOfScanException esf) {
+                LOG.info("Catching EndOfStreamException, the stream is finished.");
+                return;
+            }
+
+            if (isEmpty) {
+                Thread.sleep(scanInterval);
+            }
+        }
+    }
+
+    @Override
     public void cancel() {
-        closed = true;
+        isRunning = false;
+    }
+
+    public static DataStreamSource<AppendOnlyCompactionTask> buildSource(
+            StreamExecutionEnvironment env,
+            UnawareBucketSourceFunction source,
+            boolean streaming,
+            String tableIdentifier) {
+        final StreamSource<AppendOnlyCompactionTask, UnawareBucketSourceFunction> sourceOperator =
+                new StreamSource<>(source);
+        return new DataStreamSource<>(
+                env,
+                new CompactionTaskTypeInfo(),
+                sourceOperator,
+                false,
+                COMPACTION_COORDINATOR_NAME + " -> " + tableIdentifier,
+                streaming ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED);
     }
 }

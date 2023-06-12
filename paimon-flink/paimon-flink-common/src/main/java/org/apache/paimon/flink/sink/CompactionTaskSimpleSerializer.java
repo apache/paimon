@@ -27,13 +27,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 
 /** {@link SimpleVersionedSerializer} for {@link AppendOnlyCompactionTask}. */
-public class SimpleVersionedCompactionTaskSerializer
+public class CompactionTaskSimpleSerializer
         implements SimpleVersionedSerializer<AppendOnlyCompactionTask> {
 
     private final CompactionTaskSerializer compactionTaskSerializer;
 
-    public SimpleVersionedCompactionTaskSerializer(
-            CompactionTaskSerializer compactionTaskSerializer) {
+    public CompactionTaskSimpleSerializer(CompactionTaskSerializer compactionTaskSerializer) {
         this.compactionTaskSerializer = compactionTaskSerializer;
     }
 

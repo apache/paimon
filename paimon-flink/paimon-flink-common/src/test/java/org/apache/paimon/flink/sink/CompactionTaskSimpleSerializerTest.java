@@ -34,14 +34,14 @@ import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.ro
 import static org.apache.paimon.stats.StatsTestUtils.newTableStats;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link SimpleVersionedCompactionTaskSerializer}. */
-public class SimpleVersionedCompactionTaskSerializerTest {
+/** Test for {@link CompactionTaskSimpleSerializer}. */
+public class CompactionTaskSimpleSerializerTest {
 
     private final CompactionTaskSerializer compactionTaskSerializer =
             new CompactionTaskSerializer();
 
-    private final SimpleVersionedCompactionTaskSerializer serializer =
-            new SimpleVersionedCompactionTaskSerializer(compactionTaskSerializer);
+    private final CompactionTaskSimpleSerializer serializer =
+            new CompactionTaskSimpleSerializer(compactionTaskSerializer);
 
     private final BinaryRow partition = BinaryRow.EMPTY_ROW;
 

@@ -122,14 +122,10 @@ public abstract class FlinkSink<T> implements Serializable {
         // When the job restarts, commitUser will be recovered from states and this value is
         // ignored.
         String initialCommitUser = UUID.randomUUID().toString();
-        return sinkFrom(
-                input,
-                initialCommitUser,
-                createWriteProvider(input.getExecutionEnvironment().getCheckpointConfig()));
+        return sinkFrom(input, initialCommitUser);
     }
 
-    public DataStreamSink<?> sinkFrom(
-            DataStream<T> input, String commitUser, StoreSinkWrite.Provider sinkProvider) {
+    public DataStreamSink<?> sinkFrom(DataStream<T> input, String commitUser) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
@@ -142,12 +138,24 @@ public abstract class FlinkSink<T> implements Serializable {
             assertCheckpointConfiguration(env);
         }
 
-        CommittableTypeInfo typeInfo = new CommittableTypeInfo();
+        SingleOutputStreamOperator<Committable> written =
+                handleInput(input, isStreaming, commitUser);
+
+        return commit(written, streamingCheckpointEnabled, commitUser);
+    }
+
+    protected SingleOutputStreamOperator<Committable> handleInput(
+            DataStream<T> input, boolean isStreaming, String commitUser) {
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
                                 WRITER_NAME + " -> " + table.name(),
-                                typeInfo,
-                                createWriteOperator(sinkProvider, isStreaming, commitUser))
+                                new CommittableTypeInfo(),
+                                createWriteOperator(
+                                        createWriteProvider(
+                                                input.getExecutionEnvironment()
+                                                        .getCheckpointConfig()),
+                                        isStreaming,
+                                        commitUser))
                         .setParallelism(input.getParallelism());
         Options options = Options.fromMap(table.options());
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
@@ -156,11 +164,17 @@ public abstract class FlinkSink<T> implements Serializable {
                     .declareManagedMemoryUseCaseAtOperatorScope(
                             ManagedMemoryUseCase.OPERATOR, memorySize.getMebiBytes());
         }
+        return written;
+    }
 
+    protected DataStreamSink<?> commit(
+            SingleOutputStreamOperator<Committable> written,
+            boolean streamingCheckpointEnabled,
+            String commitUser) {
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME + " -> " + table.name(),
-                                typeInfo,
+                                new CommittableTypeInfo(),
                                 new CommitterOperator<>(
                                         streamingCheckpointEnabled,
                                         commitUser,

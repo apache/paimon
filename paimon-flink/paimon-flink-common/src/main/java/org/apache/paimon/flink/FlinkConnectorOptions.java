@@ -87,12 +87,12 @@ public class FlinkConnectorOptions {
                                     + "for each statement individually by also considering the global configuration. "
                                     + "If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.");
 
-    public static final ConfigOption<Integer> COMPACTION_PARALLELISM =
-            ConfigOptions.key("compaction.parallelism")
+    public static final ConfigOption<Integer> UNAWARE_BUCKET_COMPACTION_PARALLELISM =
+            ConfigOptions.key("unaware-bucket.compaction.parallelism")
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "Defines a custom parallelism for the compaction job. "
+                            "Defines a custom parallelism for the unaware-bucket table compaction job. "
                                     + "By default, if this option is not defined, the planner will derive the parallelism "
                                     + "for each statement individually by also considering the global configuration.");
 
