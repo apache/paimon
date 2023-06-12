@@ -51,8 +51,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
 public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
-    private static final String DATABASE_NAME = "paimon_sync_database";
-
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
