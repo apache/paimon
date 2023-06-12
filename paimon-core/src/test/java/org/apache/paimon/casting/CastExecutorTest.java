@@ -37,12 +37,11 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.DecimalUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.junit.jupiter.api.Test;
 
-import static org.apache.paimon.utils.DateTimeUtils.unixTimestamp;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Test for {@link CastExecutor}. */
 public class CastExecutorTest {
@@ -148,6 +147,48 @@ public class CastExecutorTest {
     }
 
     @Test
+    public void testBooleanToNumeric() {
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new TinyIntType(false)),
+                true,
+                (byte) 1);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new SmallIntType(false)),
+                true,
+                (short) 1);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new IntType(false)), true, 1);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new BigIntType(false)), true, 1L);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new FloatType(false)), true, 1F);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new DoubleType(false)), true, 1D);
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new DecimalType(1, 0)),
+                true,
+                DecimalUtils.castFrom(1, 1, 0));
+    }
+
+    @Test
+    public void testNumericToBoolean() {
+        compareCastResult(
+                CastExecutors.resolve(new TinyIntType(false), new BooleanType(false)),
+                (byte) 1,
+                true);
+        compareCastResult(
+                CastExecutors.resolve(new SmallIntType(false), new BooleanType(false)),
+                (short) 1,
+                true);
+        compareCastResult(
+                CastExecutors.resolve(new IntType(false), new BooleanType(false)), 0, false);
+        compareCastResult(
+                CastExecutors.resolve(new BigIntType(false), new BooleanType(false)), 12L, true);
+    }
+
+    // To string rules
+
+    @Test
     public void testNumericToString() {
         // byte to string
         compareCastResult(
@@ -190,6 +231,45 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new DecimalType(10, 5), new VarCharType(20)),
                 DecimalUtils.castFrom(1.23456D, 10, 5),
                 BinaryString.fromString("1.23456"));
+    }
+
+    @Test
+    public void testBooleanToString() {
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new CharType(5)),
+                true,
+                BinaryString.fromString("true "));
+        compareCastResult(
+                CastExecutors.resolve(new BooleanType(false), new VarCharType(5)),
+                true,
+                BinaryString.fromString("true"));
+    }
+
+    @Test
+    public void testTimestampToString() {
+        long mills = System.currentTimeMillis();
+        Timestamp timestamp = Timestamp.fromEpochMillis(mills);
+        compareCastResult(
+                CastExecutors.resolve(new TimestampType(5), VarCharType.STRING_TYPE),
+                timestamp,
+                BinaryString.fromString(
+                        DateTimeUtils.formatTimestamp(timestamp, DateTimeUtils.UTC_ZONE, 5)));
+    }
+
+    @Test
+    public void testTimeToString() {
+        compareCastResult(
+                CastExecutors.resolve(new TimeType(2), VarCharType.STRING_TYPE),
+                36115615,
+                BinaryString.fromString("10:01:55.61"));
+    }
+
+    @Test
+    public void testDateToString() {
+        compareCastResult(
+                CastExecutors.resolve(new DateType(), VarCharType.STRING_TYPE),
+                19516,
+                BinaryString.fromString("2023-06-08"));
     }
 
     @Test
@@ -243,6 +323,140 @@ public class CastExecutorTest {
                 BinaryString.fromString("12345678            "));
     }
 
+    // From string rules
+
+    @Test
+    public void testStringToBoolean() {
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("t"),
+                true);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("true"),
+                true);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("y"),
+                true);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("yes"),
+                true);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("1"),
+                true);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("TRUE"),
+                true);
+
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("f"),
+                false);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("false"),
+                false);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("n"),
+                false);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("no"),
+                false);
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BooleanType(false)),
+                BinaryString.fromString("0"),
+                false);
+
+        assertThatThrownBy(
+                        () ->
+                                compareCastResult(
+                                        CastExecutors.resolve(
+                                                new VarCharType(5), new BooleanType(false)),
+                                        BinaryString.fromString("11"),
+                                        false))
+                .hasMessage("Cannot parse '11' as BOOLEAN.");
+    }
+
+    @Test
+    public void testStringToDecimal() {
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new DecimalType(5, 2)),
+                BinaryString.fromString("1.233"),
+                DecimalUtils.castFrom(1.233D, 5, 2));
+    }
+
+    @Test
+    public void testStringToNumeric() {
+        // string to byte
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new TinyIntType(false)),
+                BinaryString.fromString("1"),
+                (byte) 1);
+
+        // string to short
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new SmallIntType(false)),
+                BinaryString.fromString("1"),
+                (short) 1);
+
+        // string to int
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new IntType(false)),
+                BinaryString.fromString("1"),
+                1);
+
+        // string to bigint
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(5), new BigIntType(false)),
+                BinaryString.fromString("1"),
+                1L);
+
+        // string to float
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(10), new FloatType(false)),
+                BinaryString.fromString("1.23456"),
+                1.23456F);
+
+        // string to double
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(10), new DoubleType(false)),
+                BinaryString.fromString("1.23456"),
+                1.23456D);
+    }
+
+    @Test
+    public void testStringToDate() {
+        String date = "2023-06-06";
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(25), new DateType()),
+                BinaryString.fromString(date),
+                DateTimeUtils.parseDate(date));
+    }
+
+    @Test
+    public void testStringToTime() {
+        String date = "09:30:00.0";
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(25), new TimeType(2)),
+                BinaryString.fromString(date),
+                DateTimeUtils.parseTime(date));
+    }
+
+    @Test
+    public void testStringToTimestamp() {
+        String date = "2017-12-12 09:30:00.0";
+        compareCastResult(
+                CastExecutors.resolve(new VarCharType(25), new TimestampType(3)),
+                BinaryString.fromString(date),
+                DateTimeUtils.parseTimestampData(date, 3));
+    }
+
     @Test
     public void testStringToBinary() {
         // string(10) to binary(5)
@@ -257,6 +471,8 @@ public class CastExecutorTest {
                 BinaryString.fromString("12345678"),
                 "12345678".getBytes());
     }
+
+    // To binary rules
 
     @Test
     public void testBinaryToBinary() {
@@ -285,37 +501,7 @@ public class CastExecutorTest {
                 "12345678".getBytes());
     }
 
-    @Test
-    public void testBoolean() {
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new TinyIntType(false)),
-                true,
-                (byte) 1);
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new SmallIntType(false)),
-                true,
-                (short) 1);
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new IntType(false)), true, 1);
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new BigIntType(false)), true, 1L);
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new FloatType(false)), true, 1F);
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new DoubleType(false)), true, 1D);
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new DecimalType(1, 0)),
-                true,
-                DecimalUtils.castFrom(1, 1, 0));
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new CharType(5)),
-                true,
-                BinaryString.fromString("true "));
-        compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new VarCharType(5)),
-                true,
-                BinaryString.fromString("true"));
-    }
+    // Date/Time/Timestamp rules
 
     @Test
     public void testTimestampData() {
@@ -339,61 +525,24 @@ public class CastExecutorTest {
                 CastExecutors.resolve(new TimestampType(5), new TimeType(2)),
                 Timestamp.fromEpochMillis(mills),
                 (int) (mills % DateTimeUtils.MILLIS_PER_DAY));
+    }
 
-        // timestamp to byte
+    @Test
+    public void testDateToTimestamp() {
+        String date = "2023-06-06";
         compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new TinyIntType(false)),
-                Timestamp.fromEpochMillis(mills),
-                (byte) unixTimestamp(mills));
+                CastExecutors.resolve(new DateType(), new TimestampType(5)),
+                DateTimeUtils.parseDate(date),
+                DateTimeUtils.parseTimestampData(date, 3));
+    }
 
-        // timestamp to short
+    @Test
+    public void testTimeToTimestamp() {
+        String time = "12:00:00";
         compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new SmallIntType(false)),
-                Timestamp.fromEpochMillis(mills),
-                (short) unixTimestamp(mills));
-
-        // timestamp to int
-        compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new IntType(false)),
-                Timestamp.fromEpochMillis(mills),
-                (int) unixTimestamp(mills));
-
-        // timestamp to bigint
-        compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new BigIntType(false)),
-                Timestamp.fromEpochMillis(mills),
-                unixTimestamp(mills));
-
-        // timestamp to float
-        compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new FloatType(false)),
-                Timestamp.fromEpochMillis(mills),
-                (float) unixTimestamp(mills));
-
-        // timestamp to double
-        compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new DoubleType(false)),
-                Timestamp.fromEpochMillis(mills),
-                (double) unixTimestamp(mills));
-
-        // timestamp to decimal
-        compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new DecimalType(10, 5)),
-                Timestamp.fromEpochMillis(mills),
-                DecimalUtils.castFrom(mills, 10, 5));
-
-        // timestamp to string
-        compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new CharType(25)),
-                Timestamp.fromEpochMillis(mills),
-                StringUtils.concat(
-                        BinaryString.fromString(timestamp.toString()),
-                        BinaryString.blankString(2)));
-
-        compareCastResult(
-                CastExecutors.resolve(new TimestampType(5), new VarCharType(25)),
-                Timestamp.fromEpochMillis(mills),
-                BinaryString.fromString(timestamp.toString()));
+                CastExecutors.resolve(new TimeType(), new TimestampType(3)),
+                DateTimeUtils.parseTime(time),
+                DateTimeUtils.parseTimestampData("1970-01-01 " + time, 3));
     }
 
     @SuppressWarnings("rawtypes")
