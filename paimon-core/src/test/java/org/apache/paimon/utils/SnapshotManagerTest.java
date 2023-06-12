@@ -66,6 +66,7 @@ public class SnapshotManagerTest {
                             null,
                             null,
                             null,
+                            null,
                             0L,
                             Snapshot.CommitKind.APPEND,
                             millis + i * 1000,
@@ -98,6 +99,7 @@ public class SnapshotManagerTest {
                     new Snapshot(
                             i,
                             0L,
+                            null,
                             null,
                             null,
                             null,

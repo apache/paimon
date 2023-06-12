@@ -434,6 +434,7 @@ public class FileDeletionTest {
                 .tryCommitOnce(
                         delete,
                         Collections.emptyList(),
+                        Collections.emptyList(),
                         commitIdentifier++,
                         null,
                         Collections.emptyMap(),

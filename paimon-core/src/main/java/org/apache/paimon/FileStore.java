@@ -18,6 +18,7 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
@@ -50,6 +51,8 @@ public interface FileStore<T> extends Serializable {
     BucketMode bucketMode();
 
     FileStoreScan newScan();
+
+    IndexFileHandler newIndexFileHandler();
 
     FileStoreRead<T> newRead();
 

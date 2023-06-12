@@ -16,36 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.index;
 
-import org.junit.jupiter.api.Test;
+import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.ObjectSerializerTestBase;
 
-import java.util.HashSet;
 import java.util.Random;
-import java.util.Set;
 
-import static org.assertj.core.api.Assertions.assertThat;
+/** Test for {@link org.apache.paimon.index.IndexFileMetaSerializer}. */
+public class IndexFileMetaSerializerTest extends ObjectSerializerTestBase<IndexFileMeta> {
 
-/** Test for {@link IntHashSet}. */
-public class IntHashSetTest {
+    @Override
+    protected ObjectSerializer<IndexFileMeta> serializer() {
+        return new IndexFileMetaSerializer();
+    }
 
-    @Test
-    public void testRandom() {
-        Set<Integer> values = new HashSet<>();
+    @Override
+    protected IndexFileMeta object() {
+        return randomIndexFile();
+    }
+
+    public static IndexFileMeta randomIndexFile() {
         Random rnd = new Random();
-        for (int i = 0; i < rnd.nextInt(100); i++) {
-            values.add(rnd.nextInt());
-        }
-        if (rnd.nextBoolean()) {
-            values.add(0);
-            values.add(-1);
-            values.add(1);
-        }
-
-        IntHashSet set = new IntHashSet();
-        values.forEach(set::add);
-
-        int[] expected = values.stream().mapToInt(Integer::intValue).sorted().toArray();
-        assertThat(set.toInts()).containsExactlyInAnyOrder(expected);
+        return new IndexFileMeta(
+                HashIndexFile.HASH_INDEX,
+                "my_file_name" + rnd.nextLong(),
+                rnd.nextInt(),
+                rnd.nextInt());
     }
 }

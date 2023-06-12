@@ -19,12 +19,15 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.io.NewFilesIncrement;
 
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.util.Arrays;
 
+import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
@@ -38,9 +41,15 @@ public class CommitMessageSerializerTest {
         CommitMessageSerializer serializer = new CommitMessageSerializer();
         NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
-        CommitMessage committable =
-                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
-        CommitMessage newCommittable = serializer.deserialize(2, serializer.serialize(committable));
-        assertThat(newCommittable).isEqualTo(committable);
+        IndexIncrement indexIncrement =
+                new IndexIncrement(Arrays.asList(randomIndexFile(), randomIndexFile()));
+        CommitMessageImpl committable =
+                new CommitMessageImpl(
+                        row(0), 1, newFilesIncrement, compactIncrement, indexIncrement);
+        CommitMessageImpl newCommittable =
+                (CommitMessageImpl) serializer.deserialize(2, serializer.serialize(committable));
+        assertThat(newCommittable.compactIncrement()).isEqualTo(committable.compactIncrement());
+        assertThat(newCommittable.newFilesIncrement()).isEqualTo(committable.newFilesIncrement());
+        assertThat(newCommittable.indexIncrement()).isEqualTo(committable.indexIncrement());
     }
 }
