@@ -250,6 +250,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
         String database = this.database;
         MySqlDatabaseSyncMode mode = this.mode;
+        // To make the sync database workflow serializable
+        Options catalogOptions = this.catalogOptions;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
@@ -258,7 +260,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         .withParserFactory(parserFactory)
                         .withDatabase(database)
                         .withCatalogLoader(
-                                () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions))
+                                () -> {
+                                    return FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+                                })
                         .withTables(fileStoreTables)
                         .withMode(mode);
 
