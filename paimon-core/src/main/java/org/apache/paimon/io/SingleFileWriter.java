@@ -114,13 +114,8 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         return recordCount;
     }
 
-    @Override
-    public long length() throws IOException {
-        if (closed) {
-            return length;
-        } else {
-            return out.getPos();
-        }
+    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
+        return writer.reachTargetSize(suggestedCheck, targetSize);
     }
 
     @Override

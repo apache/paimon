@@ -110,7 +110,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
         // to the give output stream directly. However, the path would be used as
         // the key of writer in the ORC memory manager, thus we need to make it unique.
         Path unusedPath = new Path(UUID.randomUUID().toString());
-        return new OrcBulkWriter(vectorizer, new WriterImpl(null, unusedPath, opts));
+        return new OrcBulkWriter(vectorizer, new WriterImpl(null, unusedPath, opts), out);
     }
 
     @VisibleForTesting
