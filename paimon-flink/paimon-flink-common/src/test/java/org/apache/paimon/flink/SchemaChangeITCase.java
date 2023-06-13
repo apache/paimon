@@ -18,13 +18,16 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -333,7 +336,14 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
                         "+I[apache, 2023-06-07 12:00:00, 2023-06-07 08:00:00.123456, 2023-06-07, 08:00:00, 2023-06-07 00:00:00.123456]",
-                        "+I[paimon, 2023-06-06 12:00:00.000, 2023-06-06 08:00:00.123456, 2023-05-31, 14:30:00, 1970-01-01 08:00:04.001]");
+                        "+I[paimon, 2023-06-06 12:00:00.000, 2023-06-06 08:00:00.123456, 2023-05-31, 14:30:00, "
+                                + BinaryString.fromString(
+                                        DateTimeUtils.formatTimestamp(
+                                                DateTimeUtils.parseTimestampData(
+                                                        "1970-01-01 00:00:04.001", 3),
+                                                DateTimeUtils.LOCAL_TZ,
+                                                3))
+                                + "]");
     }
 
     @Test
@@ -434,7 +444,15 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[2022-12-12T09:30:10, 2022-12-12, 09:30, 2022-12-12T09:30:00.123, 2022-12-11T16:30:00.123Z]");
+                        "+I[2022-12-12T09:30:10, 2022-12-12, 09:30, 2022-12-12T09:30:00.123, "
+                                + DateTimeUtils.timestampToTimestampWithLocalZone(
+                                                DateTimeUtils.parseTimestampData(
+                                                        "2022-12-12 00:30:00.123456", 3),
+                                                DateTimeUtils.LOCAL_TZ)
+                                        .toLocalDateTime()
+                                        .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                + "Z"
+                                + "]");
     }
 
     @Test
@@ -481,14 +499,29 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[2022-12-01T09:00:00.123, 2022-12-02T01:00:00.123456Z, 1970-01-01T00:00:04.001Z, 1970-01-01T08:00:04.001]");
+                        "+I[2022-12-01T09:00:00.123, "
+                                + DateTimeUtils.timestampToTimestampWithLocalZone(
+                                                DateTimeUtils.parseTimestampData(
+                                                        "2022-12-02 09:00:00.123456", 6),
+                                                DateTimeUtils.LOCAL_TZ)
+                                        .toLocalDateTime()
+                                        .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                + "Z, "
+                                + "1970-01-01T00:00:04.001Z, "
+                                + DateTimeUtils.timestampWithLocalZoneToTimestamp(
+                                                DateTimeUtils.parseTimestampData(
+                                                        "1970-01-01 00:00:04.001", 3),
+                                                DateTimeUtils.LOCAL_TZ)
+                                        .toLocalDateTime()
+                                        .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                + "]");
     }
 
     @Test
     public void testModifyColumnTypeFromDateToTimestamp() {
         // date to timestamp/timestamp_ltz
         sql("CREATE TABLE T (a DATE, b DATE)");
-        sql("INSERT INTO T VALUES(DATE '2022-12-12', DATE '2022-12-12')");
+        sql("INSERT INTO T VALUES(DATE '2022-12-12', DATE '2022-12-11')");
 
         sql("ALTER TABLE T MODIFY (a TIMESTAMP(6), b TIMESTAMP(6) WITH LOCAL TIME ZONE)");
         List<Row> result = sql("SHOW CREATE TABLE T");
@@ -497,10 +530,18 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "CREATE TABLE `PAIMON`.`default`.`T` (\n"
                                 + "  `a` TIMESTAMP(6),\n"
                                 + "  `b` TIMESTAMP(6) WITH LOCAL TIME ZONE");
-
         result = sql("SELECT * FROM T");
+
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
-                .containsExactlyInAnyOrder("+I[2022-12-12T00:00, 2022-12-11T16:00:00Z]");
+                .containsExactlyInAnyOrder(
+                        "+I[2022-12-12T00:00, "
+                                + DateTimeUtils.timestampToTimestampWithLocalZone(
+                                                DateTimeUtils.parseTimestampData("2022-12-11", 6),
+                                                DateTimeUtils.LOCAL_TZ)
+                                        .toLocalDateTime()
+                                        .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                + "Z"
+                                + "]");
     }
 
     @Test
