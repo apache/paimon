@@ -82,17 +82,16 @@ public class OrcBulkWriter implements FormatWriter {
     }
 
     @Override
-    public long length() throws IOException {
+    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
+        return rowBatch.size == 0 && length() >= targetSize;
+    }
+
+    private long length() throws IOException {
         long estimateMemory = treeWriter.estimateMemory();
         long fileLength = underlyingStream.getPos();
 
         // This value is estimated, not actual.
         return (long) Math.ceil(fileLength + estimateMemory * 0.2);
-    }
-
-    @Override
-    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
-        return rowBatch.size == 0 && length() >= targetSize;
     }
 
     @SuppressWarnings("unchecked")

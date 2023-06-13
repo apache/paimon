@@ -169,9 +169,10 @@ public class AvroFileFormat extends FileFormat {
                 }
 
                 @Override
-                public long length() throws IOException {
+                public boolean reachTargetSize(boolean suggestedCheck, long targetSize)
+                        throws IOException {
                     if (out != null) {
-                        return out.getPos();
+                        return suggestedCheck && out.getPos() >= targetSize;
                     }
                     throw new IOException("Failed to get stream length: no open stream");
                 }

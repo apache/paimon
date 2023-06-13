@@ -119,15 +119,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     }
 
     @Override
-    public long length() throws IOException {
-        if (closed) {
-            return length;
-        } else {
-            return writer.length();
-        }
-    }
-
-    @Override
     public void abort() {
         IOUtils.closeQuietly(out);
         fileIO.deleteQuietly(path);

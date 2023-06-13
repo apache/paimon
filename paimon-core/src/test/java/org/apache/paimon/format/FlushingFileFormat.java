@@ -71,8 +71,9 @@ public class FlushingFileFormat extends FileFormat {
                 }
 
                 @Override
-                public long length() throws IOException {
-                    return wrapped.length();
+                public boolean reachTargetSize(boolean suggestedCheck, long targetSize)
+                        throws IOException {
+                    return wrapped.reachTargetSize(suggestedCheck, targetSize);
                 }
             };
         };
