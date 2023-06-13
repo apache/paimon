@@ -107,6 +107,9 @@ CREATE DATABASE default;
 USE default;
 ```
 
+After switching to the catalog (`'USE paimon'`), Spark's existing tables will not be directly accessible, you
+can use the `spark_catalog.${database_name}.${table_name}` to access Spark tables.
+
 **Step 3: Create a table and Write Some Records**
 
 ```sql
