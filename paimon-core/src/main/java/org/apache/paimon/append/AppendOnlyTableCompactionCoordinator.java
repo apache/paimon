@@ -22,10 +22,14 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamTableScan;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -56,16 +60,37 @@ public class AppendOnlyTableCompactionCoordinator {
     protected static final int REMOVE_AGE = 10;
     protected static final int COMPACT_AGE = 5;
 
-    private final StreamTableScan scan;
+    private final InnerTableScan scan;
     private final long targetFileSize;
     private final int minFileNum;
     private final int maxFileNum;
+    private final boolean streamingMode;
 
     final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
             new HashMap<>();
 
     public AppendOnlyTableCompactionCoordinator(AppendOnlyFileStoreTable table) {
-        scan = table.copy(compactScanType()).newStreamScan();
+        this(table, true);
+    }
+
+    public AppendOnlyTableCompactionCoordinator(
+            AppendOnlyFileStoreTable table, boolean isStreaming) {
+        this(table, isStreaming, null);
+    }
+
+    public AppendOnlyTableCompactionCoordinator(
+            AppendOnlyFileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
+
+        FileStoreTable tableCopy = table.copy(compactScanType());
+        if (isStreaming) {
+            scan = tableCopy.newStreamScan();
+        } else {
+            scan = tableCopy.newScan();
+        }
+        if (filter != null) {
+            scan.withFilter(filter);
+        }
+        this.streamingMode = isStreaming;
         CoreOptions coreOptions = table.coreOptions();
         this.targetFileSize = coreOptions.targetFileSize();
         this.minFileNum = coreOptions.compactionMinFileNum();
@@ -93,6 +118,10 @@ public class AppendOnlyTableCompactionCoordinator {
                         DataSplit dataSplit = (DataSplit) split;
                         notifyNewFiles(dataSplit.partition(), dataSplit.files());
                     });
+            // batch mode, we don't do continuous scanning
+            if (!streamingMode) {
+                break;
+            }
         }
         return hasResult;
     }

@@ -19,9 +19,11 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -49,8 +51,7 @@ public class CompactAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactAction.class);
 
-    private final CompactorSourceBuilder sourceBuilder;
-    private final CompactorSinkBuilder sinkBuilder;
+    private List<Map<String, String>> partitions;
 
     public CompactAction(String warehouse, String database, String tableName) {
         this(warehouse, database, tableName, Collections.emptyMap());
@@ -69,9 +70,6 @@ public class CompactAction extends TableActionBase {
                             table.getClass().getName()));
         }
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
-        sourceBuilder =
-                new CompactorSourceBuilder(identifier.getFullName(), (FileStoreTable) table);
-        sinkBuilder = new CompactorSinkBuilder((FileStoreTable) table);
     }
 
     // ------------------------------------------------------------------------
@@ -79,7 +77,7 @@ public class CompactAction extends TableActionBase {
     // ------------------------------------------------------------------------
 
     public CompactAction withPartitions(List<Map<String, String>> partitions) {
-        sourceBuilder.withPartitions(partitions);
+        this.partitions = partitions;
         return this;
     }
 
@@ -87,10 +85,43 @@ public class CompactAction extends TableActionBase {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
+        switch (fileStoreTable.bucketMode()) {
+            case UNAWARE:
+                {
+                    buildForUnawareBucketCompaction(
+                            env, (AppendOnlyFileStoreTable) table, isStreaming);
+                    break;
+                }
+            case FIXED:
+            case DYNAMIC:
+            default:
+                {
+                    buildForTraditionalCompaction(env, fileStoreTable, isStreaming);
+                }
+        }
+    }
 
+    private void buildForTraditionalCompaction(
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
+        CompactorSourceBuilder sourceBuilder =
+                new CompactorSourceBuilder(identifier.getFullName(), table);
+        CompactorSinkBuilder sinkBuilder = new CompactorSinkBuilder(table);
+
+        sourceBuilder.withPartitions(partitions);
         DataStreamSource<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
         sinkBuilder.withInput(source).build();
+    }
+
+    private void buildForUnawareBucketCompaction(
+            StreamExecutionEnvironment env, AppendOnlyFileStoreTable table, boolean isStreaming) {
+        UnawareBucketCompactionTopoBuilder unawareBucketCompactionTopoBuilder =
+                new UnawareBucketCompactionTopoBuilder(env, identifier.getFullName(), table);
+
+        unawareBucketCompactionTopoBuilder.withPartitions(partitions);
+        unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
+        unawareBucketCompactionTopoBuilder.build();
     }
 
     // ------------------------------------------------------------------------
