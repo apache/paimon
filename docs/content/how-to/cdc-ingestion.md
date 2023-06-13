@@ -176,7 +176,7 @@ The command to recover from previous snapshot and add new tables to synchronize 
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    --fromSavepoint {{< savepointPath >}} \
+    --fromSavepoint <savepointPath> \
     /path/to/paimon-flink-action-{{< version >}}.jar \
     mysql-sync-database \
     --warehouse hdfs:///path/to/warehouse \

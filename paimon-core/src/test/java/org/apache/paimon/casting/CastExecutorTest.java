@@ -64,6 +64,10 @@ public class CastExecutorTest {
 
         // short to other numeric
         compareCastResult(
+                CastExecutors.resolve(new SmallIntType(false), new TinyIntType(false)),
+                (short) 123,
+                (byte) 123);
+        compareCastResult(
                 CastExecutors.resolve(new SmallIntType(false), new IntType(false)), (short) 1, 1);
         compareCastResult(
                 CastExecutors.resolve(new SmallIntType(false), new BigIntType(false)),

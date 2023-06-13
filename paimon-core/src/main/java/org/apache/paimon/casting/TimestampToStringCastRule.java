@@ -44,7 +44,7 @@ class TimestampToStringCastRule extends AbstractCastRule<Timestamp, BinaryString
     @Override
     public CastExecutor<Timestamp, BinaryString> create(DataType inputType, DataType targetType) {
         final int precision = DataTypeChecks.getPrecision(inputType);
-        if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
+        if (!inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
             return value ->
                     BinaryString.fromString(
                             DateTimeUtils.formatTimestamp(
