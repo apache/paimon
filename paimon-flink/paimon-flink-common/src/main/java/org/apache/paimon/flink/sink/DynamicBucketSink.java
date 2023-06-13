@@ -35,7 +35,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.createPartitionTransformation;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /** Sink for dynamic bucket table. */
 public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Integer>> {
@@ -64,8 +64,7 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         // committer
 
         // 1. shuffle by key hash
-        DataStream<T> partitionByKeyHash =
-                createPartitionTransformation(input, channelComputer1(), parallelism);
+        DataStream<T> partitionByKeyHash = partition(input, channelComputer1(), parallelism);
 
         // 2. bucket-assigner
         HashBucketAssignerOperator<T> assignerOperator =
@@ -78,7 +77,7 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
 
         // 3. shuffle by bucket
         DataStream<Tuple2<T, Integer>> partitionByBucket =
-                createPartitionTransformation(bucketAssigned, channelComputer2(), parallelism);
+                partition(bucketAssigned, channelComputer2(), parallelism);
 
         // 4. writer and committer
         return sinkFrom(partitionByBucket, initialCommitUser);

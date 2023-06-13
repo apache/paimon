@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
@@ -28,12 +27,13 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
  * Builder for {@link FlinkCdcSink} when syncing the whole database into one Paimon database. Each
@@ -127,15 +127,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     }
 
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
-        FlinkStreamPartitioner<CdcRecord> partitioner =
-                new FlinkStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
-        PartitionTransformation<CdcRecord> partitioned =
-                new PartitionTransformation<>(parsed.getTransformation(), partitioner);
-        if (parallelism != null) {
-            partitioned.setParallelism(parallelism);
-        }
-
-        FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory);
-        sink.sinkFrom(new DataStream<>(parsed.getExecutionEnvironment(), partitioned));
+        DataStream<CdcRecord> partitioned =
+                partition(parsed, new CdcRecordChannelComputer(table.schema()), parallelism);
+        new FlinkCdcSink(table, lockFactory).sinkFrom(partitioned);
     }
 }
