@@ -96,11 +96,15 @@ spark-sql ... \
     --conf spark.sql.catalog.paimon.warehouse=file:/tmp/paimon
 ```
 
-After `spark-sql` command line has started, run the following SQL to create and switch to database `paimon.default`.
+Catalogs are configured using properties under spark.sql.catalog.(catalog_name). In above case, 'paimon' is the
+catalog name, you can change it to your own favorite catalog name.
+
+After `spark-sql` command line has started, run the following SQL to create and switch to database `default`.
 
 ```sql
-CREATE DATABASE paimon.default;
-USE paimon.default;
+USE paimon;
+CREATE DATABASE default;
+USE default;
 ```
 
 **Step 3: Create a table and Write Some Records**
