@@ -196,7 +196,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private void refresh() throws Exception {
         while (true) {
             try (RecordReaderIterator<InternalRow> batch =
-                    new RecordReaderIterator<>(streamingReader.getRecordReader())) {
+                    new RecordReaderIterator<>(streamingReader.nextBatch())) {
                 if (!batch.hasNext()) {
                     return;
                 }

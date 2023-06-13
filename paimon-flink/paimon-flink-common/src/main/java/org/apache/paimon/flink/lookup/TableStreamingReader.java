@@ -92,7 +92,7 @@ public class TableStreamingReader {
         }
     }
 
-    public RecordReader<InternalRow> getRecordReader() throws Exception {
+    public RecordReader<InternalRow> nextBatch() throws Exception {
         try {
             return read(scan.plan());
         } catch (EndOfScanException e) {
