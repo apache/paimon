@@ -24,7 +24,8 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
 /**
- * {@link DataTypeRoot#TIMESTAMP_WITHOUT_TIME_ZONE} to {@link DataTypeRoot#TIME_WITHOUT_TIME_ZONE}.
+ * {@link DataTypeRoot#TIMESTAMP_WITHOUT_TIME_ZONE}/{@link
+ * DataTypeRoot#TIMESTAMP_WITH_LOCAL_TIME_ZONE} to {@link DataTypeRoot#TIME_WITHOUT_TIME_ZONE}.
  */
 class TimestampToTimeCastRule extends AbstractCastRule<Timestamp, Number> {
 
@@ -34,12 +35,19 @@ class TimestampToTimeCastRule extends AbstractCastRule<Timestamp, Number> {
         super(
                 CastRulePredicate.builder()
                         .input(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)
+                        .input(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)
                         .target(DataTypeRoot.TIME_WITHOUT_TIME_ZONE)
                         .build());
     }
 
     @Override
     public CastExecutor<Timestamp, Number> create(DataType inputType, DataType targetType) {
-        return value -> (int) (value.getMillisecond() % DateTimeUtils.MILLIS_PER_DAY);
+        if (inputType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
+            return value -> (int) (value.getMillisecond() % DateTimeUtils.MILLIS_PER_DAY);
+        } else if (inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+            return value ->
+                    DateTimeUtils.timestampWithLocalZoneToTime(value, DateTimeUtils.LOCAL_TZ);
+        }
+        return null;
     }
 }

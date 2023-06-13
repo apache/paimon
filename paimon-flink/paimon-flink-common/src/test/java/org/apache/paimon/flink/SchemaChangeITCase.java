@@ -310,13 +310,13 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
     @Test
     public void testModifyColumnTypeFromTimestampToString() {
-        // Timestamp/Date/Time to String
+        // timestamp/date/time/timestamp_ltz to string
         sql(
-                "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b TIMESTAMP(3), c TIMESTAMP(6), d DATE, f TIME)");
+                "CREATE TABLE T (a STRING PRIMARY KEY NOT ENFORCED, b TIMESTAMP(3), c TIMESTAMP(6), d DATE, f TIME, g TIMESTAMP(3) WITH LOCAL TIME ZONE)");
         sql(
-                "INSERT INTO T VALUES('paimon', TIMESTAMP '2023-06-06 12:00:00', TIMESTAMP '2023-06-06 08:00:00.123456', DATE '2023-05-31', TIME '14:30:00')");
+                "INSERT INTO T VALUES('paimon', TIMESTAMP '2023-06-06 12:00:00', TIMESTAMP '2023-06-06 08:00:00.123456', DATE '2023-05-31', TIME '14:30:00', TO_TIMESTAMP_LTZ(4001, 3))");
 
-        sql("ALTER TABLE T MODIFY (b STRING, c STRING, d STRING, f STRING)");
+        sql("ALTER TABLE T MODIFY (b STRING, c STRING, d STRING, f STRING, g STRING)");
         List<Row> result = sql("SHOW CREATE TABLE T");
         assertThat(result.toString())
                 .contains(
@@ -325,14 +325,15 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `b` VARCHAR(2147483647),\n"
                                 + "  `c` VARCHAR(2147483647),\n"
                                 + "  `d` VARCHAR(2147483647),\n"
-                                + "  `f` VARCHAR(2147483647),");
+                                + "  `f` VARCHAR(2147483647),\n"
+                                + "  `g` VARCHAR(2147483647),");
         sql(
-                "INSERT INTO T VALUES('apache', '2023-06-07 12:00:00', '2023-06-07 08:00:00.123456', '2023-06-07', '08:00:00')");
+                "INSERT INTO T VALUES('apache', '2023-06-07 12:00:00', '2023-06-07 08:00:00.123456', '2023-06-07', '08:00:00', '2023-06-07 00:00:00.123456')");
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[apache, 2023-06-07 12:00:00, 2023-06-07 08:00:00.123456, 2023-06-07, 08:00:00]",
-                        "+I[paimon, 2023-06-06 12:00:00.000, 2023-06-06 08:00:00.123456, 2023-05-31, 14:30:00]");
+                        "+I[apache, 2023-06-07 12:00:00, 2023-06-07 08:00:00.123456, 2023-06-07, 08:00:00, 2023-06-07 00:00:00.123456]",
+                        "+I[paimon, 2023-06-06 12:00:00.000, 2023-06-06 08:00:00.123456, 2023-05-31, 14:30:00, 1970-01-01 08:00:04.001]");
     }
 
     @Test
@@ -413,12 +414,13 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
 
     @Test
     public void testModifyColumnTypeFromStringToTimestamp() {
-        // string to timestamp/date/time
-        sql("CREATE TABLE T (a VARCHAR(30), b CHAR(20), c VARCHAR(20), d STRING)");
+        // string to timestamp/date/time/timestamp_ltz
+        sql("CREATE TABLE T (a VARCHAR(30), b CHAR(20), c VARCHAR(20), d STRING, e STRING)");
         sql(
-                "INSERT INTO T VALUES('2022-12-12 09:30:10', '2022-12-12', '09:30:00', '2022-12-12 09:30:00.123456')");
+                "INSERT INTO T VALUES('2022-12-12 09:30:10', '2022-12-12', '09:30:00', '2022-12-12 09:30:00.123456', '2022-12-12 00:30:00.123456')");
 
-        sql("ALTER TABLE T MODIFY (a TIMESTAMP, b DATE, c TIME, d TIMESTAMP(3))");
+        sql(
+                "ALTER TABLE T MODIFY (a TIMESTAMP, b DATE, c TIME, d TIMESTAMP(3), e TIMESTAMP(3) WITH LOCAL TIME ZONE)");
         List<Row> result = sql("SHOW CREATE TABLE T");
         assertThat(result.toString())
                 .contains(
@@ -426,12 +428,13 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `a` TIMESTAMP(6),\n"
                                 + "  `b` DATE,\n"
                                 + "  `c` TIME(0),\n"
-                                + "  `d` TIMESTAMP(3)");
+                                + "  `d` TIMESTAMP(3),\n"
+                                + "  `e` TIMESTAMP(3) WITH LOCAL TIME ZONE");
 
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[2022-12-12T09:30:10, 2022-12-12, 09:30, 2022-12-12T09:30:00.123]");
+                        "+I[2022-12-12T09:30:10, 2022-12-12, 09:30, 2022-12-12T09:30:00.123, 2022-12-11T16:30:00.123Z]");
     }
 
     @Test
@@ -457,31 +460,69 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testModifyColumnTypeDateAndTimeAndTimeStamp() {
-        // timestamp to timestamp/date/time and date to timestamp and time to timestamp
+    public void testModifyColumnTypeFromTimestampToTimestamp() {
+        // timestamp/timestamp_ltz to timestamp/timestamp_ltz
         sql(
-                "CREATE TABLE T (a TIMESTAMP(3), b TIMESTAMP(6), c TIMESTAMP(3), d TIMESTAMP(3), e DATE, f TIME, g TIME(2))");
+                "CREATE TABLE T (a TIMESTAMP(6), b TIMESTAMP(6), c TIMESTAMP(6) WITH LOCAL TIME ZONE, d TIMESTAMP(6) WITH LOCAL TIME ZONE)");
         sql(
-                "INSERT INTO T VALUES(TIMESTAMP '2022-12-12 09:30:10.123', TIMESTAMP '2022-12-12 09:30:10.123456', TIMESTAMP '2022-12-12 09:30:10.123', TIMESTAMP '2022-12-12 09:30:10', DATE '2022-12-12', TIME '09:30:10', TIME '09:30:10.24')");
+                "INSERT INTO T VALUES(TIMESTAMP '2022-12-01 09:00:00.123456', TIMESTAMP '2022-12-02 09:00:00.123456', TO_TIMESTAMP_LTZ(4001, 3), TO_TIMESTAMP_LTZ(4001, 3))");
 
         sql(
-                "ALTER TABLE T MODIFY (a TIMESTAMP(6), b TIMESTAMP(3), c DATE, d TIME, e TIMESTAMP(3), f TIMESTAMP(3), g TIMESTAMP(6))");
+                "ALTER TABLE T MODIFY (a TIMESTAMP(3), b TIMESTAMP(6) WITH LOCAL TIME ZONE, c TIMESTAMP(3) WITH LOCAL TIME ZONE, d TIMESTAMP(3))");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` TIMESTAMP(3),\n"
+                                + "  `b` TIMESTAMP(6) WITH LOCAL TIME ZONE,\n"
+                                + "  `c` TIMESTAMP(3) WITH LOCAL TIME ZONE,\n"
+                                + "  `d` TIMESTAMP(3)");
+
+        result = sql("SELECT * FROM T");
+        assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "+I[2022-12-01T09:00:00.123, 2022-12-02T01:00:00.123456Z, 1970-01-01T00:00:04.001Z, 1970-01-01T08:00:04.001]");
+    }
+
+    @Test
+    public void testModifyColumnTypeFromDateToTimestamp() {
+        // date to timestamp/timestamp_ltz
+        sql("CREATE TABLE T (a DATE, b DATE)");
+        sql("INSERT INTO T VALUES(DATE '2022-12-12', DATE '2022-12-12')");
+
+        sql("ALTER TABLE T MODIFY (a TIMESTAMP(6), b TIMESTAMP(6) WITH LOCAL TIME ZONE)");
         List<Row> result = sql("SHOW CREATE TABLE T");
         assertThat(result.toString())
                 .contains(
                         "CREATE TABLE `PAIMON`.`default`.`T` (\n"
                                 + "  `a` TIMESTAMP(6),\n"
-                                + "  `b` TIMESTAMP(3),\n"
-                                + "  `c` DATE,\n"
-                                + "  `d` TIME(0),\n"
-                                + "  `e` TIMESTAMP(3),\n"
-                                + "  `f` TIMESTAMP(3),\n"
-                                + "  `g` TIMESTAMP(6)");
+                                + "  `b` TIMESTAMP(6) WITH LOCAL TIME ZONE");
+
+        result = sql("SELECT * FROM T");
+        assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("+I[2022-12-12T00:00, 2022-12-11T16:00:00Z]");
+    }
+
+    @Test
+    public void testModifyColumnTypeFromTimeToTimestamp() {
+        // time to timestamp/timestamp_ltz
+        sql("CREATE TABLE T (a TIME, b TIME(2), c TIME(3))");
+        sql("INSERT INTO T VALUES(TIME '09:30:10', TIME '09:30:10.24', TIME '09:30:10.123')");
+
+        sql(
+                "ALTER TABLE T MODIFY (a TIMESTAMP(3), b TIMESTAMP(6), c TIMESTAMP(6) WITH LOCAL TIME ZONE)");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` TIMESTAMP(3),\n"
+                                + "  `b` TIMESTAMP(6),\n"
+                                + "  `c` TIMESTAMP(6) WITH LOCAL TIME ZONE");
 
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[2022-12-12T09:30:10.123, 2022-12-12T09:30:10.123, 2022-12-12, 09:30:10, 2022-12-12T00:00, 1970-01-01T09:30:10, 1970-01-01T09:30:10.240]");
+                        "+I[1970-01-01T09:30:10, 1970-01-01T09:30:10.240, 1970-01-01T09:30:10.123Z]");
     }
 
     @Test

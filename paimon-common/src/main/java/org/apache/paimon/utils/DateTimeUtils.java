@@ -616,8 +616,35 @@ public class DateTimeUtils {
     // TIMESTAMP to TIMESTAMP_LTZ conversions
     // --------------------------------------------------------------------------------------------
 
+    public static Timestamp timestampToTimestampWithLocalZone(Timestamp ts, TimeZone tz) {
+        return Timestamp.fromInstant(ts.toLocalDateTime().atZone(tz.toZoneId()).toInstant());
+    }
+
     public static Timestamp timestampWithLocalZoneToTimestamp(Timestamp ts, TimeZone tz) {
         return Timestamp.fromLocalDateTime(LocalDateTime.ofInstant(ts.toInstant(), tz.toZoneId()));
+    }
+
+    public static int timestampWithLocalZoneToDate(Timestamp ts, TimeZone tz) {
+        return toInternal(
+                LocalDateTime.ofInstant(Instant.ofEpochMilli(ts.getMillisecond()), tz.toZoneId())
+                        .toLocalDate());
+    }
+
+    public static int timestampWithLocalZoneToTime(Timestamp ts, TimeZone tz) {
+        return toInternal(
+                LocalDateTime.ofInstant(Instant.ofEpochMilli(ts.getMillisecond()), tz.toZoneId())
+                        .toLocalTime());
+    }
+
+    public static Timestamp dateToTimestampWithLocalZone(int date, TimeZone tz) {
+        return Timestamp.fromInstant(
+                LocalDateTime.of(toLocalDate(date), LocalTime.MIDNIGHT)
+                        .atZone(tz.toZoneId())
+                        .toInstant());
+    }
+
+    public static Timestamp timeToTimestampWithLocalZone(int time, TimeZone tz) {
+        return Timestamp.fromInstant(toLocalDateTime(time).atZone(tz.toZoneId()).toInstant());
     }
 
     public static Timestamp truncate(Timestamp ts, int precision) {

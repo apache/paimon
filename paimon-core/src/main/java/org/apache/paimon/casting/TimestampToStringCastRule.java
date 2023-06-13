@@ -26,6 +26,8 @@ import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import java.util.TimeZone;
+
 import static org.apache.paimon.types.VarCharType.STRING_TYPE;
 
 /** {@link DataTypeFamily#TIMESTAMP} to {@link DataTypeFamily#CHARACTER_STRING} cast rule. */
@@ -44,12 +46,11 @@ class TimestampToStringCastRule extends AbstractCastRule<Timestamp, BinaryString
     @Override
     public CastExecutor<Timestamp, BinaryString> create(DataType inputType, DataType targetType) {
         final int precision = DataTypeChecks.getPrecision(inputType);
-        if (!inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
-            return value ->
-                    BinaryString.fromString(
-                            DateTimeUtils.formatTimestamp(
-                                    value, DateTimeUtils.UTC_ZONE, precision));
-        }
-        return null;
+        TimeZone timeZone =
+                inputType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)
+                        ? DateTimeUtils.LOCAL_TZ
+                        : DateTimeUtils.UTC_ZONE;
+        return value ->
+                BinaryString.fromString(DateTimeUtils.formatTimestamp(value, timeZone, precision));
     }
 }

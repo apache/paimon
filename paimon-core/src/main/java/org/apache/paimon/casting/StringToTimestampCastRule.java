@@ -25,6 +25,7 @@ import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.BinaryStringUtils;
+import org.apache.paimon.utils.DateTimeUtils;
 
 /** {@link DataTypeFamily#CHARACTER_STRING} to {@link DataTypeFamily#TIMESTAMP} cast rule. */
 class StringToTimestampCastRule extends AbstractCastRule<BinaryString, Timestamp> {
@@ -44,6 +45,9 @@ class StringToTimestampCastRule extends AbstractCastRule<BinaryString, Timestamp
         int targetPrecision = DataTypeChecks.getPrecision(targetType);
         if (targetType.is(DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE)) {
             return value -> BinaryStringUtils.toTimestamp(value, targetPrecision);
+        } else if (targetType.is(DataTypeRoot.TIMESTAMP_WITH_LOCAL_TIME_ZONE)) {
+            return value ->
+                    BinaryStringUtils.toTimestamp(value, targetPrecision, DateTimeUtils.LOCAL_TZ);
         }
         return null;
     }
