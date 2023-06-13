@@ -69,7 +69,7 @@ public class AppendOnlyCompactionTask {
                 new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
         return new CommitMessageImpl(
                 partition,
-                0, // bucket 0 is temp bucket for non-bucket table
+                0, // bucket 0 is temp bucket for unaware-bucket table
                 NewFilesIncrement.emptyIncrement(),
                 compactIncrement);
     }

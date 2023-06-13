@@ -126,33 +126,29 @@ public abstract class FlinkSink<T> implements Serializable {
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input, String initialCommitUser) {
+        // do the actually writing action, no snapshot generated in this stage
+        SingleOutputStreamOperator<Committable> written = doWrite(input, initialCommitUser);
 
-        return sinkFrom(
-                input,
-                initialCommitUser,
-                createWriteProvider(input.getExecutionEnvironment().getCheckpointConfig()));
+        // commit the committable to generate a new snapshot
+        return doCommit(written, initialCommitUser);
     }
 
-    public DataStreamSink<?> sinkFrom(
-            DataStream<T> input, String commitUser, StoreSinkWrite.Provider sinkProvider) {
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
-        CheckpointConfig checkpointConfig = env.getCheckpointConfig();
-
+    public SingleOutputStreamOperator<Committable> doWrite(DataStream<T> input, String commitUser) {
         boolean isStreaming =
-                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
-        boolean streamingCheckpointEnabled =
-                isStreaming && checkpointConfig.isCheckpointingEnabled();
-        if (streamingCheckpointEnabled) {
-            assertCheckpointConfiguration(env);
-        }
+                StreamExecutionEnvironmentUtils.getConfiguration(input.getExecutionEnvironment())
+                                .get(ExecutionOptions.RUNTIME_MODE)
+                        == RuntimeExecutionMode.STREAMING;
 
-        CommittableTypeInfo typeInfo = new CommittableTypeInfo();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
                                 WRITER_NAME + " -> " + table.name(),
-                                typeInfo,
-                                createWriteOperator(sinkProvider, isStreaming, commitUser))
+                                new CommittableTypeInfo(),
+                                createWriteOperator(
+                                        createWriteProvider(
+                                                input.getExecutionEnvironment()
+                                                        .getCheckpointConfig()),
+                                        isStreaming,
+                                        commitUser))
                         .setParallelism(input.getParallelism());
         Options options = Options.fromMap(table.options());
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
@@ -161,11 +157,25 @@ public abstract class FlinkSink<T> implements Serializable {
                     .declareManagedMemoryUseCaseAtOperatorScope(
                             ManagedMemoryUseCase.OPERATOR, memorySize.getMebiBytes());
         }
+        return written;
+    }
+
+    protected DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
+        StreamExecutionEnvironment env = written.getExecutionEnvironment();
+        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        CheckpointConfig checkpointConfig = env.getCheckpointConfig();
+        boolean isStreaming =
+                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
+        boolean streamingCheckpointEnabled =
+                isStreaming && checkpointConfig.isCheckpointingEnabled();
+        if (streamingCheckpointEnabled) {
+            assertCheckpointConfiguration(env);
+        }
 
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME + " -> " + table.name(),
-                                typeInfo,
+                                new CommittableTypeInfo(),
                                 new CommitterOperator<>(
                                         streamingCheckpointEnabled,
                                         commitUser,

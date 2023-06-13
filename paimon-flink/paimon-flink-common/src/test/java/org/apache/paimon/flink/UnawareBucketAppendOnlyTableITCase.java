@@ -34,33 +34,8 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test case for append-only managed table. */
-public class AppendOnlyTableITCase extends CatalogITCaseBase {
-
-    @Test
-    public void testCreateTableWithPrimaryKey() {
-        assertThatThrownBy(
-                        () ->
-                                batchSql(
-                                        "CREATE TABLE pk_table (id INT PRIMARY KEY NOT ENFORCED, data STRING) "
-                                                + "WITH ('write-mode'='append-only')"))
-                .hasRootCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage(
-                        "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if still "
-                                + "want to keep the primary key definition.");
-    }
-
-    @Test
-    public void testCreateUnawareBucketTableWithBucketKey() {
-        assertThatThrownBy(
-                        () ->
-                                batchSql(
-                                        "CREATE TABLE pk_table (id INT, data STRING) "
-                                                + "WITH ('bucket' = '-1', 'bucket-key' = 'id')"))
-                .hasRootCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage(
-                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
-    }
+/** Test case for append-only managed unaware-bucket table. */
+public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testReadEmpty() {
@@ -82,20 +57,6 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         rows = batchSql("SELECT data from append_table");
         assertThat(rows.size()).isEqualTo(2);
         assertThat(rows).containsExactlyInAnyOrder(Row.of("AAA"), Row.of("BBB"));
-    }
-
-    @Test
-    public void testReadPartitionOrder() {
-        setParallelism(1);
-        batchSql("INSERT INTO part_table VALUES (1, 'AAA', 'part-1')");
-        batchSql("INSERT INTO part_table VALUES (2, 'BBB', 'part-2')");
-        batchSql("INSERT INTO part_table VALUES (3, 'CCC', 'part-3')");
-
-        assertThat(batchSql("SELECT * FROM part_table"))
-                .containsExactly(
-                        Row.of(1, "AAA", "part-1"),
-                        Row.of(2, "BBB", "part-2"),
-                        Row.of(3, "CCC", "part-3"));
     }
 
     @Test
@@ -171,23 +132,27 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                 Snapshot.CommitKind.APPEND);
         assertAutoCompaction(
                 "INSERT INTO append_table VALUES (5, 'EEE'), (6, 'FFF')",
-                5L,
-                Snapshot.CommitKind.COMPACT);
+                4L,
+                Snapshot.CommitKind.APPEND);
         assertAutoCompaction(
                 "INSERT INTO append_table VALUES (7, 'HHH'), (8, 'III')",
                 6L,
-                Snapshot.CommitKind.APPEND);
+                Snapshot.CommitKind.COMPACT);
         assertAutoCompaction(
                 "INSERT INTO append_table VALUES (9, 'JJJ'), (10, 'KKK')",
                 7L,
                 Snapshot.CommitKind.APPEND);
         assertAutoCompaction(
                 "INSERT INTO append_table VALUES (11, 'LLL'), (12, 'MMM')",
-                9L,
+                8L,
+                Snapshot.CommitKind.APPEND);
+        assertAutoCompaction(
+                "INSERT INTO append_table VALUES (13, 'NNN'), (14, 'OOO')",
+                10L,
                 Snapshot.CommitKind.COMPACT);
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
-        assertThat(rows.size()).isEqualTo(16);
+        assertThat(rows.size()).isEqualTo(18);
         assertThat(rows)
                 .containsExactlyInAnyOrder(
                         Row.of(1, "AAA"),
@@ -205,7 +170,9 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                         Row.of(9, "JJJ"),
                         Row.of(10, "KKK"),
                         Row.of(11, "LLL"),
-                        Row.of(12, "MMM"));
+                        Row.of(12, "MMM"),
+                        Row.of(13, "NNN"),
+                        Row.of(14, "OOO"));
     }
 
     @Test
@@ -246,9 +213,9 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only')",
-                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('write-mode'='append-only')",
-                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('write-mode'='append-only')");
+                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only', 'bucket' = '-1')",
+                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('write-mode'='append-only', 'bucket' = '-1')",
+                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('write-mode'='append-only', 'bucket' = '-1')");
     }
 
     private void testRejectChanges(RowKind kind) {

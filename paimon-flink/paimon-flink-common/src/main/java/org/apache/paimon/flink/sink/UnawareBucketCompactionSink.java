@@ -42,6 +42,13 @@ public class UnawareBucketCompactionSink extends FlinkSink<AppendOnlyCompactionT
         return new UnawareBucketCompactionSink(table).sinkFrom(input);
     }
 
+    public static DataStream<Committable> uncommitted(
+            AppendOnlyFileStoreTable table,
+            DataStream<AppendOnlyCompactionTask> input,
+            String commitUser) {
+        return new UnawareBucketCompactionSink(table).doWrite(input, commitUser);
+    }
+
     @Override
     protected OneInputStreamOperator<AppendOnlyCompactionTask, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {

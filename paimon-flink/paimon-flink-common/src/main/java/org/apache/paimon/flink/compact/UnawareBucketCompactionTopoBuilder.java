@@ -20,6 +20,7 @@ package org.apache.paimon.flink.compact;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.UnawareBucketCompactionSink;
 import org.apache.paimon.flink.source.UnawareBucketSourceFunction;
 import org.apache.paimon.options.Options;
@@ -73,12 +74,20 @@ public class UnawareBucketCompactionTopoBuilder {
     }
 
     public void build() {
-
         // build source from UnawareSourceFunction
         DataStreamSource<AppendOnlyCompactionTask> source = buildSource();
 
         // from source, construct the full flink job
         sinkFromSource(source);
+    }
+
+    public DataStream<Committable> fetchUncommitted(String commitUser) {
+        DataStreamSource<AppendOnlyCompactionTask> source = buildSource();
+
+        // rebalance input to default or assigned parallelism
+        DataStream<AppendOnlyCompactionTask> rebalanced = rebalanceInput(source);
+
+        return UnawareBucketCompactionSink.uncommitted(table, rebalanced, commitUser);
     }
 
     private DataStreamSource<AppendOnlyCompactionTask> buildSource() {
@@ -91,6 +100,13 @@ public class UnawareBucketCompactionTopoBuilder {
     }
 
     private void sinkFromSource(DataStreamSource<AppendOnlyCompactionTask> input) {
+        DataStream<AppendOnlyCompactionTask> rebalanced = rebalanceInput(input);
+
+        UnawareBucketCompactionSink.sink(table, rebalanced);
+    }
+
+    private DataStream<AppendOnlyCompactionTask> rebalanceInput(
+            DataStreamSource<AppendOnlyCompactionTask> input) {
         Options conf = Options.fromMap(table.options());
         Integer compactionWorkerParallelism =
                 conf.get(FlinkConnectorOptions.UNAWARE_BUCKET_COMPACTION_PARALLELISM);
@@ -104,9 +120,7 @@ public class UnawareBucketCompactionTopoBuilder {
             // we need to set to default parallelism by hand.
             transformation.setParallelism(env.getParallelism());
         }
-        DataStream<AppendOnlyCompactionTask> rebalanced = new DataStream<>(env, transformation);
-
-        UnawareBucketCompactionSink.sink(table, rebalanced);
+        return new DataStream<>(env, transformation);
     }
 
     private Predicate getPartitionFilter() {
