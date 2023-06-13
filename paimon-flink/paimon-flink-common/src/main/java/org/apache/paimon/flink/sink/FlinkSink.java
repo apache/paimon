@@ -125,7 +125,16 @@ public abstract class FlinkSink<T> implements Serializable {
         return sinkFrom(input, initialCommitUser);
     }
 
-    public DataStreamSink<?> sinkFrom(DataStream<T> input, String commitUser) {
+    public DataStreamSink<?> sinkFrom(DataStream<T> input, String initialCommitUser) {
+
+        return sinkFrom(
+                input,
+                initialCommitUser,
+                createWriteProvider(input.getExecutionEnvironment().getCheckpointConfig()));
+    }
+
+    public DataStreamSink<?> sinkFrom(
+            DataStream<T> input, String commitUser, StoreSinkWrite.Provider sinkProvider) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
@@ -138,24 +147,12 @@ public abstract class FlinkSink<T> implements Serializable {
             assertCheckpointConfiguration(env);
         }
 
-        SingleOutputStreamOperator<Committable> written =
-                handleInput(input, isStreaming, commitUser);
-
-        return commit(written, streamingCheckpointEnabled, commitUser);
-    }
-
-    protected SingleOutputStreamOperator<Committable> handleInput(
-            DataStream<T> input, boolean isStreaming, String commitUser) {
+        CommittableTypeInfo typeInfo = new CommittableTypeInfo();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
                                 WRITER_NAME + " -> " + table.name(),
-                                new CommittableTypeInfo(),
-                                createWriteOperator(
-                                        createWriteProvider(
-                                                input.getExecutionEnvironment()
-                                                        .getCheckpointConfig()),
-                                        isStreaming,
-                                        commitUser))
+                                typeInfo,
+                                createWriteOperator(sinkProvider, isStreaming, commitUser))
                         .setParallelism(input.getParallelism());
         Options options = Options.fromMap(table.options());
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
@@ -164,17 +161,11 @@ public abstract class FlinkSink<T> implements Serializable {
                     .declareManagedMemoryUseCaseAtOperatorScope(
                             ManagedMemoryUseCase.OPERATOR, memorySize.getMebiBytes());
         }
-        return written;
-    }
 
-    protected DataStreamSink<?> commit(
-            SingleOutputStreamOperator<Committable> written,
-            boolean streamingCheckpointEnabled,
-            String commitUser) {
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME + " -> " + table.name(),
-                                new CommittableTypeInfo(),
+                                typeInfo,
                                 new CommitterOperator<>(
                                         streamingCheckpointEnabled,
                                         commitUser,
@@ -185,7 +176,7 @@ public abstract class FlinkSink<T> implements Serializable {
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
-    public static void assertCheckpointConfiguration(StreamExecutionEnvironment env) {
+    private void assertCheckpointConfiguration(StreamExecutionEnvironment env) {
         Preconditions.checkArgument(
                 !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
                 "Paimon sink currently does not support unaligned checkpoints. Please set "

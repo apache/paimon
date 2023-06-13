@@ -88,20 +88,6 @@ public class CdcSinkBuilder<T> {
 
         FileStoreTable dataTable = (FileStoreTable) table;
 
-        BucketMode bucketMode = dataTable.bucketMode();
-        switch (bucketMode) {
-            case FIXED:
-                return buildForFixedBucket();
-            case DYNAMIC:
-            case UNAWARE:
-            default:
-                throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
-        }
-    }
-
-    private DataStreamSink<?> buildForFixedBucket() {
-        FileStoreTable dataTable = (FileStoreTable) table;
-
         SingleOutputStreamOperator<CdcRecord> parsed =
                 input.forward()
                         .process(new CdcParsingProcessFunction<>(parserFactory))
@@ -117,6 +103,25 @@ public class CdcSinkBuilder<T> {
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
+        BucketMode bucketMode = dataTable.bucketMode();
+        switch (bucketMode) {
+            case FIXED:
+                return buildForFixedBucket(parsed);
+            case DYNAMIC:
+                return buildForDynamicBucket(parsed);
+            case UNAWARE:
+            default:
+                throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
+        }
+    }
+
+    private DataStreamSink<?> buildForDynamicBucket(DataStream<CdcRecord> parsed) {
+        return new CdcDynamicBucketSink((FileStoreTable) table, lockFactory)
+                .build(parsed, parallelism);
+    }
+
+    private DataStreamSink<?> buildForFixedBucket(DataStream<CdcRecord> parsed) {
+        FileStoreTable dataTable = (FileStoreTable) table;
         FlinkStreamPartitioner<CdcRecord> partitioner =
                 new FlinkStreamPartitioner<>(new CdcRecordChannelComputer(dataTable.schema()));
         PartitionTransformation<CdcRecord> partitioned =

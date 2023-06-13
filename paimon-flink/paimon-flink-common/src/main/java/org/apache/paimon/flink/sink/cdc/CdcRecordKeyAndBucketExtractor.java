@@ -41,10 +41,13 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
     private final Projection partitionProjection;
     private final List<DataField> bucketKeyFields;
     private final Projection bucketKeyProjection;
+    private final List<DataField> trimmedPKFields;
+    private final Projection trimmedPKProjection;
 
     private CdcRecord record;
 
     private BinaryRow partition;
+    private BinaryRow trimmedPK;
     private BinaryRow bucketKey;
     private Integer bucket;
 
@@ -62,6 +65,12 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
         this.bucketKeyProjection =
                 CodeGenUtils.newProjection(
                         bucketKeyType, IntStream.range(0, bucketKeyType.getFieldCount()).toArray());
+
+        this.trimmedPKFields = schema.trimmedPrimaryKeysFields();
+        this.trimmedPKProjection =
+                CodeGenUtils.newProjection(
+                        new RowType(trimmedPKFields),
+                        IntStream.range(0, trimmedPKFields.size()).toArray());
     }
 
     @Override
@@ -70,6 +79,7 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
 
         this.partition = null;
         this.bucketKey = null;
+        this.trimmedPK = null;
         this.bucket = null;
     }
 
@@ -96,7 +106,10 @@ public class CdcRecordKeyAndBucketExtractor implements KeyAndBucketExtractor<Cdc
 
     @Override
     public BinaryRow trimmedPrimaryKey() {
-        throw new UnsupportedOperationException();
+        if (trimmedPK == null) {
+            trimmedPK = trimmedPKProjection.apply(projectAsInsert(record, trimmedPKFields));
+        }
+        return trimmedPK;
     }
 
     @Override
