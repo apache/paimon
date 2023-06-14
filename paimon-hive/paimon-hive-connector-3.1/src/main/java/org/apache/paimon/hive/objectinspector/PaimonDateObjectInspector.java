@@ -18,6 +18,8 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+import org.apache.paimon.utils.DateTimeUtils;
+
 import org.apache.hadoop.hive.common.type.Date;
 import org.apache.hadoop.hive.serde2.io.DateWritableV2;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
@@ -26,7 +28,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for DATE type. */
 public class PaimonDateObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements DateObjectInspector {
+        implements DateObjectInspector, WriteableObjectInspector {
 
     public PaimonDateObjectInspector() {
         super(TypeInfoFactory.dateTypeInfo);
@@ -50,6 +52,18 @@ public class PaimonDateObjectInspector extends AbstractPrimitiveJavaObjectInspec
             return date.clone();
         } else {
             return o;
+        }
+    }
+
+    @Override
+    public Integer convert(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof org.apache.hadoop.hive.common.type.Date) {
+            return DateTimeUtils.toInternal(new java.sql.Date(((Date) value).toEpochMilli()));
+        } else {
+            return null;
         }
     }
 }
