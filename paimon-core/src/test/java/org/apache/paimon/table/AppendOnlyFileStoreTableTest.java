@@ -177,11 +177,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits =
-                toSplits(
-                        table.newSnapshotReader()
-                                .withKind(ScanKind.DELTA)
-                                .read()
-                                .dataSplits());
+                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("+101|11", "+102|12"));

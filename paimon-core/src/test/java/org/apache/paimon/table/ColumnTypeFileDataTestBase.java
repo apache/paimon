@@ -56,8 +56,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits =
-                            toSplits(table.newSnapshotReader().read().dataSplits());
+                    List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     // scan all data with original column type
                     assertThat(getResult(table.newRead(), splits, fieldGetterList))
@@ -69,8 +68,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                 },
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits =
-                            toSplits(table.newSnapshotReader().read().dataSplits());
+                    List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), splits, fieldGetterList))
                             .containsExactlyInAnyOrder(

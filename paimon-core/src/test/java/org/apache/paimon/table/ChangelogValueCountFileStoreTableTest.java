@@ -109,11 +109,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits =
-                toSplits(
-                        table.newSnapshotReader()
-                                .withKind(ScanKind.DELTA)
-                                .read()
-                                .dataSplits());
+                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -134,11 +130,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits =
-                toSplits(
-                        table.newSnapshotReader()
-                                .withKind(ScanKind.DELTA)
-                                .read()
-                                .dataSplits());
+                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("-100|10", "+101|11"));
@@ -211,11 +203,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
 
         // check that no data file is produced
         List<Split> splits =
-                toSplits(
-                        table.newSnapshotReader()
-                                .withKind(ScanKind.DELTA)
-                                .read()
-                                .dataSplits());
+                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
         assertThat(splits).isEmpty();
         // check that no changelog file is produced
         Path bucketPath = DataFilePathFactory.bucketPath(table.location(), "1", 0);

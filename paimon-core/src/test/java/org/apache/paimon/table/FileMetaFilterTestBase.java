@@ -137,10 +137,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                     // results of field "d" in [14, 19] in SCHEMA_1_FIELDS
                     Predicate predicate = builder.between(1, 14, 19);
                     List<DataSplit> filterSplits =
-                            table.newSnapshotReader()
-                                    .withFilter(predicate)
-                                    .read()
-                                    .dataSplits();
+                            table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     List<DataFileMeta> filterFileMetas =
                             filterSplits.stream()
                                     .flatMap(s -> s.files().stream())
@@ -223,10 +220,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                     // SCHEMA_0_FIELDS
                     Predicate predicate = builder.greaterThan(3, 1120);
                     List<DataSplit> filterSplits =
-                            table.newSnapshotReader()
-                                    .withFilter(predicate)
-                                    .read()
-                                    .dataSplits();
+                            table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(filterSplits), 2L);
 
                     List<DataFileMeta> filterFileMetas =
@@ -303,10 +297,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             new PredicateBuilder(table.schema().logicalRowType());
                     Predicate predicate = builder.between(4, 115L, 120L);
                     List<DataSplit> splits =
-                            table.newSnapshotReader()
-                                    .withFilter(predicate)
-                                    .read()
-                                    .dataSplits();
+                            table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return null;
                 },
@@ -316,10 +307,7 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                             new PredicateBuilder(table.schema().logicalRowType());
                     Predicate predicate = builder.between(2, 115L, 120L);
                     List<DataSplit> splits =
-                            table.newSnapshotReader()
-                                    .withFilter(predicate)
-                                    .read()
-                                    .dataSplits();
+                            table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                 },
                 getPrimaryKeyNames(),

@@ -123,10 +123,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
                     List<DataSplit> splits =
-                            table.newSnapshotReader()
-                                    .withFilter(predicate)
-                                    .read()
-                                    .dataSplits();
+                            table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return splits.stream()
                             .flatMap(s -> s.files().stream())
@@ -185,10 +182,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(4, (short) 200, (short) 500);
                     List<DataSplit> splits =
-                            table.newSnapshotReader()
-                                    .withFilter(predicate)
-                                    .read()
-                                    .dataSplits();
+                            table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return splits.stream()
                             .flatMap(s -> s.files().stream())

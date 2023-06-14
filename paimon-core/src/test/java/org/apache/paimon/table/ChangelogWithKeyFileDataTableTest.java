@@ -55,8 +55,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                 (files, schemas) -> {
                     PredicateBuilder builder = new PredicateBuilder(new RowType(SCHEMA_1_FIELDS));
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<Split> splits =
-                            toSplits(table.newSnapshotReader().read().dataSplits());
+                    List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
 
                     // filter with "a" = 1122 in schema1 which is not exist in schema0
                     TableRead read1 = table.newRead().withFilter(builder.equal(3, 1122));
