@@ -35,6 +35,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Manager for {@code Tag}. */
 public class TagManager {
 
+    private static final String TAG_PREFIX = "tag-";
+
     private final FileIO fileIO;
     private final Path tablePath;
 
@@ -50,7 +52,7 @@ public class TagManager {
 
     /** Return the path of a tag. */
     public Path tagPath(String tagName) {
-        return new Path(tablePath + "/tag/" + tagName);
+        return new Path(tablePath + "/tag/" + TAG_PREFIX + tagName);
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
@@ -113,6 +115,7 @@ public class TagManager {
 
             return Arrays.stream(statuses)
                     .map(FileStatus::getPath)
+                    .filter(path -> path.getName().startsWith(TAG_PREFIX))
                     .map(path -> Snapshot.fromPath(fileIO, path))
                     .sorted(Comparator.comparingLong(Snapshot::id))
                     .collect(Collectors.toList());
