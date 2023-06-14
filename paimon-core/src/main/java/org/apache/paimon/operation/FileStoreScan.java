@@ -62,6 +62,9 @@ public interface FileStoreScan {
     /** Result plan of this scan. */
     interface Plan {
 
+        @Nullable
+        Long watermark();
+
         /**
          * Snapshot id of this plan, return null if the table is empty or the manifest list is
          * specified.

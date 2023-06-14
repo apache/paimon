@@ -50,7 +50,7 @@ public class ContinuousLatestStartingScannerTest extends ScannerTestBase {
 
         ContinuousLatestStartingScanner scanner = new ContinuousLatestStartingScanner();
         StartingScanner.NextSnapshot result =
-                (StartingScanner.NextSnapshot) scanner.scan(snapshotManager, snapshotSplitReader);
+                (StartingScanner.NextSnapshot) scanner.scan(snapshotManager, snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(3);
 
         write.close();
@@ -61,7 +61,7 @@ public class ContinuousLatestStartingScannerTest extends ScannerTestBase {
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousLatestStartingScanner scanner = new ContinuousLatestStartingScanner();
-        assertThat(scanner.scan(snapshotManager, snapshotSplitReader))
+        assertThat(scanner.scan(snapshotManager, snapshotReader))
                 .isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 }

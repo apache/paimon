@@ -328,6 +328,12 @@ public class ContinuousFileSplitEnumeratorTest {
         @Override
         public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {}
 
+        @Nullable
+        @Override
+        public Long watermark() {
+            return null;
+        }
+
         @Override
         public void restore(Long state) {}
     }

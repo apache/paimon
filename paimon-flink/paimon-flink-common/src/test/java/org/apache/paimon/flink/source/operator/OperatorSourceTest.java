@@ -113,7 +113,7 @@ public class OperatorSourceTest {
         // 1. run first
         OperatorSubtaskState snapshot;
         {
-            MonitorFunction function = new MonitorFunction(table.newReadBuilder(), 10);
+            MonitorFunction function = new MonitorFunction(table.newReadBuilder(), 10, false);
             StreamSource<Split, MonitorFunction> src = new StreamSource<>(function);
             AbstractStreamOperatorTestHarness<Split> testHarness =
                     new AbstractStreamOperatorTestHarness<>(src, 1, 1, 0);
@@ -123,7 +123,7 @@ public class OperatorSourceTest {
 
         // 2. restore from state
         {
-            MonitorFunction functionCopy1 = new MonitorFunction(table.newReadBuilder(), 10);
+            MonitorFunction functionCopy1 = new MonitorFunction(table.newReadBuilder(), 10, false);
             StreamSource<Split, MonitorFunction> srcCopy1 = new StreamSource<>(functionCopy1);
             AbstractStreamOperatorTestHarness<Split> testHarnessCopy1 =
                     new AbstractStreamOperatorTestHarness<>(srcCopy1, 1, 1, 0);
@@ -143,7 +143,7 @@ public class OperatorSourceTest {
 
         // 3. restore from consumer id
         {
-            MonitorFunction functionCopy2 = new MonitorFunction(table.newReadBuilder(), 10);
+            MonitorFunction functionCopy2 = new MonitorFunction(table.newReadBuilder(), 10, false);
             StreamSource<Split, MonitorFunction> srcCopy2 = new StreamSource<>(functionCopy2);
             AbstractStreamOperatorTestHarness<Split> testHarnessCopy2 =
                     new AbstractStreamOperatorTestHarness<>(srcCopy2, 1, 1, 0);

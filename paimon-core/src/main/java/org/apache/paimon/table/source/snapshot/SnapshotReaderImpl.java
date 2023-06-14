@@ -34,9 +34,12 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -48,8 +51,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
-/** Implementation of {@link SnapshotSplitReader}. */
-public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
+/** Implementation of {@link SnapshotReader}. */
+public class SnapshotReaderImpl implements SnapshotReader {
 
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
@@ -62,7 +65,7 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
     private ScanKind scanKind = ScanKind.ALL;
     private RecordComparator lazyPartitionComparator;
 
-    public SnapshotSplitReaderImpl(
+    public SnapshotReaderImpl(
             FileStoreScan scan,
             TableSchema tableSchema,
             CoreOptions options,
@@ -85,13 +88,13 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
     }
 
     @Override
-    public SnapshotSplitReader withSnapshot(long snapshotId) {
+    public SnapshotReader withSnapshot(long snapshotId) {
         scan.withSnapshot(snapshotId);
         return this;
     }
 
     @Override
-    public SnapshotSplitReader withFilter(Predicate predicate) {
+    public SnapshotReader withFilter(Predicate predicate) {
         List<String> partitionKeys = tableSchema.partitionKeys();
         int[] fieldIdxToPartitionIdx =
                 tableSchema.fields().stream()
@@ -120,27 +123,27 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
     }
 
     @Override
-    public SnapshotSplitReader withKind(ScanKind scanKind) {
+    public SnapshotReader withKind(ScanKind scanKind) {
         this.scanKind = scanKind;
         scan.withKind(scanKind);
         return this;
     }
 
     @Override
-    public SnapshotSplitReader withLevelFilter(Filter<Integer> levelFilter) {
+    public SnapshotReader withLevelFilter(Filter<Integer> levelFilter) {
         scan.withLevelFilter(levelFilter);
         return this;
     }
 
     @Override
-    public SnapshotSplitReader withBucket(int bucket) {
+    public SnapshotReader withBucket(int bucket) {
         scan.withBucket(bucket);
         return this;
     }
 
     /** Get splits from {@link FileKind#ADD} files. */
     @Override
-    public List<DataSplit> splits() {
+    public Plan read() {
         FileStoreScan.Plan plan = scan.plan();
         Long snapshotId = plan.snapshotId();
 
@@ -153,12 +156,31 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
                     .forEach(entry -> newFiles.put(entry.getKey(), entry.getValue()));
             files = newFiles;
         }
-        return generateSplits(
-                snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
-                scanKind != ScanKind.ALL,
-                false,
-                splitGenerator,
-                files);
+        List<DataSplit> splits =
+                generateSplits(
+                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        scanKind != ScanKind.ALL,
+                        false,
+                        splitGenerator,
+                        files);
+        return new Plan() {
+            @Nullable
+            @Override
+            public Long watermark() {
+                return plan.watermark();
+            }
+
+            @Nullable
+            @Override
+            public Long snapshotId() {
+                return plan.snapshotId();
+            }
+
+            @Override
+            public List<Split> splits() {
+                return (List) splits;
+            }
+        };
     }
 
     @Override
@@ -183,7 +205,7 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
      * with reverseRowKind = true (see {@link DataSplit}).
      */
     @Override
-    public List<DataSplit> overwriteSplits() {
+    public Plan readOverwrittenChanges() {
         withKind(ScanKind.DELTA);
         FileStoreScan.Plan plan = scan.plan();
         long snapshotId = plan.snapshotId();
@@ -211,7 +233,25 @@ public class SnapshotSplitReaderImpl implements SnapshotSplitReader {
                         false,
                         splitGenerator,
                         FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD))));
-        return splits;
+
+        return new Plan() {
+            @Nullable
+            @Override
+            public Long watermark() {
+                return plan.watermark();
+            }
+
+            @Nullable
+            @Override
+            public Long snapshotId() {
+                return plan.snapshotId();
+            }
+
+            @Override
+            public List<Split> splits() {
+                return (List) splits;
+            }
+        };
     }
 
     private RecordComparator partitionComparator() {

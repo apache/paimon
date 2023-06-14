@@ -20,8 +20,6 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.table.source.DataFilePlan;
-import org.apache.paimon.table.source.TableScan;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,8 +48,7 @@ public class ContinuousAppendAndCompactFollowUpScanner implements FollowUpScanne
     }
 
     @Override
-    public TableScan.Plan scan(long snapshotId, SnapshotSplitReader snapshotSplitReader) {
-        return new DataFilePlan(
-                snapshotSplitReader.withKind(ScanKind.DELTA).withSnapshot(snapshotId).splits());
+    public SnapshotReader.Plan scan(long snapshotId, SnapshotReader snapshotReader) {
+        return snapshotReader.withKind(ScanKind.DELTA).withSnapshot(snapshotId).read();
     }
 }

@@ -33,7 +33,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.FloatType;
@@ -359,11 +359,11 @@ public class SchemaEvolutionTest {
     private void forEachRemaining(
             FileStoreTable table, Predicate filter, Consumer<InternalRow> consumer)
             throws IOException {
-        SnapshotSplitReader snapshotSplitReader = table.newSnapshotSplitReader();
+        SnapshotReader snapshotReader = table.newSnapshotReader();
         if (filter != null) {
-            snapshotSplitReader.withFilter(filter);
+            snapshotReader.withFilter(filter);
         }
-        for (Split split : snapshotSplitReader.splits()) {
+        for (Split split : snapshotReader.read().dataSplits()) {
             InnerTableRead read = table.newRead();
             if (filter != null) {
                 read.withFilter(filter);

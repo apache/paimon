@@ -39,6 +39,7 @@ import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
@@ -61,6 +62,15 @@ import java.util.TreeMap;
  *
  * <p>The splits to be read are forwarded to the downstream {@link ReadOperator} which can have
  * parallelism greater than one.
+ *
+ * <p>Currently, there are two features that rely on this monitor:
+ *
+ * <ol>
+ *   <li>Consumer-id: rely on this function to do aligned snapshot consumption, and ensure that all
+ *       data in a snapshot is consumed within each checkpoint.
+ *   <li>Snapshot-watermark: when there is no watermark definition, the default Paimon table will
+ *       pass the watermark recorded in the snapshot.
+ * </ol>
  */
 public class MonitorFunction extends RichSourceFunction<Split>
         implements CheckpointedFunction, CheckpointListener {
@@ -71,6 +81,7 @@ public class MonitorFunction extends RichSourceFunction<Split>
 
     private final ReadBuilder readBuilder;
     private final long monitorInterval;
+    private final boolean emitSnapshotWatermark;
 
     private volatile boolean isRunning = true;
 
@@ -81,9 +92,11 @@ public class MonitorFunction extends RichSourceFunction<Split>
     private transient ListState<Tuple2<Long, Long>> nextSnapshotState;
     private transient TreeMap<Long, Long> nextSnapshotPerCheckpoint;
 
-    public MonitorFunction(ReadBuilder readBuilder, long monitorInterval) {
+    public MonitorFunction(
+            ReadBuilder readBuilder, long monitorInterval, boolean emitSnapshotWatermark) {
         this.readBuilder = readBuilder;
         this.monitorInterval = monitorInterval;
+        this.emitSnapshotWatermark = emitSnapshotWatermark;
     }
 
     @Override
@@ -170,6 +183,13 @@ public class MonitorFunction extends RichSourceFunction<Split>
                     List<Split> splits = scan.plan().splits();
                     isEmpty = splits.isEmpty();
                     splits.forEach(ctx::collect);
+
+                    if (emitSnapshotWatermark) {
+                        Long watermark = scan.watermark();
+                        if (watermark != null) {
+                            ctx.emitWatermark(new Watermark(watermark));
+                        }
+                    }
                 } catch (EndOfScanException esf) {
                     LOG.info("Catching EndOfStreamException, the stream is finished.");
                     return;
@@ -208,9 +228,10 @@ public class MonitorFunction extends RichSourceFunction<Split>
             String name,
             TypeInformation<RowData> typeInfo,
             ReadBuilder readBuilder,
-            long monitorInterval) {
+            long monitorInterval,
+            boolean emitSnapshotWatermark) {
         return env.addSource(
-                        new MonitorFunction(readBuilder, monitorInterval),
+                        new MonitorFunction(readBuilder, monitorInterval, emitSnapshotWatermark),
                         name + "-Monitor",
                         new JavaTypeInfo<>(Split.class))
                 .forceNonParallel()
