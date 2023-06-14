@@ -28,7 +28,7 @@ under the License.
 
 Paimon's write performance is closely related to checkpoint, so if you need greater write throughput:
 
-1. Increase the checkpoint interval.
+1. Increase the checkpoint interval, or just use batch mode.
 2. Increase `write-buffer-size`.
 3. Enable `write-buffer-spillable`.
 4. Rescale bucket number if you are using Fixed-Bucket mode.
