@@ -92,29 +92,26 @@ public class TableWriteImpl<T>
     }
 
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
-        keyAndBucketExtractor.setRecord(row);
-        SinkRecord record =
-                new SinkRecord(
-                        keyAndBucketExtractor.partition(),
-                        keyAndBucketExtractor.bucket(),
-                        keyAndBucketExtractor.trimmedPrimaryKey(),
-                        row);
+        SinkRecord record = toSinkRecord(row);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         return record;
     }
 
     @VisibleForTesting
     public T writeAndReturnData(InternalRow row) throws Exception {
-        keyAndBucketExtractor.setRecord(row);
-        SinkRecord record =
-                new SinkRecord(
-                        keyAndBucketExtractor.partition(),
-                        keyAndBucketExtractor.bucket(),
-                        keyAndBucketExtractor.trimmedPrimaryKey(),
-                        row);
+        SinkRecord record = toSinkRecord(row);
         T data = recordExtractor.extract(record);
         write.write(record.partition(), record.bucket(), data);
         return data;
+    }
+
+    private SinkRecord toSinkRecord(InternalRow row) throws Exception {
+        keyAndBucketExtractor.setRecord(row);
+        return new SinkRecord(
+                keyAndBucketExtractor.partition(),
+                keyAndBucketExtractor.bucket(),
+                keyAndBucketExtractor.trimmedPrimaryKey(),
+                row);
     }
 
     public SinkRecord toLogRecord(SinkRecord record) {
