@@ -315,7 +315,7 @@ public abstract class AbstractFileStoreWrite<T>
 
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        if (!emptyWriter && latestSnapshotId != null) {
+        if (!ignorePreviousFiles && latestSnapshotId != null) {
             restoreFiles = scanExistingFileMetas(latestSnapshotId, partition, bucket);
         }
         IndexMaintainer<T> indexMaintainer =
