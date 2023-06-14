@@ -28,6 +28,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import javax.annotation.Nullable;
@@ -114,7 +115,7 @@ public class Snapshot {
     // a manifest recording all index files of this table
     // null if no index file
     @JsonProperty(FIELD_INDEX_MANIFEST)
-    @Nullable
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private final String indexManifest;
 
     @JsonProperty(FIELD_COMMIT_USER)
