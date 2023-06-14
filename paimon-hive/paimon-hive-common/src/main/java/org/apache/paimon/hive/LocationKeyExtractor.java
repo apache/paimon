@@ -18,11 +18,15 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 
 import java.util.Map;
 import java.util.Properties;
+
+import static org.apache.hadoop.hive.metastore.Warehouse.getDnsPath;
 
 /**
  * declaring the name of the key in the parameters of the Hive metastore table, which indicates
@@ -41,6 +45,25 @@ public class LocationKeyExtractor {
 
     public static String getLocation(Table table) {
         String sdLocation = table.getSd().getLocation();
+
+        Map<String, String> params = table.getParameters();
+
+        String propertiesLocation = null;
+        if (params != null) {
+            propertiesLocation = params.get(TBPROPERTIES_LOCATION_KEY);
+        }
+
+        return propertiesLocation != null ? propertiesLocation : sdLocation;
+    }
+
+    public static String getLocation(Table table, Configuration conf) throws MetaException {
+        String sdLocation = table.getSd().getLocation();
+        if (sdLocation != null) {
+            org.apache.hadoop.fs.Path path;
+            path = getDnsPath(new org.apache.hadoop.fs.Path(sdLocation), conf);
+            sdLocation = path.toUri().toString();
+            table.getSd().setLocation(sdLocation);
+        }
 
         Map<String, String> params = table.getParameters();
 
