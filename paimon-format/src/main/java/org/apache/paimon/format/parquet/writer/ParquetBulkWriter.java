@@ -56,4 +56,9 @@ public class ParquetBulkWriter implements FormatWriter {
     public void finish() throws IOException {
         parquetWriter.close();
     }
+
+    @Override
+    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
+        return suggestedCheck && parquetWriter.getDataSize() >= targetSize;
+    }
 }

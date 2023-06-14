@@ -48,7 +48,6 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     private final List<R> results;
 
     private SingleFileWriter<T, R> currentWriter = null;
-    private long lengthOfClosedFiles = 0L;
     private long recordCount = 0;
     private boolean closed = false;
 
@@ -67,9 +66,8 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     @VisibleForTesting
     boolean rollingFile() throws IOException {
-        // query writer's length per 1000 records
-        return recordCount % CHECK_ROLLING_RECORD_CNT == 0
-                && currentWriter.length() >= targetFileSize;
+        return currentWriter.reachTargetSize(
+                recordCount % CHECK_ROLLING_RECORD_CNT == 0, targetFileSize);
     }
 
     @Override
@@ -107,7 +105,6 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
             return;
         }
 
-        lengthOfClosedFiles += currentWriter.length();
         currentWriter.close();
         results.add(currentWriter.result());
         currentWriter = null;
@@ -116,16 +113,6 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
     @Override
     public long recordCount() {
         return recordCount;
-    }
-
-    @Override
-    public long length() throws IOException {
-        long length = lengthOfClosedFiles;
-        if (currentWriter != null) {
-            length += currentWriter.length();
-        }
-
-        return length;
     }
 
     @Override

@@ -101,14 +101,6 @@ public interface FileWriter<T, R> extends Closeable {
     long recordCount();
 
     /**
-     * The estimated length of the current writer.
-     *
-     * @return the estimated length.
-     * @throws IOException if encounter any IO error.
-     */
-    long length() throws IOException;
-
-    /**
      * Abort to clear orphan file(s) if encounter any error.
      *
      * <p>NOTE: This implementation must be reentrant.

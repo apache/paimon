@@ -69,6 +69,12 @@ public class FlushingFileFormat extends FileFormat {
                 public void finish() throws IOException {
                     wrapped.finish();
                 }
+
+                @Override
+                public boolean reachTargetSize(boolean suggestedCheck, long targetSize)
+                        throws IOException {
+                    return wrapped.reachTargetSize(suggestedCheck, targetSize);
+                }
             };
         };
     }
