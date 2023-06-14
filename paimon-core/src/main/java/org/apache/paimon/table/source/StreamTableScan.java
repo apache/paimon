@@ -33,6 +33,10 @@ import javax.annotation.Nullable;
 @Public
 public interface StreamTableScan extends TableScan, Restorable<Long> {
 
+    /** Current watermark for consumed snapshot. */
+    @Nullable
+    Long watermark();
+
     /** Restore from checkpoint next snapshot id. */
     @Override
     void restore(@Nullable Long nextSnapshotId);

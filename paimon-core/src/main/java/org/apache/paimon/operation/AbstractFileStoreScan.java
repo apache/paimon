@@ -179,16 +179,22 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public Plan plan() {
 
-        Pair<Long, List<ManifestEntry>> planResult = doPlan(this::readManifestFileMeta);
+        Pair<Snapshot, List<ManifestEntry>> planResult = doPlan(this::readManifestFileMeta);
 
-        final Long readSnapshotId = planResult.getLeft();
+        final Snapshot readSnapshot = planResult.getLeft();
         final List<ManifestEntry> files = planResult.getRight();
 
         return new Plan() {
             @Nullable
             @Override
+            public Long watermark() {
+                return readSnapshot == null ? null : readSnapshot.watermark();
+            }
+
+            @Nullable
+            @Override
             public Long snapshotId() {
-                return readSnapshotId;
+                return readSnapshot == null ? null : readSnapshot.id();
             }
 
             @Override
@@ -198,18 +204,19 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         };
     }
 
-    private Pair<Long, List<ManifestEntry>> doPlan(
+    private Pair<Snapshot, List<ManifestEntry>> doPlan(
             Function<ManifestFileMeta, List<ManifestEntry>> readManifest) {
         List<ManifestFileMeta> manifests = specifiedManifests;
-        Long snapshotId = specifiedSnapshotId;
+        Snapshot snapshot = null;
         if (manifests == null) {
+            Long snapshotId = specifiedSnapshotId;
             if (snapshotId == null) {
                 snapshotId = snapshotManager.latestSnapshotId();
             }
             if (snapshotId == null) {
                 manifests = Collections.emptyList();
             } else {
-                Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+                snapshot = snapshotManager.snapshot(snapshotId);
                 manifests = readManifests(snapshot);
             }
         }
@@ -256,7 +263,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 files.add(file);
             }
         }
-        return Pair.of(snapshotId, files);
+        return Pair.of(snapshot, files);
     }
 
     private List<ManifestFileMeta> readManifests(Snapshot snapshot) {

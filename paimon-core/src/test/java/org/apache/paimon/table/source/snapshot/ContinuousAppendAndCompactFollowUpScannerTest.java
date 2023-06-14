@@ -95,21 +95,21 @@ public class ContinuousAppendAndCompactFollowUpScannerTest extends ScannerTestBa
         Snapshot snapshot = snapshotManager.snapshot(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        TableScan.Plan plan = scanner.scan(1, snapshotSplitReader);
+        TableScan.Plan plan = scanner.scan(1, snapshotReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|1|0|1", "+I 1|2|0|1"));
 
         snapshot = snapshotManager.snapshot(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.scan(2, snapshotSplitReader);
+        plan = scanner.scan(2, snapshotReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 2|1|0|2", "+I 2|2|0|1"));
 
         snapshot = snapshotManager.snapshot(3);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.scan(3, snapshotSplitReader);
+        plan = scanner.scan(3, snapshotReader);
         assertThat(getResult(read, plan.splits())).hasSameElementsAs(Arrays.asList("+I 3|1|0|1"));
     }
 

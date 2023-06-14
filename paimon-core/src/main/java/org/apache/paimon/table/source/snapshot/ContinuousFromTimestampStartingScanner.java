@@ -40,7 +40,7 @@ public class ContinuousFromTimestampStartingScanner implements StartingScanner {
     }
 
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
         Long startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");

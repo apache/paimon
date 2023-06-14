@@ -57,7 +57,11 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
                     List<Split> splits =
-                            toSplits(table.newSnapshotSplitReader().withFilter(predicate).splits());
+                            toSplits(
+                                    table.newSnapshotSplitReader()
+                                            .withFilter(predicate)
+                                            .read()
+                                            .dataSplits());
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), splits, fieldGetterList))
                             .containsExactlyInAnyOrder(
@@ -80,7 +84,8 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
                                                     new PredicateBuilder(
                                                                     table.schema().logicalRowType())
                                                             .between(6, 200F, 500F))
-                                            .splits());
+                                            .read()
+                                            .dataSplits());
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), splits, fieldGetterList))
                             .containsExactlyInAnyOrder(

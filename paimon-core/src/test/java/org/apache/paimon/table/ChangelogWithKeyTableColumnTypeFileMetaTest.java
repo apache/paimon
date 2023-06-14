@@ -91,7 +91,10 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
                     List<DataSplit> splits =
-                            table.newSnapshotSplitReader().withFilter(predicate).splits();
+                            table.newSnapshotSplitReader()
+                                    .withFilter(predicate)
+                                    .read()
+                                    .dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 3L);
                     return splits.stream()
                             .flatMap(s -> s.files().stream())
@@ -109,7 +112,8 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(6, 200F, 500F))
-                                    .splits();
+                                    .read()
+                                    .dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                 },
                 getPrimaryKeyNames(),

@@ -24,31 +24,56 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.Filter;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
 /** Read splits from specified {@link Snapshot} with given configuration. */
-public interface SnapshotSplitReader {
+public interface SnapshotReader {
 
     ConsumerManager consumerManager();
 
-    SnapshotSplitReader withSnapshot(long snapshotId);
+    SnapshotReader withSnapshot(long snapshotId);
 
-    SnapshotSplitReader withFilter(Predicate predicate);
+    SnapshotReader withFilter(Predicate predicate);
 
-    SnapshotSplitReader withKind(ScanKind scanKind);
+    SnapshotReader withKind(ScanKind scanKind);
 
-    SnapshotSplitReader withLevelFilter(Filter<Integer> levelFilter);
+    SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
-    SnapshotSplitReader withBucket(int bucket);
+    SnapshotReader withBucket(int bucket);
 
-    /** Get splits from snapshot. */
-    List<DataSplit> splits();
+    /** Get splits plan from snapshot. */
+    Plan read();
 
-    /** Get splits from an overwrite snapshot. */
-    List<DataSplit> overwriteSplits();
+    /** Get splits plan from an overwritten snapshot. */
+    Plan readOverwrittenChanges();
 
     /** Get partitions from a snapshot. */
     List<BinaryRow> partitions();
+
+    /** Result plan of this scan. */
+    interface Plan extends TableScan.Plan {
+
+        @Nullable
+        Long watermark();
+
+        /**
+         * Snapshot id of this plan, return null if the table is empty or the manifest list is
+         * specified.
+         */
+        @Nullable
+        Long snapshotId();
+
+        /** Result splits. */
+        List<Split> splits();
+
+        default List<DataSplit> dataSplits() {
+            return (List) splits();
+        }
+    }
 }

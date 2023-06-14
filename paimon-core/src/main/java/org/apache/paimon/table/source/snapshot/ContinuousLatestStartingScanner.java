@@ -34,7 +34,7 @@ public class ContinuousLatestStartingScanner implements StartingScanner {
             LoggerFactory.getLogger(ContinuousLatestStartingScanner.class);
 
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
