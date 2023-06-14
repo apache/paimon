@@ -26,7 +26,12 @@ under the License.
 
 # Write Performance
 
-Performance of Paimon writers are related with the following factors.
+Paimon's write performance is closely related to checkpoint, so if you need greater write throughput:
+
+1. Increase the checkpoint interval.
+2. Increase `write-buffer-size`.
+3. Enable `write-buffer-spillable`.
+4. Rescale bucket number if you are using Fixed-Bucket mode.
 
 ## Parallelism
 
