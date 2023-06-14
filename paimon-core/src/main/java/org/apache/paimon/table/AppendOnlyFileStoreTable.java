@@ -134,7 +134,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
         // if this table is non-bucket table, we skip compaction and restored files searching
         if (bucketMode() == BucketMode.UNAWARE) {
             writer.skipCompaction();
-            writer.fromEmptyWriter(true);
+            writer.withIgnorePreviousFiles(true);
         }
         return new TableWriteImpl<>(
                 writer,
