@@ -303,12 +303,12 @@ public abstract class AbstractFileStoreWrite<T>
             writers.put(partition.copy(), buckets);
         }
         return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket, emptyWriter));
+                bucket, k -> createWriterContainer(partition.copy(), bucket, ignorePreviousFiles));
     }
 
     @VisibleForTesting
     public WriterContainer<T> createWriterContainer(
-            BinaryRow partition, int bucket, boolean emptyWriter) {
+            BinaryRow partition, int bucket, boolean ignorePreviousFiles) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
