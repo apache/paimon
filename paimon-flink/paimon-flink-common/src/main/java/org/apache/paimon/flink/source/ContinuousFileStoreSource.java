@@ -39,11 +39,21 @@ public class ContinuousFileStoreSource extends FlinkSource {
     private static final long serialVersionUID = 4L;
 
     private final Map<String, String> options;
+    private final boolean unawareBucket;
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
+        this(readBuilder, options, limit, false);
+    }
+
+    public ContinuousFileStoreSource(
+            ReadBuilder readBuilder,
+            Map<String, String> options,
+            @Nullable Long limit,
+            boolean unawareBucket) {
         super(readBuilder, limit);
         this.options = options;
+        this.unawareBucket = unawareBucket;
     }
 
     @Override
@@ -73,6 +83,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 coreOptions
                         .toConfiguration()
                         .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                scan);
+                scan,
+                unawareBucket);
     }
 }

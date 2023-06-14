@@ -295,7 +295,7 @@ public class ContinuousFileSplitEnumeratorTest {
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, splitBatchSize, scan);
+                    context, initialSplits, null, discoveryInterval, splitBatchSize, scan, false);
         }
     }
 

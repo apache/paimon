@@ -33,8 +33,10 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -71,13 +73,16 @@ public class ContinuousFileSplitEnumerator
 
     private boolean finished = false;
 
+    private final boolean unawareBucket;
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
             int splitBatchSize,
-            StreamTableScan scan) {
+            StreamTableScan scan,
+            boolean unawareBucket) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.bucketSplits = new HashMap<>();
@@ -88,6 +93,7 @@ public class ContinuousFileSplitEnumerator
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
+        this.unawareBucket = unawareBucket;
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -179,7 +185,12 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void assignSplits() {
-        Map<Integer, List<FileStoreSourceSplit>> assignment = createAssignment();
+        Map<Integer, List<FileStoreSourceSplit>> assignment;
+        if (unawareBucket) {
+            assignment = createAssignmentUnawareBucket();
+        } else {
+            assignment = createAssignment();
+        }
         if (finished) {
             Iterator<Integer> iterator = readersAwaitingSplit.iterator();
             while (iterator.hasNext()) {
@@ -218,6 +229,34 @@ public class ContinuousFileSplitEnumerator
                         }
                     }
                 });
+        return assignment;
+    }
+
+    private Map<Integer, List<FileStoreSourceSplit>> createAssignmentUnawareBucket() {
+        Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
+        Deque<Integer> readersId = new ArrayDeque<>(readersAwaitingSplit);
+
+        for (LinkedList<FileStoreSourceSplit> splits : bucketSplits.values()) {
+            //  we assign all the split until no spare split or no available reader
+            while (splits.size() > 0 && readersId.size() > 0) {
+                int subTask = readersId.poll();
+                // if the reader that requested another split has failed in the meantime, remove it
+                // from the list of waiting readers
+                if (!context.registeredReaders().containsKey(subTask)) {
+                    readersAwaitingSplit.remove(subTask);
+                    continue;
+                }
+                List<FileStoreSourceSplit> taskAssignment =
+                        assignment.computeIfAbsent(subTask, i -> new ArrayList<>());
+                if (taskAssignment.size() < splitBatchSize) {
+                    taskAssignment.add(splits.poll());
+                } else {
+                    // this task reader is full of batch, we continue, don't add it back
+                    continue;
+                }
+                readersId.addLast(subTask);
+            }
+        }
         return assignment;
     }
 }
