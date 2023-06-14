@@ -288,13 +288,6 @@ public abstract class AbstractFileStoreWrite<T>
                             state.commitIncrement,
                             compactExecutor());
             notifyNewWriter(writer);
-
-            try {
-                writer.compact(false);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-
             WriterContainer<T> writerContainer =
                     new WriterContainer<>(writer, state.indexMaintainer, state.baseSnapshotId);
             writerContainer.lastModifiedCommitIdentifier = state.lastModifiedCommitIdentifier;
