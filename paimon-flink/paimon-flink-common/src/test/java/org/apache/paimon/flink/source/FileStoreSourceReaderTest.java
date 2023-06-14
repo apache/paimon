@@ -67,7 +67,7 @@ public class FileStoreSourceReaderTest {
     @Test
     public void testRequestSplitWhenNoSplitRestored() throws Exception {
         final TestingReaderContext context = new TestingReaderContext();
-        final FileStoreSourceReader<?> reader = createReader(context);
+        final FileStoreSourceReader reader = createReader(context);
 
         reader.start();
         reader.close();
@@ -78,7 +78,7 @@ public class FileStoreSourceReaderTest {
     @Test
     public void testNoSplitRequestWhenSplitRestored() throws Exception {
         final TestingReaderContext context = new TestingReaderContext();
-        final FileStoreSourceReader<?> reader = createReader(context);
+        final FileStoreSourceReader reader = createReader(context);
 
         reader.addSplits(Collections.singletonList(createTestFileSplit("id1")));
         reader.start();
@@ -90,7 +90,7 @@ public class FileStoreSourceReaderTest {
     @Test
     public void testAddMultipleSplits() throws Exception {
         final TestingReaderContext context = new TestingReaderContext();
-        final FileStoreSourceReader<?> reader = createReader(context);
+        final FileStoreSourceReader reader = createReader(context);
 
         reader.start();
         assertThat(context.getNumSplitRequests()).isEqualTo(1);
@@ -104,9 +104,8 @@ public class FileStoreSourceReaderTest {
         assertThat(context.getNumSplitRequests()).isEqualTo(2);
     }
 
-    private FileStoreSourceReader<?> createReader(TestingReaderContext context) {
-        return new FileStoreSourceReader<>(
-                RecordsFunction.forIterate(),
+    private FileStoreSourceReader createReader(TestingReaderContext context) {
+        return new FileStoreSourceReader(
                 context,
                 new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
                 null);

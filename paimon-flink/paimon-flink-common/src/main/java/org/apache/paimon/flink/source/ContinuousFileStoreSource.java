@@ -20,13 +20,10 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.Boundedness;
-import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 
@@ -35,8 +32,6 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
-
-import static org.apache.paimon.flink.FlinkConnectorOptions.STREAMING_READ_ATOMIC;
 
 /** Unbounded {@link FlinkSource} for reading records. It continuously monitors new snapshots. */
 public class ContinuousFileStoreSource extends FlinkSource {
@@ -53,7 +48,8 @@ public class ContinuousFileStoreSource extends FlinkSource {
 
     @Override
     public Boundedness getBoundedness() {
-        return isBounded() ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
+        Long boundedWatermark = CoreOptions.fromMap(options).scanBoundedWatermark();
+        return boundedWatermark != null ? Boundedness.BOUNDED : Boundedness.CONTINUOUS_UNBOUNDED;
     }
 
     @Override
@@ -78,17 +74,5 @@ public class ContinuousFileStoreSource extends FlinkSource {
                         .toConfiguration()
                         .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                 scan);
-    }
-
-    @Override
-    public FileStoreSourceReader<?> createSourceReader(
-            SourceReaderContext context, TableRead read, @Nullable Long limit) {
-        return Options.fromMap(options).get(STREAMING_READ_ATOMIC)
-                ? new FileStoreSourceReader<>(RecordsFunction.forSingle(), context, read, limit)
-                : new FileStoreSourceReader<>(RecordsFunction.forIterate(), context, read, limit);
-    }
-
-    private boolean isBounded() {
-        return CoreOptions.fromMap(options).scanBoundedWatermark() != null;
     }
 }
