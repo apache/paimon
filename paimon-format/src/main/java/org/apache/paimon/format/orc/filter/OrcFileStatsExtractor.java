@@ -81,17 +81,16 @@ public class OrcFileStatsExtractor implements FileStatsExtractor {
                                 DataField field = rowType.getFields().get(i);
                                 int fieldIdx = columnNames.indexOf(field.name());
                                 int colId = columnTypes.get(fieldIdx).getId();
-                                return toFieldStats(field, columnStatistics[colId], rowCount, i);
+                                return toFieldStats(field, columnStatistics[colId], rowCount);
                             })
                     .toArray(FieldStats[]::new);
         }
     }
 
-    private FieldStats toFieldStats(
-            DataField field, ColumnStatistics stats, long rowCount, int index) {
+    private FieldStats toFieldStats(DataField field, ColumnStatistics stats, long rowCount) {
         long nullCount = rowCount - stats.getNumberOfValues();
 
-        if (nullCount == rowCount || (skipper != null && skipper.skipStatistics(index))) {
+        if (nullCount == rowCount || (skipper != null && skipper.skipStatistics(field.id()))) {
             // all nulls
             return new FieldStats(null, null, nullCount);
         }
