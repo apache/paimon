@@ -36,7 +36,7 @@ import java.util.Map;
 /** Unbounded {@link FlinkSource} for reading records. It continuously monitors new snapshots. */
 public class ContinuousFileStoreSource extends FlinkSource {
 
-    private static final long serialVersionUID = 3L;
+    private static final long serialVersionUID = 4L;
 
     private final Map<String, String> options;
 

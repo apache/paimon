@@ -23,7 +23,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.connector.file.src.reader.BulkFormat.RecordIterator;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
@@ -33,23 +33,13 @@ import java.util.Map;
 /** A {@link SourceReader} that read records from {@link FileStoreSourceSplit}. */
 public final class FileStoreSourceReader
         extends SingleThreadMultiplexSourceReaderBase<
-                BulkFormat.RecordIterator<RowData>,
-                RowData,
-                FileStoreSourceSplit,
-                FileStoreSourceSplitState> {
+                RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
     public FileStoreSourceReader(
             SourceReaderContext readerContext, TableRead tableRead, @Nullable Long limit) {
-        this(readerContext, tableRead, limit == null ? null : new RecordLimiter(limit));
-    }
-
-    private FileStoreSourceReader(
-            SourceReaderContext readerContext,
-            TableRead tableRead,
-            @Nullable RecordLimiter limiter) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
-                () -> new FileStoreSourceSplitReader(tableRead, limiter),
+                () -> new FileStoreSourceSplitReader(tableRead, RecordLimiter.create(limit)),
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);

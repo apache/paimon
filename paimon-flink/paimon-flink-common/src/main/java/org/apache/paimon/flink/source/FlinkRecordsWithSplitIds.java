@@ -22,7 +22,7 @@ import org.apache.paimon.utils.Reference;
 
 import org.apache.flink.api.connector.source.SourceOutput;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.connector.file.src.reader.BulkFormat.RecordIterator;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
 
@@ -35,20 +35,19 @@ import java.util.Set;
  * A {@link RecordsWithSplitIds} which contains only one iterator record. This can ensure that there
  * will be no checkpoint segmentation in iterator consumption.
  */
-public class FlinkRecordsWithSplitIds
-        implements RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> {
+public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordIterator<RowData>> {
 
     @Nullable private String splitId;
 
-    @Nullable private Reference<BulkFormat.RecordIterator<RowData>> recordsForSplitCurrent;
+    @Nullable private Reference<RecordIterator<RowData>> recordsForSplitCurrent;
 
-    @Nullable private final BulkFormat.RecordIterator<RowData> recordsForSplit;
+    @Nullable private final RecordIterator<RowData> recordsForSplit;
 
     private final Set<String> finishedSplits;
 
     private FlinkRecordsWithSplitIds(
             @Nullable String splitId,
-            @Nullable BulkFormat.RecordIterator<RowData> recordsForSplit,
+            @Nullable RecordIterator<RowData> recordsForSplit,
             Set<String> finishedSplits) {
         this.splitId = splitId;
         this.recordsForSplit = recordsForSplit;
@@ -71,12 +70,12 @@ public class FlinkRecordsWithSplitIds
 
     @Nullable
     @Override
-    public BulkFormat.RecordIterator<RowData> nextRecordFromSplit() {
+    public RecordIterator<RowData> nextRecordFromSplit() {
         if (this.recordsForSplitCurrent == null) {
             throw new IllegalStateException();
         }
 
-        BulkFormat.RecordIterator<RowData> recordsForSplit = this.recordsForSplitCurrent.get();
+        RecordIterator<RowData> recordsForSplit = this.recordsForSplitCurrent.get();
         this.recordsForSplitCurrent.set(null);
         return recordsForSplit;
     }
@@ -94,7 +93,7 @@ public class FlinkRecordsWithSplitIds
     }
 
     public static FlinkRecordsWithSplitIds forRecords(
-            String splitId, BulkFormat.RecordIterator<RowData> recordsForSplit) {
+            String splitId, RecordIterator<RowData> recordsForSplit) {
         return new FlinkRecordsWithSplitIds(splitId, recordsForSplit, Collections.emptySet());
     }
 
@@ -103,7 +102,7 @@ public class FlinkRecordsWithSplitIds
     }
 
     public static void emitRecord(
-            BulkFormat.RecordIterator<RowData> element,
+            RecordIterator<RowData> element,
             SourceOutput<RowData> output,
             FileStoreSourceSplitState state) {
         RecordAndPosition<RowData> record;
