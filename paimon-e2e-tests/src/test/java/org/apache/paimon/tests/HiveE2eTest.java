@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.testcontainers.containers.Container;
 
+import java.util.Arrays;
 import java.util.UUID;
 
 /**
@@ -86,6 +87,39 @@ public class HiveE2eTest extends E2eReaderTestBase {
                                 "'uri' = 'thrift://hive-metastore:9083'"),
                         createTableSql(table),
                         createInsertSql(table)));
+        checkQueryResults(table, this::executeQuery);
+    }
+
+    @Test
+    public void testHiveWrite() throws Exception {
+        final String table = "hive_test";
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + table + " (",
+                                "aa bigint" + " COMMENT 'The aa field',",
+                                "bb bigint" + " COMMENT 'The bb field',",
+                                "cc string" + " COMMENT 'The cc field'",
+                                ")",
+                                "STORED BY 'org.apache.paimon.hive.PaimonStorageHandler';"));
+        String hql1 = "hiveddl.hql";
+        writeSharedFile(hql1, hiveSql);
+        executeQuery(hql1);
+
+        String hql2 = "hivedml.hql";
+        String insertSql =
+                String.format(
+                        "INSERT INTO %s VALUES "
+                                + "(1, 10, 'Hi'), "
+                                + "(1, 100, 'Hi Again'), "
+                                + "(2, 20, 'Hello'), "
+                                + "(3, 30, 'Table'), "
+                                + "(4, 40, 'Store');",
+                        table);
+        writeSharedFile(hql2, insertSql);
+        executeQuery(hql2);
+
         checkQueryResults(table, this::executeQuery);
     }
 
