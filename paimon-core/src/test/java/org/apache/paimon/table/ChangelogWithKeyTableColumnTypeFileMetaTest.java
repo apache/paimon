@@ -91,7 +91,7 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
                     List<DataSplit> splits =
-                            table.newSnapshotSplitReader()
+                            table.newSnapshotReader()
                                     .withFilter(predicate)
                                     .read()
                                     .dataSplits();
@@ -108,7 +108,7 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                      * data. TODO support filter value in future.
                      */
                     List<DataSplit> splits =
-                            table.newSnapshotSplitReader()
+                            table.newSnapshotReader()
                                     .withFilter(
                                             new PredicateBuilder(table.schema().logicalRowType())
                                                     .between(6, 200F, 500F))

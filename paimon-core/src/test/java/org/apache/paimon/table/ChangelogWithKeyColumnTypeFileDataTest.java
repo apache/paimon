@@ -58,7 +58,7 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
                                     .between(6, 200L, 500L);
                     List<Split> splits =
                             toSplits(
-                                    table.newSnapshotSplitReader()
+                                    table.newSnapshotReader()
                                             .withFilter(predicate)
                                             .read()
                                             .dataSplits());
@@ -79,7 +79,7 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
                      */
                     List<Split> splits =
                             toSplits(
-                                    table.newSnapshotSplitReader()
+                                    table.newSnapshotReader()
                                             .withFilter(
                                                     new PredicateBuilder(
                                                                     table.schema().logicalRowType())

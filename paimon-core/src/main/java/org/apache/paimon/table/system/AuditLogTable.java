@@ -119,8 +119,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public SnapshotReader newSnapshotSplitReader() {
-        return new AuditLogDataReader(dataTable.newSnapshotSplitReader());
+    public SnapshotReader newSnapshotReader() {
+        return new AuditLogDataReader(dataTable.newSnapshotReader());
     }
 
     @Override

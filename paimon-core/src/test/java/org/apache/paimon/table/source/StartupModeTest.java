@@ -229,7 +229,7 @@ public class StartupModeTest extends ScannerTestBase {
             options.set(property.getKey(), property.getValue());
         }
         table = createFileStoreTable(options);
-        snapshotReader = table.newSnapshotSplitReader();
+        snapshotReader = table.newSnapshotReader();
         write = table.newWrite(commitUser);
         commit = table.newCommit(commitUser);
     }

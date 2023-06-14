@@ -78,7 +78,7 @@ public abstract class ScannerTestBase {
         fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
         table = createFileStoreTable();
-        snapshotReader = table.newSnapshotSplitReader();
+        snapshotReader = table.newSnapshotReader();
     }
 
     protected GenericRow rowData(Object... values) {

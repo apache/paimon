@@ -57,7 +57,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits =
-                            toSplits(table.newSnapshotSplitReader().read().dataSplits());
+                            toSplits(table.newSnapshotReader().read().dataSplits());
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     // scan all data with original column type
                     assertThat(getResult(table.newRead(), splits, fieldGetterList))
@@ -70,7 +70,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
                     List<Split> splits =
-                            toSplits(table.newSnapshotSplitReader().read().dataSplits());
+                            toSplits(table.newSnapshotReader().read().dataSplits());
                     List<InternalRow.FieldGetter> fieldGetterList = getFieldGetterList(table);
                     assertThat(getResult(table.newRead(), splits, fieldGetterList))
                             .containsExactlyInAnyOrder(
@@ -107,7 +107,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                                     .between(6, 200L, 500L);
                     List<Split> splits =
                             toSplits(
-                                    table.newSnapshotSplitReader()
+                                    table.newSnapshotReader()
                                             .withFilter(predicate)
                                             .read()
                                             .dataSplits());
@@ -131,7 +131,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                      */
                     List<Split> splits =
                             toSplits(
-                                    table.newSnapshotSplitReader()
+                                    table.newSnapshotReader()
                                             .withFilter(
                                                     new PredicateBuilder(
                                                                     table.schema().logicalRowType())
@@ -161,7 +161,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                                     .between(4, (short) 200, (short) 500);
                     List<Split> splits =
                             toSplits(
-                                    table.newSnapshotSplitReader()
+                                    table.newSnapshotReader()
                                             .withFilter(predicate)
                                             .read()
                                             .dataSplits());
@@ -179,7 +179,7 @@ public abstract class ColumnTypeFileDataTestBase extends SchemaEvolutionTableTes
                     // bigint to int
                     List<Split> splits =
                             toSplits(
-                                    table.newSnapshotSplitReader()
+                                    table.newSnapshotReader()
                                             .withFilter(
                                                     new PredicateBuilder(
                                                                     table.schema().logicalRowType())

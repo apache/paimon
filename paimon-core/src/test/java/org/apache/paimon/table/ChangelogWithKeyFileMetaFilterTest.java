@@ -50,7 +50,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<DataSplit> splits = table.newSnapshotSplitReader().read().dataSplits();
+                    List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                     return splits.stream()
                             .flatMap(s -> s.files().stream())
@@ -58,7 +58,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                 },
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<DataSplit> splits = table.newSnapshotSplitReader().read().dataSplits();
+                    List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 12L);
 
                     /**
@@ -84,7 +84,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(2, 14, 19);
                     List<DataSplit> splits =
-                            table.newSnapshotSplitReader()
+                            table.newSnapshotReader()
                                     .withFilter(predicate)
                                     .read()
                                     .dataSplits();
@@ -100,7 +100,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     // results of field "d" in [14, 19] in SCHEMA_1_FIELDS
                     Predicate predicate = builder.between(1, 14, 19);
                     List<DataSplit> splits =
-                            table.newSnapshotSplitReader()
+                            table.newSnapshotReader()
                                     .withFilter(predicate)
                                     .read()
                                     .dataSplits();
@@ -123,7 +123,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
         writeAndCheckFileResult(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    List<DataSplit> splits = table.newSnapshotSplitReader().read().dataSplits();
+                    List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                     return splits.stream()
                             .flatMap(s -> s.files().stream())
@@ -137,7 +137,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     // SCHEMA_0_FIELDS
                     Predicate predicate = builder.greaterThan(3, 1120);
                     List<DataSplit> splits =
-                            table.newSnapshotSplitReader()
+                            table.newSnapshotReader()
                                     .withFilter(predicate)
                                     .read()
                                     .dataSplits();

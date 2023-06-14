@@ -105,8 +105,8 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public SnapshotReader newSnapshotSplitReader() {
-        return wrapped.newSnapshotSplitReader();
+    public SnapshotReader newSnapshotReader() {
+        return wrapped.newSnapshotReader();
     }
 
     @Override

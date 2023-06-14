@@ -64,7 +64,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().read().dataSplits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -88,7 +88,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().read().dataSplits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .hasSameElementsAs(Arrays.asList("100|10", "101|11", "102|12", "101|11", "102|12"));
@@ -104,7 +104,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
-                toSplits(table.newSnapshotSplitReader().withFilter(predicate).read().dataSplits());
+                toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
@@ -133,7 +133,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(2, write.prepareCommit(true, 2));
         write.close();
 
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().read().dataSplits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         int[] partitions =
                 splits.stream()
                         .map(split -> ((DataSplit) split).partition().getInt(0))
@@ -162,7 +162,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.close();
 
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().read().dataSplits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         int[] partitions =
                 splits.stream()
                         .map(split -> ((DataSplit) split).partition().getInt(0))
@@ -178,7 +178,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
 
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotSplitReader()
+                        table.newSnapshotReader()
                                 .withKind(ScanKind.DELTA)
                                 .read()
                                 .dataSplits());
@@ -198,7 +198,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         Predicate predicate = builder.equal(2, 101L);
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotSplitReader()
+                        table.newSnapshotReader()
                                 .withKind(ScanKind.DELTA)
                                 .withFilter(predicate)
                                 .read()
@@ -257,7 +257,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 new PredicateBuilder(table.schema().logicalRowType()).equal(0, partition);
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotSplitReader()
+                        table.newSnapshotReader()
                                 .withFilter(partitionFilter)
                                 .withBucket(bucket)
                                 .read()

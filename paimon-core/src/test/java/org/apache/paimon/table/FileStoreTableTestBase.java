@@ -191,7 +191,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(
                         getResult(
                                 table.newRead(),
-                                toSplits(table.newSnapshotSplitReader().read().dataSplits()),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
@@ -211,7 +211,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(
                         getResult(
                                 table.newRead(),
-                                toSplits(table.newSnapshotSplitReader().read().dataSplits()),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
@@ -242,7 +242,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(
                         getResult(
                                 table.newRead(),
-                                toSplits(table.newSnapshotSplitReader().read().dataSplits()),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyElementsOf(expected);
     }
@@ -291,7 +291,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         // validate
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().read().dataSplits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead();
         assertThat(
                         getResult(
@@ -322,7 +322,7 @@ public abstract class FileStoreTableTestBase {
         commit.withOverwrite(overwritePartition).commit(1, write.prepareCommit(true, 1));
         write.close();
 
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().read().dataSplits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -354,7 +354,7 @@ public abstract class FileStoreTableTestBase {
 
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotSplitReader()
+                        table.newSnapshotReader()
                                 .withFilter(new PredicateBuilder(ROW_TYPE).equal(1, 5))
                                 .read()
                                 .dataSplits());
@@ -402,7 +402,7 @@ public abstract class FileStoreTableTestBase {
         write.close();
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().read().dataSplits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -521,7 +521,7 @@ public abstract class FileStoreTableTestBase {
         write.close();
 
         List<DataFileMeta> files =
-                table.newSnapshotSplitReader().read().dataSplits().stream()
+                table.newSnapshotReader().read().dataSplits().stream()
                         .flatMap(split -> split.files().stream())
                         .collect(Collectors.toList());
         for (DataFileMeta file : files) {

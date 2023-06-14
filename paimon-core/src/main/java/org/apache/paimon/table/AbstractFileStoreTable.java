@@ -99,7 +99,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public SnapshotReader newSnapshotSplitReader() {
+    public SnapshotReader newSnapshotReader() {
         return new SnapshotReaderImpl(
                 store().newScan(),
                 tableSchema,
@@ -111,14 +111,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new InnerTableScanImpl(coreOptions(), newSnapshotSplitReader(), snapshotManager());
+        return new InnerTableScanImpl(coreOptions(), newSnapshotReader(), snapshotManager());
     }
 
     @Override
     public InnerStreamTableScan newStreamScan() {
         return new InnerStreamTableScanImpl(
                 coreOptions(),
-                newSnapshotSplitReader(),
+                newSnapshotReader(),
                 snapshotManager(),
                 supportStreamingReadOverwrite());
     }

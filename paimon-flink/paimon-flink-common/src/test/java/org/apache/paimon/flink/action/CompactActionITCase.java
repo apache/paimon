@@ -108,7 +108,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         Assertions.assertEquals(3, snapshot.id());
         Assertions.assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
 
-        List<DataSplit> splits = table.newSnapshotSplitReader().read().dataSplits();
+        List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
         Assertions.assertEquals(3, splits.size());
         for (DataSplit split : splits) {
             if (split.partition().getInt(1) == 15) {

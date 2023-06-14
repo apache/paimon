@@ -359,7 +359,7 @@ public class SchemaEvolutionTest {
     private void forEachRemaining(
             FileStoreTable table, Predicate filter, Consumer<InternalRow> consumer)
             throws IOException {
-        SnapshotReader snapshotReader = table.newSnapshotSplitReader();
+        SnapshotReader snapshotReader = table.newSnapshotReader();
         if (filter != null) {
             snapshotReader.withFilter(filter);
         }

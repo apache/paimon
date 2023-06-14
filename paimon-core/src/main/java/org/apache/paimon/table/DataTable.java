@@ -27,7 +27,7 @@ import org.apache.paimon.utils.SnapshotManager;
 /** A {@link Table} for data. */
 public interface DataTable extends InnerTable {
 
-    SnapshotReader newSnapshotSplitReader();
+    SnapshotReader newSnapshotReader();
 
     CoreOptions coreOptions();
 
