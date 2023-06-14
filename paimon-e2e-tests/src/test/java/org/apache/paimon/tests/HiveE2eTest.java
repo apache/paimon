@@ -98,9 +98,9 @@ public class HiveE2eTest extends E2eReaderTestBase {
                         "\n",
                         Arrays.asList(
                                 "CREATE TABLE " + table + " (",
-                                "aa bigint" + " COMMENT 'The aa field',",
-                                "bb bigint" + " COMMENT 'The bb field',",
-                                "cc string" + " COMMENT 'The cc field'",
+                                "a bigint" + " COMMENT 'The a field',",
+                                "b bigint" + " COMMENT 'The b field',",
+                                "c string" + " COMMENT 'The c field'",
                                 ")",
                                 "STORED BY 'org.apache.paimon.hive.PaimonStorageHandler';"));
         String hql1 = "hiveddl.hql";
