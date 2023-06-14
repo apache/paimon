@@ -43,11 +43,9 @@ import java.util.function.Function;
  */
 public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWriter<T, R> {
 
-    @Nullable
-    private final Function<ColumnStatisticsCollectSkipper, FileStatsExtractor> fileStatsExtractor;
+    @Nullable private FileStatsExtractor fileStatsExtractor;
 
     @Nullable private FieldStatsCollector fieldStatsCollector = null;
-    @Nullable ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
@@ -61,7 +59,10 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             String compression,
             ColumnStatisticsCollectSkipper columnStatisticsCollectSkipper) {
         super(fileIO, factory, path, converter, compression);
-        this.fileStatsExtractor = fileStatsExtractorSupplier;
+        if (fileStatsExtractorSupplier != null) {
+            this.fileStatsExtractor =
+                    fileStatsExtractorSupplier.apply(columnStatisticsCollectSkipper);
+        }
         if (this.fileStatsExtractor == null) {
             this.fieldStatsCollector =
                     new FieldStatsCollector(writeSchema, columnStatisticsCollectSkipper);
@@ -79,7 +80,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     public FieldStats[] fieldStats() throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
         if (fileStatsExtractor != null) {
-            return fileStatsExtractor.apply(columnStatisticsCollectSkipper).extract(fileIO, path);
+            return fileStatsExtractor.extract(fileIO, path);
         } else {
             return fieldStatsCollector.extract();
         }
