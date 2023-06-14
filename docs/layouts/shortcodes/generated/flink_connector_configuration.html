@@ -116,11 +116,5 @@ under the License.
             <td>Boolean</td>
             <td>The option to enable return per iterator instead of per record in streaming read.This can ensure that there will be no checkpoint segmentation in iterator consumption.<br />By default, streaming source checkpoint will be performed in any time, this means 'UPDATE_BEFORE' and 'UPDATE_AFTER' can be split into two checkpoint. Downstream can see intermediate state.</td>
         </tr>
-        <tr>
-            <td><h5>unaware-bucket.compaction.parallelism</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Defines a custom parallelism for the unaware-bucket table compaction job. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration.</td>
-        </tr>
     </tbody>
 </table>
