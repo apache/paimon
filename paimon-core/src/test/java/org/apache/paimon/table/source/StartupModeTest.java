@@ -76,13 +76,13 @@ public class StartupModeTest extends ScannerTestBase {
         writeAndCommit(4, rowData(1, 10, 103L));
         TableScan.Plan thirdPlan = dataTableScan.plan();
         assertThat(thirdPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.DELTA).read());
+                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.DELTA).read().splits());
 
         // batch mode
         TableScan batchScan = table.newScan();
         TableScan.Plan plan = batchScan.plan();
         assertThat(plan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.ALL).read().splits());
     }
 
     @Test
@@ -96,20 +96,20 @@ public class StartupModeTest extends ScannerTestBase {
         TableScan.Plan secondPlan = dataTableScan.plan();
 
         assertThat(firstPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(3).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(3).withKind(ScanKind.ALL).read().splits());
         assertThat(secondPlan.splits()).isEmpty();
 
         // write next data
         writeAndCommit(4, rowData(1, 10, 103L));
         TableScan.Plan thirdPlan = dataTableScan.plan();
         assertThat(thirdPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.DELTA).read());
+                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.DELTA).read().splits());
 
         // batch mode
         TableScan batchScan = table.newScan();
         TableScan.Plan plan = batchScan.plan();
         assertThat(plan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.ALL).read().splits());
     }
 
     @Test
@@ -135,13 +135,13 @@ public class StartupModeTest extends ScannerTestBase {
 
         assertThat(firstPlan.splits()).isEmpty();
         assertThat(secondPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.DELTA).read());
+                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.DELTA).read().splits());
 
         // batch mode
         TableScan batchScan = readTable.newScan();
         TableScan.Plan plan = batchScan.plan();
         assertThat(plan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(3).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(3).withKind(ScanKind.ALL).read().splits());
     }
 
     @Test
@@ -159,15 +159,15 @@ public class StartupModeTest extends ScannerTestBase {
         TableScan.Plan secondPlan = dataTableScan.plan();
 
         assertThat(firstPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.ALL).read().splits());
         assertThat(secondPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(5).withKind(ScanKind.DELTA).read());
+                .isEqualTo(snapshotReader.withSnapshot(5).withKind(ScanKind.DELTA).read().splits());
 
         // batch mode
         TableScan batchScan = table.newScan();
         TableScan.Plan plan = batchScan.plan();
         assertThat(plan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(4).withKind(ScanKind.ALL).read().splits());
     }
 
     @Test
@@ -184,13 +184,13 @@ public class StartupModeTest extends ScannerTestBase {
 
         assertThat(firstPlan.splits()).isEmpty();
         assertThat(secondPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.DELTA).read());
+                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.DELTA).read().splits());
 
         // batch mode
         TableScan batchScan = table.newScan();
         TableScan.Plan plan = batchScan.plan();
         assertThat(plan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.ALL).read().splits());
     }
 
     @Test
@@ -205,15 +205,15 @@ public class StartupModeTest extends ScannerTestBase {
         TableScan.Plan secondPlan = dataTableScan.plan();
 
         assertThat(firstPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.ALL).read().splits());
         assertThat(secondPlan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(3).withKind(ScanKind.DELTA).read());
+                .isEqualTo(snapshotReader.withSnapshot(3).withKind(ScanKind.DELTA).read().splits());
 
         // batch mode
         TableScan batchScan = table.newScan();
         TableScan.Plan plan = batchScan.plan();
         assertThat(plan.splits())
-                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.ALL).read());
+                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.ALL).read().splits());
     }
 
     private void initializeTable(CoreOptions.StartupMode startupMode) throws Exception {
