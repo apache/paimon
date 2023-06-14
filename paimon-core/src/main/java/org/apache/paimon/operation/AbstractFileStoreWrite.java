@@ -70,7 +70,7 @@ public abstract class AbstractFileStoreWrite<T>
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
 
     private ExecutorService lazyCompactExecutor;
-    private boolean emptyWriter = false;
+    private boolean ignorePreviousFiles = false;
 
     protected AbstractFileStoreWrite(
             String commitUser,
@@ -97,8 +97,8 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public void fromEmptyWriter(boolean emptyWriter) {
-        this.emptyWriter = emptyWriter;
+    public void withIgnorePreviousFiles(boolean ignorePreviousFiles) {
+        this.ignorePreviousFiles = ignorePreviousFiles;
     }
 
     @Override
