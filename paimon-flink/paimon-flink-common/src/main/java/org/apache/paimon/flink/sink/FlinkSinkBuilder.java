@@ -30,7 +30,7 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
-import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.createPartitionTransformation;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Builder for {@link FileStoreSink}. */
@@ -94,7 +94,7 @@ public class FlinkSinkBuilder {
 
     private DataStreamSink<?> buildForFixedBucket() {
         DataStream<RowData> partitioned =
-                createPartitionTransformation(
+                partition(
                         input,
                         new RowDataChannelComputer(table.schema(), logSinkFunction != null),
                         parallelism);

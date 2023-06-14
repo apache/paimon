@@ -65,7 +65,7 @@ public class FlinkStreamPartitioner<T> extends StreamPartitioner<T> {
         return channelComputer.toString();
     }
 
-    public static <T> DataStream<T> createPartitionTransformation(
+    public static <T> DataStream<T> partition(
             DataStream<T> input, ChannelComputer<T> channelComputer, Integer parallelism) {
         FlinkStreamPartitioner<T> partitioner = new FlinkStreamPartitioner<>(channelComputer);
         PartitionTransformation<T> partitioned =
