@@ -23,6 +23,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.connector.base.source.reader.SingleThreadMultiplexSourceReaderBase;
+import org.apache.flink.connector.file.src.reader.BulkFormat.RecordIterator;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
@@ -30,31 +31,16 @@ import javax.annotation.Nullable;
 import java.util.Map;
 
 /** A {@link SourceReader} that read records from {@link FileStoreSourceSplit}. */
-public final class FileStoreSourceReader<T>
+public final class FileStoreSourceReader
         extends SingleThreadMultiplexSourceReaderBase<
-                T, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
+                RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
     public FileStoreSourceReader(
-            RecordsFunction<T> recordsFunction,
-            SourceReaderContext readerContext,
-            TableRead tableRead,
-            @Nullable Long limit) {
-        this(
-                recordsFunction,
-                readerContext,
-                tableRead,
-                limit == null ? null : new RecordLimiter(limit));
-    }
-
-    private FileStoreSourceReader(
-            RecordsFunction<T> recordsFunction,
-            SourceReaderContext readerContext,
-            TableRead tableRead,
-            @Nullable RecordLimiter limiter) {
+            SourceReaderContext readerContext, TableRead tableRead, @Nullable Long limit) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
-                () -> new FileStoreSourceSplitReader<>(recordsFunction, tableRead, limiter),
-                recordsFunction,
+                () -> new FileStoreSourceSplitReader(tableRead, RecordLimiter.create(limit)),
+                FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);
     }

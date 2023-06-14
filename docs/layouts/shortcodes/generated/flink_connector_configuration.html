@@ -111,12 +111,6 @@ under the License.
             <td>If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.</td>
         </tr>
         <tr>
-            <td><h5>streaming-read-atomic</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>The option to enable return per iterator instead of per record in streaming read.This can ensure that there will be no checkpoint segmentation in iterator consumption.<br />By default, streaming source checkpoint will be performed in any time, this means 'UPDATE_BEFORE' and 'UPDATE_AFTER' can be split into two checkpoint. Downstream can see intermediate state.</td>
-        </tr>
-        <tr>
             <td><h5>unaware-bucket.compaction.parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>

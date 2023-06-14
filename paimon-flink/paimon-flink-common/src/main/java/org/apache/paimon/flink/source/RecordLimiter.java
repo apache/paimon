@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
+import javax.annotation.Nullable;
+
 import java.util.concurrent.atomic.AtomicLong;
 
 /** A limiter to limit record reading. */
@@ -41,5 +43,10 @@ public class RecordLimiter {
 
     public void add(long delta) {
         counter.addAndGet(delta);
+    }
+
+    @Nullable
+    public static RecordLimiter create(@Nullable Long limit) {
+        return limit == null ? null : new RecordLimiter(limit);
     }
 }
