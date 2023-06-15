@@ -169,6 +169,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.snapshotNumRetainMax(),
                 options.snapshotTimeRetain().toMillis(),
                 snapshotManager(),
+                newIndexFileHandler(),
                 newSnapshotDeletion(),
                 new TagFileKeeper(
                         manifestListFactory().create(),
@@ -182,7 +183,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 fileIO,
                 pathFactory(),
                 manifestFileFactory().create(),
-                manifestListFactory().create());
+                manifestListFactory().create(),
+                newIndexFileHandler());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();

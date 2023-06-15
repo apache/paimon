@@ -22,11 +22,11 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.ParallellyExecuteUtils;
 import org.apache.paimon.utils.TagManager;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -68,23 +68,16 @@ public class TagFileKeeper {
         return entry -> index >= 0 && contains(entry);
     }
 
-    public Set<String> collectManifestSkippingSet(long beginInclusive, long endExclusive) {
-        Set<String> manifests = new HashSet<>();
+    public List<Snapshot> findOverlappedSnapshots(long beginInclusive, long endExclusive) {
+        List<Snapshot> snapshots = new ArrayList<>();
         int right = findPreviousTag(endExclusive, taggedSnapshots);
         if (right >= 0) {
             int left = Math.max(findPreviousOrEqualTag(beginInclusive, taggedSnapshots), 0);
             for (int i = left; i <= right; i++) {
-                Snapshot snapshot = taggedSnapshots.get(i);
-
-                for (ManifestFileMeta file : snapshot.dataManifests(manifestList)) {
-                    manifests.add(file.fileName());
-                }
-
-                manifests.add(snapshot.baseManifestList());
-                manifests.add(snapshot.deltaManifestList());
+                snapshots.add(taggedSnapshots.get(i));
             }
         }
-        return manifests;
+        return snapshots;
     }
 
     private void tryRefresh(Snapshot taggedSnapshot) {

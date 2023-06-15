@@ -23,7 +23,6 @@ import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.SnapshotDeletion;
 
 import javax.annotation.Nullable;
@@ -33,7 +32,6 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -43,7 +41,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
@@ -370,10 +367,7 @@ public class SnapshotManager implements Serializable {
         deletion.tryDeleteDirectories(deletionBuckets);
 
         // delete manifest files.
-        Set<String> manifestSkipped =
-                snapshot(snapshotId).dataManifests(deletion.manifestList()).stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toCollection(HashSet::new));
+        Set<String> manifestSkipped = deletion.collectManifestSkippingSet(snapshot(snapshotId));
         for (Snapshot snapshot : snapshots) {
             deletion.deleteManifestFiles(manifestSkipped, snapshot);
         }

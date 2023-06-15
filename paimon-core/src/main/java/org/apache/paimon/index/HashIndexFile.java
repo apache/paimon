@@ -59,4 +59,8 @@ public class HashIndexFile {
         writeInts(fileIO, path, input);
         return path.getName();
     }
+
+    public void delete(String fileName) {
+        fileIO.deleteQuietly(pathFactory.toPath(fileName));
+    }
 }
