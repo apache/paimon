@@ -70,6 +70,7 @@ public class Snapshot {
 
     private static final String FIELD_VERSION = "version";
     private static final String FIELD_ID = "id";
+    private static final String FIELD_PARENT_ID = "parentId";
     private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
     private static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
@@ -93,6 +94,10 @@ public class Snapshot {
 
     @JsonProperty(FIELD_ID)
     private final long id;
+
+    @JsonProperty(FIELD_PARENT_ID)
+    @Nullable
+    private final Long parentId;
 
     @JsonProperty(FIELD_SCHEMA_ID)
     private final long schemaId;
@@ -185,6 +190,44 @@ public class Snapshot {
         this(
                 CURRENT_VERSION,
                 id,
+                null,
+                schemaId,
+                baseManifestList,
+                deltaManifestList,
+                changelogManifestList,
+                indexManifest,
+                commitUser,
+                commitIdentifier,
+                commitKind,
+                timeMillis,
+                logOffsets,
+                totalRecordCount,
+                deltaRecordCount,
+                changelogRecordCount,
+                watermark);
+    }
+
+    public Snapshot(
+            long id,
+            @Nullable Long parentId,
+            long schemaId,
+            String baseManifestList,
+            String deltaManifestList,
+            @Nullable String changelogManifestList,
+            @Nullable String indexManifest,
+            String commitUser,
+            long commitIdentifier,
+            CommitKind commitKind,
+            long timeMillis,
+            Map<Integer, Long> logOffsets,
+            @Nullable Long totalRecordCount,
+            @Nullable Long deltaRecordCount,
+            @Nullable Long changelogRecordCount,
+            @Nullable Long watermark) {
+        this(
+                CURRENT_VERSION,
+                id,
+                parentId,
                 schemaId,
                 baseManifestList,
                 deltaManifestList,
@@ -205,6 +248,7 @@ public class Snapshot {
     public Snapshot(
             @JsonProperty(FIELD_VERSION) @Nullable Integer version,
             @JsonProperty(FIELD_ID) long id,
+            @JsonProperty(FIELD_PARENT_ID) @Nullable Long parentId,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_BASE_MANIFEST_LIST) String baseManifestList,
             @JsonProperty(FIELD_DELTA_MANIFEST_LIST) String deltaManifestList,
@@ -221,6 +265,7 @@ public class Snapshot {
             @JsonProperty(FILED_WATERMARK) Long watermark) {
         this.version = version;
         this.id = id;
+        this.parentId = parentId;
         this.schemaId = schemaId;
         this.baseManifestList = baseManifestList;
         this.deltaManifestList = deltaManifestList;
@@ -246,6 +291,12 @@ public class Snapshot {
     @JsonGetter(FIELD_ID)
     public long id() {
         return id;
+    }
+
+    @JsonGetter(FIELD_PARENT_ID)
+    @Nullable
+    public Long parentId() {
+        return parentId;
     }
 
     @JsonGetter(FIELD_SCHEMA_ID)
@@ -411,6 +462,7 @@ public class Snapshot {
         return Objects.hash(
                 version,
                 id,
+                parentId,
                 schemaId,
                 baseManifestList,
                 deltaManifestList,
@@ -435,6 +487,7 @@ public class Snapshot {
         Snapshot that = (Snapshot) o;
         return Objects.equals(version, that.version)
                 && id == that.id
+                && Objects.equals(parentId, that.parentId)
                 && schemaId == that.schemaId
                 && Objects.equals(baseManifestList, that.baseManifestList)
                 && Objects.equals(deltaManifestList, that.deltaManifestList)

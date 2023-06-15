@@ -655,6 +655,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             newSnapshot =
                     new Snapshot(
                             newSnapshotId,
+                            latestSnapshotId == null ? -1 : latestSnapshotId,
                             schemaManager.latest().get().id(),
                             previousChangesListName,
                             newChangesListName,

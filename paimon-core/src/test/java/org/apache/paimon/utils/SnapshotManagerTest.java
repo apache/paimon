@@ -89,6 +89,42 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testEarlierThanTimeMillsWithParentId() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 10 snapshots
+        for (long i = 0; i < 10; i++) {
+            Snapshot snapshot =
+                    new Snapshot(
+                            i,
+                            i - 1,
+                            0L,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0L,
+                            Snapshot.CommitKind.APPEND,
+                            millis + i * 1000,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null);
+            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+        // smaller than the second snapshot return the first snapshot
+        assertThat(snapshotManager.earlierThanTimeMills(millis + 999)).isEqualTo(0);
+        // return the first snapshot
+        assertThat(snapshotManager.earlierThanTimeMills(millis + 1000)).isEqualTo(0);
+        // larger than the second snapshot return the second snapshot
+        assertThat(snapshotManager.earlierThanTimeMills(millis + 1001)).isEqualTo(1);
+    }
+
+    @Test
     public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
         SnapshotManager snapshotManager =
@@ -179,5 +215,114 @@ public class SnapshotManagerTest {
         thread.join();
 
         assertThat(exception.get()).hasMessageContaining("Fails to read snapshot from path");
+    }
+
+    @Test
+    public void testCompatibilityWithoutParentId() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 4 snapshots without parent id
+        for (long i = 0; i < 4; i++) {
+            Snapshot snapshot =
+                    new Snapshot(
+                            i,
+                            0L,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0L,
+                            Snapshot.CommitKind.APPEND,
+                            millis + i * 1000,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null);
+            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        // create 4 snapshots with parent id
+        for (long i = 4; i < 8; i++) {
+            Snapshot snapshot =
+                    new Snapshot(
+                            i,
+                            i - 1L,
+                            0L,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0L,
+                            Snapshot.CommitKind.APPEND,
+                            millis + i * 1000,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null);
+            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        assertThat(snapshotManager.pickFromLatest(snapshot -> snapshot.id() == 2)).isEqualTo(2);
+    }
+
+    @Test
+    public void testCompatibilityWithParentId() throws IOException {
+        long millis = 1684726826L;
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        // create 4 snapshots without parent id
+        for (long i = 0; i < 4; i++) {
+            Snapshot snapshot =
+                    new Snapshot(
+                            i,
+                            i - 1L,
+                            0L,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            0L,
+                            Snapshot.CommitKind.APPEND,
+                            millis + i * 1000,
+                            null,
+                            null,
+                            null,
+                            null,
+                            null);
+            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        Snapshot invaildSnapshot =
+                new Snapshot(
+                        -99,
+                        0L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        Snapshot.CommitKind.APPEND,
+                        1L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        localFileIO.writeFileUtf8(snapshotManager.snapshotPath(-99), invaildSnapshot.toJson());
+
+        Long firstSnapshotId = snapshotManager.pickFromLatest(snapshot -> snapshot.id() == 0);
+        assertThat(firstSnapshotId).isEqualTo(0);
+        assertThat(snapshotManager.snapshot(firstSnapshotId).parentId()).isEqualTo(-1);
+
+        assertThat(snapshotManager.snapshotCount()).isEqualTo(4);
     }
 }

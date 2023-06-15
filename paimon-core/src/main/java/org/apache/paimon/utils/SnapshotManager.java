@@ -25,22 +25,29 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.SnapshotDeletion;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
@@ -126,6 +133,15 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
+        if (snapshot(latestId).parentId() != null) {
+            Snapshot snapshot = Iterables.getFirst(select(currentAncestors(), predicate), null);
+            if (snapshot != null) {
+                return snapshot.id();
+            }
+
+            return null;
+        }
+
         for (long snapshotId = latestId; snapshotId >= earliestId; snapshotId--) {
             if (snapshotExists(snapshotId)) {
                 Snapshot snapshot = snapshot(snapshotId);
@@ -147,6 +163,16 @@ public class SnapshotManager implements Serializable {
         Long latest = latestSnapshotId();
         if (earliest == null || latest == null) {
             return null;
+        }
+
+        if (snapshot(latest).parentId() != null) {
+            for (Snapshot snapshot : currentAncestors()) {
+                if (snapshot.timeMillis() < timestampMills) {
+                    return snapshot.id();
+                }
+            }
+
+            return earliest - 1;
         }
 
         for (long i = latest; i >= earliest; i--) {
@@ -191,14 +217,26 @@ public class SnapshotManager implements Serializable {
     }
 
     public long snapshotCount() throws IOException {
+        Long latestId = latestSnapshotId();
+        if (latestId != null && snapshot(latestId).parentId() != null) {
+            return Iterables.size(currentAncestors());
+        }
+
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX).count();
     }
 
     public Iterator<Snapshot> snapshots() throws IOException {
-        return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
-                .map(this::snapshot)
-                .sorted(Comparator.comparingLong(Snapshot::id))
-                .iterator();
+        Long latestId = latestSnapshotId();
+        Stream<Snapshot> stream;
+        if (latestId != null && snapshot(latestId).parentId() != null) {
+            stream = Arrays.stream(Iterables.toArray(currentAncestors(), Snapshot.class));
+        } else {
+            stream =
+                    listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+                            .map(this::snapshot);
+        }
+
+        return stream.sorted(Comparator.comparingLong(Snapshot::id)).iterator();
     }
 
     public Optional<Snapshot> latestSnapshotOfUser(String user) {
@@ -212,6 +250,18 @@ public class SnapshotManager implements Serializable {
                         earliestSnapshotId(),
                         "Latest snapshot id is not null, but earliest snapshot id is null. "
                                 + "This is unexpected.");
+
+        if (snapshot(latestId).parentId() != null) {
+            Snapshot snapshot =
+                    Iterables.getFirst(
+                            select(currentAncestors(), s -> s.commitUser().equals(user)), null);
+            if (snapshot != null) {
+                return Optional.of(snapshot);
+            }
+
+            return Optional.empty();
+        }
+
         for (long id = latestId; id >= earliestId; id--) {
             Snapshot snapshot = snapshot(id);
             if (user.equals(snapshot.commitUser())) {
@@ -370,6 +420,85 @@ public class SnapshotManager implements Serializable {
         Set<String> manifestSkipped = deletion.collectManifestSkippingSet(snapshot(snapshotId));
         for (Snapshot snapshot : snapshots) {
             deletion.deleteManifestFiles(manifestSkipped, snapshot);
+        }
+    }
+
+    private static <T> Iterable<T> select(Iterable<T> it, Predicate<T> predicate) {
+        return () -> StreamSupport.stream(it.spliterator(), false).filter(predicate).iterator();
+    }
+
+    private Iterable<Snapshot> currentAncestors() {
+        return ancestorsOf(
+                latestSnapshot(),
+                (id) -> {
+                    if (snapshotExists(id)) {
+                        return snapshot(id);
+                    }
+
+                    return null;
+                });
+    }
+
+    private Iterable<Snapshot> ancestorsOf(Snapshot snapshot, Function<Long, Snapshot> lookup) {
+        if (snapshot != null) {
+            return () ->
+                    new Iterator<Snapshot>() {
+                        private Snapshot next = snapshot;
+                        private boolean consumed = false; // include the snapshot in its history
+
+                        @Override
+                        public boolean hasNext() {
+                            if (!consumed) {
+                                return true;
+                            }
+
+                            if (next == null) {
+                                return false;
+                            }
+
+                            Long parentId = next.parentId();
+                            if (parentId != null && parentId == -1) {
+                                return false;
+                            }
+
+                            if (parentId != null) {
+                                this.next = lookup.apply(parentId);
+                                if (next != null) {
+                                    this.consumed = false;
+                                    return true;
+                                }
+                            } else {
+                                Long earliestId = earliestSnapshotId();
+                                if (earliestId == null) {
+                                    return false;
+                                }
+
+                                for (long snapshotId = next.id() - 1;
+                                        snapshotId >= earliestId;
+                                        snapshotId--) {
+                                    if (snapshotExists(snapshotId)) {
+                                        this.next = snapshot(snapshotId);
+                                        this.consumed = false;
+                                        return true;
+                                    }
+                                }
+                            }
+
+                            return false;
+                        }
+
+                        @Override
+                        public Snapshot next() {
+                            if (hasNext()) {
+                                this.consumed = true;
+                                return next;
+                            }
+
+                            throw new NoSuchElementException();
+                        }
+                    };
+        } else {
+            return ImmutableList.of();
         }
     }
 }
