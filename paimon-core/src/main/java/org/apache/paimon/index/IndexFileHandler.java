@@ -124,8 +124,16 @@ public class IndexFileHandler {
         return new IndexFileMeta(HASH_INDEX, file, hashIndex.fileSize(file), size);
     }
 
+    public boolean existsManifest(String indexManifest) {
+        return indexManifestFile.exists(indexManifest);
+    }
+
     public List<IndexManifestEntry> readManifest(String indexManifest) {
         return indexManifestFile.read(indexManifest);
+    }
+
+    public boolean existsIndexFile(IndexManifestEntry file) {
+        return hashIndex.exists(file.indexFile().fileName());
     }
 
     public void deleteIndexFile(IndexManifestEntry file) {

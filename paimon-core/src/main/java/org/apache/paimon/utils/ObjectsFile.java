@@ -78,6 +78,14 @@ public abstract class ObjectsFile<T> {
         return read(fileName, Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
+    public boolean exists(String fileName) {
+        try {
+            return fileIO.exists(pathFactory.toPath(fileName));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     public List<T> read(
             String fileName, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter) {
         try {

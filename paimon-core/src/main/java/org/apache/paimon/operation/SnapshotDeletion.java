@@ -198,7 +198,8 @@ public class SnapshotDeletion {
 
         // delete index files
         String indexManifest = snapshot.indexManifest();
-        if (indexManifest != null) {
+        // check exists, it may have been deleted by other snapshots
+        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
             for (IndexManifestEntry entry : indexFileHandler.readManifest(indexManifest)) {
                 if (!skipped.contains(entry.indexFile().fileName())) {
                     indexFileHandler.deleteIndexFile(entry);
