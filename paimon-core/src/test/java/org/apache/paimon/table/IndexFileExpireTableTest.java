@@ -32,6 +32,7 @@ import org.apache.paimon.table.sink.DynamicBucketRow;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
 
@@ -105,6 +106,10 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         checkIndexFiles(7);
         assertThat(indexFileSize()).isEqualTo(5);
         assertThat(indexManifestSize()).isEqualTo(3);
+
+        TagManager tagManager = new TagManager(LocalFileIO.create(), table.path);
+        checkIndexFiles(tagManager.taggedSnapshot("tag3"));
+        checkIndexFiles(tagManager.taggedSnapshot("tag5"));
     }
 
     @Test
@@ -168,9 +173,11 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     private void checkIndexFiles(long snapshotId) {
-        Snapshot snapshot = table.snapshotManager().snapshot(snapshotId);
-        String indexManifest = snapshot.indexManifest();
+        checkIndexFiles(table.snapshotManager().snapshot(snapshotId));
+    }
 
+    private void checkIndexFiles(Snapshot snapshot) {
+        String indexManifest = snapshot.indexManifest();
         IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
         assertThat(indexFileHandler.existsManifest(indexManifest)).isTrue();
 
