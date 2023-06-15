@@ -41,15 +41,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
             FileStoreTable table,
             @Nullable Map<String, String> overwritePartition,
             Lock.Factory lockFactory) {
-        this(table, overwritePartition, lockFactory, false);
-    }
-
-    public FlinkWriteSink(
-            FileStoreTable table,
-            @Nullable Map<String, String> overwritePartition,
-            Lock.Factory lockFactory,
-            boolean forceEmptyWriter) {
-        super(table, overwritePartition != null || forceEmptyWriter);
+        super(table, overwritePartition != null);
         this.overwritePartition = overwritePartition;
         this.lockFactory = lockFactory;
     }

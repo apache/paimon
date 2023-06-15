@@ -106,6 +106,9 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildUnawareBucketSink() {
+        checkArgument(
+                table instanceof AppendOnlyFileStoreTable,
+                "Unaware bucket mode only works with append-only table for now.");
         return new UnawareBucketWriteSink(
                         (AppendOnlyFileStoreTable) table,
                         lockFactory,

@@ -40,16 +40,7 @@ public class FileStoreSink extends FlinkWriteSink<RowData> {
             Lock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkFunction logSinkFunction) {
-        this(table, lockFactory, overwritePartition, logSinkFunction, false);
-    }
-
-    public FileStoreSink(
-            FileStoreTable table,
-            Lock.Factory lockFactory,
-            @Nullable Map<String, String> overwritePartition,
-            @Nullable LogSinkFunction logSinkFunction,
-            boolean forceEmptyWriter) {
-        super(table, overwritePartition, lockFactory, forceEmptyWriter);
+        super(table, overwritePartition, lockFactory);
         this.logSinkFunction = logSinkFunction;
     }
 

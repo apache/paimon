@@ -29,10 +29,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
 
-import javax.annotation.Nullable;
-
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * Build topology for unaware bucket table sink.
@@ -40,56 +37,59 @@ import java.util.UUID;
  * <p>Note: in unaware-bucket mode, we don't shuffle by bucket in inserting. We can assign
  * compaction to the inserting jobs aside.
  */
-public class UnawareBucketWriteSink {
+public class UnawareBucketWriteSink extends FileStoreSink {
 
-    private final AppendOnlyFileStoreTable table;
-    private final Lock.Factory lockFactory;
     private final boolean enableCompaction;
-    @Nullable private final Map<String, String> overwritePartitions;
-    private final LogSinkFunction logSinkFunction;
+    private final AppendOnlyFileStoreTable table;
 
     public UnawareBucketWriteSink(
             AppendOnlyFileStoreTable table,
             Lock.Factory lock,
             Map<String, String> overwritePartitions,
             LogSinkFunction logSinkFunction) {
+        super(table, lock, overwritePartitions, logSinkFunction);
         this.table = table;
-        this.lockFactory = lock;
         this.enableCompaction = !table.coreOptions().writeOnly();
-        this.overwritePartitions = overwritePartitions;
-        this.logSinkFunction = logSinkFunction;
     }
 
     public DataStreamSink<?> build(DataStream<RowData> input, Integer parallelism) {
-        String commitUser = UUID.randomUUID().toString();
-        // we set partitioner equals null, if the parallelism we set equals to input, we could chain
-        // sink operator and input in one stage
-        PartitionTransformation<RowData> partitioned =
-                new PartitionTransformation<>(input.getTransformation(), null);
-        if (parallelism != null) {
-            partitioned.setParallelism(parallelism);
-        }
-        FileStoreSink sink =
-                new FileStoreSink(table, lockFactory, overwritePartitions, logSinkFunction, true);
-        DataStream<Committable> written =
-                sink.doWrite(
-                        new DataStream<>(input.getExecutionEnvironment(), partitioned), commitUser);
+        DataStream<RowData> partitioned = partition(input, parallelism);
 
-        boolean isStreamingMode =
-                input.getExecutionEnvironment()
-                                .getConfiguration()
-                                .get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.STREAMING;
+        return sinkFrom(partitioned);
+    }
+
+    @Override
+    public DataStreamSink<?> sinkFrom(DataStream<RowData> input, String initialCommitUser) {
+        // do the actually writing action, no snapshot generated in this stage
+        DataStream<Committable> written = doWrite(input, initialCommitUser);
 
         // if enable compaction, we need to add compaction topology to this job
         if (enableCompaction) {
+            boolean isStreamingMode =
+                    input.getExecutionEnvironment()
+                                    .getConfiguration()
+                                    .get(ExecutionOptions.RUNTIME_MODE)
+                            == RuntimeExecutionMode.STREAMING;
+
             UnawareBucketCompactionTopoBuilder builder =
                     new UnawareBucketCompactionTopoBuilder(
                             input.getExecutionEnvironment(), table.name(), table);
             builder.withContinuousMode(isStreamingMode);
-            written = written.union(builder.fetchUncommitted(commitUser));
+            written = written.union(builder.fetchUncommitted(initialCommitUser));
         }
 
-        return sink.doCommit(written, commitUser);
+        // commit the committable to generate a new snapshot
+        return doCommit(written, initialCommitUser);
+    }
+
+    private DataStream<RowData> partition(DataStream<RowData> input, Integer parallelism) {
+        // we set partitioner equals null, if the parallelism we set equals to input, we could chain
+        // sink operator and input in one stage
+        PartitionTransformation<RowData> partitionTransformation =
+                new PartitionTransformation<>(input.getTransformation(), null);
+        if (parallelism != null) {
+            partitionTransformation.setParallelism(parallelism);
+        }
+        return new DataStream<>(input.getExecutionEnvironment(), partitionTransformation);
     }
 }

@@ -87,7 +87,7 @@ public class UnawareBucketCompactionTopoBuilder {
         // rebalance input to default or assigned parallelism
         DataStream<AppendOnlyCompactionTask> rebalanced = rebalanceInput(source);
 
-        return UnawareBucketCompactionSink.uncommitted(table, rebalanced, commitUser);
+        return new UnawareBucketCompactionSink(table).doWrite(rebalanced, commitUser);
     }
 
     private DataStreamSource<AppendOnlyCompactionTask> buildSource() {
