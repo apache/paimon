@@ -79,7 +79,7 @@ public class IndexFileHandler {
         Snapshot snapshot = snapshotManager.snapshot(snapshotId);
         String indexManifest = snapshot.indexManifest();
         if (indexManifest == null) {
-            throw new IllegalArgumentException("Index manifest is null in snapshot: " + snapshot);
+            return Collections.emptyList();
         }
 
         List<IndexManifestEntry> allFiles = indexManifestFile.read(indexManifest);
@@ -122,5 +122,25 @@ public class IndexFileHandler {
             throw new UncheckedIOException(e);
         }
         return new IndexFileMeta(HASH_INDEX, file, hashIndex.fileSize(file), size);
+    }
+
+    public boolean existsManifest(String indexManifest) {
+        return indexManifestFile.exists(indexManifest);
+    }
+
+    public List<IndexManifestEntry> readManifest(String indexManifest) {
+        return indexManifestFile.read(indexManifest);
+    }
+
+    public boolean existsIndexFile(IndexManifestEntry file) {
+        return hashIndex.exists(file.indexFile().fileName());
+    }
+
+    public void deleteIndexFile(IndexManifestEntry file) {
+        hashIndex.delete(file.indexFile().fileName());
+    }
+
+    public void deleteManifest(String indexManifest) {
+        indexManifestFile.delete(indexManifest);
     }
 }

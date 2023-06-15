@@ -30,11 +30,8 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
-import java.util.Random;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -149,19 +146,5 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                         createCommitMessage(row(1), 0, fileHandler.writeHashIndex(new int[] {1}))));
         assigner.prepareCommit(3);
         assertThat(assigner.currentPartitions()).isEmpty();
-    }
-
-    @Test
-    public void testFileSize() {
-        List<Integer> ints = new ArrayList<>();
-        Random rnd = new Random();
-        for (int i = 0; i < 10_000_000; i++) {
-            ints.add(rnd.nextInt());
-        }
-
-        IndexFileMeta file =
-                fileHandler.writeHashIndex(ints.stream().mapToInt(Integer::intValue).toArray());
-        System.out.println(file.fileName());
-        System.out.println(file.fileSize());
     }
 }

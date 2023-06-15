@@ -137,6 +137,7 @@ public class TestFileStore extends KeyValueFileStore {
                 millisRetained,
                 pathFactory(),
                 snapshotManager(),
+                newIndexFileHandler(),
                 manifestFileFactory(),
                 manifestListFactory());
     }

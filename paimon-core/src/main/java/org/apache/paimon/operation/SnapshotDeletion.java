@@ -23,7 +23,10 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -59,16 +62,19 @@ public class SnapshotDeletion {
     private final FileStorePathFactory pathFactory;
     private final ManifestFile manifestFile;
     private final ManifestList manifestList;
+    private final IndexFileHandler indexFileHandler;
 
     public SnapshotDeletion(
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
-            ManifestList manifestList) {
+            ManifestList manifestList,
+            IndexFileHandler indexFileHandler) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFile;
         this.manifestList = manifestList;
+        this.indexFileHandler = indexFileHandler;
     }
 
     // ================================= PUBLIC =================================================
@@ -189,6 +195,21 @@ public class SnapshotDeletion {
         if (snapshot.changelogManifestList() != null) {
             manifestList.delete(snapshot.changelogManifestList());
         }
+
+        // delete index files
+        String indexManifest = snapshot.indexManifest();
+        // check exists, it may have been deleted by other snapshots
+        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
+            for (IndexManifestEntry entry : indexFileHandler.readManifest(indexManifest)) {
+                if (!skipped.contains(entry.indexFile().fileName())) {
+                    indexFileHandler.deleteIndexFile(entry);
+                }
+            }
+
+            if (!skipped.contains(indexManifest)) {
+                indexFileHandler.deleteManifest(indexManifest);
+            }
+        }
     }
 
     // ================================= PRIVATE =================================================
@@ -282,5 +303,21 @@ public class SnapshotDeletion {
             LOG.debug("Failed to delete directory '{}'. Check whether it is empty.", path);
             return false;
         }
+    }
+
+    public Set<String> collectManifestSkippingSet(Snapshot snapshot) {
+        Set<String> skip =
+                snapshot.dataManifests(manifestList).stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toCollection(HashSet::new));
+        String indexManifest = snapshot.indexManifest();
+        if (indexManifest != null) {
+            skip.add(indexManifest);
+            indexFileHandler.readManifest(indexManifest).stream()
+                    .map(IndexManifestEntry::indexFile)
+                    .map(IndexFileMeta::fileName)
+                    .forEach(skip::add);
+        }
+        return skip;
     }
 }
