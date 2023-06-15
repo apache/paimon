@@ -33,6 +33,9 @@ import java.util.function.Function;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
+/**
+ * Bucket Index Per Partition.
+ */
 public class PartitionIndex {
 
     public final Int2ShortHashMap hash2Bucket;
