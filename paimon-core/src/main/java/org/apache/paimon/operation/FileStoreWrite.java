@@ -47,11 +47,11 @@ public interface FileStoreWrite<T> {
     FileStoreWrite<T> withMemoryPool(MemorySegmentPool memoryPool);
 
     /**
-     * Set writer to be empty, the writer will not search restored files.
+     * Set whether the write operation should ignore previously stored files.
      *
-     * @param emptyWriter set flag to tag the writer is empty.
+     * @param ignorePreviousFiles whether the write operation should ignore previously stored files.
      */
-    void fromEmptyWriter(boolean emptyWriter);
+    void withIgnorePreviousFiles(boolean ignorePreviousFiles);
 
     /**
      * Write the data to the store according to the partition and bucket.

@@ -70,7 +70,7 @@ public abstract class AbstractFileStoreWrite<T>
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
 
     private ExecutorService lazyCompactExecutor;
-    private boolean emptyWriter = false;
+    private boolean ignorePreviousFiles = false;
 
     protected AbstractFileStoreWrite(
             String commitUser,
@@ -97,8 +97,8 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public void fromEmptyWriter(boolean emptyWriter) {
-        this.emptyWriter = emptyWriter;
+    public void withIgnorePreviousFiles(boolean ignorePreviousFiles) {
+        this.ignorePreviousFiles = ignorePreviousFiles;
     }
 
     @Override
@@ -303,19 +303,19 @@ public abstract class AbstractFileStoreWrite<T>
             writers.put(partition.copy(), buckets);
         }
         return buckets.computeIfAbsent(
-                bucket, k -> createWriterContainer(partition.copy(), bucket, emptyWriter));
+                bucket, k -> createWriterContainer(partition.copy(), bucket, ignorePreviousFiles));
     }
 
     @VisibleForTesting
     public WriterContainer<T> createWriterContainer(
-            BinaryRow partition, int bucket, boolean emptyWriter) {
+            BinaryRow partition, int bucket, boolean ignorePreviousFiles) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
 
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         List<DataFileMeta> restoreFiles = new ArrayList<>();
-        if (!emptyWriter && latestSnapshotId != null) {
+        if (!ignorePreviousFiles && latestSnapshotId != null) {
             restoreFiles = scanExistingFileMetas(latestSnapshotId, partition, bucket);
         }
         IndexMaintainer<T> indexMaintainer =
