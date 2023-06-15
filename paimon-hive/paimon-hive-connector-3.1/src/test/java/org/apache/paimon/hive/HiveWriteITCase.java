@@ -216,8 +216,8 @@ public class HiveWriteITCase {
         hiveShell.execute(
                 "insert into "
                         + outputTableName
-                        + " values(1,'2023-01-13 20:00:01.123','2023-11-13')");
+                        + " values(1,'2023-01-13 20:00:01.123','2023-12-23')");
         List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
-        Assert.assertEquals(select, Arrays.asList("1\t2023-01-13 20:00:01.123\t2023-11-13"));
+        Assert.assertEquals(Arrays.asList("1\t2023-01-13 20:00:01.123\t2023-12-23"), select);
     }
 }
