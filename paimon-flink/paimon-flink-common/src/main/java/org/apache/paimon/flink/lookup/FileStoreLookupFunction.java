@@ -26,6 +26,7 @@ import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
@@ -51,7 +52,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -117,6 +117,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     public void open(FunctionContext context) throws Exception {
         String tmpDirectory = getTmpDirectory(context);
+        open(tmpDirectory);
+    }
+
+    // we tag this method friendly for testing
+    void open(String tmpDirectory) throws Exception {
         this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
 
         Options options = Options.fromMap(table.options());
@@ -190,11 +195,13 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     private void refresh() throws Exception {
         while (true) {
-            Iterator<InternalRow> batch = streamingReader.nextBatch();
-            if (!batch.hasNext()) {
-                return;
+            try (RecordReaderIterator<InternalRow> batch =
+                    new RecordReaderIterator<>(streamingReader.nextBatch())) {
+                if (!batch.hasNext()) {
+                    return;
+                }
+                this.lookupTable.refresh(batch);
             }
-            this.lookupTable.refresh(batch);
         }
     }
 

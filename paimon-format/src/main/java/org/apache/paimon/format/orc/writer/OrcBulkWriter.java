@@ -20,11 +20,16 @@ package org.apache.paimon.format.orc.writer;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
+import org.apache.paimon.fs.PositionOutputStream;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.orc.Writer;
+import org.apache.orc.impl.writer.TreeWriter;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -34,8 +39,13 @@ public class OrcBulkWriter implements FormatWriter {
     private final Writer writer;
     private final Vectorizer<InternalRow> vectorizer;
     private final VectorizedRowBatch rowBatch;
+    private final PositionOutputStream underlyingStream;
+    private final TreeWriter treeWriter;
 
-    public OrcBulkWriter(Vectorizer<InternalRow> vectorizer, Writer writer) {
+    public OrcBulkWriter(
+            Vectorizer<InternalRow> vectorizer,
+            Writer writer,
+            PositionOutputStream underlyingStream) {
         this.vectorizer = checkNotNull(vectorizer);
         this.writer = checkNotNull(writer);
         this.rowBatch = vectorizer.getSchema().createRowBatch();
@@ -43,6 +53,9 @@ public class OrcBulkWriter implements FormatWriter {
         // Configure the vectorizer with the writer so that users can add
         // metadata on the fly through the Vectorizer#vectorize(...) method.
         this.vectorizer.setWriter(this.writer);
+        this.underlyingStream = underlyingStream;
+        // TODO: Turn to access these hidden field directly after upgrade to ORC 1.7.4
+        this.treeWriter = getHiddenFiledInORC("treeWriter");
     }
 
     @Override
@@ -66,5 +79,35 @@ public class OrcBulkWriter implements FormatWriter {
     public void finish() throws IOException {
         flush();
         writer.close();
+    }
+
+    @Override
+    public boolean reachTargetSize(boolean suggestedCheck, long targetSize) throws IOException {
+        return rowBatch.size == 0 && length() >= targetSize;
+    }
+
+    private long length() throws IOException {
+        long estimateMemory = treeWriter.estimateMemory();
+        long fileLength = underlyingStream.getPos();
+
+        // This value is estimated, not actual.
+        return (long) Math.ceil(fileLength + estimateMemory * 0.2);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> T getHiddenFiledInORC(String fieldName) {
+        try {
+            Field treeWriterField = writer.getClass().getDeclaredField(fieldName);
+            AccessController.doPrivileged(
+                    (PrivilegedAction<Void>)
+                            () -> {
+                                treeWriterField.setAccessible(true);
+                                return null;
+                            });
+            return (T) treeWriterField.get(writer);
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Cannot get " + fieldName + " from " + writer.getClass().getName(), e);
+        }
     }
 }

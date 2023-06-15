@@ -31,6 +31,19 @@ Many users are concerned about small files, which can lead to:
 2. Cost issue: A small file in HDFS will temporarily use the size of a minimum of one Block, for example 128 MB.
 3. Query efficiency: The efficiency of querying too many small files will be affected.
 
+## Understand Checkpoints
+
+Assuming you are using Flink Writer, each checkpoint generates 1-2 snapshots, and the checkpoint forces the files to be
+generated on DFS, so the smaller the checkpoint interval the more small files will be generated.
+
+1. So first thing is decrease checkpoint interval.
+
+By default, not only checkpoint will cause the file to be generated, but writer's memory (write-buffer-size) exhaustion
+will also flush data to DFS and generate the corresponding file. You can enable `write-buffer-spillable` to generate
+spilled files in writer to generate bigger files in DFS.
+
+2. So second thing is increase `write-buffer-size` or enable `write-buffer-spillable`.
+
 ## Understand Snapshots
 
 Before delving further into this section, please ensure that you have read [File Operations]({{< ref "concepts/file-operations" >}}).
@@ -39,7 +52,7 @@ Before delving further into this section, please ensure that you have read [File
 
 Paimon maintains multiple versions of files, compaction and deletion of files are logical and do not actually
 delete files. Files are only really deleted when Snapshot is expired, so the first way to reduce files is to
-reduce the time it takes for snapshot to be expired. Flink Sink will automatically expire snapshots.
+reduce the time it takes for snapshot to be expired. Flink writer will automatically expire snapshots.
 
 See [Expire Snapshots]({{< ref "/maintenance/manage-snapshots#expire-snapshots" >}}).
 

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
@@ -28,13 +27,13 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
  * Builder for {@link FlinkCdcSink} when syncing the whole database into one Paimon database. Each
@@ -84,20 +83,37 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         Preconditions.checkNotNull(input);
         Preconditions.checkNotNull(parserFactory);
 
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
-
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))
                         .setParallelism(input.getParallelism());
 
         for (FileStoreTable table : tables) {
+            DataStream<Void> schemaChangeProcessFunction =
+                    SingleOutputStreamOperatorUtils.getSideOutput(
+                                    parsed,
+                                    CdcMultiTableParsingProcessFunction
+                                            .createUpdatedDataFieldsOutputTag(table.name()))
+                            .process(
+                                    new UpdatedDataFieldsProcessFunction(
+                                            new SchemaManager(table.fileIO(), table.location())));
+            schemaChangeProcessFunction.getTransformation().setParallelism(1);
+            schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
+
+            DataStream<CdcRecord> parsedForTable =
+                    SingleOutputStreamOperatorUtils.getSideOutput(
+                            parsed,
+                            CdcMultiTableParsingProcessFunction.createRecordOutputTag(
+                                    table.name()));
+
             BucketMode bucketMode = table.bucketMode();
             switch (bucketMode) {
                 case FIXED:
-                    buildForFixedBucket(table, parsed);
+                    buildForFixedBucket(table, parsedForTable);
                     break;
                 case DYNAMIC:
+                    buildForDynamicBucket(table, parsedForTable);
+                    break;
                 case UNAWARE:
                 default:
                     throw new UnsupportedOperationException(
@@ -106,34 +122,13 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         }
     }
 
-    private void buildForFixedBucket(
-            FileStoreTable table, SingleOutputStreamOperator<Void> parsed) {
-        DataStream<Void> schemaChangeProcessFunction =
-                SingleOutputStreamOperatorUtils.getSideOutput(
-                                parsed,
-                                CdcMultiTableParsingProcessFunction
-                                        .createUpdatedDataFieldsOutputTag(table.name()))
-                        .process(
-                                new UpdatedDataFieldsProcessFunction(
-                                        new SchemaManager(table.fileIO(), table.location())));
-        schemaChangeProcessFunction.getTransformation().setParallelism(1);
-        schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
+    private void buildForDynamicBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
+        new CdcDynamicBucketSink(table, lockFactory).build(parsed, parallelism);
+    }
 
-        FlinkStreamPartitioner<CdcRecord> partitioner =
-                new FlinkStreamPartitioner<>(new CdcRecordChannelComputer(table.schema()));
-        PartitionTransformation<CdcRecord> partitioned =
-                new PartitionTransformation<>(
-                        SingleOutputStreamOperatorUtils.getSideOutput(
-                                        parsed,
-                                        CdcMultiTableParsingProcessFunction.createRecordOutputTag(
-                                                table.name()))
-                                .getTransformation(),
-                        partitioner);
-        if (parallelism != null) {
-            partitioned.setParallelism(parallelism);
-        }
-
-        FlinkCdcSink sink = new FlinkCdcSink(table, lockFactory);
-        sink.sinkFrom(new DataStream<>(parsed.getExecutionEnvironment(), partitioned));
+    private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
+        DataStream<CdcRecord> partitioned =
+                partition(parsed, new CdcRecordChannelComputer(table.schema()), parallelism);
+        new FlinkCdcSink(table, lockFactory).sinkFrom(partitioned);
     }
 }

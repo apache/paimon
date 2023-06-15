@@ -18,8 +18,15 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
+import org.apache.flink.connector.file.src.util.ArrayResultIterator;
+import org.apache.flink.connector.file.src.util.CheckpointedPosition;
 import org.apache.flink.connector.file.src.util.SingletonResultIterator;
+import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
+import org.apache.flink.table.data.GenericRowData;
+import org.apache.flink.table.data.RowData;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -28,13 +35,41 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link SingleIteratorRecords}. */
-public class SingleIteratorRecordsTest {
+/** Test for {@link FlinkRecordsWithSplitIds}. */
+public class FlinkRecordsWithSplitIdsTest {
+
+    private RowData[] rows;
+    private ArrayResultIterator<RowData> iter;
+    private TestingReaderOutput<RowData> output;
+    private FileStoreSourceSplitState state;
+
+    @BeforeEach
+    public void beforeEach() {
+        iter = new ArrayResultIterator<>();
+        rows = new RowData[] {GenericRowData.of(1, 1), GenericRowData.of(2, 2)};
+        iter.set(rows, rows.length, CheckpointedPosition.NO_OFFSET, 0);
+        output = new TestingReaderOutput<>();
+        state = new FileStoreSourceSplitState(new FileStoreSourceSplit("", null));
+    }
+
+    @Test
+    public void testEmitRecord() {
+        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records =
+                FlinkRecordsWithSplitIds.forRecords("", iter);
+        records.nextSplit();
+
+        BulkFormat.RecordIterator<RowData> iterator = records.nextRecordFromSplit();
+        assertThat(iterator).isNotNull();
+        FlinkRecordsWithSplitIds.emitRecord(iterator, output, state);
+        assertThat(output.getEmittedRecords()).containsExactly(rows);
+        assertThat(state.recordsToSkip()).isEqualTo(2);
+        assertThat(records.nextRecordFromSplit()).isNull();
+    }
 
     @Test
     void testEmptySplits() {
         final String split = "empty";
-        final SingleIteratorRecords<Object> records = SingleIteratorRecords.finishedSplit(split);
+        final FlinkRecordsWithSplitIds records = FlinkRecordsWithSplitIds.finishedSplit(split);
 
         assertThat(records.finishedSplits()).isEqualTo(Collections.singleton(split));
     }
@@ -42,8 +77,8 @@ public class SingleIteratorRecordsTest {
     @Test
     void testMoveToFirstSplit() {
         final String splitId = "splitId";
-        final SingleIteratorRecords<Object> records =
-                SingleIteratorRecords.forRecords(splitId, new SingletonResultIterator<>());
+        final FlinkRecordsWithSplitIds records =
+                FlinkRecordsWithSplitIds.forRecords(splitId, new SingletonResultIterator<>());
 
         final String firstSplitId = records.nextSplit();
 
@@ -52,8 +87,8 @@ public class SingleIteratorRecordsTest {
 
     @Test
     void testMoveToSecondSplit() {
-        final SingleIteratorRecords<Object> records =
-                SingleIteratorRecords.forRecords("splitId", new SingletonResultIterator<>());
+        final FlinkRecordsWithSplitIds records =
+                FlinkRecordsWithSplitIds.forRecords("splitId", new SingletonResultIterator<>());
         records.nextSplit();
 
         final String secondSplitId = records.nextSplit();
@@ -63,13 +98,13 @@ public class SingleIteratorRecordsTest {
 
     @Test
     void testRecordsFromFirstSplit() {
-        final SingletonResultIterator<String> iter = new SingletonResultIterator<>();
-        iter.set("test", 18, 99);
-        final SingleIteratorRecords<String> records =
-                SingleIteratorRecords.forRecords("splitId", iter);
+        final SingletonResultIterator<RowData> iter = new SingletonResultIterator<>();
+        iter.set(GenericRowData.of("test"), 18, 99);
+        final FlinkRecordsWithSplitIds records =
+                FlinkRecordsWithSplitIds.forRecords("splitId", iter);
         records.nextSplit();
 
-        final BulkFormat.RecordIterator<String> recAndPos = records.nextRecordFromSplit();
+        final BulkFormat.RecordIterator<RowData> recAndPos = records.nextRecordFromSplit();
 
         assertThat(recAndPos).isSameAs(iter);
         assertThat(records.nextRecordFromSplit()).isNull();
@@ -77,16 +112,16 @@ public class SingleIteratorRecordsTest {
 
     @Test
     void testRecordsInitiallyIllegal() {
-        final SingleIteratorRecords<Object> records =
-                SingleIteratorRecords.forRecords("splitId", new SingletonResultIterator<>());
+        final FlinkRecordsWithSplitIds records =
+                FlinkRecordsWithSplitIds.forRecords("splitId", new SingletonResultIterator<>());
 
         assertThatThrownBy(records::nextRecordFromSplit).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     void testRecordsOnSecondSplitIllegal() {
-        final SingleIteratorRecords<Object> records =
-                SingleIteratorRecords.forRecords("splitId", new SingletonResultIterator<>());
+        final FlinkRecordsWithSplitIds records =
+                FlinkRecordsWithSplitIds.forRecords("splitId", new SingletonResultIterator<>());
         records.nextSplit();
         records.nextSplit();
 
@@ -96,12 +131,12 @@ public class SingleIteratorRecordsTest {
     @Test
     void testRecycleExhaustedBatch() {
         final AtomicBoolean recycled = new AtomicBoolean(false);
-        final SingletonResultIterator<Object> iter =
+        final SingletonResultIterator<RowData> iter =
                 new SingletonResultIterator<>(() -> recycled.set(true));
-        iter.set(new Object(), 1L, 2L);
+        iter.set(GenericRowData.of(), 1L, 2L);
 
-        final SingleIteratorRecords<Object> records =
-                SingleIteratorRecords.forRecords("test split", iter);
+        final FlinkRecordsWithSplitIds records =
+                FlinkRecordsWithSplitIds.forRecords("test split", iter);
         records.nextSplit();
         records.nextRecordFromSplit();
 
@@ -116,12 +151,12 @@ public class SingleIteratorRecordsTest {
     @Test
     void testRecycleNonExhaustedBatch() {
         final AtomicBoolean recycled = new AtomicBoolean(false);
-        final SingletonResultIterator<Object> iter =
+        final SingletonResultIterator<RowData> iter =
                 new SingletonResultIterator<>(() -> recycled.set(true));
-        iter.set(new Object(), 1L, 2L);
+        iter.set(GenericRowData.of(), 1L, 2L);
 
-        final SingleIteratorRecords<Object> records =
-                SingleIteratorRecords.forRecords("test split", iter);
+        final FlinkRecordsWithSplitIds records =
+                FlinkRecordsWithSplitIds.forRecords("test split", iter);
         records.nextSplit();
 
         records.recycle();

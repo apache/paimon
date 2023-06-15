@@ -22,12 +22,14 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Helper class for the first planning of {@link TableScan}. */
 public interface StartingScanner {
 
-    Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader);
+    Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader);
 
     /** Scan result of {@link #scan}. */
     interface Result {}
@@ -35,18 +37,30 @@ public interface StartingScanner {
     /** Currently, there is no snapshot, need to wait for the snapshot to be generated. */
     class NoSnapshot implements Result {}
 
+    static ScannedResult fromPlan(SnapshotReader.Plan plan) {
+        return new ScannedResult(plan.snapshotId(), plan.watermark(), (List) plan.splits());
+    }
+
     /** Result with scanned snapshot. Next snapshot should be the current snapshot plus 1. */
     class ScannedResult implements Result {
         private final long currentSnapshotId;
+        @Nullable private final Long currentWatermark;
         private final List<DataSplit> splits;
 
-        public ScannedResult(long currentSnapshotId, List<DataSplit> splits) {
+        public ScannedResult(
+                long currentSnapshotId, @Nullable Long currentWatermark, List<DataSplit> splits) {
             this.currentSnapshotId = currentSnapshotId;
+            this.currentWatermark = currentWatermark;
             this.splits = splits;
         }
 
         public long currentSnapshotId() {
             return currentSnapshotId;
+        }
+
+        @Nullable
+        public Long currentWatermark() {
+            return currentWatermark;
         }
 
         public List<DataSplit> splits() {

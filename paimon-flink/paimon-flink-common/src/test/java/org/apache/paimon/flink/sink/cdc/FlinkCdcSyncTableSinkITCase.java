@@ -60,13 +60,22 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
+        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testRandomCdcEventsDynamicBucket() throws Exception {
+        innerTestRandomCdcEvents(-1);
+    }
+
+    private void innerTestRandomCdcEvents(int numBucket) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numEvents = random.nextInt(1500) + 1;
         int numSchemaChanges = Math.min(numEvents / 2, random.nextInt(10) + 1);
         int numPartitions = random.nextInt(3) + 1;
         int numKeys = random.nextInt(150) + 1;
-        int numBucket = random.nextInt(5) + 1;
         boolean enableFailure = random.nextBoolean();
 
         TestTable testTable =
@@ -141,6 +150,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
             throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, numBucket);
+        conf.set(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, 100L);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
 

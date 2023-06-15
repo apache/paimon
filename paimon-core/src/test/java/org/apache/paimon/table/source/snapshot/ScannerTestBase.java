@@ -70,7 +70,7 @@ public abstract class ScannerTestBase {
     protected FileIO fileIO;
     protected String commitUser;
     protected FileStoreTable table;
-    protected SnapshotSplitReader snapshotSplitReader;
+    protected SnapshotReader snapshotReader;
 
     @BeforeEach
     public void before() throws Exception {
@@ -78,7 +78,7 @@ public abstract class ScannerTestBase {
         fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
         table = createFileStoreTable();
-        snapshotSplitReader = table.newSnapshotSplitReader();
+        snapshotReader = table.newSnapshotReader();
     }
 
     protected GenericRow rowData(Object... values) {

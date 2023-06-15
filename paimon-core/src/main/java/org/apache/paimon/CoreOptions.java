@@ -648,6 +648,14 @@ public class CoreOptions implements Serializable {
                             "The expiration interval of consumer files. A consumer file will be expired if "
                                     + "it's lifetime after last modification is over this value.");
 
+    public static final ConfigOption<Long> DYNAMIC_BUCKET_TARGET_ROW_NUM =
+            key("dynamic-bucket.target-row-num")
+                    .longType()
+                    .defaultValue(2_000_000L)
+                    .withDescription(
+                            "If the bucket is -1, for primary key table, is dynamic bucket mode, "
+                                    + "this option controls the target row number for one bucket.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -835,6 +843,10 @@ public class CoreOptions implements Serializable {
 
     public int maxSortedRunNum() {
         return options.get(COMPACTION_MAX_SORTED_RUN_NUM);
+    }
+
+    public long dynamicBucketTargetRowNum() {
+        return options.get(DYNAMIC_BUCKET_TARGET_ROW_NUM);
     }
 
     public ChangelogProducer changelogProducer() {

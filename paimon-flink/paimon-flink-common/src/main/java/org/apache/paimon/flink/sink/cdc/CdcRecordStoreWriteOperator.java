@@ -43,7 +43,7 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
 
-    static final ConfigOption<Duration> RETRY_SLEEP_TIME =
+    public static final ConfigOption<Duration> RETRY_SLEEP_TIME =
             ConfigOptions.key("cdc.retry-sleep-time")
                     .durationType()
                     .defaultValue(Duration.ofMillis(500));

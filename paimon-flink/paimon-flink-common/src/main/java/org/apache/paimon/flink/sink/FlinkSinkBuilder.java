@@ -30,7 +30,8 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 
-import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.createPartitionTransformation;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Builder for {@link FileStoreSink}. */
 public class FlinkSinkBuilder {
@@ -78,15 +79,22 @@ public class FlinkSinkBuilder {
             case FIXED:
                 return buildForFixedBucket();
             case DYNAMIC:
+                return buildDynamicBucketSink();
             case UNAWARE:
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
         }
     }
 
+    private DataStreamSink<?> buildDynamicBucketSink() {
+        checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
+        return new RowDynamicBucketSink(table, lockFactory, overwritePartition)
+                .build(input, parallelism);
+    }
+
     private DataStreamSink<?> buildForFixedBucket() {
         DataStream<RowData> partitioned =
-                createPartitionTransformation(
+                partition(
                         input,
                         new RowDataChannelComputer(table.schema(), logSinkFunction != null),
                         parallelism);

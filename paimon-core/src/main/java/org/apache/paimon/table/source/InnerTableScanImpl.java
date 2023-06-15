@@ -20,7 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -34,17 +34,15 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
     private boolean hasNext;
 
     public InnerTableScanImpl(
-            CoreOptions options,
-            SnapshotSplitReader snapshotSplitReader,
-            SnapshotManager snapshotManager) {
-        super(options, snapshotSplitReader);
+            CoreOptions options, SnapshotReader snapshotReader, SnapshotManager snapshotManager) {
+        super(options, snapshotReader);
         this.snapshotManager = snapshotManager;
         this.hasNext = true;
     }
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        snapshotSplitReader.withFilter(predicate);
+        snapshotReader.withFilter(predicate);
         return this;
     }
 
@@ -56,8 +54,7 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
 
         if (hasNext) {
             hasNext = false;
-            StartingScanner.Result result =
-                    startingScanner.scan(snapshotManager, snapshotSplitReader);
+            StartingScanner.Result result = startingScanner.scan(snapshotManager, snapshotReader);
             return DataFilePlan.fromResult(result);
         } else {
             throw new EndOfScanException();

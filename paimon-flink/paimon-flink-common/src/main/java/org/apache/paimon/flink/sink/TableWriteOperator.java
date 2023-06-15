@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -59,15 +60,17 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        RowDataChannelComputer channelComputer =
-                new RowDataChannelComputer(table.schema(), containLogSystem());
-        channelComputer.setup(getRuntimeContext().getNumberOfParallelSubtasks());
-        state =
-                new StoreSinkWriteState(
-                        context,
-                        (tableName, partition, bucket) ->
-                                channelComputer.channel(partition, bucket)
-                                        == getRuntimeContext().getIndexOfThisSubtask());
+        boolean containLogSystem = containLogSystem();
+        int numTasks = getRuntimeContext().getNumberOfParallelSubtasks();
+        StateValueFilter stateFilter =
+                (tableName, partition, bucket) -> {
+                    int task =
+                            containLogSystem
+                                    ? ChannelComputer.select(bucket, numTasks)
+                                    : ChannelComputer.select(partition, bucket, numTasks);
+                    return task == getRuntimeContext().getIndexOfThisSubtask();
+                };
+        state = new StoreSinkWriteState(context, stateFilter);
 
         write =
                 storeSinkWriteProvider.provide(
@@ -91,7 +94,9 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     @Override
     public void close() throws Exception {
         super.close();
-        write.close();
+        if (write != null) {
+            write.close();
+        }
     }
 
     @Override

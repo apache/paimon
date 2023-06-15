@@ -59,11 +59,11 @@ public abstract class FlinkSink<T> implements Serializable {
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
     protected final FileStoreTable table;
-    private final boolean isOverwrite;
+    private final boolean emptyWriter;
 
-    public FlinkSink(FileStoreTable table, boolean isOverwrite) {
+    public FlinkSink(FileStoreTable table, boolean emptyWriter) {
         this.table = table;
-        this.isOverwrite = isOverwrite;
+        this.emptyWriter = emptyWriter;
     }
 
     private StoreSinkWrite.Provider createWriteProvider(CheckpointConfig checkpointConfig) {
@@ -97,7 +97,7 @@ public abstract class FlinkSink<T> implements Serializable {
                                 commitUser,
                                 state,
                                 ioManager,
-                                isOverwrite,
+                                emptyWriter,
                                 waitCompaction,
                                 finalDeltaCommits,
                                 memoryPool);
@@ -110,7 +110,7 @@ public abstract class FlinkSink<T> implements Serializable {
                         commitUser,
                         state,
                         ioManager,
-                        isOverwrite,
+                        emptyWriter,
                         waitCompaction,
                         memoryPool);
     }
@@ -122,6 +122,11 @@ public abstract class FlinkSink<T> implements Serializable {
         // When the job restarts, commitUser will be recovered from states and this value is
         // ignored.
         String initialCommitUser = UUID.randomUUID().toString();
+        return sinkFrom(input, initialCommitUser);
+    }
+
+    public DataStreamSink<?> sinkFrom(DataStream<T> input, String initialCommitUser) {
+
         return sinkFrom(
                 input,
                 initialCommitUser,

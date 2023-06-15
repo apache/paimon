@@ -32,7 +32,7 @@ import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingSc
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
@@ -47,16 +47,16 @@ import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 public abstract class AbstractInnerTableScan implements InnerTableScan {
 
     private final CoreOptions options;
-    protected final SnapshotSplitReader snapshotSplitReader;
+    protected final SnapshotReader snapshotReader;
 
-    protected AbstractInnerTableScan(CoreOptions options, SnapshotSplitReader snapshotSplitReader) {
+    protected AbstractInnerTableScan(CoreOptions options, SnapshotReader snapshotReader) {
         this.options = options;
-        this.snapshotSplitReader = snapshotSplitReader;
+        this.snapshotReader = snapshotReader;
     }
 
     @VisibleForTesting
     public AbstractInnerTableScan withBucket(int bucket) {
-        snapshotSplitReader.withBucket(bucket);
+        snapshotReader.withBucket(bucket);
         return this;
     }
 
@@ -84,7 +84,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
         // read from consumer id
         String consumerId = options.consumerId();
         if (consumerId != null) {
-            ConsumerManager consumerManager = snapshotSplitReader.consumerManager();
+            ConsumerManager consumerManager = snapshotReader.consumerManager();
             Optional<Consumer> consumer = consumerManager.consumer(consumerId);
             if (consumer.isPresent()) {
                 return new ContinuousFromSnapshotStartingScanner(consumer.get().nextSnapshot());
@@ -142,6 +142,6 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
     }
 
     public List<BinaryRow> listPartitions() {
-        return snapshotSplitReader.partitions();
+        return snapshotReader.partitions();
     }
 }

@@ -32,6 +32,17 @@ Primary keys consist of a set of columns that contain unique values for each rec
 
 By [defining primary keys]({{< ref "how-to/creating-tables#tables-with-primary-keys" >}}) on a changelog table, users can access the following features.
 
+## Bucket
+
+A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}).
+
+Primary Key Table supports two bucket mode:
+1. Fixed Bucket mode: configure a bucket greater than 0, rescaling buckets can only be done through offline processes, 
+   see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}). A too large number of buckets leads to too many
+   small files, and a too small number of buckets leads to poor write performance.
+2. Dynamic Bucket mode: configure `'bucket' = '-1'`, Paimon dynamically maintains the index, keeping the data volume
+   in the bucket below `'dynamic-bucket.target-row-num'`. (This is an experimental feature)
+
 ## Merge Engines
 
 When Paimon sink receives two or more records with the same primary keys, it will merge them into one record to keep primary keys unique. By specifying the `merge-engine` table property, users can choose how records are merged together.

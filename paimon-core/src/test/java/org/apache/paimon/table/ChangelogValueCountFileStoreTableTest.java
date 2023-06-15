@@ -55,7 +55,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .isEqualTo(
@@ -76,7 +76,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         writeData();
         FileStoreTable table = createFileStoreTable();
 
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("101|11", "101|11", "102|12"));
@@ -92,7 +92,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
 
         Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
-                toSplits(table.newSnapshotSplitReader().withFilter(predicate).splits());
+                toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
@@ -109,7 +109,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits =
-                toSplits(table.newSnapshotSplitReader().withKind(ScanKind.DELTA).splits());
+                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -130,7 +130,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits =
-                toSplits(table.newSnapshotSplitReader().withKind(ScanKind.DELTA).splits());
+                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
         TableRead read = table.newRead().withProjection(PROJECTION);
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
                 .isEqualTo(Arrays.asList("-100|10", "+101|11"));
@@ -147,10 +147,11 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
         Predicate predicate = builder.equal(2, 201L);
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotSplitReader()
+                        table.newSnapshotReader()
                                 .withKind(ScanKind.DELTA)
                                 .withFilter(predicate)
-                                .splits());
+                                .read()
+                                .dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
@@ -202,7 +203,7 @@ public class ChangelogValueCountFileStoreTableTest extends FileStoreTableTestBas
 
         // check that no data file is produced
         List<Split> splits =
-                toSplits(table.newSnapshotSplitReader().withKind(ScanKind.DELTA).splits());
+                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
         assertThat(splits).isEmpty();
         // check that no changelog file is produced
         Path bucketPath = DataFilePathFactory.bucketPath(table.location(), "1", 0);

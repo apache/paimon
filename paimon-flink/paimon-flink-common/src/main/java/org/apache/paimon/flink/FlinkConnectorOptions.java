@@ -87,6 +87,15 @@ public class FlinkConnectorOptions {
                                     + "for each statement individually by also considering the global configuration. "
                                     + "If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.");
 
+    public static final ConfigOption<Integer> UNAWARE_BUCKET_COMPACTION_PARALLELISM =
+            ConfigOptions.key("unaware-bucket.compaction.parallelism")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Defines a custom parallelism for the unaware-bucket table compaction job. "
+                                    + "By default, if this option is not defined, the planner will derive the parallelism "
+                                    + "for each statement individually by also considering the global configuration.");
+
     public static final ConfigOption<Boolean> INFER_SCAN_PARALLELISM =
             ConfigOptions.key("scan.infer-parallelism")
                     .booleanType()
@@ -95,23 +104,6 @@ public class FlinkConnectorOptions {
                             "If it is false, parallelism of source are set by "
                                     + SCAN_PARALLELISM.key()
                                     + ". Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).");
-
-    public static final ConfigOption<Boolean> STREAMING_READ_ATOMIC =
-            ConfigOptions.key("streaming-read-atomic")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "The option to enable return per iterator instead of per record in streaming read.")
-                                    .text(
-                                            "This can ensure that there will be no checkpoint segmentation in iterator consumption.")
-                                    .linebreak()
-                                    .text(
-                                            "By default, streaming source checkpoint will be performed in any time,"
-                                                    + " this means 'UPDATE_BEFORE' and 'UPDATE_AFTER' can be split into two checkpoint."
-                                                    + " Downstream can see intermediate state.")
-                                    .build());
 
     @Deprecated
     @ExcludeFromDocumentation("Deprecated")

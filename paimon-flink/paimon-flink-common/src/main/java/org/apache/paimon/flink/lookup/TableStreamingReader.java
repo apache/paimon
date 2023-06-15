@@ -23,7 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
-import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -33,7 +33,6 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.TypeUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
 import javax.annotation.Nullable;
@@ -41,7 +40,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
@@ -94,7 +92,7 @@ public class TableStreamingReader {
         }
     }
 
-    public Iterator<InternalRow> nextBatch() throws Exception {
+    public RecordReader<InternalRow> nextBatch() throws Exception {
         try {
             return read(scan.plan());
         } catch (EndOfScanException e) {
@@ -103,18 +101,17 @@ public class TableStreamingReader {
         }
     }
 
-    private Iterator<InternalRow> read(TableScan.Plan plan) throws IOException {
+    private RecordReader<InternalRow> read(TableScan.Plan plan) throws IOException {
         TableRead read = readBuilder.newRead();
 
         List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
         for (Split split : plan.splits()) {
             readers.add(() -> read.createReader(split));
         }
-        Iterator<InternalRow> iterator =
-                new RecordReaderIterator<>(ConcatRecordReader.create(readers));
+        RecordReader<InternalRow> reader = ConcatRecordReader.create(readers);
         if (recordFilter != null) {
-            return Iterators.filter(iterator, recordFilter::test);
+            reader = reader.filter(recordFilter::test);
         }
-        return iterator;
+        return reader;
     }
 }

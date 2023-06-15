@@ -40,8 +40,8 @@ import org.apache.paimon.table.source.InnerStreamTableScanImpl;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.InnerTableScanImpl;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -99,8 +99,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public SnapshotSplitReader newSnapshotSplitReader() {
-        return new SnapshotSplitReaderImpl(
+    public SnapshotReader newSnapshotReader() {
+        return new SnapshotReaderImpl(
                 store().newScan(),
                 tableSchema,
                 coreOptions(),
@@ -111,14 +111,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new InnerTableScanImpl(coreOptions(), newSnapshotSplitReader(), snapshotManager());
+        return new InnerTableScanImpl(coreOptions(), newSnapshotReader(), snapshotManager());
     }
 
     @Override
     public InnerStreamTableScan newStreamScan() {
         return new InnerStreamTableScanImpl(
                 coreOptions(),
-                newSnapshotSplitReader(),
+                newSnapshotReader(),
                 snapshotManager(),
                 supportStreamingReadOverwrite());
     }

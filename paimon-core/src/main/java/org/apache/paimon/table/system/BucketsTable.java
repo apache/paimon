@@ -35,7 +35,7 @@ import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
@@ -105,8 +105,8 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
-    public SnapshotSplitReader newSnapshotSplitReader() {
-        return wrapped.newSnapshotSplitReader();
+    public SnapshotReader newSnapshotReader() {
+        return wrapped.newSnapshotReader();
     }
 
     @Override
