@@ -129,6 +129,14 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         fileIO.deleteQuietly(path);
     }
 
+    public AbortExecutor abortExecutor() {
+        if (!closed) {
+            throw new RuntimeException("Writer should be closed!");
+        }
+
+        return new AbortExecutor(fileIO, path);
+    }
+
     @Override
     public void close() throws IOException {
         if (closed) {
@@ -152,6 +160,22 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             throw e;
         } finally {
             closed = true;
+        }
+    }
+
+    /** Abort executor to just have reference of path instead of whole writer. */
+    public static class AbortExecutor {
+
+        private final FileIO fileIO;
+        private final Path path;
+
+        private AbortExecutor(FileIO fileIO, Path path) {
+            this.fileIO = fileIO;
+            this.path = path;
+        }
+
+        public void abort() {
+            fileIO.deleteQuietly(path);
         }
     }
 }

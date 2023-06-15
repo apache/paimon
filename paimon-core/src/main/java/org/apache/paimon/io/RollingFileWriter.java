@@ -20,6 +20,7 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.io.SingleFileWriter.AbortExecutor;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -44,7 +45,7 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     private final Supplier<? extends SingleFileWriter<T, R>> writerFactory;
     private final long targetFileSize;
-    private final List<SingleFileWriter<T, R>> openedWriters;
+    private final List<AbortExecutor> closedWriters;
     private final List<R> results;
 
     private SingleFileWriter<T, R> currentWriter = null;
@@ -56,8 +57,8 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
             Supplier<? extends SingleFileWriter<T, R>> writerFactory, long targetFileSize) {
         this.writerFactory = writerFactory;
         this.targetFileSize = targetFileSize;
-        this.openedWriters = new ArrayList<>();
         this.results = new ArrayList<>();
+        this.closedWriters = new ArrayList<>();
     }
 
     @VisibleForTesting
@@ -99,7 +100,6 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     private void openCurrentWriter() {
         currentWriter = writerFactory.get();
-        openedWriters.add(currentWriter);
     }
 
     private void closeCurrentWriter() throws IOException {
@@ -109,6 +109,10 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
         lengthOfClosedFiles += currentWriter.length();
         currentWriter.close();
+        // only store abort executor in memory
+        // cannot store whole writer, it includes lots of memory for example column vectors to read
+        // and write
+        closedWriters.add(currentWriter.abortExecutor());
         results.add(currentWriter.result());
         currentWriter = null;
     }
@@ -130,8 +134,11 @@ public class RollingFileWriter<T, R> implements FileWriter<T, List<R>> {
 
     @Override
     public void abort() {
-        for (FileWriter<T, R> writer : openedWriters) {
-            writer.abort();
+        if (currentWriter != null) {
+            currentWriter.abort();
+        }
+        for (AbortExecutor abortExecutor : closedWriters) {
+            abortExecutor.abort();
         }
     }
 
