@@ -50,7 +50,6 @@ public abstract class CompactFutureManager implements CompactManager {
                 try {
                     result = taskFuture.get();
                 } catch (CancellationException e) {
-                    LOG.info("Compaction future is cancelled", e);
                     taskFuture = null;
                     return Optional.empty();
                 }
