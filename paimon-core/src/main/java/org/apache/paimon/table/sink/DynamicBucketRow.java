@@ -26,8 +26,10 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.RowKind;
 
+import java.io.Serializable;
+
 /** An {@link InternalRow} wraps another {@link InternalRow} with bucket. */
-public class DynamicBucketRow implements InternalRow {
+public class DynamicBucketRow implements InternalRow, Serializable {
 
     private final InternalRow row;
     private final int bucket;

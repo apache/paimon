@@ -110,4 +110,42 @@ public class SparkWriteITCase {
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[2,22,222]]");
     }
+
+    @Test
+    public void testWriteDynamicBucketPartitionedTable() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (a) TBLPROPERTIES"
+                        + " ('primary-key'='a,b', 'bucket'='-1', 'dynamic-bucket.target-row-num'='3')");
+
+        spark.sql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
+        List<Row> rows = spark.sql("SELECT max(bucket) FROM `T$FILES`").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[0]]");
+
+        spark.sql("INSERT INTO T VALUES (1, 2, '22'), (1, 3, '3')");
+        rows = spark.sql("SELECT max(bucket) FROM `T$FILES`").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[0]]");
+
+        spark.sql("INSERT INTO T VALUES (1, 4, '4'), (1, 5, '5')").collectAsList();
+        rows = spark.sql("SELECT max(bucket) FROM `T$FILES`").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1]]");
+
+        spark.sql("INSERT INTO T VALUES (1, 2, '222'), (1, 6, '6'), (1, 7, '7')").collectAsList();
+        rows = spark.sql("SELECT max(bucket) FROM `T$FILES`").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[2]]");
+
+        rows = spark.sql("SELECT count(1) FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[7]]");
+
+        rows = spark.sql("SELECT * FROM T WHERE b = 2").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,2,222]]");
+
+        spark.sql("INSERT INTO T VALUES (2, 1, '11'), (2, 3, '33'), (1, 8, '8')").collectAsList();
+        rows = spark.sql("SELECT count(1) FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[10]]");
+        rows =
+                spark.sql(
+                                "SELECT partition, max(bucket) FROM `T$FILES` GROUP BY partition ORDER BY partition")
+                        .collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[[1],2], [[2],0]]");
+    }
 }

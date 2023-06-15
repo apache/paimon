@@ -34,6 +34,7 @@ import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.spark.sql.Row;
 
+import java.io.Serializable;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -42,7 +43,7 @@ import java.util.List;
 import java.util.Map;
 
 /** A {@link InternalRow} wraps spark {@link Row}. */
-public class SparkRow implements InternalRow {
+public class SparkRow implements InternalRow, Serializable {
 
     private final RowType type;
     private final Row row;

@@ -68,7 +68,14 @@ public interface FileStoreTable extends DataTable {
         return Optional.ofNullable(schema().comment());
     }
 
+    @Override
+    default boolean isFileStoreTable() {
+        return true;
+    }
+
     TableSchema schema();
+
+    FileStore<?> store();
 
     BucketMode bucketMode();
 

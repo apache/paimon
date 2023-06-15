@@ -18,25 +18,31 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.PartitionIndex;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.table.sink.BatchTableWrite;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageSerializer;
-import org.apache.paimon.table.sink.InnerTableCommit;
+import org.apache.paimon.table.sink.*;
 
+import org.apache.spark.api.java.JavaPairRDD;
 import org.apache.spark.api.java.function.Function;
-import org.apache.spark.api.java.function.Function2;
+import org.apache.spark.sql.Column;
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.connector.write.V1Write;
+import org.apache.spark.sql.functions;
 import org.apache.spark.sql.sources.InsertableRelation;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
@@ -60,12 +66,38 @@ public class SparkWrite implements V1Write {
             }
 
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            JavaPairRDD<Integer, Iterable<InternalRow>> grouped;
+            if (isDynamicBucketTable()) {
+                FileStoreTable fileStoreTable = (FileStoreTable) table;
+                Dataset<Row> partitioned = data;
+                if (!table.partitionKeys().isEmpty()) {
+                    // repartition data in order to reduce the number of PartitionIndex for per
+                    // Spark Task.
+                    partitioned =
+                            data.repartition(
+                                    table.partitionKeys().stream()
+                                            .map(functions::col)
+                                            .toArray(Column[]::new));
+                }
+                grouped =
+                        partitioned
+                                .toJavaRDD()
+                                .mapPartitions(
+                                        rows -> assignBucket(fileStoreTable, writeBuilder, rows))
+                                .groupBy(row -> ((DynamicBucketRow) row).bucket());
+            } else {
+                grouped =
+                        data.toJavaRDD()
+                                .map(row -> (InternalRow) new SparkRow(writeBuilder.rowType(), row))
+                                .groupBy(new ComputeBucket(writeBuilder));
+            }
+
             List<CommitMessage> committables =
-                    data.toJavaRDD().groupBy(new ComputeBucket(writeBuilder))
-                            .mapValues(new WriteRecords(writeBuilder)).values()
+                    grouped.mapValues(new WriteRecords(writeBuilder)).values()
                             .mapPartitions(SparkWrite::serializeCommitMessages).collect().stream()
                             .map(this::deserializeCommitMessage)
                             .collect(Collectors.toList());
+
             try (BatchTableCommit tableCommit =
                     ((InnerTableCommit) writeBuilder.newCommit()).withLock(lockFactory.create())) {
                 tableCommit.commit(committables);
@@ -73,6 +105,34 @@ public class SparkWrite implements V1Write {
                 throw new RuntimeException(e);
             }
         };
+    }
+
+    private boolean isDynamicBucketTable() {
+        return table.isFileStoreTable()
+                && ((FileStoreTable) table).bucketMode() == BucketMode.DYNAMIC;
+    }
+
+    private static Iterator<InternalRow> assignBucket(
+            FileStoreTable fileStoreTable, BatchWriteBuilder writeBuilder, Iterator<Row> rows) {
+        long targetBucketRowNumber = fileStoreTable.coreOptions().dynamicBucketTargetRowNum();
+        List<InternalRow> dynamicBucketRows = new ArrayList<>();
+        IndexFileHandler indexFileHandler = fileStoreTable.store().newIndexFileHandler();
+        RowPartitionKeyExtractor rowPartitionKeyExtractor =
+                new RowPartitionKeyExtractor(fileStoreTable.schema());
+        Map<BinaryRow, PartitionIndex> partitionIndex = new HashMap<>();
+        while (rows.hasNext()) {
+            SparkRow internalRow = new SparkRow(writeBuilder.rowType(), rows.next());
+            int hash = rowPartitionKeyExtractor.trimmedPrimaryKey(internalRow).hashCode();
+            BinaryRow partition = rowPartitionKeyExtractor.partition(internalRow);
+            PartitionIndex index =
+                    partitionIndex.computeIfAbsent(
+                            partition,
+                            (p) ->
+                                    PartitionIndex.loadIndex(
+                                            indexFileHandler, p, targetBucketRowNumber));
+            dynamicBucketRows.add(new DynamicBucketRow(internalRow, index.assign(hash)));
+        }
+        return dynamicBucketRows.iterator();
     }
 
     private static Iterator<byte[]> serializeCommitMessages(Iterator<List<CommitMessage>> iters) {
@@ -99,7 +159,7 @@ public class SparkWrite implements V1Write {
         }
     }
 
-    private static class ComputeBucket implements Function<Row, Integer> {
+    private static class ComputeBucket implements Function<InternalRow, Integer> {
 
         private final BatchWriteBuilder writeBuilder;
 
@@ -117,12 +177,13 @@ public class SparkWrite implements V1Write {
         }
 
         @Override
-        public Integer call(Row row) {
-            return computer().getBucket(new SparkRow(writeBuilder.rowType(), row));
+        public Integer call(InternalRow row) {
+            return computer().getBucket(row);
         }
     }
 
-    private static class WriteRecords implements Function<Iterable<Row>, List<CommitMessage>> {
+    private static class WriteRecords
+            implements Function<Iterable<InternalRow>, List<CommitMessage>> {
 
         private final BatchWriteBuilder writeBuilder;
 
@@ -131,24 +192,13 @@ public class SparkWrite implements V1Write {
         }
 
         @Override
-        public List<CommitMessage> call(Iterable<Row> iterables) throws Exception {
+        public List<CommitMessage> call(Iterable<InternalRow> iterables) throws Exception {
             try (BatchTableWrite write = writeBuilder.newWrite()) {
-                for (Row row : iterables) {
-                    write.write(new SparkRow(writeBuilder.rowType(), row));
+                for (InternalRow row : iterables) {
+                    write.write(row);
                 }
                 return write.prepareCommit();
             }
-        }
-    }
-
-    private static class ListConcat<T> implements Function2<List<T>, List<T>, List<T>> {
-
-        @Override
-        public List<T> call(List<T> v1, List<T> v2) {
-            List<T> ret = new ArrayList<>();
-            ret.addAll(v1);
-            ret.addAll(v2);
-            return ret;
         }
     }
 }

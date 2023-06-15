@@ -58,6 +58,8 @@ public interface Table extends Serializable {
     /** Optional comment of this table. */
     Optional<String> comment();
 
+    boolean isFileStoreTable();
+
     // ================= Table Operations ====================
 
     /** Copy this table with adding dynamic options. */
