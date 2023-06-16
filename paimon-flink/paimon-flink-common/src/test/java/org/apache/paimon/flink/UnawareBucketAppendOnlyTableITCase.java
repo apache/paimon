@@ -19,23 +19,30 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.FailingFileIO;
 
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed unaware-bucket table. */
 public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
+
+    private static final Random RANDOM = new Random();
 
     @Test
     public void testReadEmpty() {
@@ -210,12 +217,82 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                                         .toInstant()));
     }
 
+    @Test
+    public void testReadWriteFailRandom() throws Exception {
+        setFailRate(100, 1000);
+        int size = 1000;
+        List<Row> results = new ArrayList<>();
+        StringBuilder values = new StringBuilder("");
+        for (int i = 0; i < size; i++) {
+            Integer j = RANDOM.nextInt();
+            results.add(Row.of(j, String.valueOf(j)));
+            values.append("(" + j + ",'" + j + "'" + "),");
+        }
+
+        FailingFileIO.retryArtificialException(
+                () ->
+                        batchSql(
+                                String.format(
+                                        "INSERT INTO append_table VALUES %s",
+                                        values.toString().substring(0, values.length() - 1))));
+
+        FailingFileIO.retryArtificialException(
+                () -> {
+                    batchSql("SELECT * FROM append_table");
+                    List<Row> rows = batchSql("SELECT * FROM append_table");
+                    assertThat(rows.size()).isEqualTo(size);
+                    assertThat(rows).containsExactlyInAnyOrder(results.toArray(new Row[0]));
+                });
+    }
+
+    @Test
+    public void testReadWriteFailRandomString() throws Exception {
+        setFailRate(100, 1000);
+        int size = 1000;
+        List<Row> results = new ArrayList<>();
+        StringBuilder values = new StringBuilder("");
+        for (int i = 0; i < size; i++) {
+            Integer j = RANDOM.nextInt();
+            String v = String.valueOf(RANDOM.nextInt());
+            results.add(Row.of(j, v));
+            values.append("(" + j + ",'" + v + "'" + "),");
+        }
+
+        FailingFileIO.retryArtificialException(
+                () ->
+                        batchSql(
+                                String.format(
+                                        "INSERT INTO append_table VALUES %s",
+                                        values.toString().substring(0, values.length() - 1))));
+
+        FailingFileIO.retryArtificialException(
+                () -> {
+                    batchSql("SELECT * FROM append_table");
+                    List<Row> rows = batchSql("SELECT * FROM append_table");
+                    assertThat(rows.size()).isEqualTo(size);
+                    assertThat(rows).containsExactlyInAnyOrder(results.toArray(new Row[0]));
+                });
+    }
+
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only', 'bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('write-mode'='append-only', 'bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('write-mode'='append-only', 'bucket' = '-1')");
+    }
+
+    @Override
+    protected String toWarehouse(String path) {
+        File file = new File(path);
+        String dirName = file.getName();
+        String dirPath = file.getPath();
+        FailingFileIO.reset(dirName, 0, 1);
+        return FailingFileIO.getFailingPath(dirName, dirPath);
+    }
+
+    private void setFailRate(int maxFails, int failPossibility) {
+        FailingFileIO.reset(new Path(path).getName(), maxFails, failPossibility);
     }
 
     private void testRejectChanges(RowKind kind) {

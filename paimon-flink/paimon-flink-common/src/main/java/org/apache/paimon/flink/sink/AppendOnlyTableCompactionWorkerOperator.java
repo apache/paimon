@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.append.AppendOnlyTableCompactionWorker;
-import org.apache.paimon.flink.source.UnawareBucketSourceFunction;
+import org.apache.paimon.flink.source.UnawareBucketCompactorCoordinationSourceFunction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
 
 /**
  * Operator to execute {@link AppendOnlyCompactionTask} passed from {@link
- * UnawareBucketSourceFunction}.
+ * UnawareBucketCompactorCoordinationSourceFunction}.
  */
 public class AppendOnlyTableCompactionWorkerOperator
         extends PrepareCommitOperator<AppendOnlyCompactionTask, Committable> {

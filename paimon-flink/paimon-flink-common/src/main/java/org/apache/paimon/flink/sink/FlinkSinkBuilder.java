@@ -113,7 +113,8 @@ public class FlinkSinkBuilder {
                         (AppendOnlyFileStoreTable) table,
                         lockFactory,
                         overwritePartition,
-                        logSinkFunction)
-                .build(input, parallelism);
+                        logSinkFunction,
+                        parallelism)
+                .sinkFrom(input);
     }
 }

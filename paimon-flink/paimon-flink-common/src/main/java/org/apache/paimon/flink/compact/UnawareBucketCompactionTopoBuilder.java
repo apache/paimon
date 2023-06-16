@@ -22,7 +22,7 @@ import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.UnawareBucketCompactionSink;
-import org.apache.paimon.flink.source.UnawareBucketSourceFunction;
+import org.apache.paimon.flink.source.UnawareBucketCompactorCoordinationSourceFunction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -92,11 +92,12 @@ public class UnawareBucketCompactionTopoBuilder {
 
     private DataStreamSource<AppendOnlyCompactionTask> buildSource() {
         long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
-        UnawareBucketSourceFunction source =
-                new UnawareBucketSourceFunction(
+        UnawareBucketCompactorCoordinationSourceFunction source =
+                new UnawareBucketCompactorCoordinationSourceFunction(
                         table, isContinuous, scanInterval, getPartitionFilter());
 
-        return UnawareBucketSourceFunction.buildSource(env, source, isContinuous, tableIdentifier);
+        return UnawareBucketCompactorCoordinationSourceFunction.buildSource(
+                env, source, isContinuous, tableIdentifier);
     }
 
     private void sinkFromSource(DataStreamSource<AppendOnlyCompactionTask> input) {

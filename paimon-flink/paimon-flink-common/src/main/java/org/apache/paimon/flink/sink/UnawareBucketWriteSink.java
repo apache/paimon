@@ -41,27 +41,27 @@ public class UnawareBucketWriteSink extends FileStoreSink {
 
     private final boolean enableCompaction;
     private final AppendOnlyFileStoreTable table;
+    private final Integer parallelism;
 
     public UnawareBucketWriteSink(
             AppendOnlyFileStoreTable table,
             Lock.Factory lock,
             Map<String, String> overwritePartitions,
-            LogSinkFunction logSinkFunction) {
+            LogSinkFunction logSinkFunction,
+            Integer parallelism) {
         super(table, lock, overwritePartitions, logSinkFunction);
         this.table = table;
         this.enableCompaction = !table.coreOptions().writeOnly();
-    }
-
-    public DataStreamSink<?> build(DataStream<RowData> input, Integer parallelism) {
-        DataStream<RowData> partitioned = partition(input, parallelism);
-
-        return sinkFrom(partitioned);
+        this.parallelism = parallelism;
     }
 
     @Override
     public DataStreamSink<?> sinkFrom(DataStream<RowData> input, String initialCommitUser) {
+        // partition input to meet parallelism of 'sink.parallelism'
+        DataStream<RowData> partitioned = partition(input, parallelism);
+
         // do the actually writing action, no snapshot generated in this stage
-        DataStream<Committable> written = doWrite(input, initialCommitUser);
+        DataStream<Committable> written = doWrite(partitioned, initialCommitUser);
 
         // if enable compaction, we need to add compaction topology to this job
         if (enableCompaction) {
