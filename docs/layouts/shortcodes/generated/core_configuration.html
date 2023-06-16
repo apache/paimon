@@ -351,16 +351,16 @@ under the License.
             <td>Optional timestamp used in case of "from-timestamp" scan mode.</td>
         </tr>
         <tr>
+            <td><h5>sequence.auto-padding</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>Specify the way of padding precision up to micro-second if the provided sequence field is used to indicate "time" but doesn't meet the precise.<br /><br />Possible values:<ul><li>"none": No padding for sequence field.</li><li>"second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>"millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>sequence.field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
-        </tr>
-        <tr>
-            <td><h5>sequence.auto-padding</h5></td>
-            <td style="word-wrap: break-word;">none</td>
-            <td>Enum</td>
-            <td>Specify the way of making up time precision to microsecond for sequence field which indicates a second or millisecond.<br /><br />Possible values:<ul><li>"none": Do not pad to sequence number.</li><li>"second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>"millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li></ul></td>
         </tr>
         <tr>
             <td><h5>snapshot.num-retained.max</h5></td>
