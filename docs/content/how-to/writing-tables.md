@@ -172,15 +172,14 @@ INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT ..
 
 ## Purging tables
 
-You can use `INSERT OVERWRITE` to purge tables by inserting empty value. For partitioned 
-table, make sure that the table's `overwrite.dynamic-partition = false`.
+You can use `INSERT OVERWRITE` to purge tables by inserting empty value.
 
 {{< tabs "purge-tables-syntax" >}}
 
 {{< tab "Flink" >}}
 
 ```sql
-INSERT OVERWRITE MyTable SELECT * FROM MyTable WHERE false
+INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ SELECT * FROM MyTable WHERE false
 ```
 
 {{< /tab >}}
