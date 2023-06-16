@@ -72,8 +72,9 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(partitionByKeyHash.getType(), BasicTypeInfo.INT_TYPE_INFO);
         DataStream<Tuple2<T, Integer>> bucketAssigned =
-                partitionByKeyHash.transform(
-                        "dynamic-bucket-assigner", rowWithBucketType, assignerOperator);
+                partitionByKeyHash
+                        .transform("dynamic-bucket-assigner", rowWithBucketType, assignerOperator)
+                        .setParallelism(partitionByKeyHash.getParallelism());
 
         // 3. shuffle by bucket
         DataStream<Tuple2<T, Integer>> partitionByBucket =
