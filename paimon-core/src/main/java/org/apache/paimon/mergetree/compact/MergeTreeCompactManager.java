@@ -76,6 +76,15 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     }
 
     @Override
+    public boolean shouldWaitWhenPreparingCheckpoint() {
+        return levels.numberOfSortedRuns() > numSortedRunStopTrigger + 1;
+    }
+
+    private boolean checkSortedRuns(int extra) {
+        return levels.numberOfSortedRuns() > numSortedRunStopTrigger + extra;
+    }
+
+    @Override
     public void addNewFile(DataFileMeta file) {
         levels.addLevel0File(file);
     }

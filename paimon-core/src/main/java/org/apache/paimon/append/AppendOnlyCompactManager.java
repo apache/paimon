@@ -108,6 +108,11 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @Override
+    public boolean shouldWaitWhenPreparingCheckpoint() {
+        return false;
+    }
+
+    @Override
     public void addNewFile(DataFileMeta file) {
         toCompact.add(file);
     }

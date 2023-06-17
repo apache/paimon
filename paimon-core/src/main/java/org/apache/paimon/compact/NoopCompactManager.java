@@ -39,6 +39,11 @@ public class NoopCompactManager implements CompactManager {
     }
 
     @Override
+    public boolean shouldWaitWhenPreparingCheckpoint() {
+        return false;
+    }
+
+    @Override
     public void addNewFile(DataFileMeta file) {}
 
     @Override

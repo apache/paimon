@@ -227,9 +227,16 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
         flushWriteBuffer(waitCompaction, false);
-        trySyncLatestCompaction(
-                waitCompaction || commitForceCompact || compactManager.shouldWaitCompaction());
+        waitForCompaction(
+                waitCompaction
+                        || commitForceCompact
+                        || compactManager.shouldWaitWhenPreparingCheckpoint());
         return drainIncrement();
+    }
+
+    @VisibleForTesting
+    void waitForCompaction(boolean needSync) throws Exception {
+        trySyncLatestCompaction(needSync);
     }
 
     @Override

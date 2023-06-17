@@ -31,6 +31,8 @@ public interface CompactManager extends Closeable {
     /** Should wait compaction finish. */
     boolean shouldWaitCompaction();
 
+    boolean shouldWaitWhenPreparingCheckpoint();
+
     /** Add a new file. */
     void addNewFile(DataFileMeta file);
 

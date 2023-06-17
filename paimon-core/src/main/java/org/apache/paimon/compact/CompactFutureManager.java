@@ -18,6 +18,9 @@
 
 package org.apache.paimon.compact;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.utils.ExceptionUtils;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,15 +51,24 @@ public abstract class CompactFutureManager implements CompactManager {
             if (blocking || taskFuture.isDone()) {
                 CompactResult result;
                 try {
-                    result = taskFuture.get();
+                    result = obtainCompactResult();
                 } catch (CancellationException e) {
                     taskFuture = null;
                     return Optional.empty();
+                } catch (ExecutionException e) {
+                    throw ExceptionUtils.deepCopy(e);
+                } catch (InterruptedException e) {
+                    throw ExceptionUtils.deepCopy(e);
                 }
                 taskFuture = null;
                 return Optional.of(result);
             }
         }
         return Optional.empty();
+    }
+
+    @VisibleForTesting
+    public CompactResult obtainCompactResult() throws InterruptedException, ExecutionException {
+        return taskFuture.get();
     }
 }
