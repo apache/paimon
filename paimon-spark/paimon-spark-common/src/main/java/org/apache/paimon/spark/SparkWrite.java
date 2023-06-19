@@ -51,6 +51,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
+@Deprecated
 public class SparkWrite implements V1Write {
 
     private final Table table;

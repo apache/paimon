@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,29 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.paimon.spark
 
-package org.apache.paimon.spark;
+import org.apache.paimon.operation.Lock.Factory
+import org.apache.paimon.spark.commands.WriteIntoPaimonTable
+import org.apache.paimon.table.Table
 
-import org.apache.paimon.table.Table;
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.connector.write.V1Write
+import org.apache.spark.sql.sources.InsertableRelation
 
-import org.apache.spark.sql.connector.write.Write;
-import org.apache.spark.sql.connector.write.WriteBuilder;
+/** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
+class SparkV1Write(val table: Table) extends V1Write {
 
-/**
- * Spark {@link WriteBuilder}.
- *
- * <p>TODO: Support overwrite.
- */
-public class SparkWriteBuilder implements WriteBuilder {
-
-    private final Table table;
-
-    public SparkWriteBuilder(Table table) {
-        this.table = table;
-    }
-
-    @Override
-    public Write build() {
-        return new SparkV1Write(table);
-    }
+  override def toInsertableRelation: InsertableRelation = {
+    (data: DataFrame, overwrite: Boolean) =>
+      {
+        WriteIntoPaimonTable(table, overwrite, data).run(data.sparkSession)
+      }
+  }
 }
