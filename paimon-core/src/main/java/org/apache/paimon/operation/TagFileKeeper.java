@@ -25,6 +25,8 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.TagManager;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,9 +34,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import static org.apache.paimon.operation.DeletionUtils.addMergedDataFiles;
 import static org.apache.paimon.operation.DeletionUtils.containsDataFile;
-import static org.apache.paimon.operation.DeletionUtils.indexDataFiles;
-import static org.apache.paimon.operation.DeletionUtils.readEntries;
 
 /** Util class to provide methods to prevent tag files to be deleted when expiring snapshots. */
 public class TagFileKeeper {
@@ -42,6 +43,7 @@ public class TagFileKeeper {
     private final ManifestList manifestList;
     private final ManifestFile manifestFile;
     private final TagManager tagManager;
+    @Nullable private final Integer scanManifestParallelism;
 
     private long cachedTag = -1;
     private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles;
@@ -49,10 +51,15 @@ public class TagFileKeeper {
     private List<Snapshot> taggedSnapshots;
 
     public TagFileKeeper(
-            ManifestList manifestList, ManifestFile manifestFile, TagManager tagManager) {
+            ManifestList manifestList,
+            ManifestFile manifestFile,
+            TagManager tagManager,
+            @Nullable Integer scanManifestParallelism) {
         this.manifestList = manifestList;
         this.manifestFile = manifestFile;
         this.tagManager = tagManager;
+        this.scanManifestParallelism = scanManifestParallelism;
+
         this.cachedTagDataFiles = new HashMap<>();
     }
 
@@ -90,10 +97,12 @@ public class TagFileKeeper {
 
     private void refresh(Snapshot taggedSnapshot) {
         cachedTagDataFiles.clear();
-
-        Iterable<ManifestEntry> entries =
-                readEntries(taggedSnapshot.dataManifests(manifestList), manifestFile);
-        indexDataFiles(cachedTagDataFiles, ManifestEntry.mergeEntries(entries));
+        addMergedDataFiles(
+                cachedTagDataFiles,
+                taggedSnapshot,
+                manifestList,
+                manifestFile,
+                scanManifestParallelism);
     }
 
     private int findPreviousTag(long targetSnapshotId, List<Snapshot> taggedSnapshots) {

@@ -289,14 +289,10 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
 
         TagManager tagManager = new TagManager(fileIO, path);
-        SnapshotManager snapshotManager = snapshotManager();
         Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
 
-        if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
-            TagDeletion tagDeletion = store().newTagDeletion();
-            tagDeletion.delete(taggedSnapshot);
-        }
-
+        TagDeletion tagDeletion = store().newTagDeletion();
+        tagDeletion.delete(taggedSnapshot);
         fileIO.deleteQuietly(tagManager.tagPath(tagName));
     }
 }

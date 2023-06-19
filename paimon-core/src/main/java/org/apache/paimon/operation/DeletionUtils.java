@@ -18,17 +18,24 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ParallellyExecuteUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -44,20 +51,30 @@ public class DeletionUtils {
     private static final Logger LOG = LoggerFactory.getLogger(DeletionUtils.class);
 
     public static Iterable<ManifestEntry> readEntries(
-            List<ManifestFileMeta> manifests, ManifestFile manifestFile) {
+            List<ManifestFileMeta> manifests,
+            ManifestFile manifestFile,
+            @Nullable Integer scanManifestParallelism) {
         return ParallellyExecuteUtils.parallelismBatchIterable(
                 files ->
                         files.parallelStream()
                                 .flatMap(m -> manifestFile.read(m.fileName()).stream())
                                 .collect(Collectors.toList()),
                 manifests,
-                null);
+                scanManifestParallelism);
     }
 
-    public static void indexDataFiles(
+    public static void addMergedDataFiles(
             Map<BinaryRow, Map<Integer, Set<String>>> dataFiles,
-            Iterable<ManifestEntry> dataEntries) {
-        for (ManifestEntry entry : dataEntries) {
+            Snapshot snapshot,
+            ManifestList manifestList,
+            ManifestFile manifestFile,
+            @Nullable Integer scanManifestParallelism) {
+        Iterable<ManifestEntry> entries =
+                readEntries(
+                        snapshot.dataManifests(manifestList),
+                        manifestFile,
+                        scanManifestParallelism);
+        for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
             dataFiles
                     .computeIfAbsent(entry.partition(), p -> new HashMap<>())
                     .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
@@ -119,5 +136,22 @@ public class DeletionUtils {
             LOG.debug("Failed to delete directory '{}'. Check whether it is empty.", path);
             return false;
         }
+    }
+
+    public static Set<String> collectManifestSkippingSet(
+            Snapshot snapshot, ManifestList manifestList, IndexFileHandler indexFileHandler) {
+        Set<String> skip =
+                snapshot.dataManifests(manifestList).stream()
+                        .map(ManifestFileMeta::fileName)
+                        .collect(Collectors.toCollection(HashSet::new));
+        String indexManifest = snapshot.indexManifest();
+        if (indexManifest != null) {
+            skip.add(indexManifest);
+            indexFileHandler.readManifest(indexManifest).stream()
+                    .map(IndexManifestEntry::indexFile)
+                    .map(IndexFileMeta::fileName)
+                    .forEach(skip::add);
+        }
+        return skip;
     }
 }

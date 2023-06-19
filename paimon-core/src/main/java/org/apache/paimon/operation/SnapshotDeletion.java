@@ -24,7 +24,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -265,18 +264,6 @@ public class SnapshotDeletion {
     }
 
     public Set<String> collectManifestSkippingSet(Snapshot snapshot) {
-        Set<String> skip =
-                snapshot.dataManifests(manifestList).stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toCollection(HashSet::new));
-        String indexManifest = snapshot.indexManifest();
-        if (indexManifest != null) {
-            skip.add(indexManifest);
-            indexFileHandler.readManifest(indexManifest).stream()
-                    .map(IndexManifestEntry::indexFile)
-                    .map(IndexFileMeta::fileName)
-                    .forEach(skip::add);
-        }
-        return skip;
+        return DeletionUtils.collectManifestSkippingSet(snapshot, manifestList, indexFileHandler);
     }
 }

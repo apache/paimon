@@ -22,13 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,46 +54,16 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
-    private final IndexFileHandler indexFileHandler;
 
     private final TagFileKeeper tagFileKeeper;
 
     private Lock lock;
 
     public FileStoreExpireImpl(
-            FileIO fileIO,
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
-            FileStorePathFactory pathFactory,
-            SnapshotManager snapshotManager,
-            IndexFileHandler indexFileHandler,
-            ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory) {
-        this(
-                numRetainedMin,
-                numRetainedMax,
-                millisRetained,
-                snapshotManager,
-                indexFileHandler,
-                new SnapshotDeletion(
-                        fileIO,
-                        pathFactory,
-                        manifestFileFactory.create(),
-                        manifestListFactory.create(),
-                        indexFileHandler),
-                new TagFileKeeper(
-                        manifestListFactory.create(),
-                        manifestFileFactory.create(),
-                        new TagManager(fileIO, snapshotManager.tablePath())));
-    }
-
-    public FileStoreExpireImpl(
             int numRetainedMin,
             int numRetainedMax,
             long millisRetained,
             SnapshotManager snapshotManager,
-            IndexFileHandler indexFileHandler,
             SnapshotDeletion snapshotDeletion,
             TagFileKeeper tagFileKeeper) {
         this.numRetainedMin = numRetainedMin;
@@ -108,7 +72,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         this.snapshotManager = snapshotManager;
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        this.indexFileHandler = indexFileHandler;
         this.snapshotDeletion = snapshotDeletion;
         this.tagFileKeeper = tagFileKeeper;
     }

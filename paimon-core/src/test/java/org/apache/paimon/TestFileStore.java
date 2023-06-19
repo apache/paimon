@@ -40,6 +40,7 @@ import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.operation.TagFileKeeper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -52,6 +53,7 @@ import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -131,15 +133,16 @@ public class TestFileStore extends KeyValueFileStore {
     public FileStoreExpireImpl newExpire(
             int numRetainedMin, int numRetainedMax, long millisRetained) {
         return new FileStoreExpireImpl(
-                fileIO,
                 numRetainedMin,
                 numRetainedMax,
                 millisRetained,
-                pathFactory(),
                 snapshotManager(),
-                newIndexFileHandler(),
-                manifestFileFactory(),
-                manifestListFactory());
+                newSnapshotDeletion(),
+                new TagFileKeeper(
+                        manifestListFactory().create(),
+                        manifestFileFactory().create(),
+                        new TagManager(fileIO, options.path()),
+                        options.scanManifestParallelism()));
     }
 
     public List<Snapshot> commitData(

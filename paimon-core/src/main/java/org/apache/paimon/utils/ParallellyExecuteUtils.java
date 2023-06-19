@@ -20,6 +20,8 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.List;
@@ -36,7 +38,7 @@ public class ParallellyExecuteUtils {
 
     // reduce memory usage by batch iterable process, the cached result in memory will be queueSize
     public static <T, U> Iterable<T> parallelismBatchIterable(
-            Function<List<U>, List<T>> processor, List<U> input, Integer queueSize) {
+            Function<List<U>, List<T>> processor, List<U> input, @Nullable Integer queueSize) {
         if (queueSize == null) {
             queueSize = FileUtils.COMMON_IO_FORK_JOIN_POOL.getParallelism();
         } else if (queueSize <= 0) {

@@ -376,7 +376,7 @@ public class FileDeletionTest {
         Snapshot snapshot1 = snapshotManager.snapshot(1);
         List<ManifestFileMeta> snapshot1Data = snapshot1.dataManifests(manifestList);
         Snapshot snapshot3 = snapshotManager.snapshot(3);
-        List<ManifestFileMeta> snapshot3Base = snapshot3.baseManifests(manifestList);
+        List<ManifestFileMeta> snapshot3Data = snapshot3.dataManifests(manifestList);
 
         List<String> manifestLists =
                 Arrays.asList(snapshot1.baseManifestList(), snapshot1.deltaManifestList());
@@ -409,7 +409,7 @@ public class FileDeletionTest {
         // check manifests
         for (ManifestFileMeta manifestFileMeta : snapshot1Data) {
             Path path = pathFactory.toManifestFilePath(manifestFileMeta.fileName());
-            if (snapshot3Base.contains(manifestFileMeta)) {
+            if (snapshot3Data.contains(manifestFileMeta)) {
                 assertPathExists(fileIO, path);
             } else {
                 assertPathNotExists(fileIO, path);

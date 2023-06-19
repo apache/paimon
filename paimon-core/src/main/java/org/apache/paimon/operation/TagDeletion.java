@@ -32,15 +32,17 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
+import static org.apache.paimon.operation.DeletionUtils.addMergedDataFiles;
+import static org.apache.paimon.operation.DeletionUtils.collectManifestSkippingSet;
 import static org.apache.paimon.operation.DeletionUtils.containsDataFile;
-import static org.apache.paimon.operation.DeletionUtils.indexDataFiles;
 import static org.apache.paimon.operation.DeletionUtils.readEntries;
 import static org.apache.paimon.operation.DeletionUtils.tryDeleteDirectories;
 
@@ -55,6 +57,7 @@ public class TagDeletion {
     private final ManifestList manifestList;
     private final ManifestFile manifestFile;
     private final IndexFileHandler indexFileHandler;
+    @Nullable private final Integer scanManifestParallelism;
 
     private final SnapshotManager snapshotManager;
     private final List<Snapshot> taggedSnapshots;
@@ -68,12 +71,14 @@ public class TagDeletion {
             FileStorePathFactory pathFactory,
             ManifestList manifestList,
             ManifestFile manifestFile,
-            IndexFileHandler indexFileHandler) {
+            IndexFileHandler indexFileHandler,
+            @Nullable Integer scanManifestParallelism) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestList = manifestList;
         this.manifestFile = manifestFile;
         this.indexFileHandler = indexFileHandler;
+        this.scanManifestParallelism = scanManifestParallelism;
 
         this.snapshotManager = new SnapshotManager(fileIO, tablePath);
         this.taggedSnapshots = new TagManager(fileIO, tablePath).taggedSnapshots();
@@ -84,17 +89,21 @@ public class TagDeletion {
 
     /** Delete unused data files, manifest files and empty data file directories of tag. */
     public void delete(Snapshot taggedSnapshot) {
-        // collect from the earliest snapshot's base
+        if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
+            return;
+        }
+
+        // collect from the earliest snapshot
         Snapshot earliest = snapshotManager.snapshot(snapshotManager.earliestSnapshotId());
-        collectSkip(earliest.baseManifests(manifestList));
+        collectSkip(earliest);
 
         // collect from the neighbor tags
         int index = findIndex(taggedSnapshot);
         if (index - 1 >= 0) {
-            collectSkip(taggedSnapshots.get(index - 1).dataManifests(manifestList));
+            collectSkip(taggedSnapshots.get(index - 1));
         }
         if (index + 1 < taggedSnapshots.size()) {
-            collectSkip(taggedSnapshots.get(index + 1).dataManifests(manifestList));
+            collectSkip(taggedSnapshots.get(index + 1));
         }
 
         // delete data files and empty directories
@@ -103,20 +112,21 @@ public class TagDeletion {
         deleteManifestFiles(taggedSnapshot);
     }
 
-    private void collectSkip(List<ManifestFileMeta> manifestFileMetas) {
-        Iterable<ManifestEntry> entries = readEntries(manifestFileMetas, manifestFile);
-        indexDataFiles(skippedDataFiles, ManifestEntry.mergeEntries(entries));
+    private void collectSkip(Snapshot snapshot) {
+        addMergedDataFiles(
+                skippedDataFiles, snapshot, manifestList, manifestFile, scanManifestParallelism);
         skippedManifests.addAll(
-                manifestFileMetas.stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toSet()));
+                collectManifestSkippingSet(snapshot, manifestList, indexFileHandler));
     }
 
     private void deleteDataFiles(Snapshot taggedSnapshot) {
         // delete data files
         Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
         Iterable<ManifestEntry> entries =
-                readEntries(taggedSnapshot.dataManifests(manifestList), manifestFile);
+                readEntries(
+                        taggedSnapshot.dataManifests(manifestList),
+                        manifestFile,
+                        scanManifestParallelism);
         for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
             if (!containsDataFile(skippedDataFiles, entry)) {
                 Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
@@ -152,9 +162,14 @@ public class TagDeletion {
         // check exists, it may have been deleted by other snapshots
         if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
             for (IndexManifestEntry entry : indexFileHandler.readManifest(indexManifest)) {
-                indexFileHandler.deleteIndexFile(entry);
+                if (!skippedManifests.contains(entry.indexFile().fileName())) {
+                    indexFileHandler.deleteIndexFile(entry);
+                }
             }
-            indexFileHandler.deleteManifest(indexManifest);
+
+            if (!skippedManifests.contains(indexManifest)) {
+                indexFileHandler.deleteManifest(indexManifest);
+            }
         }
     }
 
