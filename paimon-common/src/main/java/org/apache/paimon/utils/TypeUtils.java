@@ -56,7 +56,7 @@ public class TypeUtils {
             case CHAR:
             case VARCHAR:
                 int stringLength = DataTypeChecks.getLength(type);
-                if (s.length() > stringLength) {
+                if (stringLength != VarCharType.MAX_LENGTH && str.numChars() > stringLength) {
                     throw new IllegalArgumentException(
                             String.format(
                                     "Length of type %s is %d, but casting result has a length of %d",
