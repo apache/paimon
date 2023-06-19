@@ -39,7 +39,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -123,37 +122,7 @@ public class SnapshotDeletion {
      * #deleteAddedDataFiles}.
      */
     public void tryDeleteDirectories(Map<BinaryRow, Set<Integer>> deletionBuckets) {
-        // All directory paths are deduplicated and sorted by hierarchy level
-        Map<Integer, Set<Path>> deduplicate = new HashMap<>();
-        for (Map.Entry<BinaryRow, Set<Integer>> entry : deletionBuckets.entrySet()) {
-            // try to delete bucket directories
-            for (Integer bucket : entry.getValue()) {
-                tryDeleteEmptyDirectory(pathFactory.bucketPath(entry.getKey(), bucket));
-            }
-
-            List<Path> hierarchicalPaths = pathFactory.getHierarchicalPartitionPath(entry.getKey());
-            int hierarchies = hierarchicalPaths.size();
-            if (hierarchies == 0) {
-                continue;
-            }
-
-            if (tryDeleteEmptyDirectory(hierarchicalPaths.get(hierarchies - 1))) {
-                // deduplicate high level partition directories
-                for (int hierarchy = 0; hierarchy < hierarchies - 1; hierarchy++) {
-                    Path path = hierarchicalPaths.get(hierarchy);
-                    deduplicate.computeIfAbsent(hierarchy, i -> new HashSet<>()).add(path);
-                }
-            }
-        }
-
-        // from deepest to shallowest
-        for (int hierarchy = deduplicate.size() - 1; hierarchy >= 0; hierarchy--) {
-            deduplicate.get(hierarchy).forEach(this::tryDeleteEmptyDirectory);
-        }
-    }
-
-    public ManifestList manifestList() {
-        return manifestList;
+        DeletionUtils.tryDeleteDirectories(deletionBuckets, pathFactory, fileIO);
     }
 
     /**
@@ -164,7 +133,7 @@ public class SnapshotDeletion {
      *     this set too. NOTE: changelog manifests won't be checked.
      */
     public void deleteManifestFiles(Set<String> skipped, Snapshot snapshot) {
-        // cannot call `toExpire.dataManifests` directly, it is possible that a job is
+        // cannot call `snapshot.dataManifests` directly, it is possible that a job is
         // killed during expiration, so some manifest files may have been deleted
         List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
         toExpireManifests.addAll(tryReadManifestList(snapshot.baseManifestList()));
@@ -293,16 +262,6 @@ public class SnapshotDeletion {
                                         }
                                     }
                                 });
-    }
-
-    private boolean tryDeleteEmptyDirectory(Path path) {
-        try {
-            fileIO.delete(path, false);
-            return true;
-        } catch (IOException e) {
-            LOG.debug("Failed to delete directory '{}'. Check whether it is empty.", path);
-            return false;
-        }
     }
 
     public Set<String> collectManifestSkippingSet(Snapshot snapshot) {

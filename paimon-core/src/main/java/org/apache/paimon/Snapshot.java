@@ -346,9 +346,19 @@ public class Snapshot {
      */
     public List<ManifestFileMeta> dataManifests(ManifestList manifestList) {
         List<ManifestFileMeta> result = new ArrayList<>();
-        result.addAll(manifestList.read(baseManifestList));
+        result.addAll(baseManifests(manifestList));
         result.addAll(deltaManifests(manifestList));
         return result;
+    }
+
+    /**
+     * Return a {@link ManifestFileMeta} for each base manifest in this snapshot.
+     *
+     * @param manifestList a {@link ManifestList} instance used for reading files at snapshot.
+     * @return a list of ManifestFileMeta.
+     */
+    public List<ManifestFileMeta> baseManifests(ManifestList manifestList) {
+        return manifestList.read(baseManifestList);
     }
 
     /**

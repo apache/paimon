@@ -113,6 +113,20 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
+    public void testIndexFileExpirationWhenDeletingTag() throws Exception {
+        prepareExpireTable();
+        table.createTag("tag3", 3);
+
+        long indexFileSize = indexFileSize();
+        long indexManifestSize = indexManifestSize();
+
+        table.deleteTag("tag3");
+
+        assertThat(indexFileSize()).isEqualTo(indexFileSize);
+        assertThat(indexManifestSize()).isEqualTo(indexManifestSize);
+    }
+
+    @Test
     public void testIndexFileRollback() throws Exception {
         prepareExpireTable();
 

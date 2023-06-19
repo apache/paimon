@@ -23,17 +23,18 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.utils.ParallellyExecuteUtils;
 import org.apache.paimon.utils.TagManager;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
+
+import static org.apache.paimon.operation.DeletionUtils.containsDataFile;
+import static org.apache.paimon.operation.DeletionUtils.indexDataFiles;
+import static org.apache.paimon.operation.DeletionUtils.readEntries;
 
 /** Util class to provide methods to prevent tag files to be deleted when expiring snapshots. */
 public class TagFileKeeper {
@@ -65,7 +66,7 @@ public class TagFileKeeper {
         if (index >= 0) {
             tryRefresh(taggedSnapshots.get(index));
         }
-        return entry -> index >= 0 && contains(entry);
+        return entry -> index >= 0 && containsDataFile(cachedTagDataFiles, entry);
     }
 
     public List<Snapshot> findOverlappedSnapshots(long beginInclusive, long endExclusive) {
@@ -91,31 +92,8 @@ public class TagFileKeeper {
         cachedTagDataFiles.clear();
 
         Iterable<ManifestEntry> entries =
-                ParallellyExecuteUtils.parallelismBatchIterable(
-                        files ->
-                                files.parallelStream()
-                                        .flatMap(m -> manifestFile.read(m.fileName()).stream())
-                                        .collect(Collectors.toList()),
-                        taggedSnapshot.dataManifests(manifestList),
-                        null);
-
-        for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
-            cachedTagDataFiles
-                    .computeIfAbsent(entry.partition(), p -> new HashMap<>())
-                    .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
-                    .add(entry.file().fileName());
-        }
-    }
-
-    private boolean contains(ManifestEntry entry) {
-        Map<Integer, Set<String>> buckets = cachedTagDataFiles.get(entry.partition());
-        if (buckets != null) {
-            Set<String> fileNames = buckets.get(entry.bucket());
-            if (fileNames != null) {
-                return fileNames.contains(entry.file().fileName());
-            }
-        }
-        return false;
+                readEntries(taggedSnapshot.dataManifests(manifestList), manifestFile);
+        indexDataFiles(cachedTagDataFiles, ManifestEntry.mergeEntries(entries));
     }
 
     private int findPreviousTag(long targetSnapshotId, List<Snapshot> taggedSnapshots) {

@@ -25,6 +25,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -44,6 +45,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
@@ -280,5 +282,21 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
         TagManager tagManager = new TagManager(fileIO, path);
         tagManager.createTag(snapshot, tagName);
+    }
+
+    @Override
+    public void deleteTag(String tagName) {
+        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+
+        TagManager tagManager = new TagManager(fileIO, path);
+        SnapshotManager snapshotManager = snapshotManager();
+        Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
+
+        if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
+            TagDeletion tagDeletion = store().newTagDeletion();
+            tagDeletion.delete(taggedSnapshot);
+        }
+
+        fileIO.deleteQuietly(tagManager.tagPath(tagName));
     }
 }

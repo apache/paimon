@@ -347,6 +347,159 @@ public class FileDeletionTest {
         assertPathExists(fileIO, pathFactory.toManifestListPath(tag1.deltaManifestList()));
     }
 
+    @Test
+    public void testDeleteTagWithSnapshot() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
+        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        SnapshotManager snapshotManager = store.snapshotManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: commit A to bucket 0 and B to bucket 1
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        for (int bucket : Arrays.asList(0, 1)) {
+            List<KeyValue> kvs = partitionedData(5, gen);
+            writeData(store, kvs, partition, bucket, writers);
+        }
+        commitData(store, commitIdentifier++, writers);
+
+        // snapshot 2: commit -A (by cleaning bucket 0)
+        cleanBucket(store, partition, 0);
+
+        // snapshot 3: commit C to bucket 2
+        writers.clear();
+        writeData(store, partitionedData(5, gen), partition, 2, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        ManifestList manifestList = store.manifestListFactory().create();
+        Snapshot snapshot1 = snapshotManager.snapshot(1);
+        List<ManifestFileMeta> snapshot1Data = snapshot1.dataManifests(manifestList);
+        Snapshot snapshot3 = snapshotManager.snapshot(3);
+        List<ManifestFileMeta> snapshot3Base = snapshot3.baseManifests(manifestList);
+
+        List<String> manifestLists =
+                Arrays.asList(snapshot1.baseManifestList(), snapshot1.deltaManifestList());
+
+        // create tag1
+        tagManager.createTag(snapshot1, "tag1");
+
+        // expire snapshot 1, 2
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
+
+        // check before deleting tag1
+        FileStorePathFactory pathFactory = store.pathFactory();
+        for (int i = 0; i < 3; i++) {
+            assertPathExists(fileIO, pathFactory.bucketPath(partition, i));
+        }
+        for (ManifestFileMeta manifestFileMeta : snapshot1Data) {
+            assertPathExists(fileIO, pathFactory.toManifestFilePath(manifestFileMeta.fileName()));
+        }
+        for (String manifestListName : manifestLists) {
+            assertPathExists(fileIO, pathFactory.toManifestListPath(manifestListName));
+        }
+
+        store.newTagDeletion().delete(tagManager.taggedSnapshot("tag1"));
+
+        // check data files
+        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 2));
+
+        // check manifests
+        for (ManifestFileMeta manifestFileMeta : snapshot1Data) {
+            Path path = pathFactory.toManifestFilePath(manifestFileMeta.fileName());
+            if (snapshot3Base.contains(manifestFileMeta)) {
+                assertPathExists(fileIO, path);
+            } else {
+                assertPathNotExists(fileIO, path);
+            }
+        }
+        for (String manifestListName : manifestLists) {
+            assertPathNotExists(fileIO, pathFactory.toManifestListPath(manifestListName));
+        }
+    }
+
+    @Test
+    public void testDeleteTagWithOtherTag() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
+        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        SnapshotManager snapshotManager = store.snapshotManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: commit A to bucket 0
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        writeData(store, partitionedData(5, gen), partition, 0, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        // snapshot 2: commit B to bucket 1
+        writers.clear();
+        writeData(store, partitionedData(5, gen), partition, 1, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        // snapshot 3: commit -A (by cleaning bucket 0)
+        cleanBucket(store, partition, 0);
+
+        // snapshot 4: commit -B (by cleaning bucket 1)
+        cleanBucket(store, partition, 1);
+
+        // snapshot 5: commit C to snapshot 2 (used as the last snapshot)
+        cleanBucket(store, partition, 2);
+
+        ManifestList manifestList = store.manifestListFactory().create();
+        Snapshot snapshot2 = snapshotManager.snapshot(2);
+        List<ManifestFileMeta> snapshot2Data = snapshot2.dataManifests(manifestList);
+
+        List<String> manifestLists =
+                Arrays.asList(snapshot2.baseManifestList(), snapshot2.deltaManifestList());
+
+        // create tags
+        tagManager.createTag(snapshotManager.snapshot(1), "tag1");
+        tagManager.createTag(snapshotManager.snapshot(2), "tag2");
+        tagManager.createTag(snapshotManager.snapshot(4), "tag3");
+
+        // expire snapshot 1, 2, 3, 4
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
+
+        // check before deleting tag2
+        FileStorePathFactory pathFactory = store.pathFactory();
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+
+        for (ManifestFileMeta manifestFileMeta : snapshot2Data) {
+            assertPathExists(fileIO, pathFactory.toManifestFilePath(manifestFileMeta.fileName()));
+        }
+        for (String manifestListName : manifestLists) {
+            assertPathExists(fileIO, pathFactory.toManifestListPath(manifestListName));
+        }
+
+        store.newTagDeletion().delete(tagManager.taggedSnapshot("tag2"));
+
+        // check data files
+        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
+        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 1));
+
+        // check manifests
+        Snapshot tag1 = tagManager.taggedSnapshot("tag1");
+        Snapshot tag3 = tagManager.taggedSnapshot("tag3");
+        List<ManifestFileMeta> existing = tag1.dataManifests(manifestList);
+        existing.addAll(tag3.dataManifests(manifestList));
+        for (ManifestFileMeta manifestFileMeta : snapshot2Data) {
+            Path path = pathFactory.toManifestFilePath(manifestFileMeta.fileName());
+            if (existing.contains(manifestFileMeta)) {
+                assertPathExists(fileIO, path);
+            } else {
+                assertPathNotExists(fileIO, path);
+            }
+        }
+
+        for (String manifestListName : manifestLists) {
+            assertPathNotExists(fileIO, pathFactory.toManifestListPath(manifestListName));
+        }
+    }
+
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode) throws Exception {
         return createStore(mode, 2);
     }
