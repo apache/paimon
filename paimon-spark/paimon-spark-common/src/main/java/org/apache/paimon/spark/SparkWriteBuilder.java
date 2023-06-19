@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.paimon.table.Table;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.spark.sql.connector.write.Write;
 import org.apache.spark.sql.connector.write.WriteBuilder;
@@ -30,14 +30,14 @@ import org.apache.spark.sql.connector.write.WriteBuilder;
  */
 public class SparkWriteBuilder implements WriteBuilder {
 
-    private final Table table;
+    private final FileStoreTable table;
 
-    public SparkWriteBuilder(Table table) {
+    public SparkWriteBuilder(FileStoreTable table) {
         this.table = table;
     }
 
     @Override
     public Write build() {
-        return new SparkV1Write(table);
+        return new SparkWrite(table);
     }
 }

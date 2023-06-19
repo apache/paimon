@@ -19,24 +19,26 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.index.PartitionIndex
-import org.apache.paimon.spark.SparkRow
-import org.apache.paimon.table.{FileStoreTable, Table}
+import org.apache.paimon.operation.Lock.Factory
+import org.apache.paimon.spark.{SparkRow, SparkTypeUtils}
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, InnerTableCommit, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.{Row, SparkSession}
-import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.{DataFrame, RelationalGroupedDataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.functions._
+import org.apache.spark.sql.types.{IntegerType, StructField, StructType}
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 /** Used to write a [[DataFrame]] into a paimon table. */
 case class WriteIntoPaimonTable(
-    table: Table,
+    table: FileStoreTable,
+    lockFactory: Factory,
     overwrite: Boolean,
     data: DataFrame)
   extends RunnableCommand
@@ -44,44 +46,56 @@ case class WriteIntoPaimonTable(
 
   import WriteIntoPaimonTable._
 
+  private lazy val tableSchema = table.schema()
+
+  private lazy val rowType = table.rowType()
+
+  private lazy val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+
+  private lazy val serializer = new CommitMessageSerializer
+
   if (overwrite) {
     throw new UnsupportedOperationException("Overwrite is unsupported.");
   }
 
-  private val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
-  private val rowType = writeBuilder.rowType()
-  private lazy val serializer = new CommitMessageSerializer
-
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
-    val partitioned = if (table.partitionKeys().isEmpty) {
+    val partitionCols = table.partitionKeys().asScala.map(col)
+    val partitioned = if (partitionCols.isEmpty) {
       data
     } else {
       // repartition data in order to reduce the number of PartitionIndex for per Spark Task.
-      data.repartition(table.partitionKeys().asScala.map(col): _*)
+      data.repartition(partitionCols: _*)
     }
 
     // append _bucket_ column as placeholder
     val withBucketCol = partitioned.withColumn(BUCKET_COL, lit(-1))
     val bucketColIdx = withBucketCol.schema.size - 1
 
+    val groupedSchema = StructType(
+      SparkTypeUtils.fromPaimonRowType(tableSchema.logicalPartitionType()).fields ++ Seq(
+        StructField(BUCKET_COL, IntegerType)))
+    val groupedEncoder = RowEncoder.apply(groupedSchema).resolveAndBind()
+    val bucketColIdxInGrouped = groupedSchema.size - 1
+
     val dataEncoder = RowEncoder.apply(withBucketCol.schema).resolveAndBind()
     val toRow = dataEncoder.createSerializer()
     val fromRow = dataEncoder.createDeserializer()
 
     val bucketProcessor = if (isDynamicBucketTable) {
-      val fileStoreTable = table.asInstanceOf[FileStoreTable]
-      DynamicBucketProcessor(fileStoreTable, rowType, bucketColIdx, toRow, fromRow)
+      DynamicBucketProcessor(table, rowType, bucketColIdx, toRow, fromRow)
     } else {
       CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
     }
     val committables =
       withBucketCol
         .mapPartitions(bucketProcessor.processPartition)(dataEncoder)
-        .groupByKey(row => row.getInt(bucketColIdx))
+        .groupBy(partitionCols ++ Seq(col(BUCKET_COL)): _*)
+        .as[Row, Row](groupedEncoder, dataEncoder)
         .flatMapGroups {
-          (bucket, iter) =>
+          (group, iter) =>
+            val bucket = group.getInt(bucketColIdxInGrouped)
             val write = writeBuilder.newWrite()
             try {
               val serializer = new CommitMessageSerializer
