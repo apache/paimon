@@ -24,7 +24,6 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
@@ -55,27 +54,12 @@ public class TypeUtils {
         switch (type.getTypeRoot()) {
             case CHAR:
             case VARCHAR:
-                int stringLength = DataTypeChecks.getLength(type);
-                if (s.length() > stringLength) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Length of type %s is %d, but casting result has a length of %d",
-                                    type, stringLength, s.length()));
-                }
                 return str;
             case BOOLEAN:
                 return BinaryStringUtils.toBoolean(str);
             case BINARY:
             case VARBINARY:
-                int binaryLength = DataTypeChecks.getLength(type);
-                byte[] bytes = s.getBytes();
-                if (bytes.length > binaryLength) {
-                    throw new IllegalArgumentException(
-                            String.format(
-                                    "Length of type %s is %d, but casting result has a length of %d",
-                                    type, binaryLength, bytes.length));
-                }
-                return bytes;
+                return s.getBytes();
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) type;
                 return Decimal.fromBigDecimal(

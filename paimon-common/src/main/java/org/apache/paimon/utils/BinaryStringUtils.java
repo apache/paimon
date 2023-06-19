@@ -21,18 +21,14 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeChecks;
 
 import java.time.DateTimeException;
-import java.util.Arrays;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.data.BinaryString.fromString;
-import static org.apache.paimon.types.DataTypeRoot.BINARY;
-import static org.apache.paimon.types.DataTypeRoot.CHAR;
 
 /** Util for {@link BinaryString}. */
 public class BinaryStringUtils {
@@ -305,32 +301,14 @@ public class BinaryStringUtils {
     }
 
     public static BinaryString toCharacterString(BinaryString strData, DataType type) {
-        final boolean targetCharType = type.getTypeRoot() == CHAR;
-        final int targetLength = DataTypeChecks.getLength(type);
-        if (strData.numChars() > targetLength) {
-            return strData.substring(0, targetLength);
-        } else if (strData.numChars() < targetLength && targetCharType) {
-            int padLength = targetLength - strData.numChars();
-            BinaryString padString = BinaryString.blankString(padLength);
-            return StringUtils.concat(strData, padString);
-        }
+        // DO NOT Truncate or fill, let the data remain in its original form, even it is not
+        // compatible with the precision.
         return strData;
     }
 
     public static byte[] toBinaryString(byte[] byteArrayTerm, DataType type) {
-        final boolean targetBinaryType = type.getTypeRoot() == BINARY;
-        final int targetLength = DataTypeChecks.getLength(type);
-        if (byteArrayTerm.length == targetLength) {
-            return byteArrayTerm;
-        }
-        if (targetBinaryType) {
-            return Arrays.copyOf(byteArrayTerm, targetLength);
-        } else {
-            if (byteArrayTerm.length <= targetLength) {
-                return byteArrayTerm;
-            } else {
-                return Arrays.copyOf(byteArrayTerm, targetLength);
-            }
-        }
+        // DO NOT Truncate or fill, let the data remain in its original form, even it is not
+        // compatible with the precision.
+        return byteArrayTerm;
     }
 }

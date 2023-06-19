@@ -44,9 +44,8 @@ class TimeToStringCastRule extends AbstractCastRule<Integer, BinaryString> {
 
     @Override
     public CastExecutor<Integer, BinaryString> create(DataType inputType, DataType targetType) {
+        int precision = DataTypeChecks.getPrecision(inputType);
         return value ->
-                BinaryString.fromString(
-                        DateTimeUtils.formatTimestampMillis(
-                                value, DataTypeChecks.getPrecision(inputType)));
+                BinaryString.fromString(DateTimeUtils.formatTimestampMillis(value, precision));
     }
 }
