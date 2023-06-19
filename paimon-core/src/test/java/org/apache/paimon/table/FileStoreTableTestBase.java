@@ -123,6 +123,21 @@ public abstract class FileStoreTableTestBase {
                     },
                     new String[] {"pk", "pt0", "pt1", "v"});
 
+    protected static final RowType ROW_TYPE_WITH_TIMESTAMP =
+            RowType.of(
+                    new DataType[] {
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.BIGINT(),
+                        DataTypes.TIMESTAMP(0),
+                        DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3),
+                        DataTypes.TIMESTAMP(6),
+                        DataTypes.STRING()
+                    },
+                    new String[] {"pt", "a", "b", "sec", "mills", "tm0", "tm3", "tm6", "non_time"});
+
     protected static final int[] PROJECTION = new int[] {2, 1};
     protected static final Function<InternalRow, String> BATCH_ROW_TO_STRING =
             rowData ->
@@ -155,6 +170,26 @@ public abstract class FileStoreTableTestBase {
     protected static final Function<InternalRow, String> CHANGELOG_ROW_TO_STRING =
             rowData ->
                     rowData.getRowKind().shortString() + " " + BATCH_ROW_TO_STRING.apply(rowData);
+
+    protected static final Function<InternalRow, String> ROW_WITH_TIMESTAMP_TO_STRING =
+            rowData ->
+                    rowData.getInt(0)
+                            + "|"
+                            + rowData.getInt(1)
+                            + "|"
+                            + rowData.getInt(2)
+                            + "|"
+                            + rowData.getInt(3)
+                            + "|"
+                            + rowData.getLong(4)
+                            + "|"
+                            + rowData.getTimestamp(5, 0)
+                            + "|"
+                            + rowData.getTimestamp(6, 3)
+                            + "|"
+                            + rowData.getTimestamp(7, 6)
+                            + "|"
+                            + rowData.getString(8);
 
     @TempDir java.nio.file.Path tempDir;
 
