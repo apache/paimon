@@ -47,11 +47,9 @@ import java.util.List;
  * write-combined). Besides, we don't need to save state in this function, it will invoke a full
  * scan when starting up, and scan continuously for the following snapshot.
  */
-public class UnawareBucketCompactorCoordinationSourceFunction
-        extends RichSourceFunction<AppendOnlyCompactionTask> {
+public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCompactionTask> {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(UnawareBucketCompactorCoordinationSourceFunction.class);
+    private static final Logger LOG = LoggerFactory.getLogger(BucketUnawareCompactSource.class);
     private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
 
     private final AppendOnlyFileStoreTable table;
@@ -62,7 +60,7 @@ public class UnawareBucketCompactorCoordinationSourceFunction
     private transient SourceContext<AppendOnlyCompactionTask> ctx;
     private volatile boolean isRunning = true;
 
-    public UnawareBucketCompactorCoordinationSourceFunction(
+    public BucketUnawareCompactSource(
             AppendOnlyFileStoreTable table,
             boolean isStreaming,
             long scanInterval,
@@ -117,12 +115,11 @@ public class UnawareBucketCompactorCoordinationSourceFunction
 
     public static DataStreamSource<AppendOnlyCompactionTask> buildSource(
             StreamExecutionEnvironment env,
-            UnawareBucketCompactorCoordinationSourceFunction source,
+            BucketUnawareCompactSource source,
             boolean streaming,
             String tableIdentifier) {
-        final StreamSource<
-                        AppendOnlyCompactionTask, UnawareBucketCompactorCoordinationSourceFunction>
-                sourceOperator = new StreamSource<>(source);
+        final StreamSource<AppendOnlyCompactionTask, BucketUnawareCompactSource> sourceOperator =
+                new StreamSource<>(source);
         return new DataStreamSource<>(
                 env,
                 new CompactionTaskTypeInfo(),

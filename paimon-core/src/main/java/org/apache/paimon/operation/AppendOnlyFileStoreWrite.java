@@ -173,8 +173,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     }
 
     @Override
-    public void withIgnorePreviousFiles(boolean emptyWriter) {
+    public void withIgnorePreviousFiles(boolean ignorePrevious) {
         // in unaware bucket mode, we need all writers to be empty
-        super.withIgnorePreviousFiles(emptyWriter || bucketMode == BucketMode.UNAWARE);
+        super.withIgnorePreviousFiles(ignorePrevious || bucketMode == BucketMode.UNAWARE);
     }
 }

@@ -127,13 +127,15 @@ public abstract class FlinkSink<T> implements Serializable {
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input, String initialCommitUser) {
         // do the actually writing action, no snapshot generated in this stage
-        SingleOutputStreamOperator<Committable> written = doWrite(input, initialCommitUser);
+        SingleOutputStreamOperator<Committable> written =
+                doWrite(input, initialCommitUser, input.getParallelism());
 
         // commit the committable to generate a new snapshot
         return doCommit(written, initialCommitUser);
     }
 
-    public SingleOutputStreamOperator<Committable> doWrite(DataStream<T> input, String commitUser) {
+    public SingleOutputStreamOperator<Committable> doWrite(
+            DataStream<T> input, String commitUser, Integer parallelism) {
         boolean isStreaming =
                 StreamExecutionEnvironmentUtils.getConfiguration(input.getExecutionEnvironment())
                                 .get(ExecutionOptions.RUNTIME_MODE)
@@ -149,7 +151,7 @@ public abstract class FlinkSink<T> implements Serializable {
                                                         .getCheckpointConfig()),
                                         isStreaming,
                                         commitUser))
-                        .setParallelism(input.getParallelism());
+                        .setParallelism(parallelism == null ? input.getParallelism() : parallelism);
         Options options = Options.fromMap(table.options());
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
             MemorySize memorySize = options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY);

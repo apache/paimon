@@ -26,7 +26,6 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
 
 import java.util.Map;
@@ -57,11 +56,8 @@ public class UnawareBucketWriteSink extends FileStoreSink {
 
     @Override
     public DataStreamSink<?> sinkFrom(DataStream<RowData> input, String initialCommitUser) {
-        // partition input to meet parallelism of 'sink.parallelism'
-        DataStream<RowData> partitioned = partition(input, parallelism);
-
         // do the actually writing action, no snapshot generated in this stage
-        DataStream<Committable> written = doWrite(partitioned, initialCommitUser);
+        DataStream<Committable> written = doWrite(input, initialCommitUser, parallelism);
 
         // if enable compaction, we need to add compaction topology to this job
         if (enableCompaction) {
@@ -80,16 +76,5 @@ public class UnawareBucketWriteSink extends FileStoreSink {
 
         // commit the committable to generate a new snapshot
         return doCommit(written, initialCommitUser);
-    }
-
-    private DataStream<RowData> partition(DataStream<RowData> input, Integer parallelism) {
-        // we set partitioner equals null, if the parallelism we set equals to input, we could chain
-        // sink operator and input in one stage
-        PartitionTransformation<RowData> partitionTransformation =
-                new PartitionTransformation<>(input.getTransformation(), null);
-        if (parallelism != null) {
-            partitionTransformation.setParallelism(parallelism);
-        }
-        return new DataStream<>(input.getExecutionEnvironment(), partitionTransformation);
     }
 }
