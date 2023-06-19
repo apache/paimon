@@ -243,7 +243,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new BooleanType(false), new CharType(5)),
                 true,
-                BinaryString.fromString("true "));
+                BinaryString.fromString("true"));
         compareCastResult(
                 CastExecutors.resolve(new BooleanType(false), new VarCharType(5)),
                 true,
@@ -289,7 +289,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new VarCharType(5)),
                 BinaryString.fromString("1234567890"),
-                BinaryString.fromString("12345"));
+                BinaryString.fromString("1234567890"));
 
         // varchar(10) to varchar(20)
         compareCastResult(
@@ -301,19 +301,19 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new CharType(5)),
                 BinaryString.fromString("1234567890"),
-                BinaryString.fromString("12345"));
+                BinaryString.fromString("1234567890"));
 
         // varchar(10) to char(20)
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new CharType(20)),
                 BinaryString.fromString("1234567890"),
-                BinaryString.fromString("1234567890          "));
+                BinaryString.fromString("1234567890"));
 
         // char(10) to varchar(5)
         compareCastResult(
                 CastExecutors.resolve(new CharType(10), new VarCharType(5)),
                 BinaryString.fromString("1234567890"),
-                BinaryString.fromString("12345"));
+                BinaryString.fromString("1234567890"));
 
         // char(10) to varchar(20)
         compareCastResult(
@@ -325,13 +325,13 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new CharType(10), new CharType(5)),
                 BinaryString.fromString("12345678  "),
-                BinaryString.fromString("12345"));
+                BinaryString.fromString("12345678  "));
 
         // char(10) to char(20)
         compareCastResult(
                 CastExecutors.resolve(new CharType(10), new CharType(20)),
                 BinaryString.fromString("12345678  "),
-                BinaryString.fromString("12345678            "));
+                BinaryString.fromString("12345678  "));
     }
 
     // From string rules
@@ -479,7 +479,7 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new VarCharType(10), new VarBinaryType(5)),
                 BinaryString.fromString("12345678"),
-                "12345".getBytes());
+                "12345678".getBytes());
 
         // string(10) to binary(20)
         compareCastResult(
@@ -496,19 +496,19 @@ public class CastExecutorTest {
         compareCastResult(
                 CastExecutors.resolve(new BinaryType(10), new BinaryType(5)),
                 "1234567890".getBytes(),
-                "12345".getBytes());
+                "1234567890".getBytes());
 
         // binary(10) to binary(20)
         compareCastResult(
                 CastExecutors.resolve(new BinaryType(10), new BinaryType(20)),
                 "12345678".getBytes(),
-                new byte[] {49, 50, 51, 52, 53, 54, 55, 56, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0});
+                "12345678".getBytes());
 
         // binary(10) to varbinary(5)
         compareCastResult(
                 CastExecutors.resolve(new BinaryType(10), new VarBinaryType(5)),
                 "1234567890".getBytes(),
-                "12345".getBytes());
+                "1234567890".getBytes());
 
         // binary(10) to varbinary(20)
         compareCastResult(
