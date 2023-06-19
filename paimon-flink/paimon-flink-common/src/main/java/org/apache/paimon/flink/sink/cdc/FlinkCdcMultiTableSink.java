@@ -33,7 +33,6 @@ import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableFunction;
@@ -61,20 +60,18 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private static final String WRITER_NAME = "CDC MultiplexWriter";
     private static final String GLOBAL_COMMITTER_NAME = "Multiplex Global Committer";
 
-    private final Lock.Factory lockFactory;
     private final boolean isOverwrite = false;
     private final Catalog.Loader catalogLoader;
 
-    public FlinkCdcMultiTableSink(Catalog.Loader catalogLoader, Lock.Factory lockFactory) {
+    public FlinkCdcMultiTableSink(Catalog.Loader catalogLoader) {
         this.catalogLoader = catalogLoader;
-        this.lockFactory = lockFactory;
     }
 
     private StoreSinkWrite.Provider createWriteProvider() {
         // for now, no compaction for multiplexed sink
         return (table, commitUser, state, ioManager, memoryPool) ->
                 new StoreSinkWriteImpl(
-                        table, commitUser, state, ioManager, isOverwrite, false, memoryPool);
+                        table, commitUser, state, ioManager, isOverwrite, false, true, memoryPool);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<CdcMultiplexRecord> input) {
