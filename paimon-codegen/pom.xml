@@ -82,7 +82,7 @@ under the License.
             <plugin>
                 <groupId>net.alchim31.maven</groupId>
                 <artifactId>scala-maven-plugin</artifactId>
-                <version>3.2.2</version>
+                <version>${scala-maven-plugin.version}</version>
                 <executions>
                     <!-- Run scala compiler in the process-resources phase, so that dependencies on
                         scala classes can be resolved later in the (Java) compile phase -->

@@ -35,7 +35,6 @@ under the License.
 
     <properties>
         <spark.version>3.4.0</spark.version>
-        <scala-maven-plugin.version>4.4.0</scala-maven-plugin.version>
     </properties>
 
     <dependencies>

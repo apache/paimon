@@ -125,6 +125,7 @@ under the License.
         <json-smart.version>2.4.9</json-smart.version>
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
+        <scala-maven-plugin.version>3.2.2</scala-maven-plugin.version>
     </properties>
 
     <dependencies>
