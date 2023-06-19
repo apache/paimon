@@ -569,17 +569,6 @@ public final class ExceptionUtils {
         }
     }
 
-    public static <T extends Throwable> T deepCopy(T exception) {
-        try {
-            byte[] bytes = InstantiationUtil.serializeObject(exception);
-            return InstantiationUtil.deserializeObject(
-                    bytes, Thread.currentThread().getContextClassLoader());
-        } catch (Throwable e) {
-            exception.addSuppressed(e);
-            return exception;
-        }
-    }
-
     // ------------------------------------------------------------------------
 
     /** Private constructor to prevent instantiation. */

@@ -71,17 +71,13 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public boolean shouldWaitCompaction() {
+    public boolean shouldWaitForLatestCompaction() {
         return levels.numberOfSortedRuns() > numSortedRunStopTrigger;
     }
 
     @Override
-    public boolean shouldWaitWhenPreparingCheckpoint() {
+    public boolean shouldWaitForPreparingCheckpoint() {
         return levels.numberOfSortedRuns() > numSortedRunStopTrigger + 1;
-    }
-
-    private boolean checkSortedRuns(int extra) {
-        return levels.numberOfSortedRuns() > numSortedRunStopTrigger + extra;
     }
 
     @Override

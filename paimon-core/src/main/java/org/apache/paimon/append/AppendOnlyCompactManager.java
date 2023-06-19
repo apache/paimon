@@ -103,12 +103,12 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public boolean shouldWaitCompaction() {
+    public boolean shouldWaitForLatestCompaction() {
         return false;
     }
 
     @Override
-    public boolean shouldWaitWhenPreparingCheckpoint() {
+    public boolean shouldWaitForPreparingCheckpoint() {
         return false;
     }
 

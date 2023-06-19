@@ -37,6 +37,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.AbstractCompactRewriter;
+import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
@@ -67,9 +68,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.ArgumentMatchers;
-import org.mockito.Mockito;
-import org.mockito.stubbing.Answer;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -90,8 +88,6 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.Mockito.times;
 
 /** Tests for {@link MergeTreeReaders} and {@link MergeTreeWriter}. */
 public abstract class MergeTreeTestBase {
@@ -255,32 +251,24 @@ public abstract class MergeTreeTestBase {
 
         writer = createMergeTreeWriter(newFiles);
         writeBatch(2);
-        MergeTreeWriter spiedWriter = Mockito.spy(writer);
-        spiedWriter.prepareCommit(false);
+        CommitIncrement increment = writer.prepareCommit(false);
 
-        Mockito.verify(spiedWriter, times(1)).waitForCompaction(ArgumentMatchers.eq(true));
+        Assertions.assertEquals(1, increment.newFilesIncrement().newFiles().size());
+
+        Assertions.assertEquals(11, increment.compactIncrement().compactBefore().size());
+        Assertions.assertEquals(1, increment.compactIncrement().compactAfter().size());
     }
 
     @Nullable
     private List<DataFileMeta> generateDataFileToCommit() throws Exception {
         List<DataFileMeta> newFiles = new ArrayList<>();
 
-        // append successsfull but compaction fail
+        // append successsfully but compaction fail
         for (int i = 0; i < 10; i++) {
             List<DataFileMeta> dataFileMetas = new ArrayList<>();
-            MergeTreeCompactManager compactManager = createCompactManager(service, dataFileMetas);
-            MergeTreeCompactManager spiedManager = Mockito.spy(compactManager);
-
-            // do Nothing Mock compaction fail
-            Mockito.doAnswer(
-                            (Answer<Void>)
-                                    invocationOnMock -> {
-                                        return null;
-                                    })
-                    .when(spiedManager)
-                    .triggerCompaction(anyBoolean());
-
-            writer = createMergeTreeWriter(dataFileMetas, spiedManager);
+            MergeTreeCompactManager compactManager =
+                    createCompactManager(service, new ArrayList<>());
+            writer = createMergeTreeWriter(dataFileMetas, compactManager);
             writeBatch(200);
             newFiles.addAll(writer.dataFiles());
         }
@@ -292,13 +280,20 @@ public abstract class MergeTreeTestBase {
 
         List<DataFileMeta> dataFileMetas = generateDataFileToCommit();
 
-        MergeTreeCompactManager compactManager = createCompactManager(service, dataFileMetas);
-        MergeTreeCompactManager spiedManager = Mockito.spy(compactManager);
-        ExecutionException executionException = new ExecutionException(new OutOfMemoryError());
-        // Throw Exception when waiting for compaction
-        Mockito.doThrow(executionException).when(spiedManager).obtainCompactResult();
-
-        writer = createMergeTreeWriter(dataFileMetas, spiedManager);
+        MockFailResultCompactionManager mockFailResultCompactionManager =
+                new MockFailResultCompactionManager(
+                        service,
+                        new Levels(comparator, dataFileMetas, options.numLevels()),
+                        new UniversalCompaction(
+                                options.maxSizeAmplificationPercent(),
+                                options.sortedRunSizeRatio(),
+                                options.numSortedRunCompactionTrigger(),
+                                options.maxSortedRunNum()),
+                        comparator,
+                        options.targetFileSize(),
+                        options.numSortedRunStopTrigger(),
+                        new TestRewriter());
+        writer = createMergeTreeWriter(dataFileMetas, mockFailResultCompactionManager);
 
         writeBatch(2);
 
@@ -463,6 +458,31 @@ public abstract class MergeTreeTestBase {
                 options.targetFileSize(),
                 options.numSortedRunStopTrigger(),
                 new TestRewriter());
+    }
+
+    static class MockFailResultCompactionManager extends MergeTreeCompactManager {
+        public MockFailResultCompactionManager(
+                ExecutorService executor,
+                Levels levels,
+                CompactStrategy strategy,
+                Comparator<InternalRow> keyComparator,
+                long minFileSize,
+                int numSortedRunStopTrigger,
+                CompactRewriter rewriter) {
+            super(
+                    executor,
+                    levels,
+                    strategy,
+                    keyComparator,
+                    minFileSize,
+                    numSortedRunStopTrigger,
+                    rewriter);
+        }
+
+        protected CompactResult obtainCompactResult() throws ExecutionException {
+            OutOfMemoryError outOfMemoryError = new OutOfMemoryError();
+            throw new ExecutionException("mock", outOfMemoryError);
+        }
     }
 
     private void mergeCompacted(
