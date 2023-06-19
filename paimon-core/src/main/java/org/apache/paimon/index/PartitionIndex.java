@@ -29,7 +29,7 @@ import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.IntPredicate;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
@@ -57,11 +57,7 @@ public class PartitionIndex {
         this.accessed = true;
     }
 
-    public int assign(int hash) {
-        return assign(hash, (bucket) -> Boolean.TRUE);
-    }
-
-    public int assign(int hash, Function<Integer, Boolean> bucketFilterFunc) {
+    public int assign(int hash, IntPredicate bucketFilterFunc) {
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -71,7 +67,7 @@ public class PartitionIndex {
 
         // 2. find bucket from existing buckets
         for (Integer bucket : bucketInformation.keySet()) {
-            if (bucketFilterFunc.apply(bucket)) {
+            if (bucketFilterFunc.test(bucket)) {
                 // it is my bucket
                 Long number = bucketInformation.get(bucket);
                 if (number < targetBucketRowNumber) {
@@ -84,7 +80,7 @@ public class PartitionIndex {
 
         // 3. create a new bucket
         for (int i = 0; i < Short.MAX_VALUE; i++) {
-            if (bucketFilterFunc.apply(i) && !bucketInformation.containsKey(i)) {
+            if (bucketFilterFunc.test(i) && !bucketInformation.containsKey(i)) {
                 hash2Bucket.put(hash, (short) i);
                 bucketInformation.put(i, 1L);
                 return i;
@@ -101,16 +97,10 @@ public class PartitionIndex {
     }
 
     public static PartitionIndex loadIndex(
-            IndexFileHandler indexFileHandler, BinaryRow partition, long targetBucketRowNumber) {
-        return loadIndex(
-                indexFileHandler, partition, targetBucketRowNumber, (hash) -> Boolean.TRUE);
-    }
-
-    public static PartitionIndex loadIndex(
             IndexFileHandler indexFileHandler,
             BinaryRow partition,
             long targetBucketRowNumber,
-            Function<Integer, Boolean> hashFilterFunc) {
+            IntPredicate hashFilterFunc) {
         Int2ShortHashMap map = new Int2ShortHashMap();
         List<IndexManifestEntry> files = indexFileHandler.scan(HASH_INDEX, partition);
         Map<Integer, Long> buckets = new HashMap<>();
@@ -119,7 +109,7 @@ public class PartitionIndex {
                 while (true) {
                     try {
                         int hash = iterator.next();
-                        if (hashFilterFunc.apply(hash)) {
+                        if (hashFilterFunc.test(hash)) {
                             map.put(hash, (short) file.bucket());
                         }
                         buckets.compute(

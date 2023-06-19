@@ -48,11 +48,6 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default boolean isFileStoreTable() {
-        return false;
-    }
-
-    @Override
     default BatchWriteBuilder newBatchWriteBuilder() {
         throw new UnsupportedOperationException(
                 String.format(
