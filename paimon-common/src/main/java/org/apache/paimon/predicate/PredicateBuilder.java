@@ -38,6 +38,7 @@ import java.sql.Date;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -244,6 +245,18 @@ public class PredicateBuilder {
                 LocalDate epochDay =
                         Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC).toLocalDate();
                 return (int) ChronoUnit.DAYS.between(epochDay, localDate);
+            case TIME_WITHOUT_TIME_ZONE:
+                LocalTime localTime;
+                if (o instanceof java.sql.Time) {
+                    localTime = ((java.sql.Time) o).toLocalTime();
+                } else if (o instanceof java.time.LocalTime) {
+                    localTime = (java.time.LocalTime) o;
+                } else {
+                    throw new UnsupportedOperationException(
+                            "Unexpected time literal of class " + o.getClass().getName());
+                }
+                // return millis of a day
+                return (int) (localTime.toNanoOfDay() / 1_000_000);
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) literalType;
                 int precision = decimalType.getPrecision();
