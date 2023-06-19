@@ -18,29 +18,63 @@
 
 package org.apache.paimon.casting;
 
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeChecks;
-import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.DecimalUtils;
-import org.apache.paimon.utils.StringUtils;
+import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.DataTypeRoot;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
-
-import static org.apache.paimon.types.DataTypeRoot.BINARY;
-import static org.apache.paimon.types.DataTypeRoot.CHAR;
-import static org.apache.paimon.types.DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
-import static org.apache.paimon.types.DataTypeRoot.VARBINARY;
-import static org.apache.paimon.types.DataTypeRoot.VARCHAR;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Stream;
 
 /** Cast executors for input type and output type. */
 public class CastExecutors {
+
+    /* ------- Singleton declaration ------- */
+
+    private static final CastExecutors INSTANCE = new CastExecutors();
+
+    static {
+        INSTANCE
+                // Numeric rules
+                .addRule(DecimalToDecimalCastRule.INSTANCE)
+                .addRule(NumericPrimitiveToDecimalCastRule.INSTANCE)
+                .addRule(DecimalToNumericPrimitiveCastRule.INSTANCE)
+                .addRule(NumericPrimitiveCastRule.INSTANCE)
+                // Boolean <-> numeric rules
+                .addRule(BooleanToNumericCastRule.INSTANCE)
+                .addRule(NumericToBooleanCastRule.INSTANCE)
+                // To string rules
+                .addRule(NumericToStringCastRule.INSTANCE)
+                .addRule(BooleanToStringCastRule.INSTANCE)
+                .addRule(TimestampToStringCastRule.INSTANCE)
+                .addRule(TimeToStringCastRule.INSTANCE)
+                .addRule(DateToStringCastRule.INSTANCE)
+                .addRule(StringToStringCastRule.INSTANCE)
+                // From string rules
+                .addRule(StringToBooleanCastRule.INSTANCE)
+                .addRule(StringToDecimalCastRule.INSTANCE)
+                .addRule(StringToNumericPrimitiveCastRule.INSTANCE)
+                .addRule(StringToDateCastRule.INSTANCE)
+                .addRule(StringToTimeCastRule.INSTANCE)
+                .addRule(StringToTimestampCastRule.INSTANCE)
+                .addRule(StringToBinaryCastRule.INSTANCE)
+                // Date/Time/Timestamp rules
+                .addRule(TimestampToTimestampCastRule.INSTANCE)
+                .addRule(TimestampToDateCastRule.INSTANCE)
+                .addRule(TimestampToTimeCastRule.INSTANCE)
+                .addRule(DateToTimestampCastRule.INSTANCE)
+                .addRule(TimeToTimestampCastRule.INSTANCE)
+                // To binary rules
+                .addRule(BinaryToBinaryCastRule.INSTANCE);
+    }
+
+    /* ------- Entrypoint ------- */
+
     private static final CastExecutor<?, ?> IDENTITY_CAST_EXECUTOR = value -> value;
 
     /**
@@ -52,188 +86,90 @@ public class CastExecutors {
      * @return the {@link CastExecutor} instance.
      */
     public static @Nullable CastExecutor<?, ?> resolve(DataType inputType, DataType outputType) {
-        switch (inputType.getTypeRoot()) {
-            case TINYINT:
-            case SMALLINT:
-            case INTEGER:
-            case BIGINT:
-            case FLOAT:
-            case DOUBLE:
-                {
-                    switch (outputType.getTypeRoot()) {
-                        case TINYINT:
-                            return value -> ((Number) value).byteValue();
-                        case SMALLINT:
-                            return value -> ((Number) value).shortValue();
-                        case INTEGER:
-                            return value -> ((Number) value).intValue();
-                        case BIGINT:
-                            return value -> ((Number) value).longValue();
-                        case FLOAT:
-                            return value -> ((Number) value).floatValue();
-                        case DOUBLE:
-                            return value -> ((Number) value).doubleValue();
-                        case DECIMAL:
-                            final DecimalType decimalType = (DecimalType) outputType;
-                            return value -> {
-                                final Number number = (Number) value;
-                                switch (inputType.getTypeRoot()) {
-                                    case TINYINT:
-                                    case SMALLINT:
-                                    case INTEGER:
-                                    case BIGINT:
-                                        {
-                                            return DecimalUtils.castFrom(
-                                                    number.longValue(),
-                                                    decimalType.getPrecision(),
-                                                    decimalType.getScale());
-                                        }
-                                    default:
-                                        {
-                                            return DecimalUtils.castFrom(
-                                                    number.doubleValue(),
-                                                    decimalType.getPrecision(),
-                                                    decimalType.getScale());
-                                        }
-                                }
-                            };
-                        default:
-                            return null;
-                    }
-                }
-            case DECIMAL:
-                {
-                    switch (outputType.getTypeRoot()) {
-                        case TINYINT:
-                            return value -> (byte) DecimalUtils.castToIntegral((Decimal) value);
-                        case SMALLINT:
-                            return value -> (short) DecimalUtils.castToIntegral((Decimal) value);
-                        case INTEGER:
-                            return value -> (int) DecimalUtils.castToIntegral((Decimal) value);
-                        case BIGINT:
-                            return value -> DecimalUtils.castToIntegral((Decimal) value);
-                        case FLOAT:
-                            return value -> (float) DecimalUtils.doubleValue((Decimal) value);
-                        case DOUBLE:
-                            return value -> DecimalUtils.doubleValue((Decimal) value);
-                        case DECIMAL:
-                            DecimalType decimalType = (DecimalType) outputType;
-                            return value ->
-                                    DecimalUtils.castToDecimal(
-                                            (Decimal) value,
-                                            decimalType.getPrecision(),
-                                            decimalType.getScale());
-                        default:
-                            return null;
-                    }
-                }
-            case CHAR:
-            case VARCHAR:
-                if (outputType.getTypeRoot() == CHAR || outputType.getTypeRoot() == VARCHAR) {
-                    final boolean targetCharType = outputType.getTypeRoot() == CHAR;
-                    final int targetLength = DataTypeChecks.getLength(outputType);
-                    return value -> {
-                        BinaryString result;
-                        String strVal = value.toString();
-                        BinaryString strData = BinaryString.fromString(strVal);
-                        if (strData.numChars() > targetLength) {
-                            result = BinaryString.fromString(strVal.substring(0, targetLength));
-                        } else {
-                            if (strData.numChars() < targetLength) {
-                                if (targetCharType) {
-                                    int padLength = targetLength - strData.numChars();
-                                    BinaryString padString = BinaryString.blankString(padLength);
-                                    result = StringUtils.concat(strData, padString);
-                                } else {
-                                    result = strData;
-                                }
-                            } else {
-                                result = strData;
-                            }
-                        }
-
-                        return result;
-                    };
-                } else if (outputType.getTypeRoot() == VARBINARY) {
-                    final int targetLength = DataTypeChecks.getLength(outputType);
-                    return value -> {
-                        byte[] byteArrayTerm = ((BinaryString) value).toBytes();
-                        if (byteArrayTerm.length <= targetLength) {
-                            return byteArrayTerm;
-                        } else {
-                            return Arrays.copyOf(byteArrayTerm, targetLength);
-                        }
-                    };
-                }
-                return null;
-            case BINARY:
-            case VARBINARY:
-                if (outputType.getTypeRoot() == BINARY || outputType.getTypeRoot() == VARBINARY) {
-                    boolean targetBinaryType = outputType.getTypeRoot() == BINARY;
-                    final int targetLength = DataTypeChecks.getLength(outputType);
-                    return value -> {
-                        byte[] bytes = (byte[]) value;
-                        if (((byte[]) value).length == targetLength) {
-                            return value;
-                        }
-                        if (targetBinaryType) {
-                            if (bytes.length == targetLength) {
-                                return bytes;
-                            } else {
-                                return Arrays.copyOf(bytes, targetLength);
-                            }
-                        } else {
-                            if (bytes.length <= targetLength) {
-                                return bytes;
-                            } else {
-                                return Arrays.copyOf(bytes, targetLength);
-                            }
-                        }
-                    };
-                }
-                return null;
-            case TIMESTAMP_WITHOUT_TIME_ZONE:
-                switch (outputType.getTypeRoot()) {
-                    case DATE:
-                        {
-                            return value ->
-                                    (int)
-                                            (((Timestamp) value).getMillisecond()
-                                                    / DateTimeUtils.MILLIS_PER_DAY);
-                        }
-                    case TIMESTAMP_WITHOUT_TIME_ZONE:
-                        {
-                            return value ->
-                                    DateTimeUtils.truncate(
-                                            (Timestamp) value,
-                                            ((TimestampType) outputType).getPrecision());
-                        }
-                    case TIME_WITHOUT_TIME_ZONE:
-                        {
-                            return value ->
-                                    (int)
-                                            (((Timestamp) value).getMillisecond()
-                                                    % DateTimeUtils.MILLIS_PER_DAY);
-                        }
-                    default:
-                        {
-                            return null;
-                        }
-                }
-            case TIME_WITHOUT_TIME_ZONE:
-                if (outputType.getTypeRoot() == TIMESTAMP_WITHOUT_TIME_ZONE) {
-                    return value ->
-                            (int)
-                                    (((Timestamp) value).getMillisecond()
-                                            % DateTimeUtils.MILLIS_PER_DAY);
-                }
-                return null;
-            default:
-                return null;
+        CastRule<?, ?> rule = INSTANCE.internalResolve(inputType, outputType);
+        if (rule == null) {
+            return null;
         }
+        return rule.create(inputType, outputType);
     }
 
     public static CastExecutor<?, ?> identityCastExecutor() {
         return IDENTITY_CAST_EXECUTOR;
+    }
+
+    // Map<Target family or root, Map<Input family or root, rule>>
+    private final Map<Object, Map<Object, CastRule<?, ?>>> rules = new HashMap<>();
+
+    private CastExecutors addRule(CastRule<?, ?> rule) {
+        CastRulePredicate predicate = rule.getPredicateDefinition();
+
+        for (DataType targetType : predicate.getTargetTypes()) {
+            final Map<Object, CastRule<?, ?>> map =
+                    rules.computeIfAbsent(targetType, k -> new HashMap<>());
+            for (DataTypeRoot inputTypeRoot : predicate.getInputTypeRoots()) {
+                map.put(inputTypeRoot, rule);
+            }
+            for (DataTypeFamily inputTypeFamily : predicate.getInputTypeFamilies()) {
+                map.put(inputTypeFamily, rule);
+            }
+        }
+        for (DataTypeRoot targetTypeRoot : predicate.getTargetTypeRoots()) {
+            final Map<Object, CastRule<?, ?>> map =
+                    rules.computeIfAbsent(targetTypeRoot, k -> new HashMap<>());
+            for (DataTypeRoot inputTypeRoot : predicate.getInputTypeRoots()) {
+                map.put(inputTypeRoot, rule);
+            }
+            for (DataTypeFamily inputTypeFamily : predicate.getInputTypeFamilies()) {
+                map.put(inputTypeFamily, rule);
+            }
+        }
+        for (DataTypeFamily targetTypeFamily : predicate.getTargetTypeFamilies()) {
+            final Map<Object, CastRule<?, ?>> map =
+                    rules.computeIfAbsent(targetTypeFamily, k -> new HashMap<>());
+            for (DataTypeRoot inputTypeRoot : predicate.getInputTypeRoots()) {
+                map.put(inputTypeRoot, rule);
+            }
+            for (DataTypeFamily inputTypeFamily : predicate.getInputTypeFamilies()) {
+                map.put(inputTypeFamily, rule);
+            }
+        }
+
+        return this;
+    }
+
+    private CastRule<?, ?> internalResolve(DataType inputType, DataType targetType) {
+
+        final Iterator<Object> targetTypeRootFamilyIterator =
+                Stream.concat(
+                                Stream.of(targetType),
+                                Stream.<Object>concat(
+                                        Stream.of(targetType.getTypeRoot()),
+                                        targetType.getTypeRoot().getFamilies().stream()))
+                        .iterator();
+
+        // Try lookup by target type root/type families
+        while (targetTypeRootFamilyIterator.hasNext()) {
+            final Object targetMapKey = targetTypeRootFamilyIterator.next();
+            final Map<Object, CastRule<?, ?>> inputTypeToCastRuleMap = rules.get(targetMapKey);
+
+            if (inputTypeToCastRuleMap == null) {
+                continue;
+            }
+
+            // Try lookup by input type root/type families
+            Optional<? extends CastRule<?, ?>> rule =
+                    Stream.<Object>concat(
+                                    Stream.of(inputType.getTypeRoot()),
+                                    inputType.getTypeRoot().getFamilies().stream())
+                            .map(inputTypeToCastRuleMap::get)
+                            .filter(Objects::nonNull)
+                            .findFirst();
+
+            if (rule.isPresent()) {
+                return rule.get();
+            }
+        }
+
+        return null;
     }
 }
