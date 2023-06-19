@@ -23,7 +23,7 @@ import java.io.Serializable;
 /**
  * There are two modes for database sync. 1) STATIC mode, only write record from static tables.
  * Newly added tables during runtime are not synced. 2) DYNAMIC mode, all records from static tables
- * and newly added tables are routed into new operators.
+ * and newly added tables are routed into unified operator.
  */
 public enum MySqlDatabaseSyncMode implements Serializable {
     STATIC,

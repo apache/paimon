@@ -109,7 +109,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 input.forward()
                         .process(
                                 new CdcDynamicTableParsingProcessFunction<>(
-                                        database, catalogLoader, tables, parserFactory, mode))
+                                        database, catalogLoader, parserFactory))
                         .setParallelism(input.getParallelism());
 
         // for newly-added tables, create a multiplexing operator that handles all their records

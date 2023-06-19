@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.table.FileStoreTable;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -45,6 +46,7 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
     public void setup(int numChannels) {
         this.numChannels = numChannels;
         this.catalog = catalogLoader.load();
+        this.channelComputers = new HashMap<>();
     }
 
     @Override

@@ -38,8 +38,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableFunction;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -62,6 +60,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private static final long serialVersionUID = 1L;
     private static final String WRITER_NAME = "CDC MultiplexWriter";
     private static final String GLOBAL_COMMITTER_NAME = "Multiplex Global Committer";
+
     private final Lock.Factory lockFactory;
     private final boolean isOverwrite = false;
     private final Catalog.Loader catalogLoader;
@@ -71,7 +70,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
         this.lockFactory = lockFactory;
     }
 
-    private StoreSinkWrite.Provider createWriteProvider(CheckpointConfig checkpointConfig) {
+    private StoreSinkWrite.Provider createWriteProvider() {
         // for now, no compaction for multiplexed sink
         return (table, commitUser, state, ioManager, memoryPool) ->
                 new StoreSinkWriteImpl(
@@ -85,10 +84,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
         // When the job restarts, commitUser will be recovered from states and this value is
         // ignored.
         String initialCommitUser = UUID.randomUUID().toString();
-        return sinkFrom(
-                input,
-                initialCommitUser,
-                createWriteProvider(input.getExecutionEnvironment().getCheckpointConfig()));
+        return sinkFrom(input, initialCommitUser, createWriteProvider());
     }
 
     public DataStreamSink<?> sinkFrom(
@@ -99,20 +95,14 @@ public class FlinkCdcMultiTableSink implements Serializable {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
 
-        boolean isStreaming =
-                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
-        boolean streamingCheckpointEnabled =
-                isStreaming && checkpointConfig.isCheckpointingEnabled();
-        if (streamingCheckpointEnabled) {
-            assertCheckpointConfiguration(env);
-        }
+        assertCheckpointConfiguration(env);
 
         MultiTableCommittableTypeInfo typeInfo = new MultiTableCommittableTypeInfo();
         SingleOutputStreamOperator<MultiTableCommittable> written =
                 input.transform(
                                 WRITER_NAME,
                                 typeInfo,
-                                createWriteOperator(sinkProvider, isStreaming, commitUser))
+                                createWriteOperator(sinkProvider, commitUser))
                         .setParallelism(input.getParallelism());
 
         SingleOutputStreamOperator<?> committed =
@@ -120,9 +110,9 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                 GLOBAL_COMMITTER_NAME,
                                 typeInfo,
                                 new CommitterOperator<>(
-                                        streamingCheckpointEnabled,
+                                        true,
                                         commitUser,
-                                        createCommitterFactory(streamingCheckpointEnabled),
+                                        createCommitterFactory(),
                                         createCommittableStateManager()))
                         .setParallelism(1)
                         .setMaxParallelism(1);
@@ -143,7 +133,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
     }
 
     protected OneInputStreamOperator<CdcMultiplexRecord, MultiTableCommittable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
+            StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new CdcRecordStoreMultiWriteOperator(
                 catalogLoader, writeProvider, commitUser, new Options());
     }
@@ -151,7 +141,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
     // Table committers are dynamically created at runtime
     protected SerializableFunction<
                     String, Committer<MultiTableCommittable, WrappedManifestCommittable>>
-            createCommitterFactory(boolean streamingCheckpointEnabled) {
+            createCommitterFactory() {
         // If checkpoint is enabled for streaming job, we have to
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after

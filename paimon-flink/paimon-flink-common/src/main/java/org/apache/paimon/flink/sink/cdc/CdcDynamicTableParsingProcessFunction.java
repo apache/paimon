@@ -20,24 +20,17 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode;
-import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
@@ -51,18 +44,9 @@ import java.util.stream.Collectors;
  */
 public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T, Void> {
 
-    private final EventParser.Factory<T> parserFactory;
-    private final Set<String> initialTables;
-    private final String database;
-    private final Catalog.Loader catalogLoader;
-    private final MySqlDatabaseSyncMode mode;
-
-    private transient EventParser<T> parser;
-    private transient Catalog catalog;
-    private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
-    private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
     public static final OutputTag<CdcMultiplexRecord> DYNAMIC_OUTPUT_TAG =
             new OutputTag<>("paimon-dynamic-table", TypeInformation.of(CdcMultiplexRecord.class));
+
     public static final OutputTag<Tuple2<Identifier, List<DataField>>>
             DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG =
                     new OutputTag<>(
@@ -70,33 +54,24 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                             TypeInformation.of(
                                     new TypeHint<Tuple2<Identifier, List<DataField>>>() {}));
 
-    public CdcDynamicTableParsingProcessFunction(
-            String database,
-            Catalog.Loader catalogLoader,
-            List<FileStoreTable> tables,
-            EventParser.Factory<T> parserFactory) {
-        this(database, catalogLoader, tables, parserFactory, MySqlDatabaseSyncMode.STATIC);
-    }
+    private final EventParser.Factory<T> parserFactory;
+    private final String database;
+    private final Catalog.Loader catalogLoader;
+
+    private transient EventParser<T> parser;
+    private transient Catalog catalog;
 
     public CdcDynamicTableParsingProcessFunction(
-            String database,
-            Catalog.Loader catalogLoader,
-            List<FileStoreTable> tables,
-            EventParser.Factory<T> parserFactory,
-            MySqlDatabaseSyncMode mode) {
+            String database, Catalog.Loader catalogLoader, EventParser.Factory<T> parserFactory) {
         // for now, only support single database
         this.database = database;
         this.catalogLoader = catalogLoader;
-        this.initialTables = tables.stream().map(FileStoreTable::name).collect(Collectors.toSet());
         this.parserFactory = parserFactory;
-        this.mode = mode;
     }
 
     @Override
     public void open(Configuration parameters) throws Exception {
         parser = parserFactory.create();
-        updatedDataFieldsOutputTags = new HashMap<>();
-        recordOutputTags = new HashMap<>();
         catalog = catalogLoader.load();
     }
 
@@ -140,28 +115,5 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
 
     private CdcMultiplexRecord wrapRecord(String databaseName, String tableName, CdcRecord record) {
         return CdcMultiplexRecord.fromCdcRecord(databaseName, tableName, record);
-    }
-
-    private OutputTag<List<DataField>> getUpdatedDataFieldsOutputTag(String tableName) {
-        return updatedDataFieldsOutputTags.computeIfAbsent(
-                tableName, CdcDynamicTableParsingProcessFunction::createUpdatedDataFieldsOutputTag);
-    }
-
-    public static OutputTag<List<DataField>> createUpdatedDataFieldsOutputTag(String tableName) {
-        return new OutputTag<>(
-                "new-data-field-list-" + tableName, new ListTypeInfo<>(DataField.class));
-    }
-
-    private OutputTag<CdcRecord> getRecordOutputTag(String tableName) {
-        return recordOutputTags.computeIfAbsent(
-                tableName, CdcDynamicTableParsingProcessFunction::createRecordOutputTag);
-    }
-
-    private boolean isTableNewlyAdded(String tableName) {
-        return !initialTables.contains(tableName);
-    }
-
-    public static OutputTag<CdcRecord> createRecordOutputTag(String tableName) {
-        return new OutputTag<>("record-" + tableName, TypeInformation.of(CdcRecord.class));
     }
 }
