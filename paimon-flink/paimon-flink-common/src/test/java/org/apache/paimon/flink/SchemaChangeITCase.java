@@ -289,7 +289,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
                         "+I[apache, 345, 200, 0.1, 1000.12345]",
-                        "+I[paimon, 123, 300.12, 400, 400.1234  ]");
+                        "+I[paimon, 123, 300.123, 400.123, 400.1234]");
     }
 
     @Test
@@ -350,7 +350,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeFromStringToString() {
         sql("CREATE TABLE T (b VARCHAR(10), c VARCHAR(10), d CHAR(5), e CHAR(5))");
         sql("INSERT INTO T VALUES('paimon', '1234567890', '12345', '12345')");
-
+        sql("INSERT INTO T VALUES('apache', '1234567890', '123456', '1234567')");
         sql("ALTER TABLE T MODIFY (b VARCHAR(5), c CHAR(5), d VARCHAR(5), e CHAR(6))");
         List<Row> result = sql("SHOW CREATE TABLE T");
         assertThat(result.toString())
@@ -360,11 +360,11 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                                 + "  `c` CHAR(5),\n"
                                 + "  `d` VARCHAR(5),\n"
                                 + "  `e` CHAR(6)");
-        sql("INSERT INTO T VALUES('apache', '1234567890', '123456', '1234567')");
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[apach, 12345, 12345, 123456]", "+I[paimo, 12345, 12345, 12345 ]");
+                        "+I[apache, 1234567890, 12345, 12345]",
+                        "+I[paimon, 1234567890, 12345, 12345]");
     }
 
     @Test
@@ -474,7 +474,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[[65, 112, 97, 99, 104, 0, 0, 0, 0, 0], [65, 112, 97, 99, 104], [65, 112, 97, 99, 104], [65, 112, 97, 99, 104, 101, 32, 80, 97, 105]]");
+                        "+I[[65, 112, 97, 99, 104], [65, 112, 97, 99, 104, 101, 32, 80, 97, 105], [65, 112, 97, 99, 104, 101, 32, 80, 97, 105], [65, 112, 97, 99, 104, 101, 32, 80, 97, 105]]");
     }
 
     @Test
@@ -591,7 +591,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
         result = sql("SELECT * FROM T");
         assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
                 .containsExactlyInAnyOrder(
-                        "+I[[1, 35, 69, 103, -119, 0, 0, 0, 0, 0], [1, 35, 69, 103, -119], [1, 35, 69, 103, -119], [1, 35, 69, 103, -119, 0, 0, 0, 0, 0], [1, 35, 69, 103, -119], [1, 35, 69, 103, -119], [1, 35, 69, 103, -119], [1, 35, 69, 103, -119, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]");
+                        "+I[[1, 35, 69, 103, -119], [1, 35, 69, 103, -119, 0, 0, 0, 0, 0], [1, 35, 69, 103, -119, 0, 0, 0, 0, 0], [1, 35, 69, 103, -119, 0, 0, 0, 0, 0], [1, 35, 69, 103, -119], [1, 35, 69, 103, -119], [1, 35, 69, 103, -119], [1, 35, 69, 103, -119]]");
     }
 
     @Test
