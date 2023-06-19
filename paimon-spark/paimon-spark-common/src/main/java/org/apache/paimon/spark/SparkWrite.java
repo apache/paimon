@@ -102,7 +102,9 @@ public class SparkWrite implements V1Write {
                                                                 bucketAndRow.getRight(),
                                                                 bucketAndRow.getLeft()));
                                             }
-                                            return write.prepareCommit();
+                                            List<CommitMessage> messages = write.prepareCommit();
+                                            write.close();
+                                            return messages;
                                         })
                                 .values();
             } else {
@@ -116,7 +118,9 @@ public class SparkWrite implements V1Write {
                                             for (SparkRow row : rows) {
                                                 write.write(row);
                                             }
-                                            return write.prepareCommit();
+                                            List<CommitMessage> messages = write.prepareCommit();
+                                            write.close();
+                                            return messages;
                                         })
                                 .values();
             }
