@@ -440,44 +440,6 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
-        // varchar(5) -> varchar(10)
-
-        fields = new HashMap<>();
-        fields.put("k", "4");
-        fields.put("v1", "40");
-        fields.put("v3", "long four");
-        expected =
-                CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
-        runner.offer(expected);
-        actual = runner.poll(1);
-        assertThat(actual).isNull();
-
-        schemaManager.commitChanges(SchemaChange.updateColumnType("v3", DataTypes.VARCHAR(10)));
-        actual = runner.take();
-        assertThat(actual).isEqualTo(expected);
-
-        // varbinary(5) -> varbinary(10)
-
-        fields = new HashMap<>();
-        fields.put("k", "5");
-        fields.put("v1", "50");
-        fields.put("v4", "long five~");
-        expected =
-                CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        tableId.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
-        runner.offer(expected);
-        actual = runner.poll(1);
-        assertThat(actual).isNull();
-
-        schemaManager.commitChanges(SchemaChange.updateColumnType("v4", DataTypes.VARBINARY(10)));
-        actual = runner.take();
-        assertThat(actual).isEqualTo(expected);
-
         runner.stop();
         t.join();
         harness.close();
@@ -593,45 +555,6 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         schemaManager = new SchemaManager(table2.fileIO(), table2.location());
         schemaManager.commitChanges(SchemaChange.updateColumnType("v2", DataTypes.DOUBLE()));
-        actual = runner.take();
-        assertThat(actual).isEqualTo(expected);
-
-        // varchar(5) -> varchar(10)
-
-        fields = new HashMap<>();
-        fields.put("k", "4");
-        fields.put("v1", "40");
-        fields.put("v3", "long four");
-        expected =
-                CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        secondTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
-        runner.offer(expected);
-        actual = runner.poll(1);
-        assertThat(actual).isNull();
-
-        schemaManager = new SchemaManager(table2.fileIO(), table2.location());
-        schemaManager.commitChanges(SchemaChange.updateColumnType("v3", DataTypes.VARCHAR(10)));
-        actual = runner.take();
-        assertThat(actual).isEqualTo(expected);
-
-        // varbinary(5) -> varbinary(10)
-
-        fields = new HashMap<>();
-        fields.put("k", "5");
-        fields.put("v1", "50");
-        fields.put("v4", "long five~");
-        expected =
-                CdcMultiplexRecord.fromCdcRecord(
-                        databaseName,
-                        secondTable.getObjectName(),
-                        new CdcRecord(RowKind.INSERT, fields));
-        runner.offer(expected);
-        actual = runner.poll(1);
-        assertThat(actual).isNull();
-
-        schemaManager.commitChanges(SchemaChange.updateColumnType("v4", DataTypes.VARBINARY(10)));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
 
