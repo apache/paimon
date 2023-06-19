@@ -409,6 +409,10 @@ ALTER TABLE my_table ALTER COLUMN col_a SET DATA TYPE DOUBLE;
 
 {{< /tabs >}}
 
+{{< hint info >}}
+The precision of Varchar/Char/Varbinary/Binary types is only a logical field and does not result in truncation or padding of data.
+{{< /hint >}}
+
 Supported Type Conversions.
 
 {{< generated/column_type_conversion >}}
