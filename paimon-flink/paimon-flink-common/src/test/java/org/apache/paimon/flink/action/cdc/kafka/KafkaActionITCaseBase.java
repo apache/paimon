@@ -79,11 +79,11 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link org.apache.paimon.flink.action.Action}s related to MySQL. */
-public class KafkaCanalActionITCaseBase extends ActionITCaseBase {
+public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    private static final Logger LOG = LoggerFactory.getLogger(KafkaCanalActionITCaseBase.class);
+    private static final Logger LOG = LoggerFactory.getLogger(KafkaActionITCaseBase.class);
 
     private static final String INTER_CONTAINER_KAFKA_ALIAS = "kafka";
     private static final Network NETWORK = Network.newNetwork();

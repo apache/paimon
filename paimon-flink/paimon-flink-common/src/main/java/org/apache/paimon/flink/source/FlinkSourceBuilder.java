@@ -211,7 +211,8 @@ public class FlinkSourceBuilder {
                         tableIdentifier.asSummaryString(),
                         produceTypeInfo(),
                         createReadBuilder(),
-                        conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis());
+                        conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
+                        watermarkStrategy == null);
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }

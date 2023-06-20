@@ -29,7 +29,9 @@ import java.util.concurrent.ExecutionException;
 public interface CompactManager extends Closeable {
 
     /** Should wait compaction finish. */
-    boolean shouldWaitCompaction();
+    boolean shouldWaitForLatestCompaction();
+
+    boolean shouldWaitForPreparingCheckpoint();
 
     /** Add a new file. */
     void addNewFile(DataFileMeta file);

@@ -20,15 +20,13 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.table.source.DataFilePlan;
-import org.apache.paimon.table.source.TableScan;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * {@link FollowUpScanner} used internally for stand-alone streaming compact job sources when table
- * is non-bucket.
+ * is unaware-bucket table.
  */
 public class ContinuousAppendAndCompactFollowUpScanner implements FollowUpScanner {
 
@@ -50,8 +48,7 @@ public class ContinuousAppendAndCompactFollowUpScanner implements FollowUpScanne
     }
 
     @Override
-    public TableScan.Plan scan(long snapshotId, SnapshotSplitReader snapshotSplitReader) {
-        return new DataFilePlan(
-                snapshotSplitReader.withKind(ScanKind.DELTA).withSnapshot(snapshotId).splits());
+    public SnapshotReader.Plan scan(long snapshotId, SnapshotReader snapshotReader) {
+        return snapshotReader.withKind(ScanKind.DELTA).withSnapshot(snapshotId).read();
     }
 }

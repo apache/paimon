@@ -67,7 +67,7 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
 
         Map<String, String> overwritePartition = new HashMap<>();
         overwritePartition.put("pt", "1");
-        write = table.newWrite(commitUser).fromEmptyWriter(true);
+        write = table.newWrite(commitUser).withIgnorePreviousFiles(true);
         commit = table.newCommit(commitUser).withOverwrite(overwritePartition);
         write.write(rowData(1, 10, 101L));
         write.write(rowData(1, 20, 201L));
@@ -85,14 +85,14 @@ public class ContinuousCompactorFollowUpScannerTest extends ScannerTestBase {
         Snapshot snapshot = snapshotManager.snapshot(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        TableScan.Plan plan = scanner.scan(1, snapshotSplitReader);
+        TableScan.Plan plan = scanner.scan(1, snapshotReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|1|0|1", "+I 1|2|0|1"));
 
         snapshot = snapshotManager.snapshot(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.scan(2, snapshotSplitReader);
+        plan = scanner.scan(2, snapshotReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Collections.singletonList("+I 2|2|0|1"));
 

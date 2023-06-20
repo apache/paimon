@@ -1,0 +1,21 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+{"data":null,"database":"paimon_sync_database","es":1684484822000,"id":633,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_30755036368248687I by user 1486767996652600 */ ALTER TABLE t1 ADD COLUMN v2 INT","sqlType":null,"table":"t1","ts":1684484823122,"type":"ALTER"}
+{"data":[{"k":"5","v1":"five","v2":"50"}],"database":"paimon_sync_database","es":1684484823000,"id":633,"isDdl":false,"mysqlType":{"k":"int","v1":"varchar(10)","v2":"INT"},"old":null,"pkNames":["k"],"sql":"","sqlType":{"k":4,"v1":12,"v2":4},"table":"t1","ts":1684484823122,"type":"INSERT"}
+{"data":[{"k":"7","v1":"seven","v2":"70"}],"database":"paimon_sync_database","es":1684484823000,"id":636,"isDdl":false,"mysqlType":{"k":"int","v1":"varchar(10)","v2":"INT"},"old":null,"pkNames":["k"],"sql":"","sqlType":{"k":4,"v1":12,"v2":4},"table":"t1","ts":1684484823894,"type":"INSERT"}

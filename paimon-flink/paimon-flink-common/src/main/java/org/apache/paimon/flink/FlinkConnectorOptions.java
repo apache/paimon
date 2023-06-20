@@ -105,23 +105,6 @@ public class FlinkConnectorOptions {
                                     + SCAN_PARALLELISM.key()
                                     + ". Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).");
 
-    public static final ConfigOption<Boolean> STREAMING_READ_ATOMIC =
-            ConfigOptions.key("streaming-read-atomic")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "The option to enable return per iterator instead of per record in streaming read.")
-                                    .text(
-                                            "This can ensure that there will be no checkpoint segmentation in iterator consumption.")
-                                    .linebreak()
-                                    .text(
-                                            "By default, streaming source checkpoint will be performed in any time,"
-                                                    + " this means 'UPDATE_BEFORE' and 'UPDATE_AFTER' can be split into two checkpoint."
-                                                    + " Downstream can see intermediate state.")
-                                    .build());
-
     @Deprecated
     @ExcludeFromDocumentation("Deprecated")
     public static final ConfigOption<Duration> CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL =

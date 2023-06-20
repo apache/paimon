@@ -38,10 +38,18 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** Source Function for unaware-bucket Compaction. */
-public class UnawareBucketSourceFunction extends RichSourceFunction<AppendOnlyCompactionTask> {
+/**
+ * Source Function for unaware-bucket Compaction.
+ *
+ * <p>Note: The function is the source function of unaware-bucket compactor coordinator. It will
+ * read the latest snapshot continuously by compactionCoordinator, and generate new compaction
+ * tasks. The source function is used in unaware-bucket compaction job (both stand-alone and
+ * write-combined). Besides, we don't need to save state in this function, it will invoke a full
+ * scan when starting up, and scan continuously for the following snapshot.
+ */
+public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCompactionTask> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(UnawareBucketSourceFunction.class);
+    private static final Logger LOG = LoggerFactory.getLogger(BucketUnawareCompactSource.class);
     private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
 
     private final AppendOnlyFileStoreTable table;
@@ -52,7 +60,7 @@ public class UnawareBucketSourceFunction extends RichSourceFunction<AppendOnlyCo
     private transient SourceContext<AppendOnlyCompactionTask> ctx;
     private volatile boolean isRunning = true;
 
-    public UnawareBucketSourceFunction(
+    public BucketUnawareCompactSource(
             AppendOnlyFileStoreTable table,
             boolean isStreaming,
             long scanInterval,
@@ -107,10 +115,10 @@ public class UnawareBucketSourceFunction extends RichSourceFunction<AppendOnlyCo
 
     public static DataStreamSource<AppendOnlyCompactionTask> buildSource(
             StreamExecutionEnvironment env,
-            UnawareBucketSourceFunction source,
+            BucketUnawareCompactSource source,
             boolean streaming,
             String tableIdentifier) {
-        final StreamSource<AppendOnlyCompactionTask, UnawareBucketSourceFunction> sourceOperator =
+        final StreamSource<AppendOnlyCompactionTask, BucketUnawareCompactSource> sourceOperator =
                 new StreamSource<>(source);
         return new DataStreamSource<>(
                 env,

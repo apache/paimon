@@ -50,7 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base tests for spark read. */
 public abstract class SparkReadTestBase {
-    private static final String COMMIT_USER = "user";
+
     private static final AtomicLong COMMIT_IDENTIFIER = new AtomicLong(0);
 
     protected static SparkSession spark = null;
@@ -68,7 +68,6 @@ public abstract class SparkReadTestBase {
         spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
         spark.sql("USE paimon");
-        spark.sql("CREATE NAMESPACE default");
     }
 
     @AfterAll

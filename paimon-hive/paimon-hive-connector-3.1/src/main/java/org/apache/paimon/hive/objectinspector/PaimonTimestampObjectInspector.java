@@ -26,7 +26,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 /** {@link AbstractPrimitiveJavaObjectInspector} for TIMESTAMP type. */
 public class PaimonTimestampObjectInspector extends AbstractPrimitiveJavaObjectInspector
-        implements TimestampObjectInspector {
+        implements TimestampObjectInspector, WriteableObjectInspector {
 
     public PaimonTimestampObjectInspector() {
         super(TypeInfoFactory.timestampTypeInfo);
@@ -55,6 +55,21 @@ public class PaimonTimestampObjectInspector extends AbstractPrimitiveJavaObjectI
             return timestamp.clone();
         } else {
             return o;
+        }
+    }
+
+    @Override
+    public org.apache.paimon.data.Timestamp convert(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof org.apache.hadoop.hive.common.type.Timestamp) {
+            long epochMilli = ((Timestamp) value).toEpochMilli();
+            int nanos = ((Timestamp) value).getNanos();
+            int nanoOfMillisecond = nanos % 1_000_000;
+            return org.apache.paimon.data.Timestamp.fromEpochMillis(epochMilli, nanoOfMillisecond);
+        } else {
+            return null;
         }
     }
 }

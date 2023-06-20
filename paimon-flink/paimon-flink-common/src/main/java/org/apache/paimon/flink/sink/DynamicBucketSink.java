@@ -35,7 +35,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.createPartitionTransformation;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /** Sink for dynamic bucket table. */
 public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Integer>> {
@@ -64,8 +64,12 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         // committer
 
         // 1. shuffle by key hash
+        Integer assignerParallelism = table.coreOptions().dynamicBucketAssignerParallelism();
+        if (assignerParallelism == null) {
+            assignerParallelism = parallelism;
+        }
         DataStream<T> partitionByKeyHash =
-                createPartitionTransformation(input, channelComputer1(), parallelism);
+                partition(input, channelComputer1(), assignerParallelism);
 
         // 2. bucket-assigner
         HashBucketAssignerOperator<T> assignerOperator =
@@ -73,12 +77,13 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(partitionByKeyHash.getType(), BasicTypeInfo.INT_TYPE_INFO);
         DataStream<Tuple2<T, Integer>> bucketAssigned =
-                partitionByKeyHash.transform(
-                        "dynamic-bucket-assigner", rowWithBucketType, assignerOperator);
+                partitionByKeyHash
+                        .transform("dynamic-bucket-assigner", rowWithBucketType, assignerOperator)
+                        .setParallelism(partitionByKeyHash.getParallelism());
 
         // 3. shuffle by bucket
         DataStream<Tuple2<T, Integer>> partitionByBucket =
-                createPartitionTransformation(bucketAssigned, channelComputer2(), parallelism);
+                partition(bucketAssigned, channelComputer2(), parallelism);
 
         // 4. writer and committer
         return sinkFrom(partitionByBucket, initialCommitUser);

@@ -19,12 +19,12 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -40,10 +40,11 @@ import org.apache.paimon.table.source.InnerStreamTableScanImpl;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.InnerTableScanImpl;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
@@ -78,8 +79,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         this.tableSchema = tableSchema;
     }
 
-    public abstract FileStore<?> store();
-
     @Override
     public BucketMode bucketMode() {
         return store().bucketMode();
@@ -99,8 +98,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public SnapshotSplitReader newSnapshotSplitReader() {
-        return new SnapshotSplitReaderImpl(
+    public SnapshotReader newSnapshotReader() {
+        return new SnapshotReaderImpl(
                 store().newScan(),
                 tableSchema,
                 coreOptions(),
@@ -111,14 +110,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new InnerTableScanImpl(coreOptions(), newSnapshotSplitReader(), snapshotManager());
+        return new InnerTableScanImpl(coreOptions(), newSnapshotReader(), snapshotManager());
     }
 
     @Override
     public InnerStreamTableScan newStreamScan() {
         return new InnerStreamTableScanImpl(
                 coreOptions(),
-                newSnapshotSplitReader(),
+                newSnapshotReader(),
                 snapshotManager(),
                 supportStreamingReadOverwrite());
     }
@@ -280,5 +279,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
         TagManager tagManager = new TagManager(fileIO, path);
         tagManager.createTag(snapshot, tagName);
+    }
+
+    @Override
+    public void deleteTag(String tagName) {
+        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+
+        TagManager tagManager = new TagManager(fileIO, path);
+        Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
+
+        TagDeletion tagDeletion = store().newTagDeletion();
+        tagDeletion.delete(taggedSnapshot);
+        fileIO.deleteQuietly(tagManager.tagPath(tagName));
     }
 }

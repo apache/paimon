@@ -40,8 +40,10 @@ Primary Key Table supports two bucket mode:
 1. Fixed Bucket mode: configure a bucket greater than 0, rescaling buckets can only be done through offline processes, 
    see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}). A too large number of buckets leads to too many
    small files, and a too small number of buckets leads to poor write performance.
-2. Dynamic Bucket mode: configure `'bucket' = '-1'`, Paimon dynamically maintains the index, keeping the data volume
-   in the bucket below `'dynamic-bucket.target-row-num'`. (This is an experimental feature)
+2. Dynamic Bucket mode: configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic expansion of
+   the number of buckets. (This is an experimental feature)
+   - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
+   - Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
 
 ## Merge Engines
 
@@ -271,6 +273,7 @@ there will be some cases that lead to data disorder. At this time, you can use a
 {{< hint info >}}
 When the record is updated or deleted, the `sequence.field` must become larger and cannot remain unchanged. For example,
 you can use [Mysql Binlog operation time](https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#available-metadata) as `sequence.field`.
+If the provided `sequence.field` doesn't meet the precision, like a rough second or millisecond, you can set `sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision of sequence number will be made up to microsecond by system. 
 {{< /hint >}}
 
 {{< tabs "sequence.field" >}}

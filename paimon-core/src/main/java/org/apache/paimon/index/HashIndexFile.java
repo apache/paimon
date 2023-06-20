@@ -59,4 +59,16 @@ public class HashIndexFile {
         writeInts(fileIO, path, input);
         return path.getName();
     }
+
+    public void delete(String fileName) {
+        fileIO.deleteQuietly(pathFactory.toPath(fileName));
+    }
+
+    public boolean exists(String fileName) {
+        try {
+            return fileIO.exists(pathFactory.toPath(fileName));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
 }

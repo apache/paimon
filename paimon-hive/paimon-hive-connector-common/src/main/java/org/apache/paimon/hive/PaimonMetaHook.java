@@ -45,6 +45,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.hadoop.hive.metastore.Warehouse.getDnsPath;
 import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
 
 /**
@@ -76,10 +77,12 @@ public class PaimonMetaHook implements HiveMetaHook {
 
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
-
-        String location = LocationKeyExtractor.getLocation(table);
+        String location = LocationKeyExtractor.getLocation(table, conf);
         if (location == null) {
             String warehouse = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
+            org.apache.hadoop.fs.Path hadoopPath =
+                    getDnsPath(new org.apache.hadoop.fs.Path(warehouse), conf);
+            warehouse = hadoopPath.toUri().toString();
             Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
             location = AbstractCatalog.dataTableLocation(warehouse, identifier).toUri().toString();
             table.getSd().setLocation(location);

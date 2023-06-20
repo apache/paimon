@@ -31,7 +31,7 @@ public class ContinuousCompactorStartingScanner implements StartingScanner {
             LoggerFactory.getLogger(ContinuousCompactorStartingScanner.class);
 
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (latestSnapshotId == null || earliestSnapshotId == null) {

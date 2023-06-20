@@ -33,7 +33,7 @@ public class CompactedStartingScanner implements StartingScanner {
     private static final Logger LOG = LoggerFactory.getLogger(CompactedStartingScanner.class);
 
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotSplitReader snapshotSplitReader) {
+    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
         Long startingSnapshotId = pick(snapshotManager);
         if (startingSnapshotId == null) {
             startingSnapshotId = snapshotManager.latestSnapshotId();
@@ -47,12 +47,8 @@ public class CompactedStartingScanner implements StartingScanner {
             }
         }
 
-        return new ScannedResult(
-                startingSnapshotId,
-                snapshotSplitReader
-                        .withKind(ScanKind.ALL)
-                        .withSnapshot(startingSnapshotId)
-                        .splits());
+        return StartingScanner.fromPlan(
+                snapshotReader.withKind(ScanKind.ALL).withSnapshot(startingSnapshotId).read());
     }
 
     @Nullable

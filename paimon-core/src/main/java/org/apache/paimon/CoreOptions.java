@@ -371,6 +371,14 @@ public class CoreOptions implements Serializable {
                             "The field that generates the sequence number for primary key table,"
                                     + " the sequence number determines which data is the most recent.");
 
+    public static final ConfigOption<SequenceAutoPadding> SEQUENCE_AUTO_PADDING =
+            key("sequence.auto-padding")
+                    .enumType(SequenceAutoPadding.class)
+                    .defaultValue(SequenceAutoPadding.NONE)
+                    .withDescription(
+                            "Specify the way of padding precision up to micro-second"
+                                    + " if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.");
+
     public static final ConfigOption<StartupMode> SCAN_MODE =
             key("scan.mode")
                     .enumType(StartupMode.class)
@@ -656,6 +664,15 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
+            key("dynamic-bucket.assigner-parallelism")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Parallelism of assigner operator for dynamic bucket mode, it is"
+                                    + " related to the number of initialized bucket, too small will lead to"
+                                    + " insufficient processing speed of assigner.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -898,8 +915,16 @@ public class CoreOptions implements Serializable {
         return options.get(SCAN_MANIFEST_PARALLELISM);
     }
 
+    public Integer dynamicBucketAssignerParallelism() {
+        return options.get(DYNAMIC_BUCKET_ASSIGNER_PARALLELISM);
+    }
+
     public Optional<String> sequenceField() {
         return options.getOptional(SEQUENCE_FIELD);
+    }
+
+    public SequenceAutoPadding sequenceAutoPadding() {
+        return options.get(SEQUENCE_AUTO_PADDING);
     }
 
     public WriteMode writeMode() {
@@ -1327,6 +1352,35 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         SortEngine(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the way of making up time precision for sequence field. */
+    public enum SequenceAutoPadding implements DescribedEnum {
+        NONE("none", "No padding for sequence field."),
+        SECOND_TO_MICRO(
+                "second-to-micro",
+                "Pads the sequence field that indicates time with precision of seconds to micro-second."),
+        MILLIS_TO_MICRO(
+                "millis-to-micro",
+                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
+
+        private final String value;
+        private final String description;
+
+        SequenceAutoPadding(String value, String description) {
             this.value = value;
             this.description = description;
         }

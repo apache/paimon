@@ -79,6 +79,10 @@ public abstract class SparkCatalogBase implements TableCatalog, SupportsNamespac
                         Options.fromMap(options),
                         SparkSession.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
+        try {
+            createNamespace(defaultNamespace(), new HashMap<>());
+        } catch (NamespaceAlreadyExistsException ignored) {
+        }
     }
 
     @Override

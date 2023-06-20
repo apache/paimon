@@ -61,6 +61,9 @@ public class DateTimeUtils {
      */
     public static final long MILLIS_PER_DAY = 86400000L; // = 24 * 60 * 60 * 1000
 
+    /** The UTC time zone. */
+    public static final TimeZone UTC_ZONE = TimeZone.getTimeZone("UTC");
+
     /** The local time zone. */
     public static final TimeZone LOCAL_TZ = TimeZone.getDefault();
 
@@ -396,6 +399,121 @@ public class DateTimeUtils {
         return r;
     }
 
+    // --------------------------------------------------------------------------------------------
+    // Format
+    // --------------------------------------------------------------------------------------------
+
+    private static String formatTimestamp(Timestamp ts, int precision) {
+        LocalDateTime ldt = ts.toLocalDateTime();
+
+        String fraction = pad(9, ldt.getNano());
+        while (fraction.length() > precision && fraction.endsWith("0")) {
+            fraction = fraction.substring(0, fraction.length() - 1);
+        }
+
+        StringBuilder ymdhms =
+                ymdhms(
+                        new StringBuilder(),
+                        ldt.getYear(),
+                        ldt.getMonthValue(),
+                        ldt.getDayOfMonth(),
+                        ldt.getHour(),
+                        ldt.getMinute(),
+                        ldt.getSecond());
+
+        if (fraction.length() > 0) {
+            ymdhms.append(".").append(fraction);
+        }
+
+        return ymdhms.toString();
+    }
+
+    public static String formatTimestamp(Timestamp ts, TimeZone tz, int precision) {
+        return formatTimestamp(timestampWithLocalZoneToTimestamp(ts, tz), precision);
+    }
+
+    public static String formatTimestampMillis(int time, int precision) {
+        final StringBuilder buf = new StringBuilder(8 + (precision > 0 ? precision + 1 : 0));
+        formatTimestampMillis(buf, time, precision);
+        return buf.toString();
+    }
+
+    private static void formatTimestampMillis(StringBuilder buf, int time, int precision) {
+        // we copy this method from Calcite DateTimeUtils but add the following changes
+        // time may be negative which means time milli seconds before 00:00:00
+        // this maybe a bug in calcite avatica
+        while (time < 0) {
+            time += MILLIS_PER_DAY;
+        }
+        int h = time / 3600000;
+        int time2 = time % 3600000;
+        int m = time2 / 60000;
+        int time3 = time2 % 60000;
+        int s = time3 / 1000;
+        int ms = time3 % 1000;
+        int2(buf, h);
+        buf.append(':');
+        int2(buf, m);
+        buf.append(':');
+        int2(buf, s);
+        if (precision > 0) {
+            buf.append('.');
+            while (precision > 0) {
+                buf.append((char) ('0' + (ms / 100)));
+                ms = ms % 100;
+                ms = ms * 10;
+
+                // keep consistent with Timestamp.toString()
+                if (ms == 0) {
+                    break;
+                }
+
+                --precision;
+            }
+        }
+    }
+
+    /** Helper for CAST({date} AS VARCHAR(n)). */
+    public static String formatDate(int date) {
+        final StringBuilder buf = new StringBuilder(10);
+        formatDate(buf, date);
+        return buf.toString();
+    }
+
+    private static void formatDate(StringBuilder buf, int date) {
+        julianToString(buf, date + EPOCH_JULIAN);
+    }
+
+    private static void julianToString(StringBuilder buf, int julian) {
+        // this shifts the epoch back to astronomical year -4800 instead of the
+        // start of the Christian era in year AD 1 of the proleptic Gregorian
+        // calendar.
+        int j = julian + 32044;
+        int g = j / 146097;
+        int dg = j % 146097;
+        int c = (dg / 36524 + 1) * 3 / 4;
+        int dc = dg - c * 36524;
+        int b = dc / 1461;
+        int db = dc % 1461;
+        int a = (db / 365 + 1) * 3 / 4;
+        int da = db - a * 365;
+
+        // integer number of full years elapsed since March 1, 4801 BC
+        int y = g * 400 + c * 100 + b * 4 + a;
+        // integer number of full months elapsed since the last March 1
+        int m = (da * 5 + 308) / 153 - 2;
+        // number of days elapsed since day 1 of the month
+        int d = da - (m + 4) * 153 / 5 + 122;
+        int year = y - 4800 + (m + 2) / 12;
+        int month = (m + 2) % 12 + 1;
+        int day = d + 1;
+        int4(buf, year);
+        buf.append('-');
+        int2(buf, month);
+        buf.append('-');
+        int2(buf, day);
+    }
+
     private static boolean isLeapYear(int s) {
         return s % 400 == 0 || (s % 4 == 0 && s % 100 != 0);
     }
@@ -416,6 +534,14 @@ public class DateTimeUtils {
             throws DateTimeException {
         return Timestamp.fromLocalDateTime(
                 fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision));
+    }
+
+    public static Timestamp parseTimestampData(String dateStr, int precision, TimeZone timeZone)
+            throws DateTimeException {
+        return Timestamp.fromInstant(
+                fromTemporalAccessor(DEFAULT_TIMESTAMP_FORMATTER.parse(dateStr), precision)
+                        .atZone(timeZone.toZoneId())
+                        .toInstant());
     }
 
     public static LocalDateTime toLocalDateTime(long timeMills) {
@@ -477,6 +603,50 @@ public class DateTimeUtils {
         return x;
     }
 
+    // --------------------------------------------------------------------------------------------
+    // UNIX TIME
+    // --------------------------------------------------------------------------------------------
+
+    /** Returns the value of the timestamp to seconds since '1970-01-01 00:00:00' UTC. */
+    public static long unixTimestamp(long ts) {
+        return ts / 1000;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // TIMESTAMP to TIMESTAMP_LTZ conversions
+    // --------------------------------------------------------------------------------------------
+
+    public static Timestamp timestampToTimestampWithLocalZone(Timestamp ts, TimeZone tz) {
+        return Timestamp.fromInstant(ts.toLocalDateTime().atZone(tz.toZoneId()).toInstant());
+    }
+
+    public static Timestamp timestampWithLocalZoneToTimestamp(Timestamp ts, TimeZone tz) {
+        return Timestamp.fromLocalDateTime(LocalDateTime.ofInstant(ts.toInstant(), tz.toZoneId()));
+    }
+
+    public static int timestampWithLocalZoneToDate(Timestamp ts, TimeZone tz) {
+        return toInternal(
+                LocalDateTime.ofInstant(Instant.ofEpochMilli(ts.getMillisecond()), tz.toZoneId())
+                        .toLocalDate());
+    }
+
+    public static int timestampWithLocalZoneToTime(Timestamp ts, TimeZone tz) {
+        return toInternal(
+                LocalDateTime.ofInstant(Instant.ofEpochMilli(ts.getMillisecond()), tz.toZoneId())
+                        .toLocalTime());
+    }
+
+    public static Timestamp dateToTimestampWithLocalZone(int date, TimeZone tz) {
+        return Timestamp.fromInstant(
+                LocalDateTime.of(toLocalDate(date), LocalTime.MIDNIGHT)
+                        .atZone(tz.toZoneId())
+                        .toInstant());
+    }
+
+    public static Timestamp timeToTimestampWithLocalZone(int time, TimeZone tz) {
+        return Timestamp.fromInstant(toLocalDateTime(time).atZone(tz.toZoneId()).toInstant());
+    }
+
     public static Timestamp truncate(Timestamp ts, int precision) {
         String fraction = Integer.toString(ts.toLocalDateTime().getNano());
         if (fraction.length() <= precision) {
@@ -497,6 +667,14 @@ public class DateTimeUtils {
     private static long zeroLastDigits(long l, int n) {
         long tenToTheN = (long) Math.pow(10, n);
         return (l / tenToTheN) * tenToTheN;
+    }
+
+    private static String pad(int length, long v) {
+        StringBuilder s = new StringBuilder(Long.toString(v));
+        while (s.length() < length) {
+            s.insert(0, "0");
+        }
+        return s.toString();
     }
 
     /** Appends year-month-day and hour:minute:second to a buffer; assumes they are valid. */

@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.api.connector.source.SourceReader;
@@ -47,12 +46,7 @@ public abstract class FlinkSource
 
     @Override
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
-        return createSourceReader(context, readBuilder.newRead(), limit);
-    }
-
-    public FileStoreSourceReader<?> createSourceReader(
-            SourceReaderContext context, TableRead read, @Nullable Long limit) {
-        return new FileStoreSourceReader<>(RecordsFunction.forSingle(), context, read, limit);
+        return new FileStoreSourceReader(context, readBuilder.newRead(), limit);
     }
 
     @Override

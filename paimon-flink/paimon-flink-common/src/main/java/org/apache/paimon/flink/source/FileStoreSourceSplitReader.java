@@ -39,13 +39,14 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.Set;
 
 /** The {@link SplitReader} implementation for the file store source. */
-public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSourceSplit> {
-
-    private final RecordsFunction<T> recordsFunction;
+public class FileStoreSourceSplitReader
+        implements SplitReader<BulkFormat.RecordIterator<RowData>, FileStoreSourceSplit> {
 
     private final TableRead tableRead;
 
@@ -62,11 +63,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
 
     private boolean paused;
 
-    public FileStoreSourceSplitReader(
-            RecordsFunction<T> recordsFunction,
-            TableRead tableRead,
-            @Nullable RecordLimiter limiter) {
-        this.recordsFunction = recordsFunction;
+    public FileStoreSourceSplitReader(TableRead tableRead, @Nullable RecordLimiter limiter) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
@@ -76,9 +73,9 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
     }
 
     @Override
-    public RecordsWithSplitIds<T> fetch() throws IOException {
+    public RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> fetch() throws IOException {
         if (paused) {
-            return new RecordsFunction.RecordsWithPausedSplit<>();
+            return new RecordsWithPausedSplit<>();
         }
 
         checkSplitOrStartNext();
@@ -98,7 +95,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
             pool.recycler().recycle(iterator);
             return finishSplit();
         }
-        return recordsFunction.createRecords(currentSplitId, iterator.replace(nextBatch));
+        return FlinkRecordsWithSplitIds.forRecords(currentSplitId, iterator.replace(nextBatch));
     }
 
     private boolean reachLimit() {
@@ -199,7 +196,7 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
         }
     }
 
-    private RecordsWithSplitIds<T> finishSplit() throws IOException {
+    private FlinkRecordsWithSplitIds finishSplit() throws IOException {
         if (currentReader != null) {
             if (currentReader.lazyRecordReader != null) {
                 currentReader.lazyRecordReader.close();
@@ -207,8 +204,8 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
             currentReader = null;
         }
 
-        final RecordsWithSplitIds<T> finishRecords =
-                recordsFunction.createRecordsWithFinishedSplit(currentSplitId);
+        final FlinkRecordsWithSplitIds finishRecords =
+                FlinkRecordsWithSplitIds.finishedSplit(currentSplitId);
         currentSplitId = null;
         return finishRecords;
     }
@@ -273,6 +270,27 @@ public class FileStoreSourceSplitReader<T> implements SplitReader<T, FileStoreSo
                 lazyRecordReader = tableRead.createReader(split);
             }
             return lazyRecordReader;
+        }
+    }
+
+    /** Indicates that the {@link FileStoreSourceSplitReader} is paused. */
+    private static class RecordsWithPausedSplit<T> implements RecordsWithSplitIds<T> {
+
+        @Nullable
+        @Override
+        public String nextSplit() {
+            return null;
+        }
+
+        @Nullable
+        @Override
+        public T nextRecordFromSplit() {
+            return null;
+        }
+
+        @Override
+        public Set<String> finishedSplits() {
+            return Collections.emptySet();
         }
     }
 }

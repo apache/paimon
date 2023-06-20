@@ -1,0 +1,20 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+{"data":null,"database":"paimon_sync_database","es":1684484888000,"id":644,"isDdl":true,"mysqlType":null,"old":null,"pkNames":null,"sql":"/* Query from DMS-WEBSQL-0-Qid_3171173119831958d by user 1486767996652600 */ ALTER TABLE t2 MODIFY COLUMN v3 VARCHAR(20)","sqlType":null,"table":"t2","ts":1684484888410,"type":"ALTER"}
+{"data":[{"k1":"10","k2":"ten","v1":"100","v2":"1000","v3":"long_long_string_10"}],"database":"paimon_sync_database","es":1684484888000,"id":645,"isDdl":false,"mysqlType":{"k1":"int","k2":"varchar(10)","v1":"int","v2":"bigint","v3":"VARCHAR(20)"},"old":null,"pkNames":["k1","k2"],"sql":"","sqlType":{"k1":4,"k2":12,"v1":4,"v2":-5,"v3":12},"table":"t2","ts":1684484888731,"type":"INSERT"}

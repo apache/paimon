@@ -22,24 +22,16 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
-import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.stream.Collectors;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -66,31 +58,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final TagFileKeeper tagFileKeeper;
 
     private Lock lock;
-
-    public FileStoreExpireImpl(
-            FileIO fileIO,
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
-            FileStorePathFactory pathFactory,
-            SnapshotManager snapshotManager,
-            ManifestFile.Factory manifestFileFactory,
-            ManifestList.Factory manifestListFactory) {
-        this(
-                numRetainedMin,
-                numRetainedMax,
-                millisRetained,
-                snapshotManager,
-                new SnapshotDeletion(
-                        fileIO,
-                        pathFactory,
-                        manifestFileFactory.create(),
-                        manifestListFactory.create()),
-                new TagFileKeeper(
-                        manifestListFactory.create(),
-                        manifestFileFactory.create(),
-                        new TagManager(fileIO, snapshotManager.tablePath())));
-    }
 
     public FileStoreExpireImpl(
             int numRetainedMin,
@@ -148,7 +115,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         expireUntil(earliest, latestSnapshotId - numRetainedMin + 1);
     }
 
-    private void expireUntil(long earliestId, long endExclusiveId) {
+    @VisibleForTesting
+    public void expireUntil(long earliestId, long endExclusiveId) {
         OptionalLong minNextSnapshot = consumerManager.minNextSnapshot();
         if (minNextSnapshot.isPresent()) {
             endExclusiveId = Math.min(minNextSnapshot.getAsLong(), endExclusiveId);
@@ -215,21 +183,23 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         // then delete changed bucket directories if they are empty
         snapshotDeletion.tryDeleteDirectories(deletionBuckets);
 
-        // delete manifests
-        Set<String> skipDeletion =
-                snapshotManager.snapshot(endExclusiveId)
-                        .dataManifests(snapshotDeletion().manifestList()).stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toCollection(HashSet::new));
-        skipDeletion.addAll(
-                tagFileKeeper.collectManifestSkippingSet(beginInclusiveId, endExclusiveId));
+        // delete manifests and indexFiles
+        Set<String> skipManifestFiles =
+                snapshotDeletion.collectManifestSkippingSet(
+                        snapshotManager.snapshot(endExclusiveId));
+        for (Snapshot snapshot :
+                tagFileKeeper.findOverlappedSnapshots(beginInclusiveId, endExclusiveId)) {
+            skipManifestFiles.add(snapshot.baseManifestList());
+            skipManifestFiles.add(snapshot.deltaManifestList());
+            skipManifestFiles.addAll(snapshotDeletion.collectManifestSkippingSet(snapshot));
+        }
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete manifests in snapshot #" + id);
             }
 
             Snapshot snapshot = snapshotManager.snapshot(id);
-            snapshotDeletion.deleteManifestFiles(skipDeletion, snapshot);
+            snapshotDeletion.deleteManifestFiles(skipManifestFiles, snapshot);
 
             // delete snapshot last
             snapshotManager.fileIO().deleteQuietly(snapshotManager.snapshotPath(id));

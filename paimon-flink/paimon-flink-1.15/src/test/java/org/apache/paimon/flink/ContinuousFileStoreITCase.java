@@ -33,7 +33,6 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 
-import static org.apache.paimon.flink.FlinkConnectorOptions.STREAMING_READ_ATOMIC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -51,20 +50,6 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)" + options,
                 "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
                         + options);
-    }
-
-    @Test
-    public void testStreamingAtomicChangelogFileTrue() throws Exception {
-        changelogFile = true;
-        sql("ALTER TABLE T2 SET ('%s' = 'true')", STREAMING_READ_ATOMIC.key());
-        testSimple("T2");
-    }
-
-    @Test
-    public void testStreamingAtomicChangelogFileFalse() throws Exception {
-        changelogFile = false;
-        sql("ALTER TABLE T2 SET ('%s' = 'true')", STREAMING_READ_ATOMIC.key());
-        testSimple("T2");
     }
 
     @Test

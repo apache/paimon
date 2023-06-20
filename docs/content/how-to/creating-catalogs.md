@@ -139,3 +139,10 @@ If you are using an object storage , and you don't want that the location of pai
 which may lead to the error such as "No FileSystem for scheme: s3a".
 You can set location in the properties of table/database by the config of `location-in-properties`. See
 [setting the location of table/database in properties ]({{< ref "maintenance/configurations#HiveCatalogOptions" >}})
+
+If you are using Hive3, please disable Hive ACID:
+```shell
+hive.strict.managed.tables=false
+hive.create.as.insert.only=false
+metastore.create.as.acid=false
+```

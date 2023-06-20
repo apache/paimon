@@ -409,6 +409,10 @@ ALTER TABLE my_table ALTER COLUMN col_a SET DATA TYPE DOUBLE;
 
 {{< /tabs >}}
 
+Supported Type Conversions.
+
+{{< generated/column_type_conversion >}}
+
 ## Adding watermark
 
 The following SQL adds a computed column `ts` from existing column `log_ts`, and a watermark with strategy `ts - INTERVAL '1' HOUR` on column `ts` which is marked as event time attribute of table `my_table`.

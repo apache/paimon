@@ -283,7 +283,7 @@ public class SchemaManager implements Serializable {
                             update.fieldName(),
                             (field) -> {
                                 checkState(
-                                        DataTypeCasts.supportsImplicitCast(
+                                        DataTypeCasts.supportsExplicitCast(
                                                         field.type(), update.newDataType())
                                                 && CastExecutors.resolve(
                                                                 field.type(), update.newDataType())

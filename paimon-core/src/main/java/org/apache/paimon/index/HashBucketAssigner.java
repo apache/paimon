@@ -21,24 +21,16 @@ package org.apache.paimon.index;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.utils.Int2ShortHashMap;
-import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.EOFException;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign bucket for key hashcode. */
@@ -80,43 +72,8 @@ public class HashBucketAssigner {
                 recordAssignId,
                 assignId);
 
-        // 1. is it a key that has appeared before
         PartitionIndex index = partitionIndex.computeIfAbsent(partition, this::loadIndex);
-        index.accessed = true;
-        Int2ShortHashMap hash2Bucket = index.hash2Bucket;
-        if (hash2Bucket.containsKey(hash)) {
-            return hash2Bucket.get(hash);
-        }
-
-        // 2. find bucket from existing buckets
-        Map<Integer, Long> buckets = index.bucketInformation;
-        for (Integer bucket : buckets.keySet()) {
-            if (computeAssignId(bucket) == assignId) {
-                // it is my bucket
-                Long number = buckets.get(bucket);
-                if (number < targetBucketRowNumber) {
-                    buckets.put(bucket, number + 1);
-                    hash2Bucket.put(hash, bucket.shortValue());
-                    return bucket;
-                }
-            }
-        }
-
-        // 3. create a new bucket
-        for (int i = 0; i < Short.MAX_VALUE; i++) {
-            if (computeAssignId(i) == assignId && !buckets.containsKey(i)) {
-                hash2Bucket.put(hash, (short) i);
-                buckets.put(i, 1L);
-                return i;
-            }
-        }
-
-        @SuppressWarnings("OptionalGetWithoutIsPresent")
-        int maxBucket = buckets.keySet().stream().mapToInt(Integer::intValue).max().getAsInt();
-        throw new RuntimeException(
-                String.format(
-                        "To more bucket %s, you should increase target bucket row number %s.",
-                        maxBucket, targetBucketRowNumber));
+        return index.assign(hash, (bucket) -> computeAssignId(bucket) == assignId);
     }
 
     /** Prepare commit to clear outdated partition index. */
@@ -183,45 +140,10 @@ public class HashBucketAssigner {
     }
 
     private PartitionIndex loadIndex(BinaryRow partition) {
-        Int2ShortHashMap map = new Int2ShortHashMap();
-        List<IndexManifestEntry> files = indexFileHandler.scan(HASH_INDEX, partition);
-        Map<Integer, Long> buckets = new HashMap<>();
-        for (IndexManifestEntry file : files) {
-            try (IntIterator iterator = indexFileHandler.readHashIndex(file.indexFile())) {
-                while (true) {
-                    try {
-                        int hash = iterator.next();
-                        if (computeAssignId(hash) == assignId) {
-                            map.put(hash, (short) file.bucket());
-                        }
-                        buckets.compute(
-                                file.bucket(), (bucket, number) -> number == null ? 1 : number + 1);
-                    } catch (EOFException ignored) {
-                        break;
-                    }
-                }
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
-        }
-        return new PartitionIndex(map, buckets);
-    }
-
-    private static class PartitionIndex {
-
-        private final Int2ShortHashMap hash2Bucket;
-
-        private final Map<Integer, Long> bucketInformation;
-
-        private boolean accessed;
-
-        private long lastAccessedCommitIdentifier;
-
-        private PartitionIndex(Int2ShortHashMap hash2Bucket, Map<Integer, Long> bucketInformation) {
-            this.hash2Bucket = hash2Bucket;
-            this.bucketInformation = bucketInformation;
-            this.lastAccessedCommitIdentifier = Long.MIN_VALUE;
-            this.accessed = true;
-        }
+        return PartitionIndex.loadIndex(
+                indexFileHandler,
+                partition,
+                targetBucketRowNumber,
+                (hash) -> computeAssignId(hash) == assignId);
     }
 }

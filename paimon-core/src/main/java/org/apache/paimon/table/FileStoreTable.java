@@ -70,6 +70,8 @@ public interface FileStoreTable extends DataTable {
 
     TableSchema schema();
 
+    FileStore<?> store();
+
     BucketMode bucketMode();
 
     @Override

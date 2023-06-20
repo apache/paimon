@@ -32,7 +32,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KafkaSchema}. */
-public class KafkaSchemaTest extends KafkaCanalActionITCaseBase {
+public class KafkaSchemaTest extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testKafkaSchema() throws Exception {
@@ -49,7 +49,8 @@ public class KafkaSchemaTest extends KafkaCanalActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", topic);
 
-        KafkaSchema kafkaSchema = new KafkaSchema(Configuration.fromMap(kafkaConfig), topic);
+        KafkaSchema kafkaSchema =
+                KafkaSchema.getKafkaSchema(Configuration.fromMap(kafkaConfig), topic);
         Map<String, DataType> fields = new LinkedHashMap<>();
         fields.put("pt", DataTypes.INT());
         fields.put("_id", DataTypes.INT());

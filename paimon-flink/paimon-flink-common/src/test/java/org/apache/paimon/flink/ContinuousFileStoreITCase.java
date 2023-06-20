@@ -29,7 +29,9 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
 import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
@@ -37,8 +39,9 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.FlinkConnectorOptions.STREAMING_READ_ATOMIC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -68,12 +71,6 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)" + options,
                 "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
                         + options);
-    }
-
-    @TestTemplate
-    public void testStreamingAtomic() throws Exception {
-        sql("ALTER TABLE T2 SET ('%s' = 'true')", STREAMING_READ_ATOMIC.key());
-        testSimple("T2");
     }
 
     @TestTemplate
@@ -118,6 +115,30 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
         iterator.close();
+    }
+
+    @TestTemplate
+    @Timeout(120)
+    public void testSnapshotWatermark() throws Exception {
+        streamSqlIter(
+                "CREATE TEMPORARY TABLE gen (a STRING, b STRING, c STRING,"
+                        + " dt AS NOW(), WATERMARK FOR dt AS dt) WITH ('connector'='datagen')");
+        CloseableIterator<Row> insert1 = streamSqlIter("INSERT INTO T2 SELECT a, b, c FROM gen");
+        sql("CREATE TABLE WT (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)");
+        CloseableIterator<Row> insert2 =
+                streamSqlIter("INSERT INTO WT SELECT * FROM T2 /*+ OPTIONS('consumer-id'='me') */");
+        while (true) {
+            Set<Long> watermarks =
+                    sql("SELECT `watermark` FROM WT$snapshots").stream()
+                            .map(r -> (Long) r.getField(0))
+                            .collect(Collectors.toSet());
+            if (watermarks.size() > 1) {
+                insert1.close();
+                insert2.close();
+                return;
+            }
+            Thread.sleep(1000);
+        }
     }
 
     private void testSimple(String table) throws Exception {

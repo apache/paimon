@@ -23,11 +23,17 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.TraceableFileIO;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.util.UUID;
+import java.util.function.Predicate;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base class to test catalog primary key table. */
 public abstract class PrimaryKeyTableTestBase {
@@ -39,7 +45,9 @@ public abstract class PrimaryKeyTableTestBase {
 
     @BeforeEach
     public void beforeEachBase() throws Exception {
-        CatalogContext context = CatalogContext.create(new Path(tempPath.toUri()));
+        CatalogContext context =
+                CatalogContext.create(
+                        new Path(TraceableFileIO.SCHEME + "://" + tempPath.toString()));
         Catalog catalog = CatalogFactory.createCatalog(context);
         Identifier identifier = new Identifier("default", "T");
         catalog.createDatabase(identifier.getDatabaseName(), true);
@@ -55,6 +63,14 @@ public abstract class PrimaryKeyTableTestBase {
         catalog.createTable(identifier, schema, true);
         table = (AbstractFileStoreTable) catalog.getTable(identifier);
         commitUser = UUID.randomUUID().toString();
+    }
+
+    @AfterEach
+    public void after() throws IOException {
+        // assert all connections are closed
+        Predicate<Path> pathPredicate = path -> path.toString().contains(tempPath.toString());
+        assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
+        assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();
     }
 
     protected Options tableOptions() {

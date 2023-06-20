@@ -37,6 +37,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.AbstractCompactRewriter;
+import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
@@ -55,10 +56,12 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.RecordWriter;
 
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,6 +81,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -99,7 +103,7 @@ public abstract class MergeTreeTestBase {
     private KeyValueFileReaderFactory compactReaderFactory;
     private KeyValueFileWriterFactory writerFactory;
     private KeyValueFileWriterFactory compactWriterFactory;
-    private RecordWriter<KeyValue> writer;
+    private MergeTreeWriter writer;
     private SortEngine sortEngine;
 
     @BeforeEach
@@ -240,6 +244,97 @@ public abstract class MergeTreeTestBase {
         assertRecords(expected);
     }
 
+    @Test
+    public void testPrepareCommitWaitCompaction() throws Exception {
+
+        List<DataFileMeta> newFiles = generateDataFileToCommit();
+
+        writer = createMergeTreeWriter(newFiles);
+        writeBatch(2);
+        CommitIncrement increment = writer.prepareCommit(false);
+
+        Assertions.assertEquals(1, increment.newFilesIncrement().newFiles().size());
+
+        Assertions.assertEquals(11, increment.compactIncrement().compactBefore().size());
+        Assertions.assertEquals(1, increment.compactIncrement().compactAfter().size());
+    }
+
+    @Nullable
+    private List<DataFileMeta> generateDataFileToCommit() throws Exception {
+        List<DataFileMeta> newFiles = new ArrayList<>();
+
+        // append successsfully but compaction fail
+        for (int i = 0; i < 10; i++) {
+            List<DataFileMeta> dataFileMetas = new ArrayList<>();
+            MergeTreeCompactManager compactManager =
+                    createCompactManager(service, new ArrayList<>());
+            writer = createMergeTreeWriter(dataFileMetas, compactManager);
+            writeBatch(200);
+            newFiles.addAll(writer.dataFiles());
+        }
+        return newFiles;
+    }
+
+    @Test
+    public void testPrepareCommitRecycleReference() throws Exception {
+
+        List<DataFileMeta> dataFileMetas = generateDataFileToCommit();
+
+        MockFailResultCompactionManager mockFailResultCompactionManager =
+                new MockFailResultCompactionManager(
+                        service,
+                        new Levels(comparator, dataFileMetas, options.numLevels()),
+                        new UniversalCompaction(
+                                options.maxSizeAmplificationPercent(),
+                                options.sortedRunSizeRatio(),
+                                options.numSortedRunCompactionTrigger(),
+                                options.maxSortedRunNum()),
+                        comparator,
+                        options.targetFileSize(),
+                        options.numSortedRunStopTrigger(),
+                        new TestRewriter());
+        writer = createMergeTreeWriter(dataFileMetas, mockFailResultCompactionManager);
+
+        writeBatch(2);
+
+        // When PrepareCommit receives an exception, trigger the close method to simulate the
+        // lifecycle of Flink Task.
+        RunnableWithException computeEngineCall =
+                () -> {
+                    try {
+                        try {
+                            writer.prepareCommit(false);
+                        } catch (Throwable e) {
+                            throw new IOException("mock", e);
+                        }
+                    } catch (Throwable e) {
+                        try {
+                            writer.close();
+                        } catch (Throwable ex) {
+                            e.addSuppressed(ex);
+                        }
+                        throw e;
+                    }
+                };
+
+        Throwable ex = null;
+        try {
+            computeEngineCall.run();
+        } catch (Throwable e) {
+            ex = e;
+        }
+
+        Assertions.assertNotNull(ex);
+        Assertions.assertTrue(
+                ExceptionUtils.findThrowable(ex, ExecutionException.class).isPresent());
+        Assertions.assertFalse(
+                ExceptionUtils.stringifyException(ex).contains("CIRCULAR REFERENCE"));
+    }
+
+    interface RunnableWithException {
+        void run() throws Exception;
+    }
+
     @ParameterizedTest
     @ValueSource(longs = {1, 1024 * 1024})
     public void testCloseUpgrade(long targetFileSize) throws Exception {
@@ -322,6 +417,11 @@ public abstract class MergeTreeTestBase {
     }
 
     private MergeTreeWriter createMergeTreeWriter(List<DataFileMeta> files) {
+        return createMergeTreeWriter(files, createCompactManager(service, files));
+    }
+
+    private MergeTreeWriter createMergeTreeWriter(
+            List<DataFileMeta> files, MergeTreeCompactManager compactManager) {
         long maxSequenceNumber =
                 files.stream().map(DataFileMeta::maxSequenceNumber).max(Long::compare).orElse(-1L);
         MergeTreeWriter writer =
@@ -329,7 +429,7 @@ public abstract class MergeTreeTestBase {
                         false,
                         128,
                         null,
-                        createCompactManager(service, files),
+                        compactManager,
                         maxSequenceNumber,
                         comparator,
                         DeduplicateMergeFunction.factory().create(),
@@ -358,6 +458,31 @@ public abstract class MergeTreeTestBase {
                 options.targetFileSize(),
                 options.numSortedRunStopTrigger(),
                 new TestRewriter());
+    }
+
+    static class MockFailResultCompactionManager extends MergeTreeCompactManager {
+        public MockFailResultCompactionManager(
+                ExecutorService executor,
+                Levels levels,
+                CompactStrategy strategy,
+                Comparator<InternalRow> keyComparator,
+                long minFileSize,
+                int numSortedRunStopTrigger,
+                CompactRewriter rewriter) {
+            super(
+                    executor,
+                    levels,
+                    strategy,
+                    keyComparator,
+                    minFileSize,
+                    numSortedRunStopTrigger,
+                    rewriter);
+        }
+
+        protected CompactResult obtainCompactResult() throws ExecutionException {
+            OutOfMemoryError outOfMemoryError = new OutOfMemoryError();
+            throw new ExecutionException("mock", outOfMemoryError);
+        }
     }
 
     private void mergeCompacted(

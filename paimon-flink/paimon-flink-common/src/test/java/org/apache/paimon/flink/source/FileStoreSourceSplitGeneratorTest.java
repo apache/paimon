@@ -25,7 +25,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReaderImpl;
+import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +47,11 @@ public class FileStoreSourceSplitGeneratorTest {
     public void test() {
         FileStoreScan.Plan plan =
                 new FileStoreScan.Plan() {
+                    @Override
+                    public Long watermark() {
+                        return null;
+                    }
+
                     @Nullable
                     @Override
                     public Long snapshotId() {
@@ -74,7 +79,7 @@ public class FileStoreSourceSplitGeneratorTest {
                     }
                 };
         List<DataSplit> scanSplits =
-                SnapshotSplitReaderImpl.generateSplits(
+                SnapshotReaderImpl.generateSplits(
                         1L,
                         false,
                         false,

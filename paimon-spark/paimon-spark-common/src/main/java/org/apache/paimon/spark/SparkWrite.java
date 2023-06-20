@@ -18,25 +18,38 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.index.PartitionIndex;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
+import org.apache.paimon.table.sink.DynamicBucketRow;
 import org.apache.paimon.table.sink.InnerTableCommit;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
+import org.apache.paimon.utils.Pair;
 
+import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.function.Function;
-import org.apache.spark.api.java.function.Function2;
+import org.apache.spark.sql.Column;
+import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.connector.write.V1Write;
+import org.apache.spark.sql.functions;
 import org.apache.spark.sql.sources.InsertableRelation;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
@@ -60,17 +73,111 @@ public class SparkWrite implements V1Write {
             }
 
             BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            JavaRDD<List<CommitMessage>> commitMesageRDD;
+            if (isDynamicBucketTable()) {
+                FileStoreTable fileStoreTable = (FileStoreTable) table;
+                Dataset<Row> partitioned = data;
+                if (!table.partitionKeys().isEmpty()) {
+                    // repartition data in order to reduce the number of PartitionIndex for per
+                    // Spark Task.
+                    partitioned =
+                            data.repartition(
+                                    table.partitionKeys().stream()
+                                            .map(functions::col)
+                                            .toArray(Column[]::new));
+                }
+                commitMesageRDD =
+                        partitioned
+                                .toJavaRDD()
+                                .mapPartitions(
+                                        rows -> assignBucket(fileStoreTable, writeBuilder, rows))
+                                .groupBy(Pair::getLeft)
+                                .mapValues(
+                                        bucketAndRows -> {
+                                            BatchTableWrite write = writeBuilder.newWrite();
+                                            for (Pair<Integer, SparkRow> bucketAndRow :
+                                                    bucketAndRows) {
+                                                write.write(
+                                                        new DynamicBucketRow(
+                                                                bucketAndRow.getRight(),
+                                                                bucketAndRow.getLeft()));
+                                            }
+                                            List<CommitMessage> messages = write.prepareCommit();
+                                            write.close();
+                                            return messages;
+                                        })
+                                .values();
+            } else {
+                commitMesageRDD =
+                        data.toJavaRDD()
+                                .map(row -> new SparkRow(writeBuilder.rowType(), row))
+                                .groupBy(new ComputeBucket(writeBuilder))
+                                .mapValues(
+                                        rows -> {
+                                            BatchTableWrite write = writeBuilder.newWrite();
+                                            for (SparkRow row : rows) {
+                                                write.write(row);
+                                            }
+                                            List<CommitMessage> messages = write.prepareCommit();
+                                            write.close();
+                                            return messages;
+                                        })
+                                .values();
+            }
+
             List<CommitMessage> committables =
-                    data.toJavaRDD().groupBy(new ComputeBucket(writeBuilder))
-                            .mapValues(new WriteRecords(writeBuilder)).values()
-                            .mapPartitions(SparkWrite::serializeCommitMessages).collect().stream()
+                    commitMesageRDD.mapPartitions(SparkWrite::serializeCommitMessages).collect()
+                            .stream()
                             .map(this::deserializeCommitMessage)
                             .collect(Collectors.toList());
+
             try (BatchTableCommit tableCommit =
                     ((InnerTableCommit) writeBuilder.newCommit()).withLock(lockFactory.create())) {
                 tableCommit.commit(committables);
             } catch (Exception e) {
                 throw new RuntimeException(e);
+            }
+        };
+    }
+
+    private boolean isDynamicBucketTable() {
+        try {
+            return ((FileStoreTable) table).bucketMode() == BucketMode.DYNAMIC;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static Iterator<Pair<Integer, SparkRow>> assignBucket(
+            FileStoreTable fileStoreTable, BatchWriteBuilder writeBuilder, Iterator<Row> rows) {
+        long targetBucketRowNumber = fileStoreTable.coreOptions().dynamicBucketTargetRowNum();
+        IndexFileHandler indexFileHandler = fileStoreTable.store().newIndexFileHandler();
+        RowPartitionKeyExtractor rowPartitionKeyExtractor =
+                new RowPartitionKeyExtractor(fileStoreTable.schema());
+        Map<BinaryRow, PartitionIndex> partitionIndex = new HashMap<>();
+        return new Iterator<Pair<Integer, SparkRow>>() {
+
+            @Override
+            public boolean hasNext() {
+                return rows.hasNext();
+            }
+
+            @Override
+            public Pair<Integer, SparkRow> next() {
+                SparkRow sparkRow = new SparkRow(writeBuilder.rowType(), rows.next());
+                int hash = rowPartitionKeyExtractor.trimmedPrimaryKey(sparkRow).hashCode();
+                BinaryRow partition = rowPartitionKeyExtractor.partition(sparkRow);
+                PartitionIndex index =
+                        partitionIndex.computeIfAbsent(
+                                partition,
+                                (p) ->
+                                        PartitionIndex.loadIndex(
+                                                indexFileHandler,
+                                                p,
+                                                targetBucketRowNumber,
+                                                (h) -> true));
+                int bucket = index.assign(hash, (b) -> true);
+                return Pair.of(bucket, sparkRow);
             }
         };
     }
@@ -99,7 +206,7 @@ public class SparkWrite implements V1Write {
         }
     }
 
-    private static class ComputeBucket implements Function<Row, Integer> {
+    private static class ComputeBucket implements Function<SparkRow, Integer> {
 
         private final BatchWriteBuilder writeBuilder;
 
@@ -117,38 +224,8 @@ public class SparkWrite implements V1Write {
         }
 
         @Override
-        public Integer call(Row row) {
-            return computer().getBucket(new SparkRow(writeBuilder.rowType(), row));
-        }
-    }
-
-    private static class WriteRecords implements Function<Iterable<Row>, List<CommitMessage>> {
-
-        private final BatchWriteBuilder writeBuilder;
-
-        private WriteRecords(BatchWriteBuilder writeBuilder) {
-            this.writeBuilder = writeBuilder;
-        }
-
-        @Override
-        public List<CommitMessage> call(Iterable<Row> iterables) throws Exception {
-            try (BatchTableWrite write = writeBuilder.newWrite()) {
-                for (Row row : iterables) {
-                    write.write(new SparkRow(writeBuilder.rowType(), row));
-                }
-                return write.prepareCommit();
-            }
-        }
-    }
-
-    private static class ListConcat<T> implements Function2<List<T>, List<T>, List<T>> {
-
-        @Override
-        public List<T> call(List<T> v1, List<T> v2) {
-            List<T> ret = new ArrayList<>();
-            ret.addAll(v1);
-            ret.addAll(v2);
-            return ret;
+        public Integer call(SparkRow row) {
+            return computer().getBucket(row);
         }
     }
 }

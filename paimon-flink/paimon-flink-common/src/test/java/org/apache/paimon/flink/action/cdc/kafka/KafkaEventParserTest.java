@@ -146,55 +146,34 @@ public class KafkaEventParserTest {
                 new CanalJsonEventParser(caseSensitive, new TableNameConverter(caseSensitive));
         parser.setRawEvent(CANAL_JSON_EVENT);
         List<DataField> expectDataFields = new ArrayList<>();
-        expectDataFields.add(new DataField(0, "pt", DataTypes.INT()));
-        expectDataFields.add(new DataField(1, "_id", DataTypes.INT()));
-        expectDataFields.add(new DataField(2, "v1", DataTypes.VARCHAR(10)));
-        expectDataFields.add(new DataField(3, "_geometrycollection", DataTypes.STRING()));
-        expectDataFields.add(new DataField(4, "_set", DataTypes.ARRAY(DataTypes.STRING())));
-        expectDataFields.add(new DataField(5, "_enum", DataTypes.STRING()));
-        expectDataFields.add(new DataField(6, "v2", DataTypes.INT()));
+        expectDataFields.add(new DataField(0, "v2", DataTypes.INT()));
         assertThat(parser.parseSchemaChange()).isEmpty();
         parser.setRawEvent(CANAL_JSON_DDL_ADD_EVENT);
         List<DataField> updatedDataFieldsAdd = parser.parseSchemaChange();
         assertThat(updatedDataFieldsAdd).isEqualTo(expectDataFields);
 
-        expectDataFields.remove(2);
-        expectDataFields.add(2, new DataField(2, "v1", DataTypes.VARCHAR(20)));
+        expectDataFields.clear();
+        expectDataFields.add(new DataField(0, "v1", DataTypes.VARCHAR(20)));
         parser.setRawEvent(CANAL_JSON_DDL_MODIFY_EVENT);
         List<DataField> updatedDataFieldsModify = parser.parseSchemaChange();
         assertThat(updatedDataFieldsModify).isEqualTo(expectDataFields);
-        expectDataFields.remove(2);
-        expectDataFields.add(2, new DataField(2, "v1", DataTypes.VARCHAR(30)));
-        expectDataFields.remove(6);
-        expectDataFields.add(new DataField(6, "v2", DataTypes.BIGINT()));
+        expectDataFields.clear();
 
-        expectDataFields.add(new DataField(7, "v4", DataTypes.INT()));
-        expectDataFields.add(new DataField(8, "v5", DataTypes.DOUBLE()));
-        expectDataFields.add(new DataField(9, "v6", DataTypes.DECIMAL(5, 3)));
-        expectDataFields.add(new DataField(10, "$% ^,& *(", DataTypes.VARCHAR(10)));
+        expectDataFields.add(new DataField(0, "v4", DataTypes.INT()));
+        expectDataFields.add(new DataField(1, "v1", DataTypes.VARCHAR(30)));
+
+        expectDataFields.add(new DataField(2, "v5", DataTypes.DOUBLE()));
+        expectDataFields.add(new DataField(3, "v6", DataTypes.DECIMAL(5, 3)));
+        expectDataFields.add(new DataField(4, "$% ^,& *(", DataTypes.VARCHAR(10)));
+        expectDataFields.add(new DataField(5, "v2", DataTypes.BIGINT()));
+
         parser.setRawEvent(CANAL_JSON_DDL_MULTI_ADD_EVENT);
         List<DataField> updatedDataFieldsMulti = parser.parseSchemaChange();
         assertThat(updatedDataFieldsMulti).isEqualTo(expectDataFields);
-        parser.setRawEvent(CANAL_JSON_DDL_DROP_EVENT);
-        List<DataField> updatedDataFieldsDrop = parser.parseSchemaChange();
-        for (int i = 0; i < expectDataFields.size(); i++) {
-            expectDataFields.set(
-                    i,
-                    new DataField(
-                            i, expectDataFields.get(i).name(), expectDataFields.get(i).type()));
-        }
-        expectDataFields.remove(2);
-        assertThat(updatedDataFieldsDrop).isEqualTo(expectDataFields);
+        expectDataFields.clear();
         parser.setRawEvent(CANAL_JSON_DDL_CHANGE_EVENT);
         List<DataField> updatedDataFieldsChange = parser.parseSchemaChange();
-        expectDataFields.remove(9);
-        for (int i = 0; i < expectDataFields.size(); i++) {
-            expectDataFields.set(
-                    i,
-                    new DataField(
-                            i, expectDataFields.get(i).name(), expectDataFields.get(i).type()));
-        }
-        expectDataFields.add(new DataField(10, "cg", DataTypes.VARCHAR(20)));
+        expectDataFields.add(new DataField(0, "cg", DataTypes.VARCHAR(20)));
         assertThat(updatedDataFieldsChange).isEqualTo(expectDataFields);
     }
 
@@ -203,15 +182,13 @@ public class KafkaEventParserTest {
         boolean caseSensitive = true;
         EventParser<String> parser =
                 new CanalJsonEventParser(caseSensitive, new TableNameConverter(caseSensitive));
-
+        parser.setRawEvent(DEBEZIUM_JSON_EVENT);
         RuntimeException e =
                 assertThrows(
-                        RuntimeException.class,
-                        () -> parser.setRawEvent(DEBEZIUM_JSON_EVENT),
-                        "Expecting RuntimeException");
+                        RuntimeException.class, parser::parseRecords, "Expecting RuntimeException");
         assertThat(e)
                 .hasMessage(
-                        "java.lang.NullPointerException: CanalJsonEventParser only supports canal-json format,please make sure that your topic's format is accurate.");
+                        "CanalJsonEventParser only supports canal-json format,please make sure that your topic's format is accurate.");
     }
 
     @Test

@@ -32,6 +32,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -62,9 +63,10 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final int compactionMinFileNum;
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
-    private boolean skipCompaction;
     private final boolean assertDisorder;
     private final String fileCompression;
+    private boolean skipCompaction;
+    private BucketMode bucketMode = BucketMode.FIXED;
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
@@ -159,7 +161,20 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         };
     }
 
-    public void skipCompaction() {
-        skipCompaction = true;
+    public AppendOnlyFileStoreWrite withBucketMode(BucketMode bucketMode) {
+        // AppendOnlyFileStoreWrite is sensitive with bucket mode. It will act difference in
+        // unaware-bucket mode (no compaction and force empty-writer).
+        this.bucketMode = bucketMode;
+        if (bucketMode == BucketMode.UNAWARE) {
+            super.withIgnorePreviousFiles(true);
+            skipCompaction = true;
+        }
+        return this;
+    }
+
+    @Override
+    public void withIgnorePreviousFiles(boolean ignorePrevious) {
+        // in unaware bucket mode, we need all writers to be empty
+        super.withIgnorePreviousFiles(ignorePrevious || bucketMode == BucketMode.UNAWARE);
     }
 }

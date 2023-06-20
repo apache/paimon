@@ -51,7 +51,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateNonBucketTableWithBucketKey() {
+    public void testCreateUnawareBucketTableWithBucketKey() {
         assertThatThrownBy(
                         () ->
                                 batchSql(

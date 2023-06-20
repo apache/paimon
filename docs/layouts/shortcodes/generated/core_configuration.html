@@ -111,6 +111,12 @@ under the License.
             <td>The discovery interval of continuous reading.</td>
         </tr>
         <tr>
+            <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Parallelism of assigner operator for dynamic bucket mode, it is related to the number of initialized bucket, too small will lead to insufficient processing speed of assigner.</td>
+        </tr>
+        <tr>
             <td><h5>dynamic-bucket.target-row-num</h5></td>
             <td style="word-wrap: break-word;">2000000</td>
             <td>Long</td>
@@ -361,6 +367,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>
             <td>Optional timestamp used in case of "from-timestamp" scan mode.</td>
+        </tr>
+        <tr>
+            <td><h5>sequence.auto-padding</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>Specify the way of padding precision up to micro-second if the provided sequence field is used to indicate "time" but doesn't meet the precise.<br /><br />Possible values:<ul><li>"none": No padding for sequence field.</li><li>"second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>"millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li></ul></td>
         </tr>
         <tr>
             <td><h5>sequence.field</h5></td>

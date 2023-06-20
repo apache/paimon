@@ -24,9 +24,9 @@ import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.flink.table.data.RowData;
+
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /** Builder for {@link CompactorSink}. */
 public class CompactorSinkBuilder {
@@ -63,13 +63,7 @@ public class CompactorSinkBuilder {
     }
 
     private DataStreamSink<?> buildForBucketAware() {
-        FlinkStreamPartitioner<RowData> partitioner =
-                new FlinkStreamPartitioner<>(new BucketsRowChannelComputer());
-        PartitionTransformation<RowData> partitioned =
-                new PartitionTransformation<>(input.getTransformation(), partitioner);
-
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        CompactorSink sink = new CompactorSink(table, lockFactory);
-        return sink.sinkFrom(new DataStream<>(env, partitioned));
+        DataStream<RowData> partitioned = partition(input, new BucketsRowChannelComputer(), null);
+        return new CompactorSink(table, lockFactory).sinkFrom(partitioned);
     }
 }

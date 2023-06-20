@@ -88,6 +88,10 @@ Alternatively, you can copy `paimon-spark-3.3-{{< version >}}.jar` under `spark/
 
 **Step 2: Specify Paimon Catalog**
 
+{{< tabs "Specify Paimon Catalog" >}}
+
+{{< tab "Catalog" >}}
+
 When starting `spark-sql`, use the following command to register Paimon’s Spark catalog with the name `paimon`. Table files of the warehouse is stored under `/tmp/paimon`.
 
 ```bash
@@ -96,14 +100,43 @@ spark-sql ... \
     --conf spark.sql.catalog.paimon.warehouse=file:/tmp/paimon
 ```
 
-After `spark-sql` command line has started, run the following SQL to create and switch to database `paimon.default`.
+Catalogs are configured using properties under spark.sql.catalog.(catalog_name). In above case, 'paimon' is the
+catalog name, you can change it to your own favorite catalog name.
+
+After `spark-sql` command line has started, run the following SQL to create and switch to database `default`.
 
 ```sql
-CREATE DATABASE paimon.default;
-USE paimon.default;
+USE paimon;
+USE default;
 ```
 
+After switching to the catalog (`'USE paimon'`), Spark's existing tables will not be directly accessible, you
+can use the `spark_catalog.${database_name}.${table_name}` to access Spark tables.
+
+{{< /tab >}}
+
+{{< tab "Generic Catalog" >}}
+
+When starting `spark-sql`, use the following command to register Paimon’s Spark Generic catalog to replace Spark
+default catalog `spark_catalog`. (default warehouse is Spark `spark.sql.warehouse.dir`)
+
+```bash
+spark-sql ... \
+    --conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
+```
+
+Using `SparkGenericCatalog`, you can use Paimon tables in this Catalog or non-Paimon tables such as Spark's csv,
+parquet, Hive tables, etc.
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 **Step 3: Create a table and Write Some Records**
+
+{{< tabs "Create Paimon Table" >}}
+
+{{< tab "Catalog" >}}
 
 ```sql
 create table my_table (
@@ -115,6 +148,25 @@ create table my_table (
 
 INSERT INTO my_table VALUES (1, 'Hi'), (2, 'Hello');
 ```
+
+{{< /tab >}}
+
+{{< tab "Generic Catalog" >}}
+
+```sql
+create table my_table (
+    k int,
+    v string
+) USING paimon tblproperties (
+    'primary-key' = 'k'
+) ;
+
+INSERT INTO my_table VALUES (1, 'Hi'), (2, 'Hello');
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 **Step 4: Query Table with SQL**
 

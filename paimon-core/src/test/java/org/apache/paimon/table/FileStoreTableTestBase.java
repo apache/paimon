@@ -191,7 +191,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(
                         getResult(
                                 table.newRead(),
-                                toSplits(table.newSnapshotSplitReader().splits()),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
@@ -211,7 +211,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(
                         getResult(
                                 table.newRead(),
-                                toSplits(table.newSnapshotSplitReader().splits()),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
@@ -242,7 +242,7 @@ public abstract class FileStoreTableTestBase {
         assertThat(
                         getResult(
                                 table.newRead(),
-                                toSplits(table.newSnapshotSplitReader().splits()),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyElementsOf(expected);
     }
@@ -282,7 +282,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         // overwrite data
-        try (StreamTableWrite write = table.newWrite(commitUser).fromEmptyWriter(true);
+        try (StreamTableWrite write = table.newWrite(commitUser).withIgnorePreviousFiles(true);
                 InnerTableCommit commit = table.newCommit(commitUser)) {
             for (InternalRow row : overwriteData) {
                 write.write(row);
@@ -291,7 +291,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         // validate
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead();
         assertThat(
                         getResult(
@@ -314,7 +314,7 @@ public abstract class FileStoreTableTestBase {
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
-        write = table.newWrite(commitUser).fromEmptyWriter(true);
+        write = table.newWrite(commitUser).withIgnorePreviousFiles(true);
         commit = table.newCommit(commitUser);
         write.write(rowData(2, 21, 201L));
         Map<String, String> overwritePartition = new HashMap<>();
@@ -322,7 +322,7 @@ public abstract class FileStoreTableTestBase {
         commit.withOverwrite(overwritePartition).commit(1, write.prepareCommit(true, 1));
         write.close();
 
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -354,9 +354,10 @@ public abstract class FileStoreTableTestBase {
 
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotSplitReader()
+                        table.newSnapshotReader()
                                 .withFilter(new PredicateBuilder(ROW_TYPE).equal(1, 5))
-                                .splits());
+                                .read()
+                                .dataSplits());
         assertThat(splits.size()).isEqualTo(1);
         assertThat(((DataSplit) splits.get(0)).bucket()).isEqualTo(1);
     }
@@ -401,7 +402,7 @@ public abstract class FileStoreTableTestBase {
         write.close();
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = toSplits(table.newSnapshotSplitReader().splits());
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead().withFilter(builder.equal(2, 300L));
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
@@ -520,7 +521,7 @@ public abstract class FileStoreTableTestBase {
         write.close();
 
         List<DataFileMeta> files =
-                table.newSnapshotSplitReader().splits().stream()
+                table.newSnapshotReader().read().dataSplits().stream()
                         .flatMap(split -> split.files().stream())
                         .collect(Collectors.toList());
         for (DataFileMeta file : files) {
@@ -743,6 +744,25 @@ public abstract class FileStoreTableTestBase {
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Tag name cannot be pure numeric string but is '10'."));
+    }
+
+    @Test
+    public void testDeleteTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.deleteTag("tag1");
+
+        assertThatThrownBy(() -> table.deleteTag("tag1"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class, "Tag 'tag1' doesn't exist."));
     }
 
     protected List<String> getResult(

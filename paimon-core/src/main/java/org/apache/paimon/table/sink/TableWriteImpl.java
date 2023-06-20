@@ -19,6 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.FileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -56,8 +57,8 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public TableWriteImpl<T> fromEmptyWriter(boolean emptyWriter) {
-        write.fromEmptyWriter(emptyWriter);
+    public TableWriteImpl<T> withIgnorePreviousFiles(boolean ignorePreviousFiles) {
+        write.withIgnorePreviousFiles(ignorePreviousFiles);
         return this;
     }
 
@@ -91,15 +92,26 @@ public class TableWriteImpl<T>
     }
 
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
-        keyAndBucketExtractor.setRecord(row);
-        SinkRecord record =
-                new SinkRecord(
-                        keyAndBucketExtractor.partition(),
-                        keyAndBucketExtractor.bucket(),
-                        keyAndBucketExtractor.trimmedPrimaryKey(),
-                        row);
+        SinkRecord record = toSinkRecord(row);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         return record;
+    }
+
+    @VisibleForTesting
+    public T writeAndReturnData(InternalRow row) throws Exception {
+        SinkRecord record = toSinkRecord(row);
+        T data = recordExtractor.extract(record);
+        write.write(record.partition(), record.bucket(), data);
+        return data;
+    }
+
+    private SinkRecord toSinkRecord(InternalRow row) throws Exception {
+        keyAndBucketExtractor.setRecord(row);
+        return new SinkRecord(
+                keyAndBucketExtractor.partition(),
+                keyAndBucketExtractor.bucket(),
+                keyAndBucketExtractor.trimmedPrimaryKey(),
+                row);
     }
 
     public SinkRecord toLogRecord(SinkRecord record) {

@@ -33,11 +33,9 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.snapshot.SnapshotSplitReader;
-import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -80,7 +78,7 @@ public class SchemaEvolutionTest {
     public void testAddField() throws Exception {
         Schema schema =
                 new Schema(
-                        RowType.of(new IntType(), new BigIntType()).getFields(),
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
@@ -96,7 +94,7 @@ public class SchemaEvolutionTest {
         write.close();
 
         schemaManager.commitChanges(
-                Collections.singletonList(SchemaChange.addColumn("f3", new BigIntType())));
+                Collections.singletonList(SchemaChange.addColumn("f3", DataTypes.BIGINT())));
         table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath);
 
         write = table.newWrite(commitUser);
@@ -131,7 +129,7 @@ public class SchemaEvolutionTest {
                                         Collections.singletonList(
                                                 SchemaChange.addColumn(
                                                         "f4",
-                                                        new IntType().copy(false),
+                                                        DataTypes.INT().copy(false),
                                                         null,
                                                         null))))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -143,20 +141,20 @@ public class SchemaEvolutionTest {
         final String columnName = "f3";
         Schema schema =
                 new Schema(
-                        RowType.of(new IntType(), new BigIntType()).getFields(),
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
                         "");
         schemaManager.createTable(schema);
         schemaManager.commitChanges(
-                Collections.singletonList(SchemaChange.addColumn(columnName, new BigIntType())));
+                Collections.singletonList(SchemaChange.addColumn(columnName, DataTypes.BIGINT())));
         assertThatThrownBy(
                         () ->
                                 schemaManager.commitChanges(
                                         Collections.singletonList(
                                                 SchemaChange.addColumn(
-                                                        columnName, new FloatType()))))
+                                                        columnName, DataTypes.FLOAT()))))
                 .isInstanceOf(Catalog.ColumnAlreadyExistException.class)
                 .hasMessage(
                         "Column %s already exists in the %s table.",
@@ -167,7 +165,7 @@ public class SchemaEvolutionTest {
     public void testUpdateFieldType() throws Exception {
         Schema schema =
                 new Schema(
-                        RowType.of(new IntType(), new BigIntType()).getFields(),
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
@@ -175,25 +173,17 @@ public class SchemaEvolutionTest {
         schemaManager.createTable(schema);
 
         schemaManager.commitChanges(
-                Collections.singletonList(SchemaChange.updateColumnType("f0", new BigIntType())));
-        assertThatThrownBy(
-                        () ->
-                                schemaManager.commitChanges(
-                                        Collections.singletonList(
-                                                SchemaChange.updateColumnType(
-                                                        "f0", new IntType()))))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        String.format(
-                                "Column type %s[%s] cannot be converted to %s without loosing information.",
-                                "f0", new BigIntType(), new IntType()));
+                Collections.singletonList(SchemaChange.updateColumnType("f0", DataTypes.BIGINT())));
+        // bigint to string
+        schemaManager.commitChanges(
+                Collections.singletonList(SchemaChange.updateColumnType("f0", DataTypes.STRING())));
     }
 
     @Test
     public void testRenameField() throws Exception {
         Schema schema =
                 new Schema(
-                        RowType.of(new IntType(), new BigIntType()).getFields(),
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
@@ -227,7 +217,11 @@ public class SchemaEvolutionTest {
     public void testDropField() throws Exception {
         Schema schema =
                 new Schema(
-                        RowType.of(new IntType(), new BigIntType(), new IntType(), new BigIntType())
+                        RowType.of(
+                                        DataTypes.INT(),
+                                        DataTypes.BIGINT(),
+                                        DataTypes.INT(),
+                                        DataTypes.BIGINT())
                                 .getFields(),
                         Collections.singletonList("f0"),
                         Arrays.asList("f0", "f2"),
@@ -259,7 +253,7 @@ public class SchemaEvolutionTest {
     public void testDropAllFields() throws Exception {
         Schema schema =
                 new Schema(
-                        RowType.of(new IntType(), new BigIntType()).getFields(),
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
@@ -293,7 +287,7 @@ public class SchemaEvolutionTest {
         Schema schema1 =
                 new Schema(
                         RowType.of(
-                                        new DataType[] {new IntType(), new BigIntType()},
+                                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
                                         new String[] {"f0", "_VALUE_COUNT"})
                                 .getFields(),
                         Collections.emptyList(),
@@ -310,7 +304,7 @@ public class SchemaEvolutionTest {
         Schema schema2 =
                 new Schema(
                         RowType.of(
-                                        new DataType[] {new IntType(), new BigIntType()},
+                                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
                                         new String[] {"f0", "_KEY_f1"})
                                 .getFields(),
                         Collections.emptyList(),
@@ -326,7 +320,7 @@ public class SchemaEvolutionTest {
 
         Schema schema =
                 new Schema(
-                        RowType.of(new IntType(), new BigIntType()).getFields(),
+                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         new HashMap<>(),
@@ -359,11 +353,11 @@ public class SchemaEvolutionTest {
     private void forEachRemaining(
             FileStoreTable table, Predicate filter, Consumer<InternalRow> consumer)
             throws IOException {
-        SnapshotSplitReader snapshotSplitReader = table.newSnapshotSplitReader();
+        SnapshotReader snapshotReader = table.newSnapshotReader();
         if (filter != null) {
-            snapshotSplitReader.withFilter(filter);
+            snapshotReader.withFilter(filter);
         }
-        for (Split split : snapshotSplitReader.splits()) {
+        for (Split split : snapshotReader.read().dataSplits()) {
             InnerTableRead read = table.newRead();
             if (filter != null) {
                 read.withFilter(filter);
