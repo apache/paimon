@@ -62,11 +62,12 @@ public class SequenceGenerator {
 
     public SequenceGenerator(int index, DataType dataType) {
         this.index = index;
+        this.fieldType = dataType;
         if (index == -1) {
             throw new RuntimeException(
                     String.format("Can not find sequence field in table schema: %s", index));
         }
-        generator = dataType.accept(new SequenceGeneratorVisitor());
+        generator = fieldType.accept(new SequenceGeneratorVisitor());
     }
 
     public int index() {
