@@ -36,11 +36,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 /** Used to write a [[DataFrame]] into a paimon table. */
-case class WriteIntoPaimonTable(
-    table: FileStoreTable,
-    lockFactory: Factory,
-    overwrite: Boolean,
-    data: DataFrame)
+case class WriteIntoPaimonTable(table: FileStoreTable, overwrite: Boolean, data: DataFrame)
   extends RunnableCommand
   with PaimonCommand {
 
