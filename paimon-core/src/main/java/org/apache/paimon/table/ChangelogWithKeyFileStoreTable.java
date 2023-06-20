@@ -34,6 +34,7 @@ import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -66,12 +67,17 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     private transient KeyValueFileStore lazyStore;
 
     ChangelogWithKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        super(fileIO, path, tableSchema);
+        this(fileIO, path, tableSchema, Lock.emptyFactory());
+    }
+
+    ChangelogWithKeyFileStoreTable(
+            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
+        super(fileIO, path, tableSchema, lockFactory);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new ChangelogWithKeyFileStoreTable(fileIO, path, newTableSchema);
+        return new ChangelogWithKeyFileStoreTable(fileIO, path, newTableSchema, lockFactory);
     }
 
     @Override

@@ -21,7 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -208,9 +207,7 @@ public abstract class SparkCatalogBase implements TableCatalog, SupportsNamespac
     @Override
     public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         try {
-            return new SparkTable(
-                    load(ident),
-                    Lock.factory(catalog.lockFactory().orElse(null), toIdentifier(ident)));
+            return new SparkTable(load(ident));
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }

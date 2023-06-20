@@ -100,7 +100,7 @@ public class HiveCatalog extends AbstractCatalog {
     private final IMetaStoreClient client;
     private final String warehouse;
 
-    private LocationHelper locationHelper;
+    private final LocationHelper locationHelper;
 
     public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName, String warehouse) {
         this(fileIO, hiveConf, clientClassName, Collections.emptyMap(), warehouse);

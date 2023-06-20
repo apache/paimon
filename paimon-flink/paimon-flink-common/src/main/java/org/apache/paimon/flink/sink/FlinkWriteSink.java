@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.SerializableFunction;
 
@@ -35,15 +34,10 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
     private static final long serialVersionUID = 1L;
 
     @Nullable private final Map<String, String> overwritePartition;
-    private final Lock.Factory lockFactory;
 
-    public FlinkWriteSink(
-            FileStoreTable table,
-            @Nullable Map<String, String> overwritePartition,
-            Lock.Factory lockFactory) {
+    public FlinkWriteSink(FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
         super(table, overwritePartition != null);
         this.overwritePartition = overwritePartition;
-        this.lockFactory = lockFactory;
     }
 
     @Override
@@ -57,7 +51,6 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
                 new StoreCommitter(
                         table.newCommit(user)
                                 .withOverwrite(overwritePartition)
-                                .withLock(lockFactory.create())
                                 .ignoreEmptyCommit(!streamingCheckpointEnabled));
     }
 

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
@@ -38,10 +37,8 @@ public class RowDynamicBucketSink extends DynamicBucketSink<RowData> {
     private static final long serialVersionUID = 1L;
 
     public RowDynamicBucketSink(
-            FileStoreTable table,
-            Lock.Factory lockFactory,
-            @Nullable Map<String, String> overwritePartition) {
-        super(table, lockFactory, overwritePartition);
+            FileStoreTable table, @Nullable Map<String, String> overwritePartition) {
+        super(table, overwritePartition);
     }
 
     @Override

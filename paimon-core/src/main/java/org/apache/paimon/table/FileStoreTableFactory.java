@@ -23,6 +23,7 @@ import org.apache.paimon.WriteMode;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -62,15 +63,24 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
-        return create(fileIO, tablePath, tableSchema, options);
+        return create(fileIO, tablePath, tableSchema, options, Lock.emptyFactory());
     }
 
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
-        return create(fileIO, tablePath, tableSchema, new Options());
+        return create(fileIO, tablePath, tableSchema, new Options(), Lock.emptyFactory());
     }
 
     public static FileStoreTable create(
-            FileIO fileIO, Path tablePath, TableSchema tableSchema, Options dynamicOptions) {
+            FileIO fileIO, Path tablePath, TableSchema tableSchema, Lock.Factory lockFactory) {
+        return create(fileIO, tablePath, tableSchema, new Options(), lockFactory);
+    }
+
+    public static FileStoreTable create(
+            FileIO fileIO,
+            Path tablePath,
+            TableSchema tableSchema,
+            Options dynamicOptions,
+            Lock.Factory lockFactory) {
         FileStoreTable table;
         Options coreOptions = Options.fromMap(tableSchema.options());
         WriteMode writeMode = coreOptions.get(CoreOptions.WRITE_MODE);
@@ -82,12 +92,16 @@ public class FileStoreTableFactory {
             coreOptions.set(CoreOptions.WRITE_MODE, writeMode);
         }
         if (writeMode == WriteMode.APPEND_ONLY) {
-            table = new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema);
+            table = new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema, lockFactory);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
-                table = new ChangelogValueCountFileStoreTable(fileIO, tablePath, tableSchema);
+                table =
+                        new ChangelogValueCountFileStoreTable(
+                                fileIO, tablePath, tableSchema, lockFactory);
             } else {
-                table = new ChangelogWithKeyFileStoreTable(fileIO, tablePath, tableSchema);
+                table =
+                        new ChangelogWithKeyFileStoreTable(
+                                fileIO, tablePath, tableSchema, lockFactory);
             }
         }
         return table.copy(dynamicOptions.toMap());

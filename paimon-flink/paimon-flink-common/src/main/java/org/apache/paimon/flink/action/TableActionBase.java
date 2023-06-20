@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.utils.TableEnvironmentUtils;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataType;
@@ -116,9 +115,6 @@ public abstract class TableActionBase extends ActionBase {
                 Collections.singletonList(
                         new FlinkSinkBuilder((FileStoreTable) table)
                                 .withInput(dataStream)
-                                .withLockFactory(
-                                        Lock.factory(
-                                                catalog.lockFactory().orElse(null), identifier))
                                 .build()
                                 .getTransformation());
 

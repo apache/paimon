@@ -24,6 +24,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -66,8 +67,10 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final FileIO fileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
+    protected final Lock.Factory lockFactory;
 
-    public AbstractFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
+    public AbstractFileStoreTable(
+            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
         this.fileIO = fileIO;
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
@@ -77,6 +80,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             tableSchema = tableSchema.copy(newOptions);
         }
         this.tableSchema = tableSchema;
+        this.lockFactory = lockFactory;
     }
 
     @Override
@@ -228,6 +232,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newCommit(commitUser),
                 coreOptions().writeOnly() ? null : store().newExpire(),
                 coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
+                lockFactory.create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path));
     }

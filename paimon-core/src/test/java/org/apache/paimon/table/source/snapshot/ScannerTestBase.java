@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -136,7 +137,8 @@ public abstract class ScannerTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return FileStoreTableFactory.create(fileIO, tablePath, tableSchema, conf);
+        return FileStoreTableFactory.create(
+                fileIO, tablePath, tableSchema, conf, Lock.emptyFactory());
     }
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {

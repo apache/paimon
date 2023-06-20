@@ -23,7 +23,6 @@ import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.DynamicBucketSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
@@ -37,8 +36,8 @@ public class CdcDynamicBucketSink extends DynamicBucketSink<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
 
-    public CdcDynamicBucketSink(FileStoreTable table, Lock.Factory lockFactory) {
-        super(table, lockFactory, null);
+    public CdcDynamicBucketSink(FileStoreTable table) {
+        super(table, null);
     }
 
     @Override

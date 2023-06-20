@@ -19,14 +19,12 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowKind;
@@ -42,15 +40,13 @@ public class TableUtils {
      *
      * <p>NOTE: This method is only suitable for deletion of small amount of data.
      */
-    public static void deleteWhere(Table table, List<Predicate> filters, Lock.Factory lockFactory) {
+    public static void deleteWhere(Table table, List<Predicate> filters) {
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(filters);
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits);
                 BatchTableWrite write = writeBuilder.newWrite();
-                BatchTableCommit commit =
-                        ((InnerTableCommit) writeBuilder.newCommit())
-                                .withLock(lockFactory.create())) {
+                BatchTableCommit commit = writeBuilder.newCommit()) {
             CloseableIterator<InternalRow> iterator = reader.toCloseableIterator();
             PredicateFilter filter = new PredicateFilter(table.rowType(), filters);
             while (iterator.hasNext()) {

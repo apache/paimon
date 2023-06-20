@@ -46,11 +46,12 @@ public class TableCommitImpl implements InnerTableCommit {
     private final FileStoreCommit commit;
     @Nullable private final FileStoreExpire expire;
     @Nullable private final PartitionExpire partitionExpire;
+    private final Lock lock;
+
     @Nullable private final Duration consumerExpireTime;
     private final ConsumerManager consumerManager;
 
     @Nullable private Map<String, String> overwritePartition = null;
-    @Nullable private Lock lock;
 
     private boolean batchCommitted = false;
 
@@ -58,11 +59,22 @@ public class TableCommitImpl implements InnerTableCommit {
             FileStoreCommit commit,
             @Nullable FileStoreExpire expire,
             @Nullable PartitionExpire partitionExpire,
+            Lock lock,
             @Nullable Duration consumerExpireTime,
             ConsumerManager consumerManager) {
+        commit.withLock(lock);
+        if (expire != null) {
+            expire.withLock(lock);
+        }
+        if (partitionExpire != null) {
+            partitionExpire.withLock(lock);
+        }
+
         this.commit = commit;
         this.expire = expire;
         this.partitionExpire = partitionExpire;
+        this.lock = lock;
+
         this.consumerExpireTime = consumerExpireTime;
         this.consumerManager = consumerManager;
     }
@@ -70,22 +82,6 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
         this.overwritePartition = overwritePartitions;
-        return this;
-    }
-
-    @Override
-    public TableCommitImpl withLock(Lock lock) {
-        commit.withLock(lock);
-
-        if (expire != null) {
-            expire.withLock(lock);
-        }
-
-        if (partitionExpire != null) {
-            partitionExpire.withLock(lock);
-        }
-
-        this.lock = lock;
         return this;
     }
 

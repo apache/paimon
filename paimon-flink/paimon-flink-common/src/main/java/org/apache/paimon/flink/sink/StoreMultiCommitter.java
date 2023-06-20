@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 
@@ -52,7 +51,6 @@ public class StoreMultiCommitter
     //    StoreMultiCommitter manages multiple committers which are
     //    referenced by table id.
     private Map<Identifier, StoreCommitter> tableCommitters;
-    private Lock.Factory lockFactory = Lock.emptyFactory();
 
     public StoreMultiCommitter(String commitUser, Catalog.Loader catalogLoader) {
         this.catalog = catalogLoader.load();
@@ -168,11 +166,7 @@ public class StoreMultiCommitter
                                 "Failed to get committer for table %s", tableId.getFullName()),
                         e);
             }
-            committer =
-                    new StoreCommitter(
-                            table.newCommit(commitUser)
-                                    .withLock(lockFactory.create())
-                                    .ignoreEmptyCommit(false));
+            committer = new StoreCommitter(table.newCommit(commitUser).ignoreEmptyCommit(false));
             tableCommitters.put(tableId, committer);
         }
 

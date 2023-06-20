@@ -21,7 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.PartitionIndex;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -31,7 +30,6 @@ import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.DynamicBucketRow;
-import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.utils.Pair;
 
@@ -56,13 +54,11 @@ import java.util.stream.Collectors;
 public class SparkWrite implements V1Write {
 
     private final Table table;
-    private final Lock.Factory lockFactory;
 
     private final CommitMessageSerializer serializer = new CommitMessageSerializer();
 
-    public SparkWrite(Table table, Lock.Factory lockFactory) {
+    public SparkWrite(Table table) {
         this.table = table;
-        this.lockFactory = lockFactory;
     }
 
     @Override
@@ -131,8 +127,7 @@ public class SparkWrite implements V1Write {
                             .map(this::deserializeCommitMessage)
                             .collect(Collectors.toList());
 
-            try (BatchTableCommit tableCommit =
-                    ((InnerTableCommit) writeBuilder.newCommit()).withLock(lockFactory.create())) {
+            try (BatchTableCommit tableCommit = writeBuilder.newCommit()) {
                 tableCommit.commit(committables);
             } catch (Exception e) {
                 throw new RuntimeException(e);
