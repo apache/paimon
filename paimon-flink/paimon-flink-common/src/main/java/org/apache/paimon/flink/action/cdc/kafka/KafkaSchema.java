@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
+import org.apache.commons.compress.utils.Lists;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -41,6 +42,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.UUID;
 
@@ -48,48 +50,22 @@ import java.util.UUID;
 public class KafkaSchema {
 
     private static final int MAX_RETRY = 100;
+    private static final int MAX_READ = 1000;
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
-    private String databaseName;
-    private String tableName;
+    private final String databaseName;
+    private final String tableName;
     private final Map<String, DataType> fields;
     private final List<String> primaryKeys;
 
-    public KafkaSchema(Configuration kafkaConfig, String topic) throws Exception {
-
-        fields = new LinkedHashMap<>();
-        primaryKeys = new ArrayList<>();
-        KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig);
-
-        consumer.subscribe(Collections.singletonList(topic));
-
-        int retry = 0;
-        boolean success = false;
-        while (!success) {
-            ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
-            for (ConsumerRecord<String, String> record : records) {
-                try {
-                    String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
-                    if ("canal-json".equals(format)) {
-                        success = parseCanalJson(record.value());
-                        if (success) {
-                            break;
-                        }
-                    } else {
-                        throw new UnsupportedOperationException(
-                                "This format: " + format + " is not support.");
-                    }
-                } catch (JsonProcessingException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-            if (!success && retry == MAX_RETRY) {
-                throw new Exception("Could not get metadata from server,topic :" + topic);
-            }
-            Thread.sleep(100);
-            retry++;
-        }
+    public KafkaSchema(
+            String databaseName,
+            String tableName,
+            Map<String, DataType> fields,
+            List<String> primaryKeys) {
+        this.databaseName = databaseName;
+        this.tableName = tableName;
+        this.fields = fields;
+        this.primaryKeys = primaryKeys;
     }
 
     public String tableName() {
@@ -132,7 +108,12 @@ public class KafkaSchema {
         return record != null && record.get(key) != null ? record.get(key).asText() : null;
     }
 
-    private boolean parseCanalJson(String record) throws JsonProcessingException {
+    private static KafkaSchema parseCanalJson(String record, ObjectMapper objectMapper)
+            throws JsonProcessingException {
+        String databaseName;
+        String tableName;
+        final Map<String, DataType> fields = new LinkedHashMap<>();
+        final List<String> primaryKeys = new ArrayList<>();
         JsonNode root = objectMapper.readValue(record, JsonNode.class);
         if (!extractIsDDL(root)) {
             JsonNode mysqlType = root.get("mysqlType");
@@ -151,8 +132,102 @@ public class KafkaSchema {
             }
             databaseName = extractJsonNode(root, "database");
             tableName = extractJsonNode(root, "table");
+            return new KafkaSchema(databaseName, tableName, fields, primaryKeys);
+        }
+        return null;
+    }
+
+    public static KafkaSchema getKafkaSchema(Configuration kafkaConfig, String topic)
+            throws Exception {
+        KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig);
+
+        consumer.subscribe(Collections.singletonList(topic));
+        KafkaSchema kafkaSchema;
+        int retry = 0;
+        ObjectMapper objectMapper = new ObjectMapper();
+        while (true) {
+            ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+            for (ConsumerRecord<String, String> record : records) {
+                try {
+                    String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
+                    if ("canal-json".equals(format)) {
+                        kafkaSchema = parseCanalJson(record.value(), objectMapper);
+                        if (kafkaSchema != null) {
+                            return kafkaSchema;
+                        }
+                    } else {
+                        throw new UnsupportedOperationException(
+                                "This format: " + format + " is not support.");
+                    }
+                } catch (JsonProcessingException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            if (retry == MAX_RETRY) {
+                throw new Exception("Could not get metadata from server,topic :" + topic);
+            }
+            Thread.sleep(100);
+            retry++;
+        }
+    }
+
+    public static List<KafkaSchema> getListKafkaSchema(
+            Configuration kafkaConfig, String topic, int maxRead) throws Exception {
+        KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig);
+
+        consumer.subscribe(Collections.singletonList(topic));
+        List<KafkaSchema> kafkaSchemaList = Lists.newArrayList();
+        int retry = 0;
+        int read = 0;
+        maxRead = maxRead == 0 ? MAX_READ : maxRead;
+        ObjectMapper objectMapper = new ObjectMapper();
+        while (maxRead > read) {
+            ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+            for (ConsumerRecord<String, String> record : records) {
+                read++;
+                try {
+                    String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
+                    if ("canal-json".equals(format)) {
+                        KafkaSchema kafkaSchema = parseCanalJson(record.value(), objectMapper);
+                        if (kafkaSchema != null && !kafkaSchemaList.contains(kafkaSchema)) {
+                            kafkaSchemaList.add(kafkaSchema);
+                        }
+                    } else {
+                        throw new UnsupportedOperationException(
+                                "This format: " + format + " is not support.");
+                    }
+                } catch (JsonProcessingException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            if (kafkaSchemaList.isEmpty() && retry == MAX_RETRY) {
+                throw new Exception("Could not get metadata from server,topic :" + topic);
+            } else if (!kafkaSchemaList.isEmpty() && retry == MAX_RETRY) {
+                break;
+            }
+            Thread.sleep(100);
+            retry++;
+        }
+        return kafkaSchemaList;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
             return true;
         }
-        return false;
+        if (!(o instanceof KafkaSchema)) {
+            return false;
+        }
+        KafkaSchema that = (KafkaSchema) o;
+        return databaseName.equals(that.databaseName)
+                && tableName.equals(that.tableName)
+                && fields.equals(that.fields)
+                && primaryKeys.equals(that.primaryKeys);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(databaseName, tableName, fields, primaryKeys);
     }
 }

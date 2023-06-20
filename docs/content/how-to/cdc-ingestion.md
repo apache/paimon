@@ -27,14 +27,15 @@ under the License.
 # CDC Ingestion
 
 Paimon supports a variety of ways to ingest data into Paimon tables with schema evolution. This means that the added
-columns are synchronized to the Paimon table in real time and the synchronization job will not restarted for this purpose.
+columns are synchronized to the Paimon table in real time and the synchronization job will not be restarted for this purpose.
 
 We currently support the following sync ways:
 
 1. MySQL Synchronizing Table: synchronize one or multiple tables from MySQL into one Paimon table.
 2. MySQL Synchronizing Database: synchronize the whole MySQL database into one Paimon database.
 3. [API Synchronizing Table]({{< ref "/api/flink-api#cdc-ingestion-table" >}}): synchronize your custom DataStream input into one Paimon table.
-4. Kafka Synchronizing Table: synchronize one Kafka topic's table into one Paimon table.
+4. Kafka Synchronizing Table: synchronize one Kafka topic's table into one Paimon table. 
+5. Kafka Synchronizing Database: synchronize one Kafka topic containing multiple tables or multiple topics containing one table each into one Paimon database.
 
 ## MySQL
 
@@ -268,6 +269,76 @@ Example
     --computed-columns '_year=year(age)' \
     --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
     --kafka-conf topic=order \
+    --kafka-conf properties.group.id=123456 \
+    --kafka-conf value.format=canal-json \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4
+```
+### Synchronizing Databases
+
+By using [KafkaSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the multi topic or one topic into one Paimon database.
+
+To use this feature through `flink run`, run the following shell command.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    kafka-sync-database
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    [--schema-init-max-read <int>] \
+    [--ignore-incompatible <true/false>] \
+    [--table-prefix <paimon-table-prefix>] \
+    [--table-suffix <paimon-table-suffix>] \
+    [--including-tables <table-name|name-regular-expr>] \
+    [--excluding-tables <table-name|name-regular-expr>] \
+    [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+```
+
+{{< generated/kafka_sync_database >}}
+
+Only tables with primary keys will be synchronized.
+
+For each Kafka topic's table to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table.
+Its schema will be derived from all specified Kafka topic's tables,it gets the earliest non-DDL data parsing schema from topic. If the Paimon table already exists, its schema will be compared against the schema of all specified Kafka topic's tables.
+
+Example
+
+Synchronization from one Kafka topic to Paimon database.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    kafka-sync-database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --schema-init-max-read 500 \
+    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
+    --kafka-conf topic=order \
+    --kafka-conf properties.group.id=123456 \
+    --kafka-conf value.format=canal-json \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4
+```
+
+Synchronization from multiple Kafka topics to Paimon database.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    kafka-sync-database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
+    --kafka-conf topic=order,logistic_order,user \
     --kafka-conf properties.group.id=123456 \
     --kafka-conf value.format=canal-json \
     --catalog-conf metastore=hive \

@@ -37,7 +37,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Null
 
 import com.alibaba.druid.DbType;
 import com.alibaba.druid.sql.SQLUtils;
-import com.alibaba.druid.sql.ast.SQLName;
 import com.alibaba.druid.sql.ast.SQLStatement;
 import com.alibaba.druid.sql.ast.statement.SQLAlterTableAddColumn;
 import com.alibaba.druid.sql.ast.statement.SQLAlterTableDropColumnItem;
@@ -52,7 +51,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -65,6 +63,7 @@ public class CanalJsonEventParser implements EventParser<String> {
     private static final String FIELD_DATA = "data";
     private static final String FIELD_OLD = "old";
     private static final String TYPE = "type";
+    private static final String MYSQL_TYPE = "mysqlType";
     private static final String OP_INSERT = "INSERT";
     private static final String OP_UPDATE = "UPDATE";
     private static final String OP_DELETE = "DELETE";
@@ -72,8 +71,6 @@ public class CanalJsonEventParser implements EventParser<String> {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     private JsonNode root;
-    private Map<String, String> mySqlFieldTypes;
-    private Map<String, DataType> paimonFieldTypes;
 
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
@@ -100,15 +97,7 @@ public class CanalJsonEventParser implements EventParser<String> {
     public void setRawEvent(String rawEvent) {
         try {
             root = objectMapper.readValue(rawEvent, JsonNode.class);
-            Preconditions.checkNotNull(
-                    root.get("mysqlType"),
-                    "CanalJsonEventParser only supports canal-json format,"
-                            + "please make sure that your topic's format is accurate.");
-            JsonNode mysqlType = root.get("mysqlType");
 
-            if (!isSchemaChange()) {
-                updateFieldTypes(mysqlType);
-            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -118,18 +107,6 @@ public class CanalJsonEventParser implements EventParser<String> {
     public String parseTableName() {
         String tableName = root.get("table").asText();
         return tableNameConverter.convert(tableName);
-    }
-
-    private void updateFieldTypes(JsonNode schema) {
-        mySqlFieldTypes = new LinkedHashMap<>();
-        paimonFieldTypes = new LinkedHashMap<>();
-        Iterator<String> iterator = schema.fieldNames();
-        while (iterator.hasNext()) {
-            String fieldName = iterator.next();
-            String fieldType = schema.get(fieldName).asText();
-            mySqlFieldTypes.put(fieldName, fieldType);
-            paimonFieldTypes.put(fieldName, MySqlTypeUtils.toDataType(fieldType));
-        }
     }
 
     private boolean isSchemaChange() {
@@ -151,16 +128,8 @@ public class CanalJsonEventParser implements EventParser<String> {
         if (StringUtils.isEmpty(sql)) {
             return Collections.emptyList();
         }
-
         List<DataField> result = new ArrayList<>();
         int id = 0;
-        for (Map.Entry<String, DataType> fieldType : paimonFieldTypes.entrySet()) {
-            result.add(
-                    new DataField(
-                            id++,
-                            caseSensitive ? fieldType.getKey() : fieldType.getKey().toLowerCase(),
-                            fieldType.getValue()));
-        }
         SQLStatement sqlStatement = SQLUtils.parseSingleStatement(sql, DbType.mysql);
         if (sqlStatement instanceof SQLAlterTableStatement) {
             SQLAlterTableStatement sqlAlterTableStatement = (SQLAlterTableStatement) sqlStatement;
@@ -185,26 +154,9 @@ public class CanalJsonEventParser implements EventParser<String> {
                                         id++,
                                         caseSensitive ? columnName : columnName.toLowerCase(),
                                         dataType));
-                        mySqlFieldTypes.put(columnName, columnType);
-                        paimonFieldTypes.put(columnName, MySqlTypeUtils.toDataType(columnType));
                     }
                 } else if (sqlAlterTableItem instanceof SQLAlterTableDropColumnItem) {
-                    SQLAlterTableDropColumnItem sqlAlterTableDropColumnItem =
-                            (SQLAlterTableDropColumnItem) sqlAlterTableItem;
-                    List<String> columnNames =
-                            sqlAlterTableDropColumnItem.getColumns().stream()
-                                    .map(SQLName::getSimpleName)
-                                    .collect(Collectors.toList());
-                    columnNames.forEach(
-                            columnName -> {
-                                mySqlFieldTypes.remove(columnName);
-                                paimonFieldTypes.remove(columnName);
-                            });
-
-                    result =
-                            result.stream()
-                                    .filter(dataField -> !columnNames.contains(dataField.name()))
-                                    .collect(Collectors.toList());
+                    // ignore
                 } else if (sqlAlterTableItem instanceof MySqlAlterTableModifyColumn) {
                     MySqlAlterTableModifyColumn mySqlAlterTableModifyColumn =
                             (MySqlAlterTableModifyColumn) sqlAlterTableItem;
@@ -216,26 +168,12 @@ public class CanalJsonEventParser implements EventParser<String> {
                     boolean notNull =
                             newColumnDefinition.toString().toUpperCase().contains("NOT NULL");
                     dataType = notNull ? dataType.notNull() : dataType.nullable();
-                    DataType finalDataType = dataType;
-                    result =
-                            result.stream()
-                                    .map(
-                                            dataField -> {
-                                                if (dataField.name().equals(columnName)) {
-                                                    dataField =
-                                                            new DataField(
-                                                                    dataField.id(),
-                                                                    caseSensitive
-                                                                            ? columnName
-                                                                            : columnName
-                                                                                    .toLowerCase(),
-                                                                    finalDataType);
-                                                }
-                                                return dataField;
-                                            })
-                                    .collect(Collectors.toList());
-                    mySqlFieldTypes.put(columnName, columnType);
-                    paimonFieldTypes.put(columnName, MySqlTypeUtils.toDataType(columnType));
+                    result.add(
+                            new DataField(
+                                    id++,
+                                    caseSensitive ? columnName : columnName.toLowerCase(),
+                                    dataType));
+
                 } else if (sqlAlterTableItem instanceof MySqlAlterTableChangeColumn) {
                     MySqlAlterTableChangeColumn mySqlAlterTableChangeColumn =
                             (MySqlAlterTableChangeColumn) sqlAlterTableItem;
@@ -258,13 +196,9 @@ public class CanalJsonEventParser implements EventParser<String> {
                                     .collect(Collectors.toList());
                     result.add(
                             new DataField(
-                                    id,
+                                    id++,
                                     caseSensitive ? columnName : columnName.toLowerCase(),
                                     dataType));
-                    mySqlFieldTypes.remove(oldColumnName);
-                    paimonFieldTypes.remove(oldColumnName);
-                    mySqlFieldTypes.put(columnName, columnType);
-                    paimonFieldTypes.put(columnName, MySqlTypeUtils.toDataType(columnType));
                 }
             }
         }
@@ -277,7 +211,10 @@ public class CanalJsonEventParser implements EventParser<String> {
         if (isSchemaChange()) {
             return Collections.emptyList();
         }
-
+        Preconditions.checkNotNull(
+                root.get(TYPE),
+                "CanalJsonEventParser only supports canal-json format,"
+                        + "please make sure that your topic's format is accurate.");
         List<CdcRecord> records = new ArrayList<>();
         String type = root.get(TYPE).asText();
         if (OP_UPDATE.equals(type)) {
@@ -324,6 +261,19 @@ public class CanalJsonEventParser implements EventParser<String> {
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
+        Map<String, String> mySqlFieldTypes = new HashMap<>();
+        Preconditions.checkNotNull(
+                root.get(MYSQL_TYPE),
+                "CanalJsonEventParser only supports canal-json format,"
+                        + "please make sure that your topic's format is accurate.");
+        JsonNode schema = root.get(MYSQL_TYPE);
+        Iterator<String> iterator = schema.fieldNames();
+        while (iterator.hasNext()) {
+            String fieldName = iterator.next();
+            String fieldType = schema.get(fieldName).asText();
+            mySqlFieldTypes.put(fieldName, fieldType);
+        }
+
         Map<String, Object> jsonMap =
                 objectMapper.convertValue(recordRow, new TypeReference<Map<String, Object>>() {});
         if (jsonMap == null) {

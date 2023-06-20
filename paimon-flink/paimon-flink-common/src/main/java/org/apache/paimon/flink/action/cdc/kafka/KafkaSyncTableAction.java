@@ -140,7 +140,7 @@ public class KafkaSyncTableAction extends ActionBase {
                 KafkaConnectorOptions.VALUE_FORMAT.key() + " cannot be null ");
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
         String topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
-        KafkaSchema kafkaSchema = new KafkaSchema(kafkaConfig, topic);
+        KafkaSchema kafkaSchema = KafkaSchema.getKafkaSchema(kafkaConfig, topic);
 
         catalog.createDatabase(database, true);
         boolean caseSensitive = catalog.caseSensitive();
