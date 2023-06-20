@@ -51,6 +51,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
@@ -69,6 +70,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private Predicate partitionFilter;
     private Long specifiedSnapshotId = null;
+    private Snapshot specifiedSnapshot = null;
     private Integer specifiedBucket = null;
     private List<ManifestFileMeta> specifiedManifests = null;
     private ScanKind scanKind = ScanKind.ALL;
@@ -143,18 +145,24 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withSnapshot(long snapshotId) {
         this.specifiedSnapshotId = snapshotId;
-        if (specifiedManifests != null) {
-            throw new IllegalStateException("Cannot set both snapshot id and manifests.");
-        }
+        checkState(specifiedSnapshot == null, "Cannot set both snapshot id and snapshot.");
+        checkState(specifiedManifests == null, "Cannot set both snapshot id and manifests.");
+        return this;
+    }
+
+    @Override
+    public FileStoreScan withSnapshot(Snapshot snapshot) {
+        this.specifiedSnapshot = snapshot;
+        checkState(specifiedSnapshotId == null, "Cannot set both snapshot and snapshot id.");
+        checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
         return this;
     }
 
     @Override
     public FileStoreScan withManifestList(List<ManifestFileMeta> manifests) {
         this.specifiedManifests = manifests;
-        if (specifiedSnapshotId != null) {
-            throw new IllegalStateException("Cannot set both snapshot id and manifests.");
-        }
+        checkState(specifiedSnapshot == null, "Cannot set both manifests and snapshot.");
+        checkState(specifiedSnapshotId == null, "Cannot set both manifests and snapshot id.");
         return this;
     }
 
@@ -209,14 +217,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = specifiedManifests;
         Snapshot snapshot = null;
         if (manifests == null) {
-            Long snapshotId = specifiedSnapshotId;
-            if (snapshotId == null) {
-                snapshotId = snapshotManager.latestSnapshotId();
-            }
-            if (snapshotId == null) {
+            snapshot = determineSnapshot();
+            if (snapshot == null) {
                 manifests = Collections.emptyList();
             } else {
-                snapshot = snapshotManager.snapshot(snapshotId);
                 manifests = readManifests(snapshot);
             }
         }
@@ -264,6 +268,19 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             }
         }
         return Pair.of(snapshot, files);
+    }
+
+    @Nullable
+    private Snapshot determineSnapshot() {
+        if (specifiedSnapshot != null) {
+            return specifiedSnapshot;
+        }
+
+        Long snapshotId = specifiedSnapshotId;
+        if (snapshotId == null) {
+            snapshotId = snapshotManager.latestSnapshotId();
+        }
+        return snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
     }
 
     private List<ManifestFileMeta> readManifests(Snapshot snapshot) {

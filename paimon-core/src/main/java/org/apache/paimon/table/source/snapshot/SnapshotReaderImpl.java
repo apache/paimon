@@ -94,6 +94,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withSnapshot(Snapshot snapshot) {
+        scan.withSnapshot(snapshot);
+        return this;
+    }
+
+    @Override
     public SnapshotReader withFilter(Predicate predicate) {
         List<String> partitionKeys = tableSchema.partitionKeys();
         int[] fieldIdxToPartitionIdx =

@@ -39,6 +39,8 @@ public interface SnapshotReader {
 
     SnapshotReader withSnapshot(long snapshotId);
 
+    SnapshotReader withSnapshot(Snapshot snapshot);
+
     SnapshotReader withFilter(Predicate predicate);
 
     SnapshotReader withKind(ScanKind scanKind);

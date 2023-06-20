@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
+import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.Preconditions;
 
@@ -135,6 +136,10 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 return isStreaming && startupMode == CoreOptions.StartupMode.FROM_SNAPSHOT
                         ? new ContinuousFromSnapshotStartingScanner(snapshotId)
                         : new StaticFromSnapshotStartingScanner(snapshotId);
+            case FROM_TAG:
+                Preconditions.checkArgument(
+                        !isStreaming, "Cannot scan from tag in streaming mode.");
+                return new StaticFromTagStartingScanner(options().scanTagName());
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());

@@ -168,11 +168,14 @@ public abstract class SparkReadTestBase {
                         tableName));
     }
 
+    protected static FileStoreTable getTable(String tableName) {
+        return FileStoreTableFactory.create(
+                LocalFileIO.create(),
+                new Path(warehousePath, String.format("default.db/%s", tableName)));
+    }
+
     protected static void writeTable(String tableName, GenericRow... rows) throws Exception {
-        FileStoreTable fileStoreTable =
-                FileStoreTableFactory.create(
-                        LocalFileIO.create(),
-                        new Path(warehousePath, String.format("default.db/%s", tableName)));
+        FileStoreTable fileStoreTable = getTable(tableName);
         StreamWriteBuilder streamWriteBuilder = fileStoreTable.newStreamWriteBuilder();
         StreamTableWrite writer = streamWriteBuilder.newWrite();
         StreamTableCommit commit = streamWriteBuilder.newCommit();

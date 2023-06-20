@@ -19,9 +19,11 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -141,10 +143,20 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     }
 
     protected CatalogTable table(String tableName) throws TableNotExistException {
-        Catalog catalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
+        Catalog catalog = flinkCatalog();
         CatalogBaseTable table =
                 catalog.getTable(new ObjectPath(catalog.getDefaultDatabase(), tableName));
         return (CatalogTable) table;
+    }
+
+    protected Table paimonTable(String tableName)
+            throws org.apache.paimon.catalog.Catalog.TableNotExistException {
+        org.apache.paimon.catalog.Catalog catalog = flinkCatalog().catalog();
+        return catalog.getTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
+    }
+
+    private FlinkCatalog flinkCatalog() {
+        return (FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
     }
 
     protected Path getTableDirectory(String tableName) {

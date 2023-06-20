@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
@@ -47,6 +48,8 @@ public interface FileStoreScan {
     FileStoreScan withPartitionBucket(BinaryRow partition, int bucket);
 
     FileStoreScan withSnapshot(long snapshotId);
+
+    FileStoreScan withSnapshot(Snapshot snapshot);
 
     FileStoreScan withManifestList(List<ManifestFileMeta> manifests);
 
