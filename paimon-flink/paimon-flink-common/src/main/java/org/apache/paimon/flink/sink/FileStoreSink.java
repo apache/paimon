@@ -46,7 +46,7 @@ public class FileStoreSink extends FlinkWriteSink<RowData> {
 
     @Override
     protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
+            StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser);
     }
 }

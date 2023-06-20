@@ -72,8 +72,17 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             boolean ignorePreviousFiles,
             boolean waitCompaction,
             int deltaCommits,
+            boolean isStreaming,
             @Nullable MemorySegmentPool memoryPool) {
-        super(table, commitUser, state, ioManager, ignorePreviousFiles, waitCompaction, memoryPool);
+        super(
+                table,
+                commitUser,
+                state,
+                ioManager,
+                ignorePreviousFiles,
+                waitCompaction,
+                isStreaming,
+                memoryPool);
 
         this.deltaCommits = deltaCommits;
 

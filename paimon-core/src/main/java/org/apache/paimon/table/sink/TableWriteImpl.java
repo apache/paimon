@@ -63,6 +63,12 @@ public class TableWriteImpl<T>
     }
 
     @Override
+    public TableWriteImpl<T> optimizeForBatch(boolean isBatch) {
+        write.optimizeForBatch(isBatch);
+        return this;
+    }
+
+    @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
         return this;

@@ -40,8 +40,8 @@ public class CompactorSink extends FlinkSink<RowData> {
 
     @Override
     protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
-        return new StoreCompactOperator(table, writeProvider, isStreaming, commitUser);
+            StoreSinkWrite.Provider writeProvider, String commitUser) {
+        return new StoreCompactOperator(table, writeProvider, commitUser);
     }
 
     @Override

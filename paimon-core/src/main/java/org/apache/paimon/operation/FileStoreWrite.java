@@ -99,6 +99,15 @@ public interface FileStoreWrite<T> {
             throws Exception;
 
     /**
+     * We detect whether it is in batch mode, if so, we do some optimization.
+     *
+     * @param isBatch whether in batch mode
+     */
+    default void optimizeForBatch(boolean isBatch) {
+        // default do no optimization
+    }
+
+    /**
      * Close the writer.
      *
      * @throws Exception the thrown exception

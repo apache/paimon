@@ -40,7 +40,7 @@ public class FlinkCdcSink extends FlinkWriteSink<CdcRecord> {
 
     @Override
     protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, boolean isStreaming, String commitUser) {
+            StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new CdcRecordStoreWriteOperator(table, writeProvider, commitUser);
     }
 }

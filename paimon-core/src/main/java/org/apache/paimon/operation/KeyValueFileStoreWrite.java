@@ -79,6 +79,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
+    private boolean forceSpillable = false;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -161,7 +162,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         CompactManager compactManager =
                 createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
         return new MergeTreeWriter(
-                bufferSpillable(),
+                bufferSpillable() || forceSpillable,
                 options.localSortMaxNumFileHandles(),
                 ioManager,
                 compactManager,
@@ -172,6 +173,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement);
+    }
+
+    @Override
+    public void optimizeForBatch(boolean isBatch) {
+        forceSpillable = true;
     }
 
     private boolean bufferSpillable() {

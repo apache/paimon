@@ -47,7 +47,6 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
     private final FileStoreTable table;
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
-    private final boolean isStreaming;
     private final String initialCommitUser;
 
     private transient StoreSinkWriteState state;
@@ -57,7 +56,6 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     public StoreCompactOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
-            boolean isStreaming,
             String initialCommitUser) {
         super(Options.fromMap(table.options()));
         Preconditions.checkArgument(
@@ -65,7 +63,6 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                 CoreOptions.WRITE_ONLY.key() + " should not be true for StoreCompactOperator.");
         this.table = table;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
-        this.isStreaming = isStreaming;
         this.initialCommitUser = initialCommitUser;
     }
 
@@ -115,7 +112,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
         byte[] serializedFiles = record.getBinary(3);
         List<DataFileMeta> files = dataFileMetaSerializer.deserializeList(serializedFiles);
 
-        if (isStreaming) {
+        if (write.streamingMode()) {
             write.notifyNewFiles(snapshotId, partition, bucket, files);
             write.compact(partition, bucket, false);
         } else {
