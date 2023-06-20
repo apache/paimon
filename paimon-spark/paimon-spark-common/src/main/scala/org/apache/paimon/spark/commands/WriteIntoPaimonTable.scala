@@ -61,19 +61,12 @@ case class WriteIntoPaimonTable(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
+    val partitionCols = table.partitionKeys().asScala.map(col)
     val dataEncoder = RowEncoder.apply(data.schema).resolveAndBind()
     val originFromRow = dataEncoder.createDeserializer()
 
-    val partitionCols = table.partitionKeys().asScala.map(col)
-    val partitioned = if (partitionCols.isEmpty) {
-      data
-    } else {
-      // repartition data in order to reduce the number of PartitionIndex for per Spark Task.
-      data.repartition(partitionCols: _*)
-    }
-
     // append _bucket_ column as placeholder
-    val withBucketCol = partitioned.withColumn(BUCKET_COL, lit(-1))
+    val withBucketCol = data.withColumn(BUCKET_COL, lit(-1))
     val bucketColIdx = withBucketCol.schema.size - 1
 
     val groupedSchema = StructType(
