@@ -52,8 +52,6 @@ public class KafkaSchema {
     private static final int MAX_RETRY = 100;
     private static final int MAX_READ = 1000;
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
-
     private String databaseName;
     private String tableName;
     private final Map<String, DataType> fields;
@@ -110,7 +108,8 @@ public class KafkaSchema {
         return record != null && record.get(key) != null ? record.get(key).asText() : null;
     }
 
-    private static KafkaSchema parseCanalJson(String record) throws JsonProcessingException {
+    private static KafkaSchema parseCanalJson(String record, ObjectMapper objectMapper)
+            throws JsonProcessingException {
         String databaseName;
         String tableName;
         final Map<String, DataType> fields = new LinkedHashMap<>();
@@ -145,13 +144,14 @@ public class KafkaSchema {
         consumer.subscribe(Collections.singletonList(topic));
         KafkaSchema kafkaSchema;
         int retry = 0;
+        ObjectMapper objectMapper = new ObjectMapper();
         while (true) {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
             for (ConsumerRecord<String, String> record : records) {
                 try {
                     String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
                     if ("canal-json".equals(format)) {
-                        kafkaSchema = parseCanalJson(record.value());
+                        kafkaSchema = parseCanalJson(record.value(), objectMapper);
                         if (kafkaSchema != null) {
                             return kafkaSchema;
                         }
@@ -180,6 +180,7 @@ public class KafkaSchema {
         int retry = 0;
         int read = 0;
         maxRead = maxRead == 0 ? MAX_READ : maxRead;
+        ObjectMapper objectMapper = new ObjectMapper();
         while (maxRead > read) {
             ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
             for (ConsumerRecord<String, String> record : records) {
@@ -187,7 +188,7 @@ public class KafkaSchema {
                 try {
                     String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
                     if ("canal-json".equals(format)) {
-                        KafkaSchema kafkaSchema = parseCanalJson(record.value());
+                        KafkaSchema kafkaSchema = parseCanalJson(record.value(), objectMapper);
                         if (kafkaSchema != null && !kafkaSchemaList.contains(kafkaSchema)) {
                             kafkaSchemaList.add(kafkaSchema);
                         }
