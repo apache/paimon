@@ -25,7 +25,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, InnerTableCommit, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.{DataFrame, RelationalGroupedDataset, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
@@ -61,12 +61,21 @@ case class WriteIntoPaimonTable(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
-    val partitionCols = table.partitionKeys().asScala.map(col)
     val dataEncoder = RowEncoder.apply(data.schema).resolveAndBind()
     val originFromRow = dataEncoder.createDeserializer()
 
+    val partitionCols = tableSchema.partitionKeys().asScala.map(col)
+    val bucketCols = tableSchema.bucketKeys().asScala.map(col)
+    table.schema().logicalBucketKeyType()
+    val partitioned = if (bucketCols.isEmpty) {
+      data
+    } else {
+      // Make sure that the records with the same bucket values is within a task.
+      data.repartition(bucketCols: _*)
+    }
+
     // append _bucket_ column as placeholder
-    val withBucketCol = data.withColumn(BUCKET_COL, lit(-1))
+    val withBucketCol = partitioned.withColumn(BUCKET_COL, lit(-1))
     val bucketColIdx = withBucketCol.schema.size - 1
 
     val groupedSchema = StructType(
