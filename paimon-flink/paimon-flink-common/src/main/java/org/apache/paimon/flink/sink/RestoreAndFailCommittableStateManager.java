@@ -78,9 +78,8 @@ public class RestoreAndFailCommittableStateManager<GlobalCommitT>
 
     private void recover(List<GlobalCommitT> committables, Committer<?, GlobalCommitT> committer)
             throws Exception {
-        committables = committer.filterRecoveredCommittables(committables);
-        if (!committables.isEmpty()) {
-            committer.commit(committables);
+        int numCommitted = committer.filterAndCommit(committables);
+        if (numCommitted > 0) {
             throw new RuntimeException(
                     "This exception is intentionally thrown "
                             + "after committing the restored checkpoints. "

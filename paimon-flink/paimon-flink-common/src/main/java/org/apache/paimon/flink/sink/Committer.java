@@ -32,16 +32,18 @@ import java.util.Map;
  */
 public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
 
-    /** Find out which global committables need to be retried when recovering from the failure. */
-    List<GlobalCommitT> filterRecoveredCommittables(List<GlobalCommitT> globalCommittables)
-            throws IOException;
-
     /** Compute an aggregated committable from a list of committables. */
     GlobalCommitT combine(long checkpointId, long watermark, List<CommitT> committables)
             throws IOException;
 
     /** Commits the given {@link GlobalCommitT}. */
     void commit(List<GlobalCommitT> globalCommittables) throws IOException, InterruptedException;
+
+    /**
+     * Filter out all {@link GlobalCommitT} which have committed, and commit the remaining {@link
+     * GlobalCommitT}.
+     */
+    int filterAndCommit(List<GlobalCommitT> globalCommittables) throws IOException;
 
     Map<Long, List<CommitT>> groupByCheckpoint(Collection<CommitT> committables);
 }

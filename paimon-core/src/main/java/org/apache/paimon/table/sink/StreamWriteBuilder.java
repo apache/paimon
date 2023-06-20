@@ -32,8 +32,8 @@ import org.apache.paimon.data.InternalRow;
  *   <li>Different applications need to use different commitUsers.
  *   <li>The commitIdentifier of {@link StreamTableWrite} and {@link StreamTableCommit} needs to be
  *       consistent, and the id needs to be incremented for the next committing.
- *   <li>When a failure occurs, if you still have uncommitted {@link CommitMessage}s, please use
- *       {@link StreamTableCommit#filterCommitted} to exclude the committed messages by
+ *   <li>When a failure occurs, if you still have uncommitted {@link CommitMessage}s, please retry
+ *       with {@link StreamTableCommit#filterAndCommit} to exclude the committed messages by
  *       commitIdentifier.
  * </ul>
  *
