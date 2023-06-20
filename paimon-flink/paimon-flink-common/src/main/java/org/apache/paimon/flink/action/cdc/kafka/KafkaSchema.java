@@ -52,8 +52,8 @@ public class KafkaSchema {
     private static final int MAX_RETRY = 100;
     private static final int MAX_READ = 1000;
 
-    private String databaseName;
-    private String tableName;
+    private final String databaseName;
+    private final String tableName;
     private final Map<String, DataType> fields;
     private final List<String> primaryKeys;
 
