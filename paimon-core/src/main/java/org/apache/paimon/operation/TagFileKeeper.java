@@ -23,17 +23,19 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.utils.ParallellyExecuteUtils;
 import org.apache.paimon.utils.TagManager;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
+
+import static org.apache.paimon.operation.DeletionUtils.addMergedDataFiles;
+import static org.apache.paimon.operation.DeletionUtils.containsDataFile;
 
 /** Util class to provide methods to prevent tag files to be deleted when expiring snapshots. */
 public class TagFileKeeper {
@@ -41,6 +43,7 @@ public class TagFileKeeper {
     private final ManifestList manifestList;
     private final ManifestFile manifestFile;
     private final TagManager tagManager;
+    @Nullable private final Integer scanManifestParallelism;
 
     private long cachedTag = -1;
     private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles;
@@ -48,10 +51,15 @@ public class TagFileKeeper {
     private List<Snapshot> taggedSnapshots;
 
     public TagFileKeeper(
-            ManifestList manifestList, ManifestFile manifestFile, TagManager tagManager) {
+            ManifestList manifestList,
+            ManifestFile manifestFile,
+            TagManager tagManager,
+            @Nullable Integer scanManifestParallelism) {
         this.manifestList = manifestList;
         this.manifestFile = manifestFile;
         this.tagManager = tagManager;
+        this.scanManifestParallelism = scanManifestParallelism;
+
         this.cachedTagDataFiles = new HashMap<>();
     }
 
@@ -65,7 +73,7 @@ public class TagFileKeeper {
         if (index >= 0) {
             tryRefresh(taggedSnapshots.get(index));
         }
-        return entry -> index >= 0 && contains(entry);
+        return entry -> index >= 0 && containsDataFile(cachedTagDataFiles, entry);
     }
 
     public List<Snapshot> findOverlappedSnapshots(long beginInclusive, long endExclusive) {
@@ -89,33 +97,12 @@ public class TagFileKeeper {
 
     private void refresh(Snapshot taggedSnapshot) {
         cachedTagDataFiles.clear();
-
-        Iterable<ManifestEntry> entries =
-                ParallellyExecuteUtils.parallelismBatchIterable(
-                        files ->
-                                files.parallelStream()
-                                        .flatMap(m -> manifestFile.read(m.fileName()).stream())
-                                        .collect(Collectors.toList()),
-                        taggedSnapshot.dataManifests(manifestList),
-                        null);
-
-        for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
-            cachedTagDataFiles
-                    .computeIfAbsent(entry.partition(), p -> new HashMap<>())
-                    .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
-                    .add(entry.file().fileName());
-        }
-    }
-
-    private boolean contains(ManifestEntry entry) {
-        Map<Integer, Set<String>> buckets = cachedTagDataFiles.get(entry.partition());
-        if (buckets != null) {
-            Set<String> fileNames = buckets.get(entry.bucket());
-            if (fileNames != null) {
-                return fileNames.contains(entry.file().fileName());
-            }
-        }
-        return false;
+        addMergedDataFiles(
+                cachedTagDataFiles,
+                taggedSnapshot,
+                manifestList,
+                manifestFile,
+                scanManifestParallelism);
     }
 
     private int findPreviousTag(long targetSnapshotId, List<Snapshot> taggedSnapshots) {

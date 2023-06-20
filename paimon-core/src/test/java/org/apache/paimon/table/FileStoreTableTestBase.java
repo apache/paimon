@@ -746,6 +746,25 @@ public abstract class FileStoreTableTestBase {
                                 "Tag name cannot be pure numeric string but is '10'."));
     }
 
+    @Test
+    public void testDeleteTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.deleteTag("tag1");
+
+        assertThatThrownBy(() -> table.deleteTag("tag1"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class, "Tag 'tag1' doesn't exist."));
+    }
+
     protected List<String> getResult(
             TableRead read,
             List<Split> splits,

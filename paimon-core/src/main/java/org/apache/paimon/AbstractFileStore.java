@@ -30,6 +30,7 @@ import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.TagFileKeeper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
@@ -169,12 +170,12 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.snapshotNumRetainMax(),
                 options.snapshotTimeRetain().toMillis(),
                 snapshotManager(),
-                newIndexFileHandler(),
                 newSnapshotDeletion(),
                 new TagFileKeeper(
                         manifestListFactory().create(),
                         manifestFileFactory().create(),
-                        new TagManager(fileIO, options.path())));
+                        new TagManager(fileIO, options.path()),
+                        options.scanManifestParallelism()));
     }
 
     @Override
@@ -185,6 +186,18 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
                 newIndexFileHandler());
+    }
+
+    @Override
+    public TagDeletion newTagDeletion() {
+        return new TagDeletion(
+                fileIO,
+                options.path(),
+                pathFactory(),
+                manifestListFactory().create(),
+                manifestFileFactory().create(),
+                newIndexFileHandler(),
+                options.scanManifestParallelism());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
