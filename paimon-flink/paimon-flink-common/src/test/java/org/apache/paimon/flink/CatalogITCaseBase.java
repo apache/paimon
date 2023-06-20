@@ -74,7 +74,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
                                 + inferScan
                                 + ")",
                         catalog,
-                        path));
+                        toWarehouse(path)));
         tEnv.useCatalog(catalog);
 
         sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
@@ -159,5 +159,9 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
                 new SnapshotManager(LocalFileIO.create(), getTableDirectory(tableName));
         Long id = snapshotManager.latestSnapshotId();
         return id == null ? null : snapshotManager.snapshot(id);
+    }
+
+    protected String toWarehouse(String path) {
+        return path;
     }
 }

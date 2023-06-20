@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * {@link FollowUpScanner} used internally for stand-alone streaming compact job sources when table
- * is non-bucket.
+ * is unaware-bucket table.
  */
 public class ContinuousAppendAndCompactFollowUpScanner implements FollowUpScanner {
 

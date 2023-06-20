@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -81,6 +82,7 @@ public class FlinkSinkBuilder {
             case DYNAMIC:
                 return buildDynamicBucketSink();
             case UNAWARE:
+                return buildUnawareBucketSink();
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
         }
@@ -101,5 +103,18 @@ public class FlinkSinkBuilder {
         FileStoreSink sink =
                 new FileStoreSink(table, lockFactory, overwritePartition, logSinkFunction);
         return sink.sinkFrom(partitioned);
+    }
+
+    private DataStreamSink<?> buildUnawareBucketSink() {
+        checkArgument(
+                table instanceof AppendOnlyFileStoreTable,
+                "Unaware bucket mode only works with append-only table for now.");
+        return new UnawareBucketWriteSink(
+                        (AppendOnlyFileStoreTable) table,
+                        lockFactory,
+                        overwritePartition,
+                        logSinkFunction,
+                        parallelism)
+                .sinkFrom(input);
     }
 }
