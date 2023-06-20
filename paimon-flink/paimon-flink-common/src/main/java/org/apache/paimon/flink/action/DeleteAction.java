@@ -68,13 +68,10 @@ public class DeleteAction extends TableActionBase {
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        if (tablePath == null) {
-            return Optional.empty();
-        }
-
         String filter = params.get("where");
         if (filter == null) {
-            return Optional.empty();
+            throw new IllegalArgumentException(
+                    "Please specify deletion filter. If you want to delete all records, please use overwrite (see doc).");
         }
 
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
@@ -97,7 +94,7 @@ public class DeleteAction extends TableActionBase {
         System.out.println();
 
         System.out.println(
-                "The '--where <filter_spec>' part is equal to the 'WHERE' clause in SQL DELETE statement. If you want delete all records, please use overwrite (see doc).");
+                "The '--where <filter_spec>' part is equal to the 'WHERE' clause in SQL DELETE statement. If you want to delete all records, please use overwrite (see doc).");
         System.out.println();
 
         System.out.println("Examples:");

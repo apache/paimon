@@ -54,6 +54,7 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
 import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -338,9 +339,17 @@ public class KafkaSyncDatabaseAction extends ActionBase {
             return Optional.empty();
         }
 
+        checkRequiredArgument(params, "warehouse");
+        checkRequiredArgument(params, "database");
+        checkRequiredArgument(params, "kafka-conf");
+
+        int schemaInitMaxRead = 1000;
+        if (params.has("schema-init-max-read")) {
+            schemaInitMaxRead = Integer.parseInt(params.get("schema-init-max-read"));
+        }
+
         String warehouse = params.get("warehouse");
         String database = params.get("database");
-        int schemaInitMaxRead = Integer.parseInt(params.get("schema-init-max-read"));
         boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
         String tablePrefix = params.get("table-prefix");
         String tableSuffix = params.get("table-suffix");

@@ -19,14 +19,14 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncDatabaseAction;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncTableAction;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseAction;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -42,7 +42,6 @@ public interface Action {
     /** The execution method of the action. */
     void run() throws Exception;
 
-    @Nullable
     static Tuple3<String, String, String> getTablePath(MultipleParameterTool params) {
         String warehouse = params.get("warehouse");
         String database = params.get("database");
@@ -53,10 +52,8 @@ public interface Action {
         int count = 0;
         if (warehouse != null || database != null || table != null) {
             if (warehouse == null || database == null || table == null) {
-                System.err.println(
-                        "Warehouse, database and table must be specified all at once.\n"
-                                + "Run <action> --help for help.");
-                return null;
+                throw new IllegalArgumentException(
+                        "Warehouse, database and table must be specified all at once to specify a table.");
             }
             tablePath = Tuple3.of(warehouse, database, table);
             count++;
@@ -71,45 +68,57 @@ public interface Action {
         }
 
         if (count != 1) {
-            System.err.println(
-                    "Please specify either \"warehouse, database and table\" or \"path\".\n"
-                            + "Run <action> --help for help.");
-            return null;
+            throw new IllegalArgumentException(
+                    "Please specify either \"warehouse, database and table\" or \"path\".");
         }
 
         return tablePath;
     }
 
-    @Nullable
     static List<Map<String, String>> getPartitions(MultipleParameterTool params) {
         List<Map<String, String>> partitions = new ArrayList<>();
         for (String partition : params.getMultiParameter("partition")) {
-            Map<String, String> kvs = parseKeyValues(partition);
-            if (kvs == null) {
-                return null;
-            }
+            Map<String, String> kvs = parseCommaSeparatedKeyValues(partition);
             partitions.add(kvs);
         }
 
         return partitions;
     }
 
-    static Map<String, String> parseKeyValues(String keyValues) {
+    static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {
         Map<String, String> kvs = new HashMap<>();
         for (String kvString : keyValues.split(",")) {
-            String[] kv = kvString.split("=");
-            if (kv.length != 2) {
-                System.err.print(
-                        "Invalid key-value pair \""
-                                + kvString
-                                + "\".\n"
-                                + "Run <action> --help for help.");
-                return null;
-            }
-            kvs.put(kv[0].trim(), kv[1].trim());
+            parseKeyValueString(kvs, kvString);
+        }
+        return kvs;
+    }
+
+    static Map<String, String> optionalConfigMap(MultipleParameterTool params, String key) {
+        if (!params.has(key)) {
+            return Collections.emptyMap();
         }
 
-        return kvs;
+        Map<String, String> config = new HashMap<>();
+        for (String kvString : params.getMultiParameter(key)) {
+            parseKeyValueString(config, kvString);
+        }
+        return config;
+    }
+
+    static void parseKeyValueString(Map<String, String> map, String kvString) {
+        String[] kv = kvString.split("=");
+        if (kv.length != 2) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid key-value string '%s'. Please use format 'key=value'",
+                            kvString));
+        }
+        map.put(kv[0].trim(), kv[1].trim());
+    }
+
+    static void checkRequiredArgument(MultipleParameterTool params, String key) {
+        Preconditions.checkArgument(
+                params.has(key), "Argument '%s' is required. Run '<action> --help' for help.", key);
     }
 
     /** Factory to create {@link Action}. */
@@ -126,6 +135,7 @@ public interface Action {
         private static final String MYSQL_SYNC_DATABASE = "mysql-sync-database";
 
         private static final String KAFKA_SYNC_TABLE = "kafka-sync-table";
+        private static final String KAFKA_SYNC_DATABASE = "kafka-sync-database";
 
         public static Optional<Action> create(String[] args) {
             String action = args[0].toLowerCase();
@@ -148,10 +158,11 @@ public interface Action {
                     return MySqlSyncDatabaseAction.create(actionArgs);
                 case KAFKA_SYNC_TABLE:
                     return KafkaSyncTableAction.create(actionArgs);
+                case KAFKA_SYNC_DATABASE:
+                    return KafkaSyncDatabaseAction.create(actionArgs);
                 default:
-                    System.err.println("Unknown action \"" + action + "\"");
                     printHelp();
-                    return Optional.empty();
+                    throw new UnsupportedOperationException("Unknown action \"" + action + "\".");
             }
         }
 
@@ -164,30 +175,13 @@ public interface Action {
             System.out.println("  " + DROP_PARTITION);
             System.out.println("  " + DELETE);
             System.out.println("  " + MERGE_INTO);
+            System.out.println("  " + ROLLBACK_TO);
             System.out.println("  " + MYSQL_SYNC_TABLE);
             System.out.println("  " + MYSQL_SYNC_DATABASE);
+            System.out.println("  " + KAFKA_SYNC_TABLE);
+            System.out.println("  " + KAFKA_SYNC_DATABASE);
 
             System.out.println("For detailed options of each action, run <action> --help");
         }
-    }
-
-    static Map<String, String> optionalConfigMap(MultipleParameterTool params, String key) {
-        if (!params.has(key)) {
-            return Collections.emptyMap();
-        }
-
-        Map<String, String> map = new HashMap<>();
-        for (String param : params.getMultiParameter(key)) {
-            String[] kv = param.split("=");
-            if (kv.length == 2) {
-                map.put(kv[0], kv[1]);
-                continue;
-            }
-
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid argument '%s %s'. Please use format 'key=value'", key, param));
-        }
-        return map;
     }
 }

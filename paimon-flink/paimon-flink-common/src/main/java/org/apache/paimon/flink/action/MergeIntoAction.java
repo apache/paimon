@@ -47,9 +47,10 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 import static org.apache.paimon.flink.action.Action.optionalConfigMap;
-import static org.apache.paimon.flink.action.Action.parseKeyValues;
+import static org.apache.paimon.flink.action.Action.parseCommaSeparatedKeyValues;
 
 /**
  * Flink action for 'MERGE INTO', which references the syntax as follows (we use 'upsert' semantics
@@ -233,9 +234,6 @@ public class MergeIntoAction extends TableActionBase {
         }
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        if (tablePath == null) {
-            return Optional.empty();
-        }
 
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 
@@ -251,14 +249,10 @@ public class MergeIntoAction extends TableActionBase {
             action.withSourceSqls(sourceSqls.toArray(new String[0]));
         }
 
-        if (argumentAbsent(params, "source-table")) {
-            return Optional.empty();
-        }
+        checkRequiredArgument(params, "source-table");
         action.withSourceTable(params.get("source-table"));
 
-        if (argumentAbsent(params, "on")) {
-            return Optional.empty();
-        }
+        checkRequiredArgument(params, "on");
         action.withMergeCondition(params.get("on"));
 
         List<String> actions =
@@ -266,16 +260,12 @@ public class MergeIntoAction extends TableActionBase {
                         .map(String::trim)
                         .collect(Collectors.toList());
         if (actions.contains("matched-upsert")) {
-            if (argumentAbsent(params, "matched-upsert-set")) {
-                return Optional.empty();
-            }
+            checkRequiredArgument(params, "matched-upsert-set");
             action.withMatchedUpsert(
                     params.get("matched-upsert-condition"), params.get("matched-upsert-set"));
         }
         if (actions.contains("not-matched-by-source-upsert")) {
-            if (argumentAbsent(params, "not-matched-by-source-upsert-set")) {
-                return Optional.empty();
-            }
+            checkRequiredArgument(params, "not-matched-by-source-upsert-set");
             action.withNotMatchedBySourceUpsert(
                     params.get("not-matched-by-source-upsert-condition"),
                     params.get("not-matched-by-source-upsert-set"));
@@ -288,66 +278,47 @@ public class MergeIntoAction extends TableActionBase {
                     params.get("not-matched-by-source-delete-condition"));
         }
         if (actions.contains("not-matched-insert")) {
-            if (argumentAbsent(params, "not-matched-insert-values")) {
-                return Optional.empty();
-            }
+            checkRequiredArgument(params, "not-matched-insert-values");
             action.withNotMatchedInsert(
                     params.get("not-matched-insert-condition"),
                     params.get("not-matched-insert-values"));
         }
 
-        if (!validate(action)) {
-            return Optional.empty();
-        }
+        validate(action);
 
         return Optional.of(action);
     }
 
-    private static boolean argumentAbsent(MultipleParameterTool params, String key) {
-        if (!params.has(key)) {
-            System.err.println(key + " is absent.\nRun <action> --help for help.");
-            return true;
-        }
-
-        return false;
-    }
-
-    private static boolean validate(MergeIntoAction action) {
+    private static void validate(MergeIntoAction action) {
         if (!action.matchedUpsert
                 && !action.notMatchedUpsert
                 && !action.matchedDelete
                 && !action.notMatchedDelete
                 && !action.insert) {
-            System.err.println(
-                    "Must specify at least one merge action.\nRun <action> --help for help.");
-            return false;
+            throw new IllegalArgumentException(
+                    "Must specify at least one merge action. Run 'merge-into --help' for help.");
         }
 
         if ((action.matchedUpsert && action.matchedDelete)
                 && (action.matchedUpsertCondition == null
                         || action.matchedDeleteCondition == null)) {
-            System.err.println(
-                    "If both matched-upsert and matched-delete actions are present, their conditions must both be present too.\n"
-                            + "Run <action> --help for help.");
-            return false;
+            throw new IllegalArgumentException(
+                    "If both matched-upsert and matched-delete actions are present, their conditions must both be present too.");
         }
 
         if ((action.notMatchedUpsert && action.notMatchedDelete)
                 && (action.notMatchedBySourceUpsertCondition == null
                         || action.notMatchedBySourceDeleteCondition == null)) {
-            System.err.println(
-                    "If both not-matched-by-source-upsert and not-matched-by--source-delete actions are present, their conditions must both be present too.\n"
-                            + "Run <action> --help for help.");
-            return false;
+            throw new IllegalArgumentException(
+                    "If both not-matched-by-source-upsert and not-matched-by--source-delete actions are present, "
+                            + "their conditions must both be present too.\n");
         }
 
         if (action.notMatchedBySourceUpsertSet != null
                 && action.notMatchedBySourceUpsertSet.equals("*")) {
-            System.err.println("The '*' cannot be used in not-matched-by-source-upsert-set");
-            return false;
+            throw new IllegalArgumentException(
+                    "The '*' cannot be used in not-matched-by-source-upsert-set");
         }
-
-        return true;
     }
 
     private static void printHelp() {
@@ -499,11 +470,7 @@ public class MergeIntoAction extends TableActionBase {
             // validate upsert changes
             // no need to check primary keys changes because merge condition must contain all pks
             // of the target table
-            Map<String, String> changes = parseKeyValues(matchedUpsertSet);
-            if (changes == null) {
-                throw new IllegalArgumentException(
-                        "matched-upsert-set is invalid.\nRun <action> --help for help.");
-            }
+            Map<String, String> changes = parseCommaSeparatedKeyValues(matchedUpsertSet);
             for (String targetField : changes.keySet()) {
                 if (!targetFieldNames.contains(targetField)) {
                     throw new RuntimeException(
@@ -544,11 +511,7 @@ public class MergeIntoAction extends TableActionBase {
         }
 
         // validate upsert change
-        Map<String, String> changes = parseKeyValues(notMatchedBySourceUpsertSet);
-        if (changes == null) {
-            throw new IllegalArgumentException(
-                    "matched-upsert-set is invalid.\nRun <action> --help for help.");
-        }
+        Map<String, String> changes = parseCommaSeparatedKeyValues(notMatchedBySourceUpsertSet);
         for (String targetField : changes.keySet()) {
             if (!targetFieldNames.contains(targetField)) {
                 throw new RuntimeException(

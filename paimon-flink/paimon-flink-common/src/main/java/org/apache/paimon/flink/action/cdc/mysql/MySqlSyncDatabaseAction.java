@@ -54,6 +54,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
 import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -323,6 +324,10 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             return Optional.empty();
         }
 
+        checkRequiredArgument(params, "warehouse");
+        checkRequiredArgument(params, "database");
+        checkRequiredArgument(params, "mysql-conf");
+
         String warehouse = params.get("warehouse");
         String database = params.get("database");
         boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
@@ -330,10 +335,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         String tableSuffix = params.get("table-suffix");
         String includingTables = params.get("including-tables");
         String excludingTables = params.get("excluding-tables");
-
-        if (!params.has("mysql-conf")) {
-            return Optional.empty();
-        }
 
         Map<String, String> mySqlConfig = optionalConfigMap(params, "mysql-conf");
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
