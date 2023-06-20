@@ -107,7 +107,6 @@ After `spark-sql` command line has started, run the following SQL to create and 
 
 ```sql
 USE paimon;
-CREATE DATABASE default;
 USE default;
 ```
 
