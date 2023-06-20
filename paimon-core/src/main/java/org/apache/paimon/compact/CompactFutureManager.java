@@ -52,7 +52,6 @@ public abstract class CompactFutureManager implements CompactManager {
                 try {
                     result = obtainCompactResult();
                 } catch (CancellationException e) {
-                    taskFuture = null;
                     return Optional.empty();
                 } finally {
                     taskFuture = null;
