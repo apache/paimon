@@ -20,7 +20,6 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
@@ -56,9 +55,7 @@ public class SparkCatalog extends SparkCatalogBase {
         LOG.info("Time travel target snapshot id is {}.", snapshotId);
 
         Options dynamicOptions = new Options().set(CoreOptions.SCAN_SNAPSHOT_ID, snapshotId);
-        return new SparkTable(
-                table.copy(dynamicOptions.toMap()),
-                Lock.factory(catalog.lockFactory().orElse(null), toIdentifier(ident)));
+        return new SparkTable(table.copy(dynamicOptions.toMap()));
     }
 
     /**
@@ -75,9 +72,7 @@ public class SparkCatalog extends SparkCatalogBase {
         LOG.info("Time travel target timestamp is {} milliseconds.", timestamp);
 
         Options option = new Options().set(CoreOptions.SCAN_TIMESTAMP_MILLIS, timestamp);
-        return new SparkTable(
-                table.copy(option.toMap()),
-                Lock.factory(catalog.lockFactory().orElse(null), toIdentifier(ident)));
+        return new SparkTable(table.copy(option.toMap()));
     }
 
     private Table loadAndCheck(Identifier ident) throws NoSuchTableException {

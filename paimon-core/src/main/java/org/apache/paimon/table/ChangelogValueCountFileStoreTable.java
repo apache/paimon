@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -58,16 +59,20 @@ import static org.apache.paimon.schema.SystemColumns.VALUE_COUNT;
 public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
-
     private transient KeyValueFileStore lazyStore;
 
     ChangelogValueCountFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        super(fileIO, path, tableSchema);
+        this(fileIO, path, tableSchema, Lock.emptyFactory());
+    }
+
+    ChangelogValueCountFileStoreTable(
+            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
+        super(fileIO, path, tableSchema, lockFactory);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new ChangelogValueCountFileStoreTable(fileIO, path, newTableSchema);
+        return new ChangelogValueCountFileStoreTable(fileIO, path, newTableSchema, lockFactory);
     }
 
     @Override

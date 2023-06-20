@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -80,7 +81,11 @@ public abstract class AbstractCatalog implements Catalog {
 
     private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
         TableSchema tableSchema = getDataTableSchema(identifier);
-        return FileStoreTableFactory.create(fileIO, getDataTableLocation(identifier), tableSchema);
+        return FileStoreTableFactory.create(
+                fileIO,
+                getDataTableLocation(identifier),
+                tableSchema,
+                Lock.factory(lockFactory().orElse(null), identifier));
     }
 
     @VisibleForTesting

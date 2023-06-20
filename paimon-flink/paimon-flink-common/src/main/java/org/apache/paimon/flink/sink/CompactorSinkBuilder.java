@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -34,7 +33,6 @@ public class CompactorSinkBuilder {
     private final FileStoreTable table;
 
     private DataStream<RowData> input;
-    private Lock.Factory lockFactory = Lock.emptyFactory();
 
     public CompactorSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -42,11 +40,6 @@ public class CompactorSinkBuilder {
 
     public CompactorSinkBuilder withInput(DataStream<RowData> input) {
         this.input = input;
-        return this;
-    }
-
-    public CompactorSinkBuilder withLockFactory(Lock.Factory lockFactory) {
-        this.lockFactory = lockFactory;
         return this;
     }
 
@@ -64,6 +57,6 @@ public class CompactorSinkBuilder {
 
     private DataStreamSink<?> buildForBucketAware() {
         DataStream<RowData> partitioned = partition(input, new BucketsRowChannelComputer(), null);
-        return new CompactorSink(table, lockFactory).sinkFrom(partitioned);
+        return new CompactorSink(table).sinkFrom(partitioned);
     }
 }

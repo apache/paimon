@@ -18,8 +18,6 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.operation.Lock;
-
 import javax.annotation.Nullable;
 
 import java.util.Map;
@@ -40,8 +38,4 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
      * </ul>
      */
     InnerTableCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
-
-    /** @deprecated lock should pass from table. */
-    @Deprecated
-    InnerTableCommit withLock(Lock lock);
 }

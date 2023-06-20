@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -49,7 +48,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private DataStream<T> input = null;
     private EventParser.Factory<T> parserFactory = null;
     private List<FileStoreTable> tables = new ArrayList<>();
-    private Lock.Factory lockFactory = Lock.emptyFactory();
 
     @Nullable private Integer parallelism;
 
@@ -66,11 +64,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withTables(List<FileStoreTable> tables) {
         this.tables = tables;
-        return this;
-    }
-
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withLockFactory(Lock.Factory lockFactory) {
-        this.lockFactory = lockFactory;
         return this;
     }
 
@@ -123,12 +116,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     }
 
     private void buildForDynamicBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
-        new CdcDynamicBucketSink(table, lockFactory).build(parsed, parallelism);
+        new CdcDynamicBucketSink(table).build(parsed, parallelism);
     }
 
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(table.schema()), parallelism);
-        new FlinkCdcSink(table, lockFactory).sinkFrom(partitioned);
+        new FlinkCdcSink(table).sinkFrom(partitioned);
     }
 }

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
@@ -37,10 +36,9 @@ public class FileStoreSink extends FlinkWriteSink<RowData> {
 
     public FileStoreSink(
             FileStoreTable table,
-            Lock.Factory lockFactory,
             @Nullable Map<String, String> overwritePartition,
             @Nullable LogSinkFunction logSinkFunction) {
-        super(table, overwritePartition, lockFactory);
+        super(table, overwritePartition);
         this.logSinkFunction = logSinkFunction;
     }
 

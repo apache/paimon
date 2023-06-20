@@ -19,7 +19,6 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTableFactory;
 
@@ -70,7 +69,7 @@ public class SparkSource implements DataSourceRegister, SessionConfigSupport {
                 CatalogContext.create(
                         Options.fromMap(options),
                         SparkSession.active().sessionState().newHadoopConf());
-        return new SparkTable(FileStoreTableFactory.create(catalogContext), Lock.emptyFactory());
+        return new SparkTable(FileStoreTableFactory.create(catalogContext));
     }
 
     @Override

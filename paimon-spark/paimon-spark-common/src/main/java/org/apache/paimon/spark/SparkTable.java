@@ -18,7 +18,6 @@
 
 package org.apache.paimon.spark;
 
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
@@ -53,11 +52,9 @@ public class SparkTable
                 SupportsDelete {
 
     private final Table table;
-    private final Lock.Factory lockFactory;
 
-    public SparkTable(Table table, Lock.Factory lockFactory) {
+    public SparkTable(Table table) {
         this.table = table;
-        this.lockFactory = lockFactory;
     }
 
     @Override
@@ -94,7 +91,7 @@ public class SparkTable
 
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
-        return new SparkWriteBuilder(table, lockFactory);
+        return new SparkWriteBuilder(table);
     }
 
     @Override
@@ -109,7 +106,7 @@ public class SparkTable
             predicates.add(converter.convert(filter));
         }
 
-        TableUtils.deleteWhere(table, predicates, lockFactory);
+        TableUtils.deleteWhere(table, predicates);
     }
 
     @Override

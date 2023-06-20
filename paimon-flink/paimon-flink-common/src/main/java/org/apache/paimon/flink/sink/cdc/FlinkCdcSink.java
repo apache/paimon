@@ -22,7 +22,6 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
@@ -34,8 +33,8 @@ public class FlinkCdcSink extends FlinkWriteSink<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
 
-    public FlinkCdcSink(FileStoreTable table, Lock.Factory lockFactory) {
-        super(table, null, lockFactory);
+    public FlinkCdcSink(FileStoreTable table) {
+        super(table, null);
     }
 
     @Override

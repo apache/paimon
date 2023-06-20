@@ -21,13 +21,10 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
@@ -65,7 +62,6 @@ public abstract class FlinkTableSinkBase
 
     protected Map<String, String> staticPartitions = new HashMap<>();
     protected boolean overwrite = false;
-    @Nullable protected CatalogLock.Factory lockFactory;
 
     public FlinkTableSinkBase(
             ObjectIdentifier tableIdentifier,
@@ -138,11 +134,6 @@ public abstract class FlinkTableSinkBase
                                         new DataStream<>(
                                                 dataStream.getExecutionEnvironment(),
                                                 dataStream.getTransformation()))
-                                .withLockFactory(
-                                        Lock.factory(
-                                                lockFactory,
-                                                FlinkCatalog.toIdentifier(
-                                                        tableIdentifier.toObjectPath())))
                                 .withLogSinkFunction(logSinkFunction)
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
                                 .withParallelism(conf.get(FlinkConnectorOptions.SINK_PARALLELISM))
@@ -155,7 +146,6 @@ public abstract class FlinkTableSinkBase
                 new FlinkTableSink(tableIdentifier, table, context, logStoreTableFactory);
         copied.staticPartitions = new HashMap<>(staticPartitions);
         copied.overwrite = overwrite;
-        copied.lockFactory = lockFactory;
         return copied;
     }
 
@@ -179,9 +169,5 @@ public abstract class FlinkTableSinkBase
     @Override
     public void applyOverwrite(boolean overwrite) {
         this.overwrite = overwrite;
-    }
-
-    public void setLockFactory(@Nullable CatalogLock.Factory lockFactory) {
-        this.lockFactory = lockFactory;
     }
 }
