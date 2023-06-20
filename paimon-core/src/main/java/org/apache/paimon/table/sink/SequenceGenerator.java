@@ -55,6 +55,15 @@ public class SequenceGenerator {
         generator = rowType.getTypeAt(index).accept(new SequenceGeneratorVisitor());
     }
 
+    public SequenceGenerator(int index, DataType dataType) {
+        this.index = index;
+        if (index == -1) {
+            throw new RuntimeException(
+                    String.format("Can not find sequence field in table schema: %s", index));
+        }
+        generator = dataType.accept(new SequenceGeneratorVisitor());
+    }
+
     public int index() {
         return index;
     }

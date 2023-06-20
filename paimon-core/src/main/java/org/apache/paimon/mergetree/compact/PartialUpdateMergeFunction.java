@@ -35,6 +35,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
@@ -190,11 +193,35 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             List<DataType> fieldTypes = tableTypes;
+            Map<Integer, SequenceGenerator> projFieldSequences = new HashMap<>();
             if (projection != null) {
                 fieldTypes = Projection.of(projection).project(tableTypes);
+                int[] fieldOldIndex = Projection.of(projection).toTopLevelIndexes();
+                Map<Integer, Integer> indexMap = new HashMap<>();
+                for (int i = 0; i < fieldOldIndex.length; i++) {
+                    indexMap.put(fieldOldIndex[i], i);
+                }
+                for (int index = 0; index < fieldOldIndex.length; index++) {
+                    int oldIndex = fieldOldIndex[index];
+                    if (fieldSequences.get(oldIndex) != null) {
+                        int oldKeyIndex = fieldSequences.get(oldIndex).index();
+                        int keyIndex = indexMap.get(oldKeyIndex);
+                        if (!projFieldSequences.containsKey(keyIndex)) {
+                            SequenceGenerator newSequenceGen =
+                                    new SequenceGenerator(keyIndex, fieldTypes.get(keyIndex));
+                            projFieldSequences.put(keyIndex, newSequenceGen);
+                        }
+                        projFieldSequences.put(index, projFieldSequences.get(keyIndex));
+                    }
+                }
             }
+
             InternalRow.FieldGetter[] fieldGetters = createFieldGetters(fieldTypes);
 
+            if (!projFieldSequences.isEmpty()) {
+                return new PartialUpdateMergeFunction(
+                        fieldGetters, ignoreDelete, projFieldSequences);
+            }
             return new PartialUpdateMergeFunction(fieldGetters, ignoreDelete, fieldSequences);
         }
 
@@ -204,6 +231,29 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 return new AdjustedProjection(projection, null);
             }
             // TODO implement this, just keep required fields and adjust fieldSequences too.
+            if (projection != null) {
+                int[] projIndexs = Projection.of(projection).toTopLevelIndexes();
+                Set<Integer> indexSet =
+                        Arrays.stream(projIndexs).boxed().collect(Collectors.toSet());
+                Set<Integer> extraIndexSet = new TreeSet<>();
+                for (int index : projIndexs) {
+                    if (fieldSequences.get(index) != null) {
+                        int sequenceKeyIndex = fieldSequences.get(index).index();
+                        if (!indexSet.contains(sequenceKeyIndex)) {
+                            extraIndexSet.add(sequenceKeyIndex);
+                        }
+                    }
+                }
+                int[][] pushdownProjection = new int[projection.length + extraIndexSet.size()][];
+                int pos = projection.length;
+                System.arraycopy(projection, 0, pushdownProjection, 0, pos);
+
+                for (int index : extraIndexSet) {
+                    pushdownProjection[pos++] = new int[] {index};
+                }
+                return new AdjustedProjection(pushdownProjection, projection);
+            }
+
             return new AdjustedProjection(null, projection);
         }
     }
