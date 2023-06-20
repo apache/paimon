@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 
@@ -60,14 +61,8 @@ public class RollbackToAction extends TableActionBase {
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        if (tablePath == null) {
-            throw new IllegalArgumentException("Please specific table.");
-        }
-
+        checkRequiredArgument(params, "snapshot");
         String snapshot = params.get("snapshot");
-        if (snapshot == null) {
-            throw new IllegalArgumentException("Please specific snapshot.");
-        }
 
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 

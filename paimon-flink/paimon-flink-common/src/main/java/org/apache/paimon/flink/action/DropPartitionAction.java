@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
 import static org.apache.paimon.flink.action.Action.getPartitions;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 import static org.apache.paimon.flink.action.Action.optionalConfigMap;
@@ -77,25 +78,8 @@ public class DropPartitionAction extends TableActionBase {
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        if (tablePath == null) {
-            return Optional.empty();
-        }
-
-        if (!params.has("partition")) {
-            LOG.info(
-                    "Action drop-partition must specify partitions needed to be dropped.\n"
-                            + "Run drop-partition --help for help.");
-            System.err.println(
-                    "Action drop-partition must specify partitions needed to be dropped.\n"
-                            + "Run drop-partition --help for help.");
-
-            return Optional.empty();
-        }
-
+        checkRequiredArgument(params, "partition");
         List<Map<String, String>> partitions = getPartitions(params);
-        if (partitions == null) {
-            return Optional.empty();
-        }
 
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 

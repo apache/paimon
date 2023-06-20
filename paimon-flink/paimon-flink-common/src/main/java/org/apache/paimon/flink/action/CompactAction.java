@@ -140,10 +140,6 @@ public class CompactAction extends TableActionBase {
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        if (tablePath == null) {
-            return Optional.empty();
-        }
-
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 
         CompactAction action =
@@ -151,10 +147,6 @@ public class CompactAction extends TableActionBase {
 
         if (params.has("partition")) {
             List<Map<String, String>> partitions = getPartitions(params);
-            if (partitions == null) {
-                return Optional.empty();
-            }
-
             action.withPartitions(partitions);
         }
 

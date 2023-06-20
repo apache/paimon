@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
 import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -207,9 +208,6 @@ public class KafkaSyncTableAction extends ActionBase {
         }
 
         Tuple3<String, String, String> tablePath = Action.getTablePath(params);
-        if (tablePath == null) {
-            return Optional.empty();
-        }
 
         List<String> partitionKeys = Collections.emptyList();
         if (params.has("partition-keys")) {
@@ -229,9 +227,7 @@ public class KafkaSyncTableAction extends ActionBase {
             computedColumnArgs = new ArrayList<>(params.getMultiParameter("computed-column"));
         }
 
-        if (!params.has("kafka-conf")) {
-            return Optional.empty();
-        }
+        checkRequiredArgument(params, "kafka-conf");
 
         Map<String, String> kafkaConfig = optionalConfigMap(params, "kafka-conf");
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
