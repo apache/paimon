@@ -33,6 +33,7 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.operation.TagFileKeeper;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -144,6 +145,13 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
+        return newCommit(commitUser, new Options());
+    }
+
+    @Override
+    public FileStoreCommitImpl newCommit(String commitUser, Options extraOptions) {
+        CoreOptions coreOptions =
+                new CoreOptions(Options.combine(options.toConfiguration(), extraOptions));
         return new FileStoreCommitImpl(
                 fileIO,
                 schemaManager,
@@ -155,11 +163,11 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestListFactory(),
                 indexManifestFileFactory(),
                 newScan(),
-                options.bucket(),
-                options.manifestTargetSize(),
-                options.manifestFullCompactionThresholdSize(),
-                options.manifestMergeMinCount(),
-                partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
+                coreOptions.bucket(),
+                coreOptions.manifestTargetSize(),
+                coreOptions.manifestFullCompactionThresholdSize(),
+                coreOptions.manifestMergeMinCount(),
+                partitionType.getFieldCount() > 0 && coreOptions.dynamicPartitionOverwrite(),
                 newKeyComparator());
     }
 

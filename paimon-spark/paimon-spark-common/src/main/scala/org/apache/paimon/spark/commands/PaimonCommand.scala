@@ -20,6 +20,9 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageSerializer}
 
+import org.apache.spark.sql.catalyst.analysis.Resolver
+import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter, Not, Or}
+
 import java.io.IOException
 
 /** Helper trait for all paimon commands. */
@@ -44,4 +47,50 @@ trait PaimonCommand {
         throw new RuntimeException("Failed to deserialize CommitMessage's object", e)
     }
   }
+
+  /**
+   * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`
+   * methods where the `AlwaysTrue` Filter is used.
+   */
+  def isTruncate(filter: Filter): Boolean = {
+    val filters = splitConjunctiveFilters(filter)
+    filters.length == 1 && filters.head.isInstanceOf[AlwaysTrue]
+  }
+
+  /**
+   * For the 'INSERT OVERWRITE T PARTITION (partitionVal, ...)' semantics of SQL, Spark will
+   * transform `partitionVal`s to EqualNullSafe Filters.
+   */
+  def convertFilterToMap(
+      filter: Filter,
+      partitionColumns: Seq[String],
+      resolver: Resolver): Map[String, String] = {
+    splitConjunctiveFilters(filter).map {
+      case EqualNullSafe(attribute, value) =>
+        if (isNestedFilterInValue(value)) {
+          throw new RuntimeException(
+            s"Not support the complex partition value in EqualNullSafe when run `INSERT OVERWRITE`.")
+        } else {
+          partitionColumns.find(resolver(_, attribute)).map((_, value.toString)).getOrElse {
+            throw new RuntimeException(s"this $attribute is not recognized in partition columns.")
+          }
+        }
+      case _ =>
+        throw new RuntimeException(
+          s"Only EqualNullSafe should be used when run `INSERT OVERWRITE`.")
+    }.toMap
+  }
+
+  def splitConjunctiveFilters(filter: Filter): Seq[Filter] = {
+    filter match {
+      case And(filter1, filter2) =>
+        splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
+      case other => other :: Nil
+    }
+  }
+
+  def isNestedFilterInValue(value: Any): Boolean = {
+    value.isInstanceOf[Filter]
+  }
+
 }

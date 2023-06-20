@@ -55,6 +55,9 @@ public interface BatchWriteBuilder extends WriteBuilder {
 
     long COMMIT_IDENTIFIER = Long.MAX_VALUE;
 
+    /** Set option For Write or Commit. */
+    BatchWriteBuilder withOption(String key, String value);
+
     /** Overwrite writing, same as the 'INSERT OVERWRITE' semantics of SQL. */
     default BatchWriteBuilder withOverwrite() {
         withOverwrite(Collections.emptyMap());

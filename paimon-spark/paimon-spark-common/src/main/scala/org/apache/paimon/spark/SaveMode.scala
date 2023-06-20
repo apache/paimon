@@ -17,20 +17,12 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.paimon.spark.commands.WriteIntoPaimonTable
-import org.apache.paimon.table.FileStoreTable
+import org.apache.spark.sql.sources.Filter
 
-import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.connector.write.V1Write
-import org.apache.spark.sql.sources.InsertableRelation
+sealed trait SaveMode extends Serializable
 
-/** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
-class SparkWrite(val table: FileStoreTable, saveMode: SaveMode) extends V1Write {
+object InsertInto extends SaveMode
 
-  override def toInsertableRelation: InsertableRelation = {
-    (data: DataFrame, overwrite: Boolean) =>
-      {
-        WriteIntoPaimonTable(table, saveMode, data).run(data.sparkSession)
-      }
-  }
-}
+case class Overwrite(filters: Option[Filter]) extends SaveMode
+
+object DynamicOverWrite extends SaveMode

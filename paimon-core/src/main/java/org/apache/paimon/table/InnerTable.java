@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -42,6 +43,8 @@ public interface InnerTable extends Table {
     InnerTableWrite newWrite(String commitUser);
 
     InnerTableCommit newCommit(String commitUser);
+
+    InnerTableCommit newCommit(String commitUser, Options options);
 
     @Override
     default ReadBuilder newReadBuilder() {

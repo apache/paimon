@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.TagDeletion;
@@ -228,8 +229,19 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TableCommitImpl newCommit(String commitUser) {
+        FileStoreCommit fileStoreCommit = store().newCommit(commitUser);
+        return newCommitInternal(commitUser, fileStoreCommit);
+    }
+
+    @Override
+    public TableCommitImpl newCommit(String commitUser, Options options) {
+        FileStoreCommit fileStoreCommit = store().newCommit(commitUser, options);
+        return newCommitInternal(commitUser, fileStoreCommit);
+    }
+
+    private TableCommitImpl newCommitInternal(String commitUser, FileStoreCommit fileStoreCommit) {
         return new TableCommitImpl(
-                store().newCommit(commitUser),
+                fileStoreCommit,
                 coreOptions().writeOnly() ? null : store().newExpire(),
                 coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
                 lockFactory.create(),

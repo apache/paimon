@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
@@ -73,6 +74,14 @@ public interface ReadonlyTable extends InnerTable {
 
     @Override
     default InnerTableCommit newCommit(String commitUser) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support newCommit.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default InnerTableCommit newCommit(String commitUser, Options options) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support newCommit.",

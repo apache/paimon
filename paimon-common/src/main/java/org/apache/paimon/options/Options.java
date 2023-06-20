@@ -65,6 +65,12 @@ public class Options implements Serializable {
         return new Options(map);
     }
 
+    public static Options combine(Options o1, Options o2) {
+        Map<String, String> combinedMap = new HashMap<>(o1.toMap());
+        combinedMap.putAll(o2.toMap());
+        return Options.fromMap(combinedMap);
+    }
+
     /**
      * Adds the given key/value pair to the configuration object.
      *

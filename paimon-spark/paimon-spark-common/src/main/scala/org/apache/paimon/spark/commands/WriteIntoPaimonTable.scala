@@ -17,8 +17,10 @@
  */
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.index.PartitionIndex
+import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.table.FileStoreTable
@@ -27,6 +29,7 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
@@ -38,7 +41,7 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 /** Used to write a [[DataFrame]] into a paimon table. */
-case class WriteIntoPaimonTable(table: FileStoreTable, overwrite: Boolean, data: DataFrame)
+case class WriteIntoPaimonTable(table: FileStoreTable, saveMode: SaveMode, data: DataFrame)
   extends RunnableCommand
   with PaimonCommand {
 
@@ -52,12 +55,11 @@ case class WriteIntoPaimonTable(table: FileStoreTable, overwrite: Boolean, data:
 
   private lazy val serializer = new CommitMessageSerializer
 
-  if (overwrite) {
-    throw new UnsupportedOperationException("Overwrite is unsupported.");
-  }
-
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
+
+    val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode(
+      sparkSession.sessionState.conf.resolver)
 
     val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala.map(col)
     val partitionCols = tableSchema.partitionKeys().asScala.map(col)
@@ -113,13 +115,35 @@ case class WriteIntoPaimonTable(table: FileStoreTable, overwrite: Boolean, data:
         .map(deserializeCommitMessage(serializer, _))
 
     try {
-      val tableCommit = writeBuilder.newCommit().asInstanceOf[InnerTableCommit]
+      val tableCommit = writeBuilder
+        .withOption(DYNAMIC_PARTITION_OVERWRITE.key(), dynamicPartitionOverwriteMode.toString)
+        .withOverwrite(overwritePartition.asJava)
+        .newCommit()
       tableCommit.commit(commitMessages.toList.asJava)
     } catch {
       case e: Throwable => throw new RuntimeException(e);
     }
 
     Seq.empty
+  }
+
+  private def parseSaveMode(resolver: Resolver): (Boolean, Map[String, String]) = {
+    var dynamicPartitionOverwriteMode = false
+    val overwritePartition = saveMode match {
+      case InsertInto => null
+      case Overwrite(filter) =>
+        if (filter.isEmpty) {
+          Map.empty[String, String]
+        } else if (isTruncate(filter.get)) {
+          Map.empty[String, String]
+        } else {
+          convertFilterToMap(filter.get, tableSchema.partitionKeys().asScala, resolver)
+        }
+      case DynamicOverWrite =>
+        dynamicPartitionOverwriteMode = true
+        throw new UnsupportedOperationException("Dynamic Overwrite is unsupported for now.")
+    }
+    (dynamicPartitionOverwriteMode, overwritePartition)
   }
 
   override def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan]): LogicalPlan =
