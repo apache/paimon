@@ -61,6 +61,9 @@ case class WriteIntoPaimonTable(
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
+    val dataEncoder = RowEncoder.apply(data.schema).resolveAndBind()
+    val originFromRow = dataEncoder.createDeserializer()
+
     val partitionCols = table.partitionKeys().asScala.map(col)
     val partitioned = if (partitionCols.isEmpty) {
       data
@@ -79,9 +82,9 @@ case class WriteIntoPaimonTable(
     val groupedEncoder = RowEncoder.apply(groupedSchema).resolveAndBind()
     val bucketColIdxInGrouped = groupedSchema.size - 1
 
-    val dataEncoder = RowEncoder.apply(withBucketCol.schema).resolveAndBind()
-    val toRow = dataEncoder.createSerializer()
-    val fromRow = dataEncoder.createDeserializer()
+    val withBucketDataEncoder = RowEncoder.apply(withBucketCol.schema).resolveAndBind()
+    val toRow = withBucketDataEncoder.createSerializer()
+    val fromRow = withBucketDataEncoder.createDeserializer()
 
     val bucketProcessor = if (isDynamicBucketTable) {
       DynamicBucketProcessor(table, rowType, bucketColIdx, toRow, fromRow)
@@ -90,9 +93,9 @@ case class WriteIntoPaimonTable(
     }
     val committables =
       withBucketCol
-        .mapPartitions(bucketProcessor.processPartition)(dataEncoder)
+        .mapPartitions(bucketProcessor.processPartition)(withBucketDataEncoder)
         .groupBy(partitionCols ++ Seq(col(BUCKET_COL)): _*)
-        .as[Row, Row](groupedEncoder, dataEncoder)
+        .as[Row, Row](groupedEncoder, withBucketDataEncoder)
         .flatMapGroups {
           (group, iter) =>
             val bucket = group.getInt(bucketColIdxInGrouped)
@@ -101,8 +104,8 @@ case class WriteIntoPaimonTable(
               val serializer = new CommitMessageSerializer
               iter.foreach {
                 row =>
-                  // Notice: `row` contains a _bucket_ column, but there's no impact and we don't have to remove it.
-                  write.write(new DynamicBucketRow(new SparkRow(rowType, row), bucket))
+                  val bucketColDropped = originFromRow(toRow(row))
+                  write.write(new DynamicBucketRow(new SparkRow(rowType, bucketColDropped), bucket))
               }
               write.prepareCommit().asScala.map(serializer.serialize)
             } finally {
