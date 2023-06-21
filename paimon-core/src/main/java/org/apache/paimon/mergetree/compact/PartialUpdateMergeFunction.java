@@ -33,10 +33,10 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
@@ -194,6 +194,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             List<DataType> fieldTypes = tableTypes;
             Map<Integer, SequenceGenerator> projFieldSequences = new HashMap<>();
+
             if (projection != null) {
                 fieldTypes = Projection.of(projection).project(tableTypes);
                 int[] fieldOldIndex = Projection.of(projection).toTopLevelIndexes();
@@ -230,12 +231,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             if (fieldSequences.isEmpty()) {
                 return new AdjustedProjection(projection, null);
             }
-            // TODO implement this, just keep required fields and adjust fieldSequences too.
+
             if (projection != null) {
                 int[] projIndexs = Projection.of(projection).toTopLevelIndexes();
                 Set<Integer> indexSet =
                         Arrays.stream(projIndexs).boxed().collect(Collectors.toSet());
-                Set<Integer> extraIndexSet = new TreeSet<>();
+                Set<Integer> extraIndexSet = new LinkedHashSet<>();
                 for (int index : projIndexs) {
                     if (fieldSequences.get(index) != null) {
                         int sequenceKeyIndex = fieldSequences.get(index).index();
@@ -244,14 +245,19 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         }
                     }
                 }
+
                 int[][] pushdownProjection = new int[projection.length + extraIndexSet.size()][];
+                int[][] outerProjection = new int[projection.length][];
                 int pos = projection.length;
                 System.arraycopy(projection, 0, pushdownProjection, 0, pos);
-
                 for (int index : extraIndexSet) {
                     pushdownProjection[pos++] = new int[] {index};
                 }
-                return new AdjustedProjection(pushdownProjection, projection);
+                for (int i = 0; i < projection.length; i++) {
+                    outerProjection[i] = new int[] {i};
+                }
+
+                return new AdjustedProjection(pushdownProjection, outerProjection);
             }
 
             return new AdjustedProjection(null, projection);
