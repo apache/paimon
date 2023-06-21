@@ -1018,9 +1018,8 @@ public class CoreOptions implements Serializable {
         DEFAULT(
                 "default",
                 "Determines actual startup mode according to other table properties. "
-                        + "If \"scan.timestamp-millis\" is set the actual startup mode will be \"from-timestamp\"; "
-                        + "if \"scan.snapshot-id\" is set the actual startup mode will be \"from-snapshot\"; "
-                        + "and if \"scan.tag-name\" ise set the actual startup mode will be \"from-tag\". "
+                        + "If \"scan.timestamp-millis\" is set the actual startup mode will be \"from-timestamp\", "
+                        + "and if \"scan.snapshot-id\" or \"scan.tag-name\" is set the actual startup mode will be \"from-snapshot\". "
                         + "Otherwise the actual startup mode will be \"latest-full\"."),
 
         LATEST_FULL(
