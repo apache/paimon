@@ -245,7 +245,8 @@ public class PartialUpdateMergeFunctionTest {
         int[][] projection = new int[][] {{0}, {1}, {3}, {4}, {7}};
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType);
-        MergeFunctionFactory.AdjustedProjection adjustedProjection = factory.adjustProjection(projection);
+        MergeFunctionFactory.AdjustedProjection adjustedProjection =
+                factory.adjustProjection(projection);
 
         validate(adjustedProjection, new int[] {0, 1, 3, 4, 7}, null);
 
@@ -259,122 +260,37 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, 2, 2, 2, 2, 2);
     }
 
-    private void add(
-            MergeFunction<KeyValue> function,
-            Integer f0,
-            Integer f1,
-            Integer f2,
-            Integer f3,
-            Integer f4) {
+    @Test
+    public void testAdjustProjectionCreateDirectly() {
+        Options options = new Options();
+        options.set("fields.f4.sequence-group", "f1,f3");
+        options.set("fields.f5.sequence-group", "f7");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        int[][] projection = new int[][] {{1}, {7}};
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(options, rowType)
+                                        .create(projection))
+                .hasMessageContaining("Can not find new sequence field for new field.");
+    }
+
+    private void add(MergeFunction<KeyValue> function, Integer... f) {
         function.add(
                 new KeyValue()
-                        .replace(
-                                GenericRow.of(1),
-                                sequence++,
-                                RowKind.INSERT,
-                                GenericRow.of(f0, f1, f2, f3, f4)));
+                        .replace(GenericRow.of(1), sequence++, RowKind.INSERT, GenericRow.of(f)));
     }
 
-    private void add(
-            MergeFunction<KeyValue> function,
-            Integer f0,
-            Integer f1,
-            Integer f2,
-            Integer f3,
-            Integer f4,
-            Integer f5) {
-        function.add(
-                new KeyValue()
-                        .replace(
-                                GenericRow.of(1),
-                                sequence++,
-                                RowKind.INSERT,
-                                GenericRow.of(f0, f1, f2, f3, f4, f5)));
-    }
-
-    private void add(
-            MergeFunction<KeyValue> function,
-            Integer f0,
-            Integer f1,
-            Integer f2,
-            Integer f3,
-            Integer f4,
-            Integer f5,
-            Integer f6) {
-        function.add(
-                new KeyValue()
-                        .replace(
-                                GenericRow.of(1),
-                                sequence++,
-                                RowKind.INSERT,
-                                GenericRow.of(f0, f1, f2, f3, f4, f5, f6)));
-    }
-
-    private void add(
-            MergeFunction<KeyValue> function,
-            Integer f0,
-            Integer f1,
-            Integer f2,
-            Integer f3,
-            Integer f4,
-            Integer f5,
-            Integer f6,
-            Integer f7) {
-        function.add(
-                new KeyValue()
-                        .replace(
-                                GenericRow.of(1),
-                                sequence++,
-                                RowKind.INSERT,
-                                GenericRow.of(f0, f1, f2, f3, f4, f5, f6, f7)));
-    }
-
-    private void validate(
-            MergeFunction<KeyValue> function,
-            Integer f0,
-            Integer f1,
-            Integer f2,
-            Integer f3,
-            Integer f4) {
-        assertThat(function.getResult().value()).isEqualTo(GenericRow.of(f0, f1, f2, f3, f4));
-    }
-
-    private void validate(
-            MergeFunction<KeyValue> function,
-            Integer f0,
-            Integer f1,
-            Integer f2,
-            Integer f3,
-            Integer f4,
-            Integer f5) {
-        assertThat(function.getResult().value()).isEqualTo(GenericRow.of(f0, f1, f2, f3, f4, f5));
-    }
-
-    private void validate(
-            MergeFunction<KeyValue> function,
-            Integer f0,
-            Integer f1,
-            Integer f2,
-            Integer f3,
-            Integer f4,
-            Integer f5,
-            Integer f6) {
-        assertThat(function.getResult().value())
-                .isEqualTo(GenericRow.of(f0, f1, f2, f3, f4, f5, f6));
-    }
-
-    private void validate(
-            MergeFunction<KeyValue> function,
-            Integer f0,
-            Integer f1,
-            Integer f2,
-            Integer f3,
-            Integer f4,
-            Integer f5,
-            Integer f6,
-            Integer f7) {
-        assertThat(function.getResult().value())
-                .isEqualTo(GenericRow.of(f0, f1, f2, f3, f4, f5, f6, f7));
+    private void validate(MergeFunction<KeyValue> function, Integer... f) {
+        assertThat(function.getResult().value()).isEqualTo(GenericRow.of(f));
     }
 
     private void validate(

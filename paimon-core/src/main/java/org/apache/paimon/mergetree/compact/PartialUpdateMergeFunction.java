@@ -209,7 +209,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             int newField = indexMap.getOrDefault(field, -1);
                             if (newField != -1) {
                                 int newSequenceId = indexMap.getOrDefault(sequence.index(), -1);
-                                if (newSequenceId != -1) {
+                                if (newSequenceId == -1) {
+                                    throw new RuntimeException(
+                                            String.format(
+                                                    "Can not find new sequence field for new field. new field index is %s",
+                                                    newField));
+                                } else {
                                     projectedFieldSequences.put(
                                             newField,
                                             new SequenceGenerator(
@@ -217,15 +222,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 }
                             }
                         });
-            }
-
-            InternalRow.FieldGetter[] fieldGetters = createFieldGetters(fieldTypes);
-
-            if (!projectedFieldSequences.isEmpty()) {
                 return new PartialUpdateMergeFunction(
-                        fieldGetters, ignoreDelete, projectedFieldSequences);
+                        createFieldGetters(fieldTypes), ignoreDelete, projectedFieldSequences);
+            } else {
+                return new PartialUpdateMergeFunction(
+                        createFieldGetters(fieldTypes), ignoreDelete, fieldSequences);
             }
-            return new PartialUpdateMergeFunction(fieldGetters, ignoreDelete, fieldSequences);
         }
 
         @Override
