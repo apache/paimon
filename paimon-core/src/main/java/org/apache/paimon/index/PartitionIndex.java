@@ -57,7 +57,7 @@ public class PartitionIndex {
         this.accessed = true;
     }
 
-    public int assign(int hash, IntPredicate bucketFilterFunc) {
+    public int assign(int hash, IntPredicate bucketFilter) {
         accessed = true;
 
         // 1. is it a key that has appeared before
@@ -67,7 +67,7 @@ public class PartitionIndex {
 
         // 2. find bucket from existing buckets
         for (Integer bucket : bucketInformation.keySet()) {
-            if (bucketFilterFunc.test(bucket)) {
+            if (bucketFilter.test(bucket)) {
                 // it is my bucket
                 Long number = bucketInformation.get(bucket);
                 if (number < targetBucketRowNumber) {
@@ -80,7 +80,7 @@ public class PartitionIndex {
 
         // 3. create a new bucket
         for (int i = 0; i < Short.MAX_VALUE; i++) {
-            if (bucketFilterFunc.test(i) && !bucketInformation.containsKey(i)) {
+            if (bucketFilter.test(i) && !bucketInformation.containsKey(i)) {
                 hash2Bucket.put(hash, (short) i);
                 bucketInformation.put(i, 1L);
                 return i;
@@ -100,7 +100,7 @@ public class PartitionIndex {
             IndexFileHandler indexFileHandler,
             BinaryRow partition,
             long targetBucketRowNumber,
-            IntPredicate hashFilterFunc) {
+            IntPredicate loadFilter) {
         Int2ShortHashMap map = new Int2ShortHashMap();
         List<IndexManifestEntry> files = indexFileHandler.scan(HASH_INDEX, partition);
         Map<Integer, Long> buckets = new HashMap<>();
@@ -109,7 +109,7 @@ public class PartitionIndex {
                 while (true) {
                     try {
                         int hash = iterator.next();
-                        if (hashFilterFunc.test(hash)) {
+                        if (loadFilter.test(hash)) {
                             map.put(hash, (short) file.bucket());
                         }
                         buckets.compute(
