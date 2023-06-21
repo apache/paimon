@@ -64,14 +64,17 @@ public class SequenceGenerator {
         this.index = index;
         this.fieldType = dataType;
         if (index == -1) {
-            throw new RuntimeException(
-                    String.format("Can not find sequence field in table schema: %s", index));
+            throw new RuntimeException(String.format("Index : %s is invalid", index));
         }
         generator = fieldType.accept(new SequenceGeneratorVisitor());
     }
 
     public int index() {
         return index;
+    }
+
+    public DataType fieldType() {
+        return fieldType;
     }
 
     @Nullable

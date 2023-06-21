@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
@@ -193,35 +195,35 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             List<DataType> fieldTypes = tableTypes;
-            Map<Integer, SequenceGenerator> projFieldSequences = new HashMap<>();
+            Map<Integer, SequenceGenerator> projectedFieldSequences = new HashMap<>();
 
             if (projection != null) {
                 fieldTypes = Projection.of(projection).project(tableTypes);
-                int[] fieldOldIndex = Projection.of(projection).toTopLevelIndexes();
+                int[] projects = Projection.of(projection).toTopLevelIndexes();
                 Map<Integer, Integer> indexMap = new HashMap<>();
-                for (int i = 0; i < fieldOldIndex.length; i++) {
-                    indexMap.put(fieldOldIndex[i], i);
+                for (int i = 0; i < projects.length; i++) {
+                    indexMap.put(projects[i], i);
                 }
-                for (int index = 0; index < fieldOldIndex.length; index++) {
-                    int oldIndex = fieldOldIndex[index];
-                    if (fieldSequences.get(oldIndex) != null) {
-                        int oldKeyIndex = fieldSequences.get(oldIndex).index();
-                        int keyIndex = indexMap.get(oldKeyIndex);
-                        if (!projFieldSequences.containsKey(keyIndex)) {
-                            SequenceGenerator newSequenceGen =
-                                    new SequenceGenerator(keyIndex, fieldTypes.get(keyIndex));
-                            projFieldSequences.put(keyIndex, newSequenceGen);
-                        }
-                        projFieldSequences.put(index, projFieldSequences.get(keyIndex));
-                    }
-                }
+                fieldSequences.forEach(
+                        (field, sequence) -> {
+                            int newField = indexMap.getOrDefault(field, -1);
+                            if (newField != -1) {
+                                int newSequenceId = indexMap.getOrDefault(sequence.index(), -1);
+                                if (newSequenceId != -1) {
+                                    projectedFieldSequences.put(
+                                            newField,
+                                            new SequenceGenerator(
+                                                    newSequenceId, sequence.fieldType()));
+                                }
+                            }
+                        });
             }
 
             InternalRow.FieldGetter[] fieldGetters = createFieldGetters(fieldTypes);
 
-            if (!projFieldSequences.isEmpty()) {
+            if (!projectedFieldSequences.isEmpty()) {
                 return new PartialUpdateMergeFunction(
-                        fieldGetters, ignoreDelete, projFieldSequences);
+                        fieldGetters, ignoreDelete, projectedFieldSequences);
             }
             return new PartialUpdateMergeFunction(fieldGetters, ignoreDelete, fieldSequences);
         }
@@ -232,35 +234,29 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 return new AdjustedProjection(projection, null);
             }
 
-            if (projection != null) {
-                int[] projIndexs = Projection.of(projection).toTopLevelIndexes();
-                Set<Integer> indexSet =
-                        Arrays.stream(projIndexs).boxed().collect(Collectors.toSet());
-                Set<Integer> extraIndexSet = new LinkedHashSet<>();
-                for (int index : projIndexs) {
-                    if (fieldSequences.get(index) != null) {
-                        int sequenceKeyIndex = fieldSequences.get(index).index();
-                        if (!indexSet.contains(sequenceKeyIndex)) {
-                            extraIndexSet.add(sequenceKeyIndex);
-                        }
-                    }
+            if (projection == null) {
+                return new AdjustedProjection(null, null);
+            }
+            LinkedHashSet<Integer> extraFields = new LinkedHashSet<>();
+            int[] topProjects = Projection.of(projection).toTopLevelIndexes();
+            Set<Integer> indexSet = Arrays.stream(topProjects).boxed().collect(Collectors.toSet());
+            for (int index : topProjects) {
+                SequenceGenerator generator = fieldSequences.get(index);
+                if (generator != null && !indexSet.contains(generator.index())) {
+                    extraFields.add(generator.index());
                 }
-
-                int[][] pushdownProjection = new int[projection.length + extraIndexSet.size()][];
-                int[][] outerProjection = new int[projection.length][];
-                int pos = projection.length;
-                System.arraycopy(projection, 0, pushdownProjection, 0, pos);
-                for (int index : extraIndexSet) {
-                    pushdownProjection[pos++] = new int[] {index};
-                }
-                for (int i = 0; i < projection.length; i++) {
-                    outerProjection[i] = new int[] {i};
-                }
-
-                return new AdjustedProjection(pushdownProjection, outerProjection);
             }
 
-            return new AdjustedProjection(null, projection);
+            int[] allProjects =
+                    Stream.concat(Arrays.stream(topProjects).boxed(), extraFields.stream())
+                            .mapToInt(Integer::intValue)
+                            .toArray();
+
+            int[][] pushdown = Projection.of(allProjects).toNestedIndexes();
+            int[][] outer =
+                    Projection.of(IntStream.range(0, topProjects.length).toArray())
+                            .toNestedIndexes();
+            return new AdjustedProjection(pushdown, outer);
         }
     }
 }

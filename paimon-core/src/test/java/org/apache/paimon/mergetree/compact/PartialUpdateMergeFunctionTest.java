@@ -24,7 +24,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Projection;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -96,35 +98,198 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
-    public void testAdjustProjection() {
+    public void testAdjustProjectionRepeatProject() {
         Options options = new Options();
         options.set("fields.f4.sequence-group", "f1,f3");
         options.set("fields.f5.sequence-group", "f7");
-        options.set("fields.f8.sequence-group", "f0,f9");
         RowType rowType =
                 RowType.of(
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT(),
-                        DataTypes.DOUBLE(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        // the field 'f1' is projected twice
+        int[][] projection = new int[][] {{1}, {1}, {3}, {7}};
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType);
+        MergeFunctionFactory.AdjustedProjection adjustedProjection =
+                factory.adjustProjection(projection);
+
+        validate(adjustedProjection, new int[] {1, 1, 3, 7, 4, 5}, new int[] {0, 1, 2, 3});
+
+        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        func.reset();
+        add(func, 1, 1, 1, 1, 1, 1);
+        add(func, 2, 2, 6, 2, 2, 2);
+        validate(func, 2, 2, 6, 2, 2, 2);
+
+        // enable field updated by null
+        add(func, 3, 3, null, 7, 4, null);
+        validate(func, 3, 3, null, 2, 4, 2);
+    }
+
+    @Test
+    public void testAdjustProjectionSequenceFieldsProject() {
+        Options options = new Options();
+        options.set("fields.f4.sequence-group", "f1,f3");
+        options.set("fields.f5.sequence-group", "f7");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT());
-        int[][] projection = new int[][] {{1}, {3}, {6}, {5}, {7}, {9}};
+        // the sequence field 'f4' is projected too
+        int[][] projection = new int[][] {{1}, {4}, {3}, {7}};
         MergeFunctionFactory<KeyValue> factory =
                 PartialUpdateMergeFunction.factory(options, rowType);
         MergeFunctionFactory.AdjustedProjection adjustedProjection =
                 factory.adjustProjection(projection);
+
+        validate(adjustedProjection, new int[] {1, 4, 3, 7, 5}, new int[] {0, 1, 2, 3});
+
         MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
         func.reset();
-        add(func, 1, 1, 1, 1, 1, 1, 1.0, 1);
-        add(func, 2, 2, 6, 2, 2, 2, 1.1, null);
-        validate(func, 2, 2, 6, 2, 2, 1, 1.1, 1);
-        add(func, 3, 0, null, 1, 4, 5, 1.2, 2);
-        validate(func, 3, 0, 6, 2, 2, 5, 1.2, 2);
+        // if sequence filed is null, the related fields should not be updated
+        add(func, 1, 1, 1, 1, 1);
+        add(func, 1, null, 1, 2, 2);
+        validate(func, 1, 1, 1, 2, 2);
+    }
+
+    @Test
+    public void testAdjustProjectionAllFieldsProject() {
+        Options options = new Options();
+        options.set("fields.f4.sequence-group", "f1,f3");
+        options.set("fields.f5.sequence-group", "f7");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        // all fields are projected
+        int[][] projection = new int[][] {{0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}};
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType);
+        MergeFunctionFactory.AdjustedProjection adjustedProjection =
+                factory.adjustProjection(projection);
+
+        validate(
+                adjustedProjection,
+                new int[] {0, 1, 2, 3, 4, 5, 6, 7},
+                new int[] {0, 1, 2, 3, 4, 5, 6, 7});
+
+        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        func.reset();
+        // 'f6' has no sequence group, it should not be updated by null
+        add(func, 1, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 4, 2, 4, 2, 2, 0, null, 3);
+        validate(func, 4, 2, 4, 2, 2, 1, 1, 1);
+    }
+
+    @Test
+    public void testAdjustProjectionNonProject() {
+        Options options = new Options();
+        options.set("fields.f4.sequence-group", "f1,f3");
+        options.set("fields.f5.sequence-group", "f7");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        // set the projection = null
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType);
+        MergeFunctionFactory.AdjustedProjection adjustedProjection = factory.adjustProjection(null);
+
+        validate(adjustedProjection, null, null);
+
+        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        func.reset();
+        // Setting projection with null is similar with projecting all fields
+        add(func, 1, 1, 1, 1, 1, 1, 1, 1);
+        add(func, 4, 2, 4, 2, 2, 0, null, 3);
+        validate(func, 4, 2, 4, 2, 2, 1, 1, 1);
+    }
+
+    @Test
+    public void testAdjustProjectionNoSequenceGroup() {
+        Options options = new Options();
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        int[][] projection = new int[][] {{0}, {1}, {3}, {4}, {7}};
+        MergeFunctionFactory<KeyValue> factory =
+                PartialUpdateMergeFunction.factory(options, rowType);
+        MergeFunctionFactory.AdjustedProjection adjustedProjection = factory.adjustProjection(projection);
+
+        validate(adjustedProjection, new int[] {0, 1, 3, 4, 7}, null);
+
+        MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
+        func.reset();
+        // Without sequence group, all the fields should not be updated by null
+        add(func, 1, 1, 1, 1, 1);
+        add(func, 3, 3, null, 3, 3);
+        validate(func, 3, 3, 1, 3, 3);
+        add(func, 2, 2, 2, 2, 2);
+        validate(func, 2, 2, 2, 2, 2);
+    }
+
+    private void add(
+            MergeFunction<KeyValue> function,
+            Integer f0,
+            Integer f1,
+            Integer f2,
+            Integer f3,
+            Integer f4) {
+        function.add(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                sequence++,
+                                RowKind.INSERT,
+                                GenericRow.of(f0, f1, f2, f3, f4)));
+    }
+
+    private void add(
+            MergeFunction<KeyValue> function,
+            Integer f0,
+            Integer f1,
+            Integer f2,
+            Integer f3,
+            Integer f4,
+            Integer f5) {
+        function.add(
+                new KeyValue()
+                        .replace(
+                                GenericRow.of(1),
+                                sequence++,
+                                RowKind.INSERT,
+                                GenericRow.of(f0, f1, f2, f3, f4, f5)));
     }
 
     private void add(
@@ -153,7 +318,7 @@ public class PartialUpdateMergeFunctionTest {
             Integer f3,
             Integer f4,
             Integer f5,
-            Double f6,
+            Integer f6,
             Integer f7) {
         function.add(
                 new KeyValue()
@@ -162,6 +327,27 @@ public class PartialUpdateMergeFunctionTest {
                                 sequence++,
                                 RowKind.INSERT,
                                 GenericRow.of(f0, f1, f2, f3, f4, f5, f6, f7)));
+    }
+
+    private void validate(
+            MergeFunction<KeyValue> function,
+            Integer f0,
+            Integer f1,
+            Integer f2,
+            Integer f3,
+            Integer f4) {
+        assertThat(function.getResult().value()).isEqualTo(GenericRow.of(f0, f1, f2, f3, f4));
+    }
+
+    private void validate(
+            MergeFunction<KeyValue> function,
+            Integer f0,
+            Integer f1,
+            Integer f2,
+            Integer f3,
+            Integer f4,
+            Integer f5) {
+        assertThat(function.getResult().value()).isEqualTo(GenericRow.of(f0, f1, f2, f3, f4, f5));
     }
 
     private void validate(
@@ -185,9 +371,26 @@ public class PartialUpdateMergeFunctionTest {
             Integer f3,
             Integer f4,
             Integer f5,
-            Double f6,
+            Integer f6,
             Integer f7) {
         assertThat(function.getResult().value())
                 .isEqualTo(GenericRow.of(f0, f1, f2, f3, f4, f5, f6, f7));
+    }
+
+    private void validate(
+            MergeFunctionFactory.AdjustedProjection projection, int[] pushdown, int[] outer) {
+        if (projection.pushdownProjection == null) {
+            Assertions.assertNull(pushdown);
+        } else {
+            Assertions.assertArrayEquals(
+                    Projection.of(projection.pushdownProjection).toTopLevelIndexes(), pushdown);
+        }
+
+        if (projection.outerProjection == null) {
+            Assertions.assertNull(outer);
+        } else {
+            Assertions.assertArrayEquals(
+                    Projection.of(projection.outerProjection).toTopLevelIndexes(), outer);
+        }
     }
 }
