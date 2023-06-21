@@ -122,9 +122,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                                 time3)))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
-                        "%s must be null when you set %s",
-                        CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                        CoreOptions.SCAN_TIMESTAMP_MILLIS.key());
+                        "[scan.snapshot-id,scan.tag-name] must be null when you set [scan.timestamp-millis]");
 
         assertThatThrownBy(
                         () ->
