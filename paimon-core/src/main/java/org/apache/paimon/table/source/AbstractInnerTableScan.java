@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
@@ -33,11 +34,15 @@ import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingSc
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
+import org.apache.paimon.table.source.snapshot.IncrementalStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.List;
 import java.util.Optional;
@@ -130,6 +135,27 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 return isStreaming
                         ? new ContinuousFromSnapshotFullStartingScanner(options.scanSnapshotId())
                         : new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
+            case INCREMENTAL:
+                Pair<String, String> incremental = options.incrementalBetween();
+                Preconditions.checkNotNull(
+                        incremental,
+                        String.format(
+                                "%s can not be null when you use %s for %s",
+                                CoreOptions.INCREMENTAL_BETWEEN.key(),
+                                startupMode,
+                                CoreOptions.SCAN_MODE.key()));
+
+                Snapshot s1;
+                Snapshot s2;
+                try {
+                    SnapshotManager sm = snapshotReader.snapshotManager();
+                    s1 = sm.snapshot(Long.parseLong(incremental.getLeft()));
+                    s2 = sm.snapshot(Long.parseLong(incremental.getRight()));
+                } catch (NumberFormatException e) {
+                    throw new RuntimeException("Tag is not supported yet.", e);
+                }
+
+                return new IncrementalStartingScanner(s1, s2);
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());

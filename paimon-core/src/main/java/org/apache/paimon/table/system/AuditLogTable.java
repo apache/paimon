@@ -187,6 +187,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotManager snapshotManager() {
+            return snapshotReader.snapshotManager();
+        }
+
+        @Override
         public ConsumerManager consumerManager() {
             return snapshotReader.consumerManager();
         }

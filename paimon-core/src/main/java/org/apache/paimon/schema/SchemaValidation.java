@@ -41,6 +41,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
@@ -199,6 +200,8 @@ public class SchemaValidation {
                     options,
                     Collections.singletonList(SCAN_TIMESTAMP_MILLIS),
                     Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TAG_NAME));
+        } else if (options.startupMode() == CoreOptions.StartupMode.INCREMENTAL) {
+            checkOptionExistInMode(options, INCREMENTAL_BETWEEN, options.startupMode());
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
             checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionsConflict(

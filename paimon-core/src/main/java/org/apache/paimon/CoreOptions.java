@@ -30,6 +30,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
@@ -684,6 +685,14 @@ public class CoreOptions implements Serializable {
                                     + " related to the number of initialized bucket, too small will lead to"
                                     + " insufficient processing speed of assigner.");
 
+    public static final ConfigOption<String> INCREMENTAL_BETWEEN =
+            key("incremental-between")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Read incremental changes between start snapshot (exclusive) and end snapshot, "
+                                    + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -904,6 +913,8 @@ public class CoreOptions implements Serializable {
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
                     || options.getOptional(SCAN_TAG_NAME).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
+            } else if (options.getOptional(INCREMENTAL_BETWEEN).isPresent()) {
+                return StartupMode.INCREMENTAL;
             } else {
                 return StartupMode.LATEST_FULL;
             }
@@ -928,6 +939,16 @@ public class CoreOptions implements Serializable {
 
     public String scanTagName() {
         return options.get(SCAN_TAG_NAME);
+    }
+
+    public Pair<String, String> incrementalBetween() {
+        String str = options.get(INCREMENTAL_BETWEEN);
+        if (str == null) {
+            return null;
+        }
+
+        String[] split = str.split(",");
+        return Pair.of(split[0], split[1]);
     }
 
     public Integer scanManifestParallelism() {
@@ -1071,7 +1092,10 @@ public class CoreOptions implements Serializable {
                 "from-snapshot-full",
                 "For streaming sources, produces from snapshot specified by \"scan.snapshot-id\" "
                         + "on the table upon first startup, and continuously reads changes. For batch sources, "
-                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes.");
+                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes."),
+
+        INCREMENTAL(
+                "incremental", "Read incremental changes between start snapshot and end snapshot.");
 
         private final String value;
         private final String description;
@@ -1326,6 +1350,10 @@ public class CoreOptions implements Serializable {
 
         if (options.contains(SCAN_SNAPSHOT_ID) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_SNAPSHOT);
+        }
+
+        if (options.contains(INCREMENTAL_BETWEEN) && !options.contains(SCAN_MODE)) {
+            options.set(SCAN_MODE, StartupMode.INCREMENTAL);
         }
     }
 

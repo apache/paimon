@@ -27,6 +27,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
@@ -34,6 +35,8 @@ import java.util.List;
 
 /** Read splits from specified {@link Snapshot} with given configuration. */
 public interface SnapshotReader {
+
+    SnapshotManager snapshotManager();
 
     ConsumerManager consumerManager();
 

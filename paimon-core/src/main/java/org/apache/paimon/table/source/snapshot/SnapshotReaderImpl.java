@@ -83,6 +83,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotManager snapshotManager() {
+        return snapshotManager;
+    }
+
+    @Override
     public ConsumerManager consumerManager() {
         return consumerManager;
     }
