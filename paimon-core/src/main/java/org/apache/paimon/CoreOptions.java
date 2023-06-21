@@ -893,10 +893,9 @@ public class CoreOptions implements Serializable {
         if (mode == StartupMode.DEFAULT) {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
-            } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()) {
+            } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
+                    || options.getOptional(SCAN_TAG_NAME).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
-            } else if (options.getOptional(SCAN_TAG_NAME).isPresent()) {
-                return StartupMode.FROM_TAG;
             } else {
                 return StartupMode.LATEST_FULL;
             }
@@ -1056,20 +1055,16 @@ public class CoreOptions implements Serializable {
 
         FROM_SNAPSHOT(
                 "from-snapshot",
-                "For streaming sources, continuously reads changes "
-                        + "starting from snapshot specified by \"scan.snapshot-id\", "
-                        + "without producing a snapshot at the beginning. For batch sources, "
-                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes."),
+                "For streaming sources, continuously reads changes starting from snapshot "
+                        + "specified by \"scan.snapshot-id\", without producing a snapshot at the beginning. "
+                        + "For batch sources, produces a snapshot specified by \"scan.snapshot-id\" "
+                        + "or \"scan.tag-name\" but does not read new changes."),
 
         FROM_SNAPSHOT_FULL(
                 "from-snapshot-full",
                 "For streaming sources, produces from snapshot specified by \"scan.snapshot-id\" "
                         + "on the table upon first startup, and continuously reads changes. For batch sources, "
-                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes."),
-
-        FROM_TAG(
-                "from-tag",
-                "This mode is only for batch sources. It produces a snapshot based on the given tag.");
+                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes.");
 
         private final String value;
         private final String description;

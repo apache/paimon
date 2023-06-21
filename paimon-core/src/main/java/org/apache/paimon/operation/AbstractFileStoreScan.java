@@ -69,7 +69,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     protected final ScanBucketFilter bucketFilter;
 
     private Predicate partitionFilter;
-    private Long specifiedSnapshotId = null;
     private Snapshot specifiedSnapshot = null;
     private Integer specifiedBucket = null;
     private List<ManifestFileMeta> specifiedManifests = null;
@@ -144,25 +143,24 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withSnapshot(long snapshotId) {
-        this.specifiedSnapshotId = snapshotId;
-        checkState(specifiedSnapshot == null, "Cannot set both snapshot id and snapshot.");
-        checkState(specifiedManifests == null, "Cannot set both snapshot id and manifests.");
+        checkState(specifiedSnapshot == null, "Snapshot has been set.");
+        checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
+        this.specifiedSnapshot = snapshotManager.snapshot(snapshotId);
         return this;
     }
 
     @Override
     public FileStoreScan withSnapshot(Snapshot snapshot) {
-        this.specifiedSnapshot = snapshot;
-        checkState(specifiedSnapshotId == null, "Cannot set both snapshot and snapshot id.");
+        checkState(specifiedSnapshot == null, "Snapshot has been set.");
         checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
+        this.specifiedSnapshot = snapshot;
         return this;
     }
 
     @Override
     public FileStoreScan withManifestList(List<ManifestFileMeta> manifests) {
+        checkState(specifiedSnapshot == null, "Cannot set both snapshot and manifests.");
         this.specifiedManifests = manifests;
-        checkState(specifiedSnapshot == null, "Cannot set both manifests and snapshot.");
-        checkState(specifiedSnapshotId == null, "Cannot set both manifests and snapshot id.");
         return this;
     }
 
@@ -217,15 +215,16 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestFileMeta> manifests = specifiedManifests;
         Snapshot snapshot = null;
         if (manifests == null) {
-            snapshot = determineSnapshot();
+            snapshot =
+                    specifiedSnapshot == null
+                            ? snapshotManager.latestSnapshot()
+                            : specifiedSnapshot;
             if (snapshot == null) {
                 manifests = Collections.emptyList();
             } else {
                 manifests = readManifests(snapshot);
             }
         }
-
-        final List<ManifestFileMeta> readManifests = manifests;
 
         Iterable<ManifestEntry> entries =
                 ParallellyExecuteUtils.parallelismBatchIterable(
@@ -235,7 +234,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                         .flatMap(m -> readManifest.apply(m).stream())
                                         .filter(this::filterByStats)
                                         .collect(Collectors.toList()),
-                        readManifests,
+                        manifests,
                         scanManifestParallelism);
 
         List<ManifestEntry> files = new ArrayList<>();
@@ -268,19 +267,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             }
         }
         return Pair.of(snapshot, files);
-    }
-
-    @Nullable
-    private Snapshot determineSnapshot() {
-        if (specifiedSnapshot != null) {
-            return specifiedSnapshot;
-        }
-
-        Long snapshotId = specifiedSnapshotId;
-        if (snapshotId == null) {
-            snapshotId = snapshotManager.latestSnapshotId();
-        }
-        return snapshotId == null ? null : snapshotManager.snapshot(snapshotId);
     }
 
     private List<ManifestFileMeta> readManifests(Snapshot snapshot) {
