@@ -143,7 +143,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withSnapshot(long snapshotId) {
-        checkState(specifiedSnapshot == null, "Snapshot has been set.");
         checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
         this.specifiedSnapshot = snapshotManager.snapshot(snapshotId);
         return this;
@@ -151,7 +150,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withSnapshot(Snapshot snapshot) {
-        checkState(specifiedSnapshot == null, "Snapshot has been set.");
         checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
         this.specifiedSnapshot = snapshot;
         return this;
