@@ -39,6 +39,8 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('continuous.discovery-interval'='1 ms')",
                 "CREATE TABLE PARTITIONED_DIM (i INT, j INT, k1 INT, k2 INT, PRIMARY KEY (i, j) NOT ENFORCED) "
+                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')",
+                "CREATE TABLE DIM_NO_PK (i INT, j INT, k1 INT, k2 INT) "
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')");
     }
 
@@ -540,6 +542,35 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111, 1111),
                         Row.of(2, 22, 222, 2222),
+                        Row.of(4, null, null, null));
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupNonPkTable() throws Exception {
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_NO_PK for system_time as of T.proctime AS D ON T.i "
+                        + "= D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, null, null, null),
+                        Row.of(2, null, null, null),
+                        Row.of(3, null, null, null));
+
+        sql("INSERT INTO DIM_NO_PK VALUES (1, 11, 111, 1111), (1, 12, 112, 1112)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2), (4)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(1, 12, 112, 1112),
+                        Row.of(2, null, null, null),
                         Row.of(4, null, null, null));
         iterator.close();
     }
