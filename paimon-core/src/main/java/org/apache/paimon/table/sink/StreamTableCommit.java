@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.annotation.Public;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -35,7 +36,12 @@ public interface StreamTableCommit extends TableCommit {
     /**
      * Filter committed commits. Return uncommitted identifiers. This method is used for failover
      * cases.
+     *
+     * @deprecated Use {@link StreamTableCommit#filterAndCommit} to filter and commit all {@link
+     *     CommitMessage} in question with one method call, instead of calling this method first and
+     *     then call {@link StreamTableCommit#commit}.
      */
+    @Deprecated
     Set<Long> filterCommitted(Set<Long> commitIdentifiers);
 
     /**
@@ -55,10 +61,29 @@ public interface StreamTableCommit extends TableCommit {
      * The check frequency is controlled by 'partition.expiration-check-interval'. Partition
      * expiration will create an 'OVERWRITE' snapshot.
      *
+     * <p>Compared to {@link StreamTableCommit#filterAndCommit}, this method does not check if
+     * {@code commitIdentifier} has been committed, so this method might be faster. Please only use
+     * this method if you can make sure that the {@code commitIdentifier} hasn't been committed
+     * before.
+     *
      * @param commitIdentifier Committed transaction ID, can start from 0. If there are multiple
      *     commits, please increment this ID.
      * @param commitMessages commit messages from table write
      * @see StreamTableWrite#prepareCommit
      */
     void commit(long commitIdentifier, List<CommitMessage> commitMessages);
+
+    /**
+     * Filter out all {@code List<CommitMessage>} which have been committed and commit the remaining
+     * ones.
+     *
+     * <p>Compared to {@link StreamTableCommit#commit}, this method will first check if a {@code
+     * commitIdentifier} has been committed, so this method might be slower. A common usage of this
+     * method is to retry the commit process after a failure.
+     *
+     * @param commitIdentifiersAndMessages a map containing all {@link CommitMessage}s in question.
+     *     The key is the {@code commitIdentifier}.
+     * @return number of {@code List<CommitMessage>} committed.
+     */
+    int filterAndCommit(Map<Long, List<CommitMessage>> commitIdentifiersAndMessages);
 }

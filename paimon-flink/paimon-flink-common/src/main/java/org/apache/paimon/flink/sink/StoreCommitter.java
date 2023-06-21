@@ -29,8 +29,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /** {@link Committer} for dynamic store. */
 public class StoreCommitter implements Committer<Committable, ManifestCommittable> {
@@ -39,19 +37,6 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     public StoreCommitter(TableCommit commit) {
         this.commit = (TableCommitImpl) commit;
-    }
-
-    @Override
-    public List<ManifestCommittable> filterRecoveredCommittables(
-            List<ManifestCommittable> globalCommittables) {
-        Set<Long> identifiers =
-                commit.filterCommitted(
-                        globalCommittables.stream()
-                                .map(ManifestCommittable::identifier)
-                                .collect(Collectors.toSet()));
-        return globalCommittables.stream()
-                .filter(m -> identifiers.contains(m.identifier()))
-                .collect(Collectors.toList());
     }
 
     @Override
@@ -78,6 +63,11 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
         commit.commitMultiple(committables);
+    }
+
+    @Override
+    public int filterAndCommit(List<ManifestCommittable> globalCommittables) throws IOException {
+        return commit.filterAndCommitMultiple(globalCommittables);
     }
 
     @Override

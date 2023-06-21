@@ -560,7 +560,7 @@ Key points to achieve exactly-once consistency:
 - Different applications need to use different commitUsers.
 - The commitIdentifier of `StreamTableWrite` and `StreamTableCommit` needs to be consistent, and the
   id needs to be incremented for the next committing.
-- When a failure occurs, if you still have uncommitted `CommitMessage`s, please use `StreamTableCommit#filterCommitted`
+- When a failure occurs, if you still have uncommitted `CommitMessage`s, please use `StreamTableCommit#filterAndCommit`
   to exclude the committed messages by commitIdentifier.
 
 ```java
@@ -594,8 +594,14 @@ public class StreamWriteTable {
         StreamTableCommit commit = writeBuilder.newCommit();
         commit.commit(commitIdentifier, messages);
 
-        // 4. When failover, you can use 'filterCommitted' to filter committed commits.
-        commit.filterCommitted(committedIdentifiers);
+        // 4. When failure occurs and you're not sure if the commit process is successful,
+        //    you can use `filterAndCommit` to retry the commit process.
+        //    Succeeded commits will be automatically skipped.
+        /*
+        Map<Long, List<CommitMessage>> commitIdentifiersAndMessages = new HashMap<>();
+        commitIdentifiersAndMessages.put(commitIdentifier, messages);
+        commit.filterAndCommit(commitIdentifiersAndMessages);
+        */
     }
 }
 ```
