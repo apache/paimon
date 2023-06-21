@@ -18,22 +18,141 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataInputViewStreamWrapper;
+import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.io.NewFilesIncrement;
 
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.Objects;
 
-/**
- * Commit message for partition and bucket.
- *
- * @since 0.4.0
- */
-@Public
-public interface CommitMessage extends Serializable {
+import static org.apache.paimon.utils.SerializationUtils.deserializedBytes;
+import static org.apache.paimon.utils.SerializationUtils.serializeBytes;
 
-    /** Partition of this commit message. */
-    BinaryRow partition();
+/** File committable for sink. */
+public class CommitMessage implements Serializable {
 
-    /** Bucket of this commit message. */
-    int bucket();
+    private static final long serialVersionUID = 1L;
+
+    private static final ThreadLocal<CommitMessageSerializer> CACHE =
+            ThreadLocal.withInitial(CommitMessageSerializer::new);
+
+    private transient BinaryRow partition;
+    private transient int bucket;
+    private transient NewFilesIncrement newFilesIncrement;
+    private transient CompactIncrement compactIncrement;
+    private transient IndexIncrement indexIncrement;
+
+    @VisibleForTesting
+    public CommitMessage(
+            BinaryRow partition,
+            int bucket,
+            NewFilesIncrement newFilesIncrement,
+            CompactIncrement compactIncrement) {
+        this(
+                partition,
+                bucket,
+                newFilesIncrement,
+                compactIncrement,
+                new IndexIncrement(Collections.emptyList()));
+    }
+
+    public CommitMessage(
+            BinaryRow partition,
+            int bucket,
+            NewFilesIncrement newFilesIncrement,
+            CompactIncrement compactIncrement,
+            IndexIncrement indexIncrement) {
+        this.partition = partition;
+        this.bucket = bucket;
+        this.newFilesIncrement = newFilesIncrement;
+        this.compactIncrement = compactIncrement;
+        this.indexIncrement = indexIncrement;
+    }
+
+    public BinaryRow partition() {
+        return partition;
+    }
+
+    public int bucket() {
+        return bucket;
+    }
+
+    public NewFilesIncrement newFilesIncrement() {
+        return newFilesIncrement;
+    }
+
+    public CompactIncrement compactIncrement() {
+        return compactIncrement;
+    }
+
+    public IndexIncrement indexIncrement() {
+        return indexIncrement;
+    }
+
+    public boolean isEmpty() {
+        return newFilesIncrement.isEmpty()
+                && compactIncrement.isEmpty()
+                && indexIncrement.isEmpty();
+    }
+
+    private void writeObject(ObjectOutputStream out) throws IOException {
+        out.defaultWriteObject();
+        CommitMessageSerializer serializer = CACHE.get();
+        out.writeInt(serializer.getVersion());
+        serializeBytes(new DataOutputViewStreamWrapper(out), serializer.serialize(this));
+    }
+
+    private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
+        in.defaultReadObject();
+        int version = in.readInt();
+        byte[] bytes = deserializedBytes(new DataInputViewStreamWrapper(in));
+        CommitMessage message = CACHE.get().deserialize(version, bytes);
+        this.partition = message.partition;
+        this.bucket = message.bucket;
+        this.newFilesIncrement = message.newFilesIncrement;
+        this.compactIncrement = message.compactIncrement;
+        this.indexIncrement = message.indexIncrement;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        CommitMessage that = (CommitMessage) o;
+        return bucket == that.bucket
+                && Objects.equals(partition, that.partition)
+                && Objects.equals(newFilesIncrement, that.newFilesIncrement)
+                && Objects.equals(compactIncrement, that.compactIncrement)
+                && Objects.equals(indexIncrement, that.indexIncrement);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(partition, bucket, newFilesIncrement, compactIncrement, indexIncrement);
+    }
+
+    @Override
+    public String toString() {
+        return String.format(
+                "FileCommittable {"
+                        + "partition = %s, "
+                        + "bucket = %d, "
+                        + "newFilesIncrement = %s, "
+                        + "compactIncrement = %s, "
+                        + "indexIncrement = %s}",
+                partition, bucket, newFilesIncrement, compactIncrement, indexIncrement);
+    }
 }

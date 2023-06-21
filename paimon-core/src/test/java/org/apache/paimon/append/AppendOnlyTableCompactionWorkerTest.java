@@ -33,7 +33,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.DataTypes;
 
@@ -77,7 +76,7 @@ public class AppendOnlyTableCompactionWorkerTest {
 
         for (int i = 0; i < taskSize; i++) {
             AppendOnlyCompactionTask task = tasks.get(i);
-            CommitMessageImpl commitMessage = (CommitMessageImpl) lists.get(i);
+            CommitMessage commitMessage = lists.get(i);
             Assertions.assertIterableEquals(
                     task.compactBefore(), commitMessage.compactIncrement().compactBefore());
             Assertions.assertEquals(commitMessage.compactIncrement().compactAfter().size(), 1);
@@ -114,7 +113,7 @@ public class AppendOnlyTableCompactionWorkerTest {
 
         for (int i = 0; i < taskSize; i++) {
             AppendOnlyCompactionTask task = tasks.get(i);
-            CommitMessageImpl commitMessage = (CommitMessageImpl) lists.get(i);
+            CommitMessage commitMessage = lists.get(i);
             Assertions.assertEquals(task.partition(), commitMessage.partition());
             Assertions.assertIterableEquals(
                     task.compactBefore(), commitMessage.compactIncrement().compactBefore());
@@ -138,8 +137,7 @@ public class AppendOnlyTableCompactionWorkerTest {
         for (int i = 0; i < number; i++) {
             writer.write(randomRow());
             for (CommitMessage message : writer.prepareCommit(true, i)) {
-                CommitMessageImpl commitMessage = (CommitMessageImpl) message;
-                fileMetas.addAll(commitMessage.newFilesIncrement().newFiles());
+                fileMetas.addAll(message.newFilesIncrement().newFiles());
             }
         }
         return fileMetas;

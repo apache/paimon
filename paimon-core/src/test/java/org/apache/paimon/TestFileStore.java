@@ -46,7 +46,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -287,7 +287,7 @@ public class TestFileStore extends KeyValueFileStore {
                 CommitIncrement increment =
                         entryWithBucket.getValue().prepareCommit(ignorePreviousFiles);
                 committable.addFileCommittable(
-                        new CommitMessageImpl(
+                        new CommitMessage(
                                 entryWithPartition.getKey(),
                                 entryWithBucket.getKey(),
                                 increment.newFilesIncrement(),

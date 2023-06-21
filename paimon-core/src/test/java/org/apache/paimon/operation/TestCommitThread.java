@@ -25,7 +25,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.MergeTreeWriter;
-import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 
@@ -139,7 +139,7 @@ public class TestCommitThread extends Thread {
         for (Map.Entry<BinaryRow, MergeTreeWriter> entry : writers.entrySet()) {
             CommitIncrement inc = entry.getValue().prepareCommit(true);
             committable.addFileCommittable(
-                    new CommitMessageImpl(
+                    new CommitMessage(
                             entry.getKey(), 0, inc.newFilesIncrement(), inc.compactIncrement()));
         }
 
@@ -151,8 +151,7 @@ public class TestCommitThread extends Thread {
         ManifestCommittable committable = new ManifestCommittable(commitIdentifier++);
         CommitIncrement inc = writers.get(partition).prepareCommit(true);
         committable.addFileCommittable(
-                new CommitMessageImpl(
-                        partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
+                new CommitMessage(partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
 
         runWithRetry(
                 committable,
@@ -174,7 +173,7 @@ public class TestCommitThread extends Thread {
                     writer.compact(true);
                     CommitIncrement inc = writer.prepareCommit(true);
                     committable.addFileCommittable(
-                            new CommitMessageImpl(
+                            new CommitMessage(
                                     partition, 0, inc.newFilesIncrement(), inc.compactIncrement()));
                 }
                 commit.commit(committable, Collections.emptyMap());

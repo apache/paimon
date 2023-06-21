@@ -28,7 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
-import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.RecordWriter;
@@ -98,7 +98,7 @@ public class FileStoreTestUtils {
                     entryWithPartition.getValue().entrySet()) {
                 CommitIncrement increment = entryWithBucket.getValue().prepareCommit(false);
                 committable.addFileCommittable(
-                        new CommitMessageImpl(
+                        new CommitMessage(
                                 entryWithPartition.getKey(),
                                 entryWithBucket.getKey(),
                                 increment.newFilesIncrement(),

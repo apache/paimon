@@ -29,7 +29,6 @@ import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.RecordWriter;
@@ -179,8 +178,8 @@ public abstract class AbstractFileStoreWrite<T>
                 if (writerContainer.indexMaintainer != null) {
                     newIndexFiles = writerContainer.indexMaintainer.prepareCommit();
                 }
-                CommitMessageImpl committable =
-                        new CommitMessageImpl(
+                CommitMessage committable =
+                        new CommitMessage(
                                 partition,
                                 bucket,
                                 increment.newFilesIncrement(),

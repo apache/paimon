@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import org.junit.jupiter.api.Test;
@@ -45,7 +44,7 @@ public class CommittableSerializerTest {
         NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage committable =
-                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
+                new CommitMessage(row(0), 1, newFilesIncrement, compactIncrement);
         CommitMessage newCommittable =
                 (CommitMessage)
                         serializer

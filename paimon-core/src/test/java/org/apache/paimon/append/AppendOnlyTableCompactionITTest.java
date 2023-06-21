@@ -30,7 +30,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
@@ -63,7 +62,7 @@ public class AppendOnlyTableCompactionITTest {
         messages.forEach(
                 message ->
                         Assertions.assertTrue(
-                                ((CommitMessageImpl) message).compactIncrement().isEmpty()));
+                                ((CommitMessage) message).compactIncrement().isEmpty()));
     }
 
     @Test

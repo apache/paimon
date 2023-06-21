@@ -23,7 +23,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import org.junit.jupiter.api.Test;
 
@@ -76,7 +75,7 @@ public class ManifestCommittableSerializerTest {
             NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
             CompactIncrement compactIncrement = randomCompactIncrement();
             CommitMessage commitMessage =
-                    new CommitMessageImpl(partition, bucket, newFilesIncrement, compactIncrement);
+                    new CommitMessage(partition, bucket, newFilesIncrement, compactIncrement);
             commitMessages.add(commitMessage);
             committable.addFileCommittable(commitMessage);
         }

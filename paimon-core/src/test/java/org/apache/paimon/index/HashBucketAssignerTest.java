@@ -24,7 +24,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -80,7 +79,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     private CommitMessage createCommitMessage(BinaryRow partition, int bucket, IndexFileMeta file) {
-        return new CommitMessageImpl(
+        return new CommitMessage(
                 partition,
                 bucket,
                 new NewFilesIncrement(Collections.emptyList(), Collections.emptyList()),

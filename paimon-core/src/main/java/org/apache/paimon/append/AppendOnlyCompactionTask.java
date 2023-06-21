@@ -23,7 +23,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -67,7 +66,7 @@ public class AppendOnlyCompactionTask {
         compactAfter.addAll(rewriter.rewrite(compactBefore));
         CompactIncrement compactIncrement =
                 new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
-        return new CommitMessageImpl(
+        return new CommitMessage(
                 partition,
                 0, // bucket 0 is bucket for unaware-bucket table for compatibility with the old
                 // design

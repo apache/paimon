@@ -39,7 +39,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -405,12 +404,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             k ->
                                     this.pathFactory.createDataFilePathFactory(
                                             k.getKey(), k.getValue()));
-            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
             List<DataFileMeta> toDelete = new ArrayList<>();
-            toDelete.addAll(commitMessage.newFilesIncrement().newFiles());
-            toDelete.addAll(commitMessage.newFilesIncrement().changelogFiles());
-            toDelete.addAll(commitMessage.compactIncrement().compactAfter());
-            toDelete.addAll(commitMessage.compactIncrement().changelogFiles());
+            toDelete.addAll(message.newFilesIncrement().newFiles());
+            toDelete.addAll(message.newFilesIncrement().changelogFiles());
+            toDelete.addAll(message.compactIncrement().compactAfter());
+            toDelete.addAll(message.compactIncrement().changelogFiles());
 
             for (DataFileMeta file : toDelete) {
                 fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
@@ -425,8 +423,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> compactTableFiles,
             List<ManifestEntry> compactChangelog,
             List<IndexManifestEntry> appendIndexFiles) {
-        for (CommitMessage message : commitMessages) {
-            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+        for (CommitMessage commitMessage : commitMessages) {
             commitMessage
                     .newFilesIncrement()
                     .newFiles()

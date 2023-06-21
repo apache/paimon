@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 
 import org.junit.jupiter.api.Test;
@@ -45,7 +44,7 @@ class MultiTableCommittableSerializerTest {
         NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
-                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
+                new CommitMessage(row(0), 1, newFilesIncrement, compactIncrement);
         Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
         String database = "database";
         String table = "table";

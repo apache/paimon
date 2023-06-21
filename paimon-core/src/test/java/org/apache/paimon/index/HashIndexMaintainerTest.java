@@ -24,7 +24,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.DynamicBucketRow;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -70,8 +69,7 @@ public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
 
     private Map<BinaryRow, Map<Integer, int[]>> readIndex(List<CommitMessage> messages) {
         Map<BinaryRow, Map<Integer, int[]>> index = new HashMap<>();
-        for (CommitMessage commitMessage : messages) {
-            CommitMessageImpl message = (CommitMessageImpl) commitMessage;
+        for (CommitMessage message : messages) {
             List<IndexFileMeta> files = message.indexIncrement().newIndexFiles();
             if (files.isEmpty()) {
                 continue;

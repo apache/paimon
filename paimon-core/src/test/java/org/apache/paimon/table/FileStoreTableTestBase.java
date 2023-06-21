@@ -43,7 +43,6 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -429,7 +428,7 @@ public abstract class FileStoreTableTestBase {
         List<CommitMessage> commit4 = write.prepareCommit(false, 4);
         // trigger compaction, but not wait it.
 
-        if (((CommitMessageImpl) commit4.get(0)).compactIncrement().compactBefore().isEmpty()) {
+        if ((commit4.get(0)).compactIncrement().compactBefore().isEmpty()) {
             // commit4 is not a compaction commit
             // do compaction commit5 and compaction commit6
             write.write(rowData(2, 20, 200L));

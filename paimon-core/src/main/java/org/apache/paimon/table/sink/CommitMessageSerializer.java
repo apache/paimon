@@ -70,10 +70,9 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         }
     }
 
-    private void serialize(CommitMessage obj, DataOutputView view) throws IOException {
-        CommitMessageImpl message = (CommitMessageImpl) obj;
-        serializeBinaryRow(obj.partition(), view);
-        view.writeInt(obj.bucket());
+    private void serialize(CommitMessage message, DataOutputView view) throws IOException {
+        serializeBinaryRow(message.partition(), view);
+        view.writeInt(message.bucket());
         dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
         dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
         dataFileSerializer.serializeList(message.compactIncrement().compactBefore(), view);
@@ -112,7 +111,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
     }
 
     private CommitMessage deserialize(DataInputView view) throws IOException {
-        return new CommitMessageImpl(
+        return new CommitMessage(
                 deserializeBinaryRow(view),
                 view.readInt(),
                 new NewFilesIncrement(
