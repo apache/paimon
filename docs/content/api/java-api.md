@@ -592,22 +592,16 @@ public class StreamWriteTable {
 
         // 3. Collect all CommitMessages to a global node and commit
         StreamTableCommit commit = writeBuilder.newCommit();
-        boolean firstTry = true;
-        while (true) {
-            try {
-                if (firstTry) {
-                    commit.commit(commitIdentifier, messages);            	
-                } else {
-                    // 4. When failure occurs, you can use `filterAndCommit` to filter committed commits.
-                    Map<Long, List<CommitMessage>> commitIdentifiersAndMessages = new HashMap<>();
-                    commitIdentifiersAndMessages.put(commitIdentifier, messages);
-                    commit.filterAndCommit(commitIdentifiersAndMessages);
-                }
-                break;
-            } catch (Exception e) {
-                firstTry = false;
-            }
-        }
+        commit.commit(commitIdentifier, messages);
+
+        // 4. When failure occurs and you're not sure if the commit process is successful,
+        //    you can use `filterAndCommit` to retry the commit process.
+        //    Succeeded commits will be automatically skipped.
+        /*
+        Map<Long, List<CommitMessage>> commitIdentifiersAndMessages = new HashMap<>();
+        commitIdentifiersAndMessages.put(commitIdentifier, messages);
+        commit.filterAndCommit(commitIdentifiersAndMessages);
+        */
     }
 }
 ```
