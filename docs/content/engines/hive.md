@@ -101,7 +101,7 @@ CREATE CATALOG my_hive WITH (
   'type' = 'paimon',
   'metastore' = 'hive',
   'uri' = 'thrift://<hive-metastore-host-name>:<port>',
-  'warehouse' = '/path/to/table/store/warehouse'
+  'warehouse' = 'hdfs:///path/to/table/store/warehouse'
 );
 
 -- Use paimon Hive catalog
