@@ -30,6 +30,7 @@ import static org.apache.paimon.table.system.FilesTable.FILES;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
+import static org.apache.paimon.table.system.TagsTable.TAGS;
 
 /** Loader to load system {@link Table}s. */
 public class SystemTableLoader {
@@ -48,6 +49,8 @@ public class SystemTableLoader {
                 return new AuditLogTable(dataTable);
             case FILES:
                 return new FilesTable(dataTable);
+            case TAGS:
+                return new TagsTable(fileIO, location);
             default:
                 return null;
         }

@@ -24,11 +24,11 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.SortedMap;
+import java.util.TreeMap;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -96,12 +96,34 @@ public class TagManager {
         return Snapshot.fromPath(fileIO, tagPath(tagName));
     }
 
-    /** Get all tagged snapshots sorted by commit time. */
+    public int tagCount() {
+        return listStatus().length;
+    }
+
+    /** Get all tagged snapshots sorted by snapshot id. */
     public List<Snapshot> taggedSnapshots() {
+        return new ArrayList<>(tags().keySet());
+    }
+
+    /** Get all tagged snapshots with names sorted by snapshot id. */
+    public SortedMap<Snapshot, String> tags() {
+        FileStatus[] statuses = listStatus();
+        TreeMap<Snapshot, String> tags = new TreeMap<>(Comparator.comparingLong(Snapshot::id));
+
+        for (FileStatus status : statuses) {
+            Path path = status.getPath();
+            if (path.getName().startsWith(TAG_PREFIX)) {
+                tags.put(Snapshot.fromPath(fileIO, path), path.getName());
+            }
+        }
+        return tags;
+    }
+
+    private FileStatus[] listStatus() {
         Path tagDirectory = tagDirectory();
         try {
             if (!fileIO.exists(tagDirectory)) {
-                return Collections.emptyList();
+                return new FileStatus[0];
             }
 
             FileStatus[] statuses = fileIO.listStatus(tagDirectory);
@@ -113,17 +135,10 @@ public class TagManager {
                                 tagDirectory));
             }
 
-            return Arrays.stream(statuses)
-                    .map(FileStatus::getPath)
-                    .filter(path -> path.getName().startsWith(TAG_PREFIX))
-                    .map(path -> Snapshot.fromPath(fileIO, path))
-                    .sorted(Comparator.comparingLong(Snapshot::id))
-                    .collect(Collectors.toList());
+            return statuses;
         } catch (IOException e) {
             throw new RuntimeException(
-                    String.format(
-                            "Failed to get tagged snapshots in tag directory '%s'.", tagDirectory),
-                    e);
+                    String.format("Failed to list status in the '%s' directory.", tagDirectory), e);
         }
     }
 }
