@@ -24,14 +24,19 @@ import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.Projection;
 import org.apache.paimon.flink.log.LogSourceProvider;
+import org.apache.paimon.flink.source.align.AlignedContinuousFileSource;
 import org.apache.paimon.flink.source.operator.MonitorFunction;
+import org.apache.paimon.flink.source.operator.ReadOperator;
+import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -52,6 +57,7 @@ import javax.annotation.Nullable;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.CheckpointAlignMode;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 
 /**
@@ -196,8 +202,9 @@ public class FlinkSourceBuilder {
                                     .build());
                 }
             } else {
-                if (conf.contains(CoreOptions.CONSUMER_ID)) {
-                    return buildContinuousStreamOperator();
+                if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGNED_MODE)
+                        != CheckpointAlignMode.UNALIGNED) {
+                    return buildAlignedContinuousFileSource();
                 } else {
                     return buildContinuousFileSource();
                 }
@@ -224,6 +231,39 @@ public class FlinkSourceBuilder {
         if (parallelism != null) {
             dataStream.getTransformation().setParallelism(parallelism);
         }
+        if (watermarkStrategy != null) {
+            dataStream = dataStream.assignTimestampsAndWatermarks(watermarkStrategy);
+        }
+        return dataStream;
+    }
+
+    private DataStream<RowData> buildAlignedContinuousFileSource() {
+        ReadBuilder readBuilder = createReadBuilder();
+        AlignedContinuousFileSource source =
+                new AlignedContinuousFileSource(
+                        readBuilder, watermarkStrategy == null, table.options());
+        DataStreamSource<Split> dataStreamSource =
+                env.fromSource(
+                        source,
+                        WatermarkStrategy.noWatermarks(),
+                        tableIdentifier.asSummaryString(),
+                        new JavaTypeInfo<>(Split.class));
+
+        DataStream<RowData> dataStream =
+                dataStreamSource
+                        .forceNonParallel()
+                        .partitionCustom(
+                                (key, numPartitions) -> key % numPartitions,
+                                split -> ((DataSplit) split).bucket())
+                        .transform(
+                                tableIdentifier.asSummaryString() + "-Reader",
+                                produceTypeInfo(),
+                                new ReadOperator(readBuilder));
+
+        if (parallelism != null) {
+            dataStream.getTransformation().setParallelism(parallelism);
+        }
+
         if (watermarkStrategy != null) {
             dataStream = dataStream.assignTimestampsAndWatermarks(watermarkStrategy);
         }

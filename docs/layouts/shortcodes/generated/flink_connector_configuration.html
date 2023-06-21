@@ -116,5 +116,11 @@ under the License.
             <td>Integer</td>
             <td>Defines a custom parallelism for the unaware-bucket table compaction job. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration.</td>
         </tr>
+        <tr>
+            <td><h5>source.checkpoint-aligned.mode</h5></td>
+            <td style="word-wrap: break-word;">unaligned</td>
+            <td>Enum</td>
+            <td>Alignment mode between flink checkpoint and snapshot of source table.<br /><br />Possible values:<ul><li>"unaligned": Flink's checkpoint and source table's snapshot are not aligned.</li><li>"strictly": Flink's checkpoint and source table's snapshot will be aligned one-to-one.</li><li>"loosely": Flink's checkpoint and source table's snapshot will be loosely aligned, which means that checkpoint will only be performed between the snapshots of the source table, but there is no guarantee that there is a one-to-one relationship between checkpoint and snapshot.</li></ul></td>
+        </tr>
     </tbody>
 </table>

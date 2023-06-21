@@ -202,6 +202,13 @@ public class FlinkConnectorOptions {
                             "Weight of writer buffer in managed memory, Flink will compute the memory size "
                                     + "for writer according to the weight, the actual memory used depends on the running environment.");
 
+    public static final ConfigOption<CheckpointAlignMode> SOURCE_CHECKPOINT_ALIGNED_MODE =
+            ConfigOptions.key("source.checkpoint-aligned.mode")
+                    .enumType(CheckpointAlignMode.class)
+                    .defaultValue(CheckpointAlignMode.UNALIGNED)
+                    .withDescription(
+                            "Alignment mode between flink checkpoint and snapshot of source table.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
@@ -259,6 +266,37 @@ public class FlinkConnectorOptions {
         private final String description;
 
         SplitAssignMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Alignment mode between flink checkpoint and snapshot of source table. */
+    public enum CheckpointAlignMode implements DescribedEnum {
+        UNALIGNED("unaligned", "Flink's checkpoint and source table's snapshot are not aligned."),
+        STRICTLY(
+                "strictly",
+                "Flink's checkpoint and source table's snapshot will be aligned one-to-one."),
+        LOOSELY(
+                "loosely",
+                "Flink's checkpoint and source table's snapshot will be loosely aligned, which means that "
+                        + "checkpoint will only be performed between the snapshots of the source table, but there is no "
+                        + "guarantee that there is a one-to-one relationship between checkpoint and snapshot.");
+
+        private final String value;
+        private final String description;
+
+        CheckpointAlignMode(String value, String description) {
             this.value = value;
             this.description = description;
         }

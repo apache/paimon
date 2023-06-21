@@ -39,8 +39,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-
 /** {@link StreamTableScan} implementation for streaming planning. */
 public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         implements InnerStreamTableScan {
@@ -109,6 +107,8 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                     snapshotManager.snapshotExists(nextSnapshotId - 1)
                             && boundedChecker.shouldEndInput(
                                     snapshotManager.snapshot(nextSnapshotId - 1));
+        } else if (result instanceof StartingScanner.NoSnapshot) {
+            return SnapshotNotExistPlan.INSTANCE;
         }
         return DataFilePlan.fromResult(result);
     }
@@ -132,7 +132,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 LOG.debug(
                         "Next snapshot id {} does not exist, wait for the snapshot generation.",
                         nextSnapshotId);
-                return new DataFilePlan(Collections.emptyList());
+                return SnapshotNotExistPlan.INSTANCE;
             }
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
