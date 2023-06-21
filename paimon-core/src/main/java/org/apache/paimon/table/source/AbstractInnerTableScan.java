@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
@@ -34,7 +35,6 @@ import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
-import org.apache.paimon.table.source.snapshot.StaticFromSnapshotFullStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
@@ -128,8 +128,8 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 }
             case FROM_SNAPSHOT_FULL:
                 return isStreaming
-                        ? new ContinuousFromSnapshotStartingScanner(options.scanSnapshotId())
-                        : new StaticFromSnapshotFullStartingScanner(options.scanSnapshotId());
+                        ? new ContinuousFromSnapshotFullStartingScanner(options.scanSnapshotId())
+                        : new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());

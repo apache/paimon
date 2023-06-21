@@ -26,10 +26,10 @@ import org.apache.paimon.utils.SnapshotManager;
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} or {@link
  * CoreOptions.StartupMode#FROM_SNAPSHOT_FULL} startup mode of a batch read.
  */
-public class StaticFromSnapshotFullStartingScanner implements StartingScanner {
+public class ContinuousFromSnapshotFullStartingScanner implements StartingScanner {
     private final long snapshotId;
 
-    public StaticFromSnapshotFullStartingScanner(long snapshotId) {
+    public ContinuousFromSnapshotFullStartingScanner(long snapshotId) {
         this.snapshotId = snapshotId;
     }
 
