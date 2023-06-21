@@ -52,7 +52,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testTimeTravelRead() throws InterruptedException {
+    public void testTimeTravelRead() throws Exception {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         long time1 = System.currentTimeMillis();
 
@@ -66,6 +66,8 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         Thread.sleep(10);
         batchSql("INSERT INTO T VALUES (7, 77, 777), (8, 88, 888)");
+
+        paimonTable("T").createTag("tag2", 2);
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='1') */"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
@@ -125,9 +127,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                                 time3)))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
-                        "%s must be null when you set %s",
-                        CoreOptions.SCAN_SNAPSHOT_ID.key(),
-                        CoreOptions.SCAN_TIMESTAMP_MILLIS.key());
+                        "[scan.snapshot-id,scan.tag-name] must be null when you set [scan.timestamp-millis]");
 
         assertThatThrownBy(
                         () ->
@@ -137,5 +137,18 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 .hasRootCauseMessage(
                         "%s must be null when you use latest-full for scan.mode",
                         CoreOptions.SCAN_SNAPSHOT_ID.key());
+
+        // travel to tag
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag2') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444));
+
+        assertThatThrownBy(
+                        () -> batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='unknown') */"))
+                .hasRootCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage("Tag 'unknown' doesn't exist.");
     }
 }
