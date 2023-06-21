@@ -66,7 +66,7 @@ public class TagsTable implements ReadonlyTable {
             new RowType(
                     Arrays.asList(
                             new DataField(0, "tag_name", SerializationUtils.newStringType(false)),
-                            new DataField(1, "tagged_snapshot_id", new BigIntType(false)),
+                            new DataField(1, "snapshot_id", new BigIntType(false)),
                             new DataField(2, "schema_id", new BigIntType(false)),
                             new DataField(3, "commit_time", new TimestampType(false, 3)),
                             new DataField(4, "record_count", new BigIntType(true))));
