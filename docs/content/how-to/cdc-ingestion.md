@@ -369,3 +369,8 @@ behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently s
 `--computed-column` are the definitions of computed columns. The argument field is from Kafka topic's table field name. Supported expressions are:
 
 {{< generated/compute_column >}}
+
+## FAQ
+1. Chinese characters in records ingested from MySQL are garbled.
+* Try to set `env.java.opts: -Dfile.encoding=UTF-8` in `flink-conf.yaml`
+(the option is changed to `env.java.opts.all` since Flink-1.17).
