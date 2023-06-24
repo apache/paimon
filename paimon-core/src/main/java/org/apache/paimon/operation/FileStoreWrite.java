@@ -103,7 +103,7 @@ public interface FileStoreWrite<T> {
      *
      * @param isBatch whether in batch mode
      */
-    default void optimizeForBatch(boolean isBatch) {
+    default void isStreamingMode(boolean isBatch) {
         // default do no optimization
     }
 

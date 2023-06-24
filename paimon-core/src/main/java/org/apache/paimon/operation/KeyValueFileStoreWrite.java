@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
@@ -79,7 +80,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
-    private boolean forceSpillable = false;
+    private boolean isStreamingMode = false;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -162,7 +163,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         CompactManager compactManager =
                 createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
         return new MergeTreeWriter(
-                bufferSpillable() || forceSpillable,
+                bufferSpillable() || isStreamingMode,
                 options.localSortMaxNumFileHandles(),
                 ioManager,
                 compactManager,
@@ -176,12 +177,13 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     }
 
     @Override
-    public void optimizeForBatch(boolean isBatch) {
-        forceSpillable = true;
+    public void isStreamingMode(boolean isStreaming) {
+        isStreamingMode = isStreaming;
     }
 
-    private boolean bufferSpillable() {
-        return options.writeBufferSpillable(fileIO.isObjectStore());
+    @VisibleForTesting
+    public boolean bufferSpillable() {
+        return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
     }
 
     private CompactManager createCompactManager(

@@ -87,7 +87,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                         table.coreOptions().writeBufferSize(),
                                         table.coreOptions().pageSize()))
                 .withIgnorePreviousFiles(ignorePreviousFiles)
-                .optimizeForBatch(!isStreamingMode);
+                .isStreamingMode(isStreamingMode);
     }
 
     @Override

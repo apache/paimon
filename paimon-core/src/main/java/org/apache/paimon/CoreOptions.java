@@ -794,8 +794,9 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_BUFFER_SIZE).getBytes();
     }
 
-    public boolean writeBufferSpillable(boolean usingObjectStore) {
-        return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore);
+    public boolean writeBufferSpillable(boolean usingObjectStore, boolean isStreaming) {
+        // if not streaming mode, we turn spillable on by default.
+        return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
     }
 
     public Duration continuousDiscoveryInterval() {
