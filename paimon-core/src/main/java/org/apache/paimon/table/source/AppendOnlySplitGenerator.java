@@ -51,7 +51,7 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
     }
 
     @Override
-    public boolean splitIncrement() {
+    public boolean splitScanIncrement() {
         // if bucketMode equals unaware, we use split while increment scan
         return bucketMode == BucketMode.UNAWARE;
     }

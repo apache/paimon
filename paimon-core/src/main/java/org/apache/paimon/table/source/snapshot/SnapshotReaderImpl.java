@@ -278,7 +278,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
                 int bucket = bucketEntry.getKey();
-                if (isIncremental && !splitGenerator.splitIncrement()) {
+                if (isIncremental && !splitGenerator.splitScanIncrement()) {
                     // Don't split when incremental
                     // If we specify splitStreaming, we need to split the files. When this table is
                     // unaware-bucket, we do this

@@ -27,7 +27,7 @@ public interface SplitGenerator {
 
     List<List<DataFileMeta>> split(List<DataFileMeta> files);
 
-    default boolean splitIncrement() {
+    default boolean splitScanIncrement() {
         return false;
     }
 }
