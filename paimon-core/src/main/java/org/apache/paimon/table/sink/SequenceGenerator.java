@@ -60,8 +60,21 @@ public class SequenceGenerator {
         generator = fieldType.accept(new SequenceGeneratorVisitor());
     }
 
+    public SequenceGenerator(int index, DataType dataType) {
+        this.index = index;
+        this.fieldType = dataType;
+        if (index == -1) {
+            throw new RuntimeException(String.format("Index : %s is invalid", index));
+        }
+        generator = fieldType.accept(new SequenceGeneratorVisitor());
+    }
+
     public int index() {
         return index;
+    }
+
+    public DataType fieldType() {
+        return fieldType;
     }
 
     @Nullable

@@ -33,8 +33,13 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
@@ -190,12 +195,39 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             List<DataType> fieldTypes = tableTypes;
+            Map<Integer, SequenceGenerator> projectedFieldSequences = new HashMap<>();
+
             if (projection != null) {
                 fieldTypes = Projection.of(projection).project(tableTypes);
+                int[] projects = Projection.of(projection).toTopLevelIndexes();
+                Map<Integer, Integer> indexMap = new HashMap<>();
+                for (int i = 0; i < projects.length; i++) {
+                    indexMap.put(projects[i], i);
+                }
+                fieldSequences.forEach(
+                        (field, sequence) -> {
+                            int newField = indexMap.getOrDefault(field, -1);
+                            if (newField != -1) {
+                                int newSequenceId = indexMap.getOrDefault(sequence.index(), -1);
+                                if (newSequenceId == -1) {
+                                    throw new RuntimeException(
+                                            String.format(
+                                                    "Can not find new sequence field for new field. new field index is %s",
+                                                    newField));
+                                } else {
+                                    projectedFieldSequences.put(
+                                            newField,
+                                            new SequenceGenerator(
+                                                    newSequenceId, sequence.fieldType()));
+                                }
+                            }
+                        });
+                return new PartialUpdateMergeFunction(
+                        createFieldGetters(fieldTypes), ignoreDelete, projectedFieldSequences);
+            } else {
+                return new PartialUpdateMergeFunction(
+                        createFieldGetters(fieldTypes), ignoreDelete, fieldSequences);
             }
-            InternalRow.FieldGetter[] fieldGetters = createFieldGetters(fieldTypes);
-
-            return new PartialUpdateMergeFunction(fieldGetters, ignoreDelete, fieldSequences);
         }
 
         @Override
@@ -203,8 +235,30 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             if (fieldSequences.isEmpty()) {
                 return new AdjustedProjection(projection, null);
             }
-            // TODO implement this, just keep required fields and adjust fieldSequences too.
-            return new AdjustedProjection(null, projection);
+
+            if (projection == null) {
+                return new AdjustedProjection(null, null);
+            }
+            LinkedHashSet<Integer> extraFields = new LinkedHashSet<>();
+            int[] topProjects = Projection.of(projection).toTopLevelIndexes();
+            Set<Integer> indexSet = Arrays.stream(topProjects).boxed().collect(Collectors.toSet());
+            for (int index : topProjects) {
+                SequenceGenerator generator = fieldSequences.get(index);
+                if (generator != null && !indexSet.contains(generator.index())) {
+                    extraFields.add(generator.index());
+                }
+            }
+
+            int[] allProjects =
+                    Stream.concat(Arrays.stream(topProjects).boxed(), extraFields.stream())
+                            .mapToInt(Integer::intValue)
+                            .toArray();
+
+            int[][] pushdown = Projection.of(allProjects).toNestedIndexes();
+            int[][] outer =
+                    Projection.of(IntStream.range(0, topProjects.length).toArray())
+                            .toNestedIndexes();
+            return new AdjustedProjection(pushdown, outer);
         }
     }
 }
