@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.BucketMode;
 
 import org.junit.jupiter.api.Test;
 
@@ -62,20 +63,20 @@ public class SplitGeneratorTest {
                         newFileFromSequence("4", 23, 41, 50),
                         newFileFromSequence("5", 4, 51, 60),
                         newFileFromSequence("6", 101, 61, 100));
-        assertThat(toNames(new AppendOnlySplitGenerator(40, 2).split(files)))
+        assertThat(toNames(new AppendOnlySplitGenerator(40, 2, BucketMode.FIXED).split(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2"),
                         Collections.singletonList("3"),
                         Arrays.asList("4", "5"),
                         Collections.singletonList("6"));
 
-        assertThat(toNames(new AppendOnlySplitGenerator(70, 2).split(files)))
+        assertThat(toNames(new AppendOnlySplitGenerator(70, 2, BucketMode.FIXED).split(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "3"),
                         Arrays.asList("4", "5"),
                         Collections.singletonList("6"));
 
-        assertThat(toNames(new AppendOnlySplitGenerator(40, 20).split(files)))
+        assertThat(toNames(new AppendOnlySplitGenerator(40, 20, BucketMode.FIXED).split(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2"),
                         Collections.singletonList("3"),

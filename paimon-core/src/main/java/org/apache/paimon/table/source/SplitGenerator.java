@@ -26,4 +26,8 @@ import java.util.List;
 public interface SplitGenerator {
 
     List<List<DataFileMeta>> split(List<DataFileMeta> files);
+
+    default boolean splitIncrement() {
+        return false;
+    }
 }

@@ -185,12 +185,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void assignSplits() {
-        Map<Integer, List<FileStoreSourceSplit>> assignment;
-        if (unawareBucket) {
-            assignment = createAssignmentUnawareBucket();
-        } else {
-            assignment = createAssignment();
-        }
+        Map<Integer, List<FileStoreSourceSplit>> assignment = createAssignment();
         if (finished) {
             Iterator<Integer> iterator = readersAwaitingSplit.iterator();
             while (iterator.hasNext()) {
@@ -207,56 +202,45 @@ public class ContinuousFileSplitEnumerator
 
     private Map<Integer, List<FileStoreSourceSplit>> createAssignment() {
         Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
-        bucketSplits.forEach(
-                (bucket, splits) -> {
-                    if (splits.size() > 0) {
-                        // To ensure the order of consumption, the data of the same bucket is given
-                        // to a task to be consumed.
-                        int task = bucket % context.currentParallelism();
-                        if (readersAwaitingSplit.contains(task)) {
-                            // if the reader that requested another split has failed in the
-                            // meantime, remove
-                            // it from the list of waiting readers
-                            if (!context.registeredReaders().containsKey(task)) {
-                                readersAwaitingSplit.remove(task);
-                                return;
-                            }
-                            List<FileStoreSourceSplit> taskAssignment =
-                                    assignment.computeIfAbsent(task, i -> new ArrayList<>());
-                            if (taskAssignment.size() < splitBatchSize) {
-                                taskAssignment.add(splits.poll());
-                            }
-                        }
-                    }
-                });
-        return assignment;
-    }
-
-    private Map<Integer, List<FileStoreSourceSplit>> createAssignmentUnawareBucket() {
-        Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
         Deque<Integer> readersId = new ArrayDeque<>(readersAwaitingSplit);
+        for (Map.Entry<Integer, LinkedList<FileStoreSourceSplit>> entry : bucketSplits.entrySet()) {
+            Integer bucket = entry.getKey();
+            LinkedList<FileStoreSourceSplit> splits = entry.getValue();
 
-        for (LinkedList<FileStoreSourceSplit> splits : bucketSplits.values()) {
-            //  we assign all the split until no spare split or no available reader
-            while (splits.size() > 0 && readersId.size() > 0) {
-                int subTask = readersId.poll();
-                // if the reader that requested another split has failed in the meantime, remove it
-                // from the list of waiting readers
-                if (!context.registeredReaders().containsKey(subTask)) {
-                    readersAwaitingSplit.remove(subTask);
-                    continue;
+            if (splits.size() > 0 && readersId.size() > 0) {
+                int polledReader = readersId.poll();
+                int subTask = assignTask(bucket, polledReader);
+
+                if (readersAwaitingSplit.contains(subTask)) {
+                    // if the reader that requested another split has failed in the
+                    // meantime, remove
+                    // it from the list of waiting readers
+                    if (!context.registeredReaders().containsKey(subTask)) {
+                        readersAwaitingSplit.remove(subTask);
+                        continue;
+                    }
+                    List<FileStoreSourceSplit> taskAssignment =
+                            assignment.computeIfAbsent(subTask, i -> new ArrayList<>());
+                    if (taskAssignment.size() < splitBatchSize) {
+                        taskAssignment.add(splits.poll());
+                    } else {
+                        continue;
+                    }
                 }
-                List<FileStoreSourceSplit> taskAssignment =
-                        assignment.computeIfAbsent(subTask, i -> new ArrayList<>());
-                if (taskAssignment.size() < splitBatchSize) {
-                    taskAssignment.add(splits.poll());
-                } else {
-                    // this task reader is full of batch, we continue, don't add it back
-                    continue;
-                }
-                readersId.addLast(subTask);
+                readersId.addLast(polledReader);
             }
         }
         return assignment;
+    }
+
+    private int assignTask(int bucket, int firstReader) {
+        if (unawareBucket) {
+            // if bucket unaware, we just simply assign the first reader in the loop
+            return firstReader;
+        } else {
+            // if not bucket unaware, we assign the bucket % parallelism, the same bucket data go
+            // into the same task
+            return bucket % context.currentParallelism();
+        }
     }
 }

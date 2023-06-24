@@ -106,8 +106,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 coreOptions(),
                 snapshotManager(),
                 splitGenerator(),
-                nonPartitionFilterConsumer(),
-                bucketMode() == BucketMode.UNAWARE);
+                nonPartitionFilterConsumer());
     }
 
     @Override

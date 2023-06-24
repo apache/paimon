@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.BinPacking;
 
 import java.util.ArrayList;
@@ -32,10 +33,13 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
 
     private final long targetSplitSize;
     private final long openFileCost;
+    private final BucketMode bucketMode;
 
-    public AppendOnlySplitGenerator(long targetSplitSize, long openFileCost) {
+    public AppendOnlySplitGenerator(
+            long targetSplitSize, long openFileCost, BucketMode bucketMode) {
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
+        this.bucketMode = bucketMode;
     }
 
     @Override
@@ -44,5 +48,11 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
         files.sort(fileComparator(false));
         Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
         return BinPacking.packForOrdered(files, weightFunc, targetSplitSize);
+    }
+
+    @Override
+    public boolean splitIncrement() {
+        // if bucketMode equals unaware, we use split while increment scan
+        return bucketMode == BucketMode.UNAWARE;
     }
 }
