@@ -820,10 +820,6 @@ public class CoreOptions implements Serializable {
         return options.get(SORT_SPILL_BUFFER_SIZE).getBytes();
     }
 
-    public long readSpillBufferSize() {
-        return options.get(READ_SPILL_BUFFER_SIZE).getBytes();
-    }
-
     public Duration continuousDiscoveryInterval() {
         return options.get(CONTINUOUS_DISCOVERY_INTERVAL);
     }

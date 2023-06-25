@@ -94,7 +94,8 @@ case class WriteIntoPaimonTable(table: FileStoreTable, overwrite: Boolean, data:
         .repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
         .mapPartitions {
           iter =>
-            val write = writeBuilder.newWrite().withIOManager(createIOManager())
+            val write = writeBuilder.newWrite()
+            write.withIOManager(createIOManager)
             try {
               iter.foreach {
                 row =>
