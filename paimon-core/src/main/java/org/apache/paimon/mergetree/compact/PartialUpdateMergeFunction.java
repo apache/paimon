@@ -194,11 +194,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            List<DataType> fieldTypes = tableTypes;
-            Map<Integer, SequenceGenerator> projectedFieldSequences = new HashMap<>();
-
             if (projection != null) {
-                fieldTypes = Projection.of(projection).project(tableTypes);
+                Map<Integer, SequenceGenerator> projectedSequences = new HashMap<>();
                 int[] projects = Projection.of(projection).toTopLevelIndexes();
                 Map<Integer, Integer> indexMap = new HashMap<>();
                 for (int i = 0; i < projects.length; i++) {
@@ -215,7 +212,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                                     "Can not find new sequence field for new field. new field index is %s",
                                                     newField));
                                 } else {
-                                    projectedFieldSequences.put(
+                                    projectedSequences.put(
                                             newField,
                                             new SequenceGenerator(
                                                     newSequenceId, sequence.fieldType()));
@@ -223,10 +220,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             }
                         });
                 return new PartialUpdateMergeFunction(
-                        createFieldGetters(fieldTypes), ignoreDelete, projectedFieldSequences);
+                        createFieldGetters(Projection.of(projection).project(tableTypes)),
+                        ignoreDelete,
+                        projectedSequences);
             } else {
                 return new PartialUpdateMergeFunction(
-                        createFieldGetters(fieldTypes), ignoreDelete, fieldSequences);
+                        createFieldGetters(tableTypes), ignoreDelete, fieldSequences);
             }
         }
 
