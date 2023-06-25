@@ -21,6 +21,7 @@ package org.apache.paimon;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.orc.OrcFileFormat;
@@ -101,6 +102,21 @@ public class FileFormatTest {
         FileFormat fileFormat = CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
         Assertions.assertTrue(fileFormat instanceof OrcFileFormat);
 
+        OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
+        assertThat(orcFileFormat.formatContext().formatOptions().get("hello")).isEqualTo("world");
+        assertThat(orcFileFormat.formatContext().readBatchSize()).isEqualTo(1024);
+    }
+
+    @Test
+    public void testFileFormatOption() {
+        Options tableOptions = new Options();
+        tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(IDENTIFIER));
+        tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
+        tableOptions.setString(IDENTIFIER + ".hello", "world");
+        FileFormatDiscover fileFormatDiscover =
+                FileFormatDiscover.of(new CoreOptions(tableOptions));
+        FileFormat fileFormat = fileFormatDiscover.discover(IDENTIFIER);
+        Assertions.assertTrue(fileFormat instanceof OrcFileFormat);
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
         assertThat(orcFileFormat.formatContext().formatOptions().get("hello")).isEqualTo("world");
         assertThat(orcFileFormat.formatContext().readBatchSize()).isEqualTo(1024);

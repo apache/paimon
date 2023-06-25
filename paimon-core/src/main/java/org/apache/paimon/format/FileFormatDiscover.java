@@ -20,6 +20,7 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
+import org.apache.paimon.options.Options;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -37,12 +38,20 @@ public interface FileFormatDiscover {
             }
 
             private FileFormat create(String identifier) {
-                return FileFormat.fromIdentifier(
-                        identifier,
-                        new FormatContext(options.toConfiguration(), options.readBatchSize()));
+                return getFileFormat(options.toConfiguration(), identifier);
             }
         };
     }
 
     FileFormat discover(String identifier);
+
+    static FileFormat getFileFormat(Options options, String formatIdentifier) {
+        int readBatchSize = options.get(CoreOptions.READ_BATCH_SIZE);
+        FileFormat fileFormat =
+                FileFormat.fromIdentifier(
+                        formatIdentifier,
+                        new FormatContext(
+                                options.removePrefix(formatIdentifier + "."), readBatchSize));
+        return fileFormat;
+    }
 }
