@@ -80,7 +80,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
-    private boolean isStreamingMode = false;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
