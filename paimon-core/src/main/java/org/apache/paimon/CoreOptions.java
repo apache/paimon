@@ -401,6 +401,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Optional snapshot id used in case of \"from-snapshot\" or \"from-snapshot-full\" scan mode");
 
+    public static final ConfigOption<String> SCAN_TAG_NAME =
+            key("scan.tag-name")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Optional tag name used in case of \"from-tag\" scan mode.");
+
     public static final ConfigOption<Long> SCAN_BOUNDED_WATERMARK =
             key("scan.bounded.watermark")
                     .longType()
@@ -887,7 +893,8 @@ public class CoreOptions implements Serializable {
         if (mode == StartupMode.DEFAULT) {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
-            } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()) {
+            } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
+                    || options.getOptional(SCAN_TAG_NAME).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
             } else {
                 return StartupMode.LATEST_FULL;
@@ -909,6 +916,10 @@ public class CoreOptions implements Serializable {
 
     public Long scanSnapshotId() {
         return options.get(SCAN_SNAPSHOT_ID);
+    }
+
+    public String scanTagName() {
+        return options.get(SCAN_TAG_NAME);
     }
 
     public Integer scanManifestParallelism() {
@@ -1008,7 +1019,7 @@ public class CoreOptions implements Serializable {
                 "default",
                 "Determines actual startup mode according to other table properties. "
                         + "If \"scan.timestamp-millis\" is set the actual startup mode will be \"from-timestamp\", "
-                        + "and if \"scan.snapshot-id\" is set the actual startup mode will be \"from-snapshot\". "
+                        + "and if \"scan.snapshot-id\" or \"scan.tag-name\" is set the actual startup mode will be \"from-snapshot\". "
                         + "Otherwise the actual startup mode will be \"latest-full\"."),
 
         LATEST_FULL(
@@ -1043,10 +1054,10 @@ public class CoreOptions implements Serializable {
 
         FROM_SNAPSHOT(
                 "from-snapshot",
-                "For streaming sources, continuously reads changes "
-                        + "starting from snapshot specified by \"scan.snapshot-id\", "
-                        + "without producing a snapshot at the beginning. For batch sources, "
-                        + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes."),
+                "For streaming sources, continuously reads changes starting from snapshot "
+                        + "specified by \"scan.snapshot-id\", without producing a snapshot at the beginning. "
+                        + "For batch sources, produces a snapshot specified by \"scan.snapshot-id\" "
+                        + "or \"scan.tag-name\" but does not read new changes."),
 
         FROM_SNAPSHOT_FULL(
                 "from-snapshot-full",

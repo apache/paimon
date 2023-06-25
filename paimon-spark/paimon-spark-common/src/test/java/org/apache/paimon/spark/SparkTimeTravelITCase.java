@@ -163,17 +163,6 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testIllegalVersionString() {
-        spark.sql("CREATE TABLE t (k INT, v STRING)");
-
-        assertThatThrownBy(() -> spark.sql("SELECT * FROM t VERSION AS OF '1.5'"))
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Version for time travel should be a LONG value representing snapshot id but was '1.5'."));
-    }
-
-    @Test
     public void testUnsupportedSystemTableTimeTravel() {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
@@ -182,5 +171,44 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
                         AssertionUtils.anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Only DataTable supports time travel but given table type is 'org.apache.paimon.table.system.SnapshotsTable'"));
+    }
+
+    @Test
+    public void testTravelToTag() throws Exception {
+        spark.sql("CREATE TABLE t (k INT, v STRING)");
+
+        // snapshot 1
+        writeTable(
+                "t",
+                GenericRow.of(1, BinaryString.fromString("Hello")),
+                GenericRow.of(2, BinaryString.fromString("Paimon")));
+
+        // snapshot 2
+        writeTable(
+                "t",
+                GenericRow.of(3, BinaryString.fromString("Test")),
+                GenericRow.of(4, BinaryString.fromString("Case")));
+
+        // snapshot 3
+        writeTable(
+                "t",
+                GenericRow.of(5, BinaryString.fromString("Time")),
+                GenericRow.of(6, BinaryString.fromString("Travel")));
+
+        getTable("t").createTag("tag2", 2);
+
+        // time travel to tag2
+        assertThat(spark.sql("SELECT * FROM t VERSION AS OF 'tag2'").collectAsList().toString())
+                .isEqualTo("[[1,Hello], [2,Paimon], [3,Test], [4,Case]]");
+    }
+
+    @Test
+    public void testTravelToNonExistingTag() {
+        spark.sql("CREATE TABLE t (k INT, v STRING)");
+        assertThatThrownBy(
+                        () -> spark.sql("SELECT * FROM t VERSION AS OF 'unknown'").collectAsList())
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class, "Tag 'unknown' doesn't exist."));
     }
 }

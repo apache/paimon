@@ -31,16 +31,19 @@ import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
@@ -68,18 +71,8 @@ public class SchemaValidation {
         validatePrimaryKeysType(schema.fields(), schema.primaryKeys());
 
         CoreOptions options = new CoreOptions(schema.options());
-        if (options.startupMode() == CoreOptions.StartupMode.FROM_TIMESTAMP) {
-            checkOptionExistInMode(
-                    options, SCAN_TIMESTAMP_MILLIS, CoreOptions.StartupMode.FROM_TIMESTAMP);
-            checkOptionsConflict(options, SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS);
-        } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT
-                || options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
-            checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
-            checkOptionsConflict(options, SCAN_TIMESTAMP_MILLIS, SCAN_SNAPSHOT_ID);
-        } else {
-            checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
-            checkOptionNotExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
-        }
+
+        validateStartupMode(options);
 
         if (options.writeMode() == WriteMode.APPEND_ONLY
                 && options.changelogProducer() != CoreOptions.ChangelogProducer.NONE) {
@@ -191,6 +184,34 @@ public class SchemaValidation {
         }
     }
 
+    private static void validateStartupMode(CoreOptions options) {
+        if (options.startupMode() == CoreOptions.StartupMode.FROM_TIMESTAMP) {
+            checkOptionExistInMode(
+                    options, SCAN_TIMESTAMP_MILLIS, CoreOptions.StartupMode.FROM_TIMESTAMP);
+            checkOptionsConflict(
+                    options,
+                    Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TAG_NAME),
+                    Collections.singletonList(SCAN_TIMESTAMP_MILLIS));
+        } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
+            checkExactOneOptionExistInMode(
+                    options, options.startupMode(), SCAN_SNAPSHOT_ID, SCAN_TAG_NAME);
+            checkOptionsConflict(
+                    options,
+                    Collections.singletonList(SCAN_TIMESTAMP_MILLIS),
+                    Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TAG_NAME));
+        } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
+            checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
+            checkOptionsConflict(
+                    options,
+                    Arrays.asList(SCAN_TIMESTAMP_MILLIS, SCAN_TAG_NAME),
+                    Collections.singletonList(SCAN_SNAPSHOT_ID));
+        } else {
+            checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
+            checkOptionNotExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
+            checkOptionNotExistInMode(options, SCAN_TAG_NAME, options.startupMode());
+        }
+    }
+
     private static void checkOptionExistInMode(
             CoreOptions options, ConfigOption<?> option, CoreOptions.StartupMode startupMode) {
         checkArgument(
@@ -209,11 +230,34 @@ public class SchemaValidation {
                         option.key(), startupMode, SCAN_MODE.key()));
     }
 
-    private static void checkOptionsConflict(
-            CoreOptions options, ConfigOption<?> illegalOption, ConfigOption<?> legalOption) {
+    private static void checkExactOneOptionExistInMode(
+            CoreOptions options,
+            CoreOptions.StartupMode startupMode,
+            ConfigOption<?>... configOptions) {
         checkArgument(
-                !options.toConfiguration().contains(illegalOption),
+                Arrays.stream(configOptions)
+                                .filter(op -> options.toConfiguration().contains(op))
+                                .count()
+                        == 1,
                 String.format(
-                        "%s must be null when you set %s", illegalOption.key(), legalOption.key()));
+                        "must set only one key in [%s] when you use %s for %s",
+                        concatConfigKeys(Arrays.asList(configOptions)),
+                        startupMode,
+                        SCAN_MODE.key()));
+    }
+
+    private static void checkOptionsConflict(
+            CoreOptions options,
+            List<ConfigOption<?>> illegalOptions,
+            List<ConfigOption<?>> legalOptions) {
+        checkArgument(
+                illegalOptions.stream().noneMatch(op -> options.toConfiguration().contains(op)),
+                "[%s] must be null when you set [%s]",
+                concatConfigKeys(illegalOptions),
+                concatConfigKeys(legalOptions));
+    }
+
+    private static String concatConfigKeys(List<ConfigOption<?>> configOptions) {
+        return configOptions.stream().map(ConfigOption::key).collect(Collectors.joining(","));
     }
 }

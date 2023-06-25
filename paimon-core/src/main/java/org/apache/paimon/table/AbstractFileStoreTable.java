@@ -239,15 +239,23 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
         CoreOptions coreOptions = new CoreOptions(options);
-        Long snapshotId;
 
         switch (coreOptions.startupMode()) {
             case FROM_SNAPSHOT:
             case FROM_SNAPSHOT_FULL:
-                snapshotId = coreOptions.scanSnapshotId();
-                if (snapshotManager().snapshotExists(snapshotId)) {
-                    long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
-                    return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+                if (coreOptions.scanSnapshotId() != null) {
+                    long snapshotId = coreOptions.scanSnapshotId();
+                    if (snapshotManager().snapshotExists(snapshotId)) {
+                        long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
+                        return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+                    }
+                } else {
+                    String tagName = coreOptions.scanTagName();
+                    TagManager tagManager = new TagManager(fileIO, path);
+                    if (tagManager.tagExists(tagName)) {
+                        long schemaId = tagManager.taggedSnapshot(tagName).schemaId();
+                        return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
+                    }
                 }
                 return Optional.empty();
             case FROM_TIMESTAMP:

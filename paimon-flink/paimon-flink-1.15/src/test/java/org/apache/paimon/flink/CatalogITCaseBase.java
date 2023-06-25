@@ -19,8 +19,10 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -29,11 +31,6 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
-import org.apache.flink.table.catalog.Catalog;
-import org.apache.flink.table.catalog.CatalogBaseTable;
-import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.delegation.Parser;
 import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
@@ -127,11 +124,11 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         return sEnv.executeSql(String.format(query, args)).collect();
     }
 
-    protected CatalogTable table(String tableName) throws TableNotExistException {
-        Catalog catalog = tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
-        CatalogBaseTable table =
-                catalog.getTable(new ObjectPath(catalog.getDefaultDatabase(), tableName));
-        return (CatalogTable) table;
+    protected Table paimonTable(String tableName)
+            throws org.apache.paimon.catalog.Catalog.TableNotExistException {
+        FlinkCatalog flinkCatalog = (FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
+        org.apache.paimon.catalog.Catalog catalog = flinkCatalog.catalog();
+        return catalog.getTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
     }
 
     protected Path getTableDirectory(String tableName) {

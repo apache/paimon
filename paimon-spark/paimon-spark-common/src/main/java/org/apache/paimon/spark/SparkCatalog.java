@@ -215,21 +215,17 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
      */
     public SparkTable loadTable(Identifier ident, String version) throws NoSuchTableException {
         Table table = loadAndRequireDataTable(ident);
-        long snapshotId;
+        Options dynamicOptions = new Options();
 
-        try {
-            snapshotId = Long.parseUnsignedLong(version);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Version for time travel should be a LONG value representing snapshot id but was '%s'.",
-                            version),
-                    e);
+        if (version.chars().allMatch(Character::isDigit)) {
+            long snapshotId = Long.parseUnsignedLong(version);
+            LOG.info("Time travel to snapshot '{}'.", snapshotId);
+            dynamicOptions.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshotId);
+        } else {
+            LOG.info("Time travel to tag '{}'.", version);
+            dynamicOptions.set(CoreOptions.SCAN_TAG_NAME, version);
         }
 
-        LOG.info("Time travel target snapshot id is {}.", snapshotId);
-
-        Options dynamicOptions = new Options().set(CoreOptions.SCAN_SNAPSHOT_ID, snapshotId);
         return new SparkTable(table.copy(dynamicOptions.toMap()));
     }
 

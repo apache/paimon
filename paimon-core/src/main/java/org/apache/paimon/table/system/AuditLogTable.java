@@ -19,6 +19,7 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
@@ -192,6 +193,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
         public SnapshotReader withSnapshot(long snapshotId) {
             snapshotReader.withSnapshot(snapshotId);
+            return this;
+        }
+
+        public SnapshotReader withSnapshot(Snapshot snapshot) {
+            snapshotReader.withSnapshot(snapshot);
             return this;
         }
 
