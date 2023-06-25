@@ -113,7 +113,8 @@ public class FileFormatTest {
         tableOptions.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.fromValue(IDENTIFIER));
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
         tableOptions.setString(IDENTIFIER + ".hello", "world");
-        FileFormatDiscover fileFormatDiscover = FileFormatDiscover.of(new CoreOptions(tableOptions));
+        FileFormatDiscover fileFormatDiscover =
+                FileFormatDiscover.of(new CoreOptions(tableOptions));
         FileFormat fileFormat = fileFormatDiscover.discover(IDENTIFIER);
         Assertions.assertTrue(fileFormat instanceof OrcFileFormat);
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
