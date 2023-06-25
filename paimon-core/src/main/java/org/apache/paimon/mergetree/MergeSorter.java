@@ -92,6 +92,10 @@ public class MergeSorter {
         this.ioManager = ioManager;
     }
 
+    public MemorySegmentPool memoryPool() {
+        return memoryPool;
+    }
+
     public void setIOManager(IOManager ioManager) {
         this.ioManager = ioManager;
     }
@@ -160,6 +164,14 @@ public class MergeSorter {
         };
     }
 
+    /**
+     * Here can not use {@link SortBufferWriteBuffer} for two reasons:
+     *
+     * <p>1.Changelog-producer: full-compaction and lookup need to know the level of the KeyValue.
+     *
+     * <p>2.Changelog-producer: full-compaction and lookup need to store the reference of
+     * update_before.
+     */
     private class ExternalSorterWithLevel {
 
         private final SortBuffer buffer;

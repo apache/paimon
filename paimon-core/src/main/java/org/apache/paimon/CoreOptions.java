@@ -204,7 +204,8 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .noDefaultValue()
                     .withDescription(
-                            "If the maximum number of sort readers exceeds this value, a spill will be attempted.");
+                            "If the maximum number of sort readers exceeds this value, a spill will be attempted. "
+                                    + "This prevents too many readers from consuming too much memory and causing OOM.");
 
     @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =

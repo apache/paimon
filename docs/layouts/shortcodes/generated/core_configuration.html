@@ -69,12 +69,6 @@ under the License.
             <td>The size amplification is defined as the amount (in percentage) of additional storage needed to store a single byte of data in the merge tree for changelog mode table.</td>
         </tr>
         <tr>
-            <td><h5>compaction.max-sorted-run-num</h5></td>
-            <td style="word-wrap: break-word;">2147483647</td>
-            <td>Integer</td>
-            <td>The maximum sorted run number to pick for compaction. This value avoids merging too much sorted runs at the same time during compaction, which may lead to OutOfMemoryError.</td>
-        </tr>
-        <tr>
             <td><h5>compaction.max.file-num</h5></td>
             <td style="word-wrap: break-word;">50</td>
             <td>Integer</td>
@@ -327,6 +321,12 @@ under the License.
             <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
         </tr>
         <tr>
+            <td><h5>read-spill-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">64 mb</td>
+            <td>MemorySize</td>
+            <td>Amount of data to spill records to disk in spilled read.</td>
+        </tr>
+        <tr>
             <td><h5>read.batch-size</h5></td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
@@ -409,6 +409,12 @@ under the License.
             <td style="word-wrap: break-word;">loser-tree</td>
             <td><p>Enum</p></td>
             <td>Specify the sort engine for table with primary key.<br /><br />Possible values:<ul><li>"min-heap": Use min-heap for multiway sorting.</li><li>"loser-tree": Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>sort-spill-threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>If the maximum number of sort readers exceeds this value, a spill will be attempted. This prevents too many readers from consuming too much memory and causing OOM.</td>
         </tr>
         <tr>
             <td><h5>source.split.open-file-cost</h5></td>
