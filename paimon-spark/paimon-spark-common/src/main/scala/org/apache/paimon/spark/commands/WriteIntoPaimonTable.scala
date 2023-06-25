@@ -58,35 +58,37 @@ case class WriteIntoPaimonTable(table: FileStoreTable, overwrite: Boolean, data:
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
+    val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala.map(col)
+    val partitionCols = tableSchema.partitionKeys().asScala.map(col)
+
     val dataEncoder = RowEncoder.apply(data.schema).resolveAndBind()
     val originFromRow = dataEncoder.createDeserializer()
 
-    val partitionCols = tableSchema.partitionKeys().asScala.map(col)
-    val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala.map(col)
-    val partitioned = if (isDynamicBucketTable && primaryKeyCols.nonEmpty) {
-      // Make sure that the records with the same bucket values is within a task.
-      data.repartition(primaryKeyCols: _*)
-    } else {
-      data
-    }
-
     // append _bucket_ column as placeholder
-    val withBucketCol = partitioned.withColumn(BUCKET_COL, lit(-1))
-    val numSparkPartitions = withBucketCol.rdd.getNumPartitions
+    val withBucketCol = data.withColumn(BUCKET_COL, lit(-1))
     val bucketColIdx = withBucketCol.schema.size - 1
     val withBucketDataEncoder = RowEncoder.apply(withBucketCol.schema).resolveAndBind()
     val toRow = withBucketDataEncoder.createSerializer()
     val fromRow = withBucketDataEncoder.createDeserializer()
 
-    val bucketProcessor = if (isDynamicBucketTable) {
-      DynamicBucketProcessor(table, rowType, bucketColIdx, numSparkPartitions, toRow, fromRow)
+    val withAssignedBucket = if (isDynamicBucketTable) {
+      val partitioned = if (primaryKeyCols.nonEmpty) {
+        // Make sure that the records with the same bucket values is within a task.
+        withBucketCol.repartition(primaryKeyCols: _*)
+      } else {
+        withBucketCol
+      }
+      val numSparkPartitions = partitioned.rdd.getNumPartitions
+      val dynamicBucketProcessor =
+        DynamicBucketProcessor(table, rowType, bucketColIdx, numSparkPartitions, toRow, fromRow)
+      partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(withBucketDataEncoder)
     } else {
-      CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
+      val commonBucketProcessor = CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
+      withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(withBucketDataEncoder)
     }
 
-    val committables =
-      withBucketCol
-        .mapPartitions(bucketProcessor.processPartition)(withBucketDataEncoder)
+    val commitMessages =
+      withAssignedBucket
         .toDF()
         .repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
         .mapPartitions {
@@ -110,7 +112,7 @@ case class WriteIntoPaimonTable(table: FileStoreTable, overwrite: Boolean, data:
 
     try {
       val tableCommit = writeBuilder.newCommit().asInstanceOf[InnerTableCommit]
-      tableCommit.commit(committables.toList.asJava)
+      tableCommit.commit(commitMessages.toList.asJava)
     } catch {
       case e: Throwable => throw new RuntimeException(e);
     }
