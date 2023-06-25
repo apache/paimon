@@ -20,6 +20,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.spark.SparkRow
+import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, InnerTableCommit, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
@@ -93,7 +94,7 @@ case class WriteIntoPaimonTable(table: FileStoreTable, overwrite: Boolean, data:
         .repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
         .mapPartitions {
           iter =>
-            val write = writeBuilder.newWrite()
+            val write = writeBuilder.newWrite().withIOManager(createIOManager())
             try {
               iter.foreach {
                 row =>
