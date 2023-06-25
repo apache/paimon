@@ -29,6 +29,8 @@ import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 
+import static org.apache.paimon.spark.SparkUtils.createIOManager;
+
 /** A Spark {@link PartitionReaderFactory} for paimon. */
 public class SparkReaderFactory implements PartitionReaderFactory {
 
@@ -45,7 +47,11 @@ public class SparkReaderFactory implements PartitionReaderFactory {
             InputPartition partition) {
         RecordReader<InternalRow> reader;
         try {
-            reader = readBuilder.newRead().createReader(((SparkInputPartition) partition).split());
+            reader =
+                    readBuilder
+                            .newRead()
+                            .withIOManager(createIOManager())
+                            .createReader(((SparkInputPartition) partition).split());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
