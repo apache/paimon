@@ -82,7 +82,7 @@ under the License.
             <plugin>
                 <groupId>net.alchim31.maven</groupId>
                 <artifactId>scala-maven-plugin</artifactId>
-                <version>3.2.2</version>
+                <version>${scala-maven-plugin.version}</version>
                 <executions>
                     <!-- Run scala compiler in the process-resources phase, so that dependencies on
                         scala classes can be resolved later in the (Java) compile phase -->
@@ -118,6 +118,16 @@ under the License.
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <filters>
+                                <!-- Another copy of the Apache license, which we don't need. -->
+                                <filter>
+                                    <artifact>*</artifact>
+                                    <excludes>
+                                        <exclude>NOTICE</exclude>
+                                        <exclude>LICENSE</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                             <minimizeJar>true</minimizeJar>
                             <artifactSet>
                                 <includes combine.children="append">
