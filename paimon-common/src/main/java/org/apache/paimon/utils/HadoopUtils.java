@@ -18,7 +18,10 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.options.description.DescribedEnum;
+import org.apache.paimon.options.description.InlineElement;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
@@ -27,6 +30,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 
+import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.description.TextElement.text;
+
 /**
  * Utility class for working with Hadoop-related classes. This should only be used if Hadoop is on
  * the classpath. Note: decoupled from specific engines.
@@ -34,6 +40,13 @@ import java.io.File;
 public class HadoopUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(HadoopUtils.class);
+
+    public static final ConfigOption<HadoopConfigLoader> HADOOP_CONF_LOADER =
+            key("hadoop-conf-loader")
+                    .enumType(HadoopConfigLoader.class)
+                    .defaultValue(HadoopConfigLoader.ALL)
+                    .withDescription("Specifies the way of loading hadoop config.");
+
     private static final String[] CONFIG_PREFIXES = {"hadoop."};
     public static final String HADOOP_HOME_ENV = "HADOOP_HOME";
     public static final String HADOOP_CONF_ENV = "HADOOP_CONF_DIR";
@@ -58,8 +71,10 @@ public class HadoopUtils {
         // Approach 1: HADOOP_HOME environment variables
         String[] possibleHadoopConfPaths = new String[2];
 
+        HadoopConfigLoader loader = options.get(HADOOP_CONF_LOADER);
+
         final String hadoopHomeDir = System.getenv(HADOOP_HOME_ENV);
-        if (hadoopHomeDir != null) {
+        if (hadoopHomeDir != null && loader.loadEnv()) {
             LOG.debug("Searching Hadoop configuration files in HADOOP_HOME: {}", hadoopHomeDir);
             possibleHadoopConfPaths[0] = hadoopHomeDir + "/conf";
             possibleHadoopConfPaths[1] = hadoopHomeDir + "/etc/hadoop"; // hadoop 2.2
@@ -71,9 +86,9 @@ public class HadoopUtils {
             }
         }
 
-        // Approach 2: Paimon configuration (deprecated)
+        // Approach 2: Paimon Catalog Option
         final String hadoopConfigPath = options.getString(PATH_HADOOP_CONFIG, null);
-        if (hadoopConfigPath != null) {
+        if (hadoopConfigPath != null && loader.loadOption()) {
             LOG.debug(
                     "Searching Hadoop configuration files in Paimon config: {}", hadoopConfigPath);
             foundHadoopConfiguration =
@@ -82,7 +97,7 @@ public class HadoopUtils {
 
         // Approach 3: HADOOP_CONF_DIR environment variable
         String hadoopConfDir = System.getenv(HADOOP_CONF_ENV);
-        if (hadoopConfDir != null) {
+        if (hadoopConfDir != null && loader.loadEnv()) {
             LOG.debug("Searching Hadoop configuration files in HADOOP_CONF_DIR: {}", hadoopConfDir);
             foundHadoopConfiguration =
                     addHadoopConfIfFound(result, hadoopConfDir) || foundHadoopConfiguration;
@@ -141,5 +156,42 @@ public class HadoopUtils {
             }
         }
         return foundHadoopConfiguration;
+    }
+
+    /** Specifies the way of loading hadoop config. */
+    public enum HadoopConfigLoader implements DescribedEnum {
+        ALL("all", "Load Hadoop conf from environment variables and catalog option.", true, true),
+        ENV("env", "Load Hadoop conf from environment variables only.", true, false),
+        OPTION("option", "Load Hadoop conf from catalog option only.", false, true);
+
+        private final String value;
+        private final String description;
+        private final boolean loadEnv;
+        private final boolean loadOption;
+
+        HadoopConfigLoader(String value, String description, boolean loadEnv, boolean loadOption) {
+            this.value = value;
+            this.description = description;
+            this.loadEnv = loadEnv;
+            this.loadOption = loadOption;
+        }
+
+        public boolean loadEnv() {
+            return loadEnv;
+        }
+
+        public boolean loadOption() {
+            return loadOption;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
     }
 }
