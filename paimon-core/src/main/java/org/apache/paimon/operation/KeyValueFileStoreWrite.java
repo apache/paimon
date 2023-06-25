@@ -163,7 +163,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         CompactManager compactManager =
                 createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
         return new MergeTreeWriter(
-                bufferSpillable() || isStreamingMode,
+                bufferSpillable(),
                 options.localSortMaxNumFileHandles(),
                 ioManager,
                 compactManager,
@@ -174,11 +174,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement);
-    }
-
-    @Override
-    public void isStreamingMode(boolean isStreaming) {
-        isStreamingMode = isStreaming;
     }
 
     @VisibleForTesting
