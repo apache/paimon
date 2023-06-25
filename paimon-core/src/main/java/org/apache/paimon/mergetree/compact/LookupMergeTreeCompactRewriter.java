@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
@@ -26,6 +25,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.mergetree.LookupLevels;
+import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
 
 import java.io.IOException;
@@ -47,7 +47,7 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            SortEngine sortEngine,
+            MergeSorter mergeSorter,
             RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
         super(
@@ -55,7 +55,7 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
                 writerFactory,
                 keyComparator,
                 mfFactory,
-                sortEngine,
+                mergeSorter,
                 valueEqualiser,
                 changelogRowDeduplicate);
         this.lookupLevels = lookupLevels;
