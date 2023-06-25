@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 
@@ -70,15 +72,26 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                                     : ChannelComputer.select(partition, bucket, numTasks);
                     return task == getRuntimeContext().getIndexOfThisSubtask();
                 };
+
+        initStateAndWriter(
+                context,
+                stateFilter,
+                getContainingTask().getEnvironment().getIOManager(),
+                commitUser);
+    }
+
+    @VisibleForTesting
+    void initStateAndWriter(
+            StateInitializationContext context,
+            StateValueFilter stateFilter,
+            IOManager ioManager,
+            String commitUser)
+            throws Exception {
+        // We put state and write init in this method for convenient testing. Without construct a
+        // runtime context, we can test to construct a writer here
         state = new StoreSinkWriteState(context, stateFilter);
 
-        write =
-                storeSinkWriteProvider.provide(
-                        table,
-                        commitUser,
-                        state,
-                        getContainingTask().getEnvironment().getIOManager(),
-                        memoryPool);
+        write = storeSinkWriteProvider.provide(table, commitUser, state, ioManager, memoryPool);
     }
 
     protected abstract boolean containLogSystem();

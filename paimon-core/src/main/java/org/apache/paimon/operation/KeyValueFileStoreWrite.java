@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
@@ -174,8 +175,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 restoreIncrement);
     }
 
-    private boolean bufferSpillable() {
-        return options.writeBufferSpillable(fileIO.isObjectStore());
+    @VisibleForTesting
+    public boolean bufferSpillable() {
+        return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
     }
 
     private CompactManager createCompactManager(

@@ -63,6 +63,12 @@ public class TableWriteImpl<T>
     }
 
     @Override
+    public TableWriteImpl<T> isStreamingMode(boolean isStreamingMode) {
+        write.isStreamingMode(isStreamingMode);
+        return this;
+    }
+
+    @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
         return this;
@@ -165,6 +171,11 @@ public class TableWriteImpl<T>
     @Override
     public void restore(List<AbstractFileStoreWrite.State<T>> state) {
         write.restore(state);
+    }
+
+    @VisibleForTesting
+    public AbstractFileStoreWrite<T> getWrite() {
+        return write;
     }
 
     /** Extractor to extract {@link T} from the {@link SinkRecord}. */
