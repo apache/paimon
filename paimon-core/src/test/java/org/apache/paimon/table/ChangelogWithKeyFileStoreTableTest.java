@@ -185,7 +185,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         StreamTableCommit commit = table.newCommit(commitUser);
         long sequenceNumber1 =
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row1).sequenceNumber();
-        Thread.sleep(1);
+        Thread.sleep(1000);
         long sequenceNumber2 =
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row2).sequenceNumber();
         assertEquals(1685530987, TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS));
