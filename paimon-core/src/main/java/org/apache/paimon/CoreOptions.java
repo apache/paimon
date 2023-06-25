@@ -207,6 +207,12 @@ public class CoreOptions implements Serializable {
                             "If the maximum number of sort readers exceeds this value, a spill will be attempted. "
                                     + "This prevents too many readers from consuming too much memory and causing OOM.");
 
+    public static final ConfigOption<MemorySize> SORT_SPILL_BUFFER_SIZE =
+            key("sort-spill-buffer-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("64 mb"))
+                    .withDescription("Amount of data to spill records to disk in spilled sort.");
+
     @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =
             key("write-mode")
@@ -243,12 +249,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
-
-    public static final ConfigOption<MemorySize> READ_SPILL_BUFFER_SIZE =
-            key("read-spill-buffer-size")
-                    .memoryType()
-                    .defaultValue(MemorySize.parse("64 mb"))
-                    .withDescription("Amount of data to spill records to disk in spilled read.");
 
     public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
             key("write-buffer-spillable")
@@ -814,6 +814,10 @@ public class CoreOptions implements Serializable {
     public boolean writeBufferSpillable(boolean usingObjectStore, boolean isStreaming) {
         // if not streaming mode, we turn spillable on by default.
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
+    }
+
+    public long sortSpillBufferSize() {
+        return options.get(SORT_SPILL_BUFFER_SIZE).getBytes();
     }
 
     public long readSpillBufferSize() {

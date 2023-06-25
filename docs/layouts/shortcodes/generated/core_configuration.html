@@ -321,12 +321,6 @@ under the License.
             <td>Define primary key by table options, cannot define primary key on DDL and table options at the same time.</td>
         </tr>
         <tr>
-            <td><h5>read-spill-buffer-size</h5></td>
-            <td style="word-wrap: break-word;">64 mb</td>
-            <td>MemorySize</td>
-            <td>Amount of data to spill records to disk in spilled read.</td>
-        </tr>
-        <tr>
             <td><h5>read.batch-size</h5></td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
@@ -409,6 +403,12 @@ under the License.
             <td style="word-wrap: break-word;">loser-tree</td>
             <td><p>Enum</p></td>
             <td>Specify the sort engine for table with primary key.<br /><br />Possible values:<ul><li>"min-heap": Use min-heap for multiway sorting.</li><li>"loser-tree": Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>sort-spill-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">64 mb</td>
+            <td>MemorySize</td>
+            <td>Amount of data to spill records to disk in spilled sort.</td>
         </tr>
         <tr>
             <td><h5>sort-spill-threshold</h5></td>

@@ -88,7 +88,7 @@ public class MergeSorter {
         this.keyType = keyType;
         this.valueType = valueType;
         this.memoryPool =
-                new CachelessSegmentPool(options.readSpillBufferSize(), options.pageSize());
+                new CachelessSegmentPool(options.sortSpillBufferSize(), options.pageSize());
         this.ioManager = ioManager;
     }
 

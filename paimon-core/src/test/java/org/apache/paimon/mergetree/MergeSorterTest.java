@@ -69,7 +69,7 @@ public class MergeSorterTest {
     public void beforeTest() {
         ioManager = IOManager.create(tempDir.toString());
         Options options = new Options();
-        options.set(CoreOptions.READ_SPILL_BUFFER_SIZE, new MemorySize(MEMORY_SIZE));
+        options.set(CoreOptions.SORT_SPILL_BUFFER_SIZE, new MemorySize(MEMORY_SIZE));
         sorter = new MergeSorter(new CoreOptions(options), keyType, valueType, ioManager);
         totalPages = sorter.memoryPool().freePages();
     }
