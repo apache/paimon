@@ -24,18 +24,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      MVN_COMMON_OPTIONS: -U -B --no-transfer-progress
-      MVN_BUILD_OUTPUT_FILE: "/tmp/mvn_build_output.out"
-      MVN_VALIDATION_DIR: "/tmp/paimon-validation-deployment"
 
     steps:
-      - uses: actions/checkout@v2
-
-      - name: Set JDK
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Set up JDK ${{ env.JDK_VERSION }}
         uses: actions/setup-java@v2
         with:
-          java-version: 8
+          java-version: ${{ env.JDK_VERSION }}
           distribution: 'adopt'
 
       - name: Build
