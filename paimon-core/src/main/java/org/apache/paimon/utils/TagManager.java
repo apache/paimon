@@ -113,7 +113,9 @@ public class TagManager {
         for (FileStatus status : statuses) {
             Path path = status.getPath();
             if (path.getName().startsWith(TAG_PREFIX)) {
-                tags.put(Snapshot.fromPath(fileIO, path), path.getName());
+                tags.put(
+                        Snapshot.fromPath(fileIO, path),
+                        path.getName().substring(TAG_PREFIX.length()));
             }
         }
         return tags;

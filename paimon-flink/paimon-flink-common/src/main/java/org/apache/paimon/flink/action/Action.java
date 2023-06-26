@@ -130,6 +130,8 @@ public interface Action {
         private static final String DELETE = "delete";
         private static final String MERGE_INTO = "merge-into";
         private static final String ROLLBACK_TO = "rollback-to";
+        private static final String CREATE_TAG = "create-tag";
+        private static final String DELETE_TAG = "delete-tag";
         // cdc actions
         private static final String MYSQL_SYNC_TABLE = "mysql-sync-table";
         private static final String MYSQL_SYNC_DATABASE = "mysql-sync-database";
@@ -152,6 +154,10 @@ public interface Action {
                     return MergeIntoAction.create(actionArgs);
                 case ROLLBACK_TO:
                     return RollbackToAction.create(actionArgs);
+                case CREATE_TAG:
+                    return CreateTagAction.create(actionArgs);
+                case DELETE_TAG:
+                    return DeleteTagAction.create(actionArgs);
                 case MYSQL_SYNC_TABLE:
                     return MySqlSyncTableAction.create(actionArgs);
                 case MYSQL_SYNC_DATABASE:
@@ -176,6 +182,8 @@ public interface Action {
             System.out.println("  " + DELETE);
             System.out.println("  " + MERGE_INTO);
             System.out.println("  " + ROLLBACK_TO);
+            System.out.println("  " + CREATE_TAG);
+            System.out.println("  " + DELETE_TAG);
             System.out.println("  " + MYSQL_SYNC_TABLE);
             System.out.println("  " + MYSQL_SYNC_DATABASE);
             System.out.println("  " + KAFKA_SYNC_TABLE);
