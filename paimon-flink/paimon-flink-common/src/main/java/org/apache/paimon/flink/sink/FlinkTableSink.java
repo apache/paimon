@@ -132,28 +132,12 @@ public class FlinkTableSink extends FlinkTableSinkBase
     @Override
     public RowLevelDeleteInfo applyRowLevelDelete(
             @Nullable RowLevelModificationScanContext rowLevelModificationScanContext) {
-        if (table instanceof ChangelogWithKeyFileStoreTable) {
-            Options options = Options.fromMap(table.options());
-            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
-                return new RowLevelDeleteInfo() {};
-            }
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "merge engine '%s' can not support delete, currently only %s can support delete.",
-                            options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
-        } else if (table instanceof ChangelogValueCountFileStoreTable) {
+        if (supportDelete()) {
             return new RowLevelDeleteInfo() {};
-        } else if (table instanceof AppendOnlyFileStoreTable) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "table '%s' can not support delete, because there is no primary key.",
-                            table.getClass().getName()));
-        } else {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "%s can not support delete, because it is an unknown subclass of FileStoreTable.",
-                            table.getClass().getName()));
         }
+        // actually, this will not be executed now.
+        throw new UnsupportedOperationException(
+                String.format("table '%s' cannot support delete.", table.getClass().getName()));
     }
 
     /*
@@ -165,52 +149,32 @@ public class FlinkTableSink extends FlinkTableSinkBase
     */
     @Override
     public boolean applyDeleteFilters(List<ResolvedExpression> list) {
-        if (list.size() == 0) {
-            return false;
-        }
-
-        predicates = new ArrayList<>();
-        RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
-        for (ResolvedExpression filter : list) {
-            Optional<Predicate> predicate = PredicateConverter.convert(rowType, filter);
-            if (predicate.isPresent() && shouldPushdownDeleteFilter(predicate.get(), list.size())) {
-                predicates.add(predicate.get());
-            } else {
-                // convert failed, leave it to flink
+        if (supportDelete()) {
+            if (list.size() == 0) {
                 return false;
             }
+
+            predicates = new ArrayList<>();
+            RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
+            for (ResolvedExpression filter : list) {
+                Optional<Predicate> predicate = PredicateConverter.convert(rowType, filter);
+                if (predicate.isPresent()
+                        && shouldPushdownDeleteFilter(predicate.get(), list.size())) {
+                    predicates.add(predicate.get());
+                } else {
+                    // convert failed, leave it to flink
+                    return false;
+                }
+            }
+
+            return true;
         }
 
-        return true;
+        return false;
     }
 
     @Override
     public Optional<Long> executeDeletion() {
-        if (table instanceof ChangelogWithKeyFileStoreTable) {
-            Options options = Options.fromMap(table.options());
-            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
-                return executeDeletionInternal();
-            }
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "merge engine '%s' can not support delete, currently only %s can support delete.",
-                            options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
-        } else if (table instanceof ChangelogValueCountFileStoreTable) {
-            return executeDeletionInternal();
-        } else if (table instanceof AppendOnlyFileStoreTable) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "table '%s' can not support delete, because there is no primary key.",
-                            table.getClass().getName()));
-        } else {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "%s can not support delete, because it is an unknown subclass of FileStoreTable.",
-                            table.getClass().getName()));
-        }
-    }
-
-    private Optional<Long> executeDeletionInternal() {
         // delete partition
         if (predicates.size() == 1
                 && predicates.get(0) instanceof LeafPredicate
@@ -245,6 +209,31 @@ public class FlinkTableSink extends FlinkTableSinkBase
         return Optional.of(TableUtils.deleteWhere(table, predicates));
     }
 
+    private boolean supportDelete() {
+        if (table instanceof ChangelogWithKeyFileStoreTable) {
+            Options options = Options.fromMap(table.options());
+            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
+                return true;
+            }
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "merge engine '%s' can not support delete, currently only %s can support delete.",
+                            options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
+        } else if (table instanceof ChangelogValueCountFileStoreTable) {
+            return true;
+        } else if (table instanceof AppendOnlyFileStoreTable) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "table '%s' can not support delete, because there is no primary key.",
+                            table.getClass().getName()));
+        } else {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "%s can not support delete, because it is an unknown subclass of FileStoreTable.",
+                            table.getClass().getName()));
+        }
+    }
+
     private boolean shouldPushdownDeleteFilter(Predicate predicate, int predicateSize) {
         if (predicate instanceof CompoundPredicate) { // where pk in ('A', 'B', 'C')
             return shouldPushdownDeleteFilter((CompoundPredicate) predicate);
@@ -266,33 +255,28 @@ public class FlinkTableSink extends FlinkTableSinkBase
     }
 
     private boolean shouldPushdownDeleteFilter(CompoundPredicate predicate) {
-        if (!(predicate.function() instanceof Or)) {
-            return false;
-        }
+        List<Predicate> predicates = Arrays.asList(predicate);
 
-        List<Predicate> children = predicate.children();
-        if (children.size() == 2) {
-            Predicate first = children.get(0);
-            Predicate second = children.get(1);
-            if (first instanceof LeafPredicate && second instanceof LeafPredicate) {
-                return ((LeafPredicate) first).function() instanceof Equal
-                        && table.primaryKeys().contains(((LeafPredicate) first).fieldName())
-                        && ((LeafPredicate) second).function() instanceof Equal
-                        && table.primaryKeys().contains(((LeafPredicate) second).fieldName());
-            } else if (first instanceof LeafPredicate) {
-                return ((LeafPredicate) first).function() instanceof Equal
-                        && table.primaryKeys().contains(((LeafPredicate) first).fieldName())
-                        && shouldPushdownDeleteFilter((CompoundPredicate) second);
-            } else if (second instanceof LeafPredicate) {
-                return ((LeafPredicate) second).function() instanceof Equal
-                        && table.primaryKeys().contains(((LeafPredicate) second).fieldName())
-                        && shouldPushdownDeleteFilter((CompoundPredicate) children.get(0));
-            } else {
-                return shouldPushdownDeleteFilter((CompoundPredicate) first)
-                        && shouldPushdownDeleteFilter((CompoundPredicate) second);
+        while (predicates.size() != 0) {
+            List<Predicate> children = new ArrayList<>();
+            for (Predicate item : predicates) {
+                if (item instanceof LeafPredicate) {
+                    LeafPredicate leaf = (LeafPredicate) item;
+                    if (!(leaf.function() instanceof Equal)
+                            || !table.primaryKeys().contains(leaf.fieldName())) {
+                        return false;
+                    }
+                } else if (item instanceof CompoundPredicate) {
+                    CompoundPredicate compound = (CompoundPredicate) item;
+                    if (!(compound.function() instanceof Or)) {
+                        return false;
+                    }
+                    children.addAll(compound.children());
+                }
             }
+            predicates = children;
         }
 
-        return false;
+        return predicates.size() == 0;
     }
 }
