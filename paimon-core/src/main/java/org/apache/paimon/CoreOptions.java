@@ -199,6 +199,20 @@ public class CoreOptions implements Serializable {
                     .defaultValue(SortEngine.LOSER_TREE)
                     .withDescription("Specify the sort engine for table with primary key.");
 
+    public static final ConfigOption<Integer> SORT_SPILL_THRESHOLD =
+            key("sort-spill-threshold")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "If the maximum number of sort readers exceeds this value, a spill will be attempted. "
+                                    + "This prevents too many readers from consuming too much memory and causing OOM.");
+
+    public static final ConfigOption<MemorySize> SORT_SPILL_BUFFER_SIZE =
+            key("sort-spill-buffer-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("64 mb"))
+                    .withDescription("Amount of data to spill records to disk in spilled sort.");
+
     @Immutable
     public static final ConfigOption<WriteMode> WRITE_MODE =
             key("write-mode")
@@ -336,15 +350,6 @@ public class CoreOptions implements Serializable {
                             "For file set [f_0,...,f_N], the maximum file number to trigger a compaction "
                                     + "for append-only table, even if sum(size(f_i)) < targetFileSize. This value "
                                     + "avoids pending too much small files, which slows down the performance.");
-
-    public static final ConfigOption<Integer> COMPACTION_MAX_SORTED_RUN_NUM =
-            key("compaction.max-sorted-run-num")
-                    .intType()
-                    .defaultValue(Integer.MAX_VALUE)
-                    .withDescription(
-                            "The maximum sorted run number to pick for compaction. "
-                                    + "This value avoids merging too much sorted runs at the same time during compaction, "
-                                    + "which may lead to OutOfMemoryError.");
 
     public static final ConfigOption<ChangelogProducer> CHANGELOG_PRODUCER =
             key("changelog-producer")
@@ -785,6 +790,15 @@ public class CoreOptions implements Serializable {
         return options.get(SORT_ENGINE);
     }
 
+    public int sortSpillThreshold() {
+        Integer maxSortedRunNum = options.get(SORT_SPILL_THRESHOLD);
+        if (maxSortedRunNum == null) {
+            int stopNum = numSortedRunStopTrigger();
+            maxSortedRunNum = Math.max(stopNum, stopNum + 1);
+        }
+        return maxSortedRunNum;
+    }
+
     public long splitTargetSize() {
         return options.get(SOURCE_SPLIT_TARGET_SIZE).getBytes();
     }
@@ -800,6 +814,10 @@ public class CoreOptions implements Serializable {
     public boolean writeBufferSpillable(boolean usingObjectStore, boolean isStreaming) {
         // if not streaming mode, we turn spillable on by default.
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
+    }
+
+    public long sortSpillBufferSize() {
+        return options.get(SORT_SPILL_BUFFER_SIZE).getBytes();
     }
 
     public Duration continuousDiscoveryInterval() {
@@ -834,11 +852,7 @@ public class CoreOptions implements Serializable {
         // By default, this ensures that the compaction does not fall to level 0, but at least to
         // level 1
         Integer numLevels = options.get(NUM_LEVELS);
-        int expectedRuns =
-                maxSortedRunNum() == Integer.MAX_VALUE
-                        ? numSortedRunCompactionTrigger()
-                        : numSortedRunStopTrigger();
-        numLevels = numLevels == null ? expectedRuns + 1 : numLevels;
+        numLevels = numLevels == null ? numSortedRunCompactionTrigger() + 1 : numLevels;
         return numLevels;
     }
 
@@ -860,10 +874,6 @@ public class CoreOptions implements Serializable {
 
     public int compactionMaxFileNum() {
         return options.get(COMPACTION_MAX_FILE_NUM);
-    }
-
-    public int maxSortedRunNum() {
-        return options.get(COMPACTION_MAX_SORTED_RUN_NUM);
     }
 
     public long dynamicBucketTargetRowNum() {

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactResult;
@@ -27,9 +26,9 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 
 import java.util.ArrayList;
@@ -48,10 +47,10 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            SortEngine sortEngine,
+            MergeSorter mergeSorter,
             RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
-        super(readerFactory, writerFactory, keyComparator, mfFactory, sortEngine);
+        super(readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
         this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
@@ -78,15 +77,13 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
         List<ConcatRecordReader.ReaderSupplier<ChangelogResult>> sectionReaders = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             sectionReaders.add(
-                    () -> {
-                        List<RecordReader<KeyValue>> runReaders =
-                                MergeTreeReaders.readerForSection(section, readerFactory);
-                        return SortMergeReader.createSortMergeReader(
-                                runReaders,
-                                keyComparator,
-                                createMergeWrapper(outputLevel),
-                                sortEngine);
-                    });
+                    () ->
+                            MergeTreeReaders.readerForSection(
+                                    section,
+                                    readerFactory,
+                                    keyComparator,
+                                    createMergeWrapper(outputLevel),
+                                    mergeSorter));
         }
 
         RecordReaderIterator<ChangelogResult> iterator = null;

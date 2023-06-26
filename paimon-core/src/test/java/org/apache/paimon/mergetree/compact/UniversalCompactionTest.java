@@ -39,21 +39,16 @@ public class UniversalCompactionTest {
 
     @Test
     public void testOutputLevel() {
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 1, Integer.MAX_VALUE).outputLevel())
-                .isEqualTo(1);
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 2, Integer.MAX_VALUE).outputLevel())
-                .isEqualTo(1);
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 3, Integer.MAX_VALUE).outputLevel())
-                .isEqualTo(2);
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 4, Integer.MAX_VALUE).outputLevel())
-                .isEqualTo(3);
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 5, Integer.MAX_VALUE).outputLevel())
-                .isEqualTo(5);
+        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 1).outputLevel()).isEqualTo(1);
+        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 2).outputLevel()).isEqualTo(1);
+        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 3).outputLevel()).isEqualTo(2);
+        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 4).outputLevel()).isEqualTo(3);
+        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 5).outputLevel()).isEqualTo(5);
     }
 
     @Test
     public void testPick() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3, Integer.MAX_VALUE);
+        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
 
         // by size amplification
         Optional<CompactUnit> pick = compaction.pick(3, level0(1, 2, 3, 3));
@@ -80,36 +75,8 @@ public class UniversalCompactionTest {
     }
 
     @Test
-    public void testPickWithMaxSortedRunNum() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3, 2);
-
-        // by size amplification
-        Optional<CompactUnit> pick = compaction.pick(3, level0(1, 2, 3, 3));
-        assertThat(pick.isPresent()).isTrue();
-        long[] results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
-        assertThat(results).isEqualTo(new long[] {1, 2, 3, 3});
-
-        // by size ratio
-        pick =
-                compaction.pick(
-                        4, Arrays.asList(level(0, 1), level(1, 1), level(2, 1), level(3, 50)));
-        assertThat(pick.isPresent()).isTrue();
-        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
-        assertThat(results).isEqualTo(new long[] {1, 1});
-
-        // by file num
-        pick =
-                compaction.pick(
-                        4, Arrays.asList(level(0, 1), level(1, 2), level(2, 3), level(3, 50)));
-        assertThat(pick.isPresent()).isTrue();
-        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
-        // 3 should be in the candidate, by size ratio after picking by file num
-        assertThat(results).isEqualTo(new long[] {1, 2});
-    }
-
-    @Test
     public void testNoOutputLevel0() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3, 2);
+        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
 
         Optional<CompactUnit> pick =
                 compaction.pick(
@@ -129,7 +96,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testSizeAmplification() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 0, 1, Integer.MAX_VALUE);
+        UniversalCompaction compaction = new UniversalCompaction(25, 0, 1);
         long[] sizes = new long[] {1};
         sizes = appendAndPickForSizeAmp(compaction, sizes);
         assertThat(sizes).isEqualTo(new long[] {2});
@@ -169,7 +136,7 @@ public class UniversalCompactionTest {
 
     @Test
     public void testSizeRatio() {
-        UniversalCompaction compaction = new UniversalCompaction(25, 1, 5, Integer.MAX_VALUE);
+        UniversalCompaction compaction = new UniversalCompaction(25, 1, 5);
         long[] sizes = new long[] {1, 1, 1, 1};
         sizes = appendAndPickForSizeRatio(compaction, sizes);
         assertThat(sizes).isEqualTo(new long[] {5});
@@ -222,9 +189,9 @@ public class UniversalCompactionTest {
     @Test
     public void testSizeRatioThreshold() {
         long[] sizes = new long[] {8, 9, 10};
-        assertThat(pickForSizeRatio(new UniversalCompaction(25, 10, 2, Integer.MAX_VALUE), sizes))
+        assertThat(pickForSizeRatio(new UniversalCompaction(25, 10, 2), sizes))
                 .isEqualTo(new long[] {8, 9, 10});
-        assertThat(pickForSizeRatio(new UniversalCompaction(25, 20, 2, Integer.MAX_VALUE), sizes))
+        assertThat(pickForSizeRatio(new UniversalCompaction(25, 20, 2), sizes))
                 .isEqualTo(new long[] {27});
     }
 

@@ -79,6 +79,14 @@ public class SparkWriteITCase {
         innerSimpleWrite();
     }
 
+    @Test
+    public void testSortSpill() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
+                        + " ('primary-key'='a', 'bucket'='4', 'file.format'='avro', 'sort-spill-threshold'='1')");
+        innerSimpleWrite();
+    }
+
     private void innerSimpleWrite() {
         spark.sql("INSERT INTO T VALUES (1, 2, '3')").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();

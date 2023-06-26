@@ -47,7 +47,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.List;
 
 /** A {@link WriteBuffer} which stores records in {@link BinaryInMemorySortBuffer}. */
@@ -246,51 +245,6 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             previousRow = currentRow;
             current = tmp;
             currentRow = tmpRow;
-        }
-    }
-
-    private class RawIterator implements Iterator<KeyValue> {
-        private final MutableObjectIterator<BinaryRow> kvIter;
-        private final KeyValueSerializer current;
-
-        private BinaryRow currentRow;
-        private boolean advanced;
-
-        private RawIterator(MutableObjectIterator<BinaryRow> kvIter) {
-            this.kvIter = kvIter;
-            this.current = new KeyValueSerializer(keyType, valueType);
-            this.currentRow =
-                    new BinaryRow(keyType.getFieldCount() + 2 + valueType.getFieldCount());
-            this.advanced = false;
-        }
-
-        @Override
-        public boolean hasNext() {
-            if (!advanced) {
-                advanceNext();
-            }
-            return currentRow != null;
-        }
-
-        @Override
-        public KeyValue next() {
-            if (!hasNext()) {
-                return null;
-            }
-            advanced = false;
-            return current.getReusedKv();
-        }
-
-        private void advanceNext() {
-            try {
-                currentRow = kvIter.next(currentRow);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            if (currentRow != null) {
-                current.fromRow(currentRow);
-            }
-            advanced = true;
         }
     }
 }
