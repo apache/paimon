@@ -39,6 +39,8 @@ public class TableUtils {
      * Delete according to filters.
      *
      * <p>NOTE: This method is only suitable for deletion of small amount of data.
+     *
+     * @return the number of deleted records
      */
     public static long deleteWhere(Table table, List<Predicate> filters) {
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(filters);

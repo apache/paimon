@@ -25,10 +25,8 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.DropPartitionAction;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.DeletePushDownFunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.Or;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
@@ -132,12 +130,8 @@ public class FlinkTableSink extends FlinkTableSinkBase
     @Override
     public RowLevelDeleteInfo applyRowLevelDelete(
             @Nullable RowLevelModificationScanContext rowLevelModificationScanContext) {
-        if (supportDelete()) {
-            return new RowLevelDeleteInfo() {};
-        }
-        // actually, this will not be executed now.
-        throw new UnsupportedOperationException(
-                String.format("table '%s' cannot support delete.", table.getClass().getName()));
+        checkDeletable();
+        return new RowLevelDeleteInfo() {};
     }
 
     /*
@@ -149,28 +143,24 @@ public class FlinkTableSink extends FlinkTableSinkBase
     */
     @Override
     public boolean applyDeleteFilters(List<ResolvedExpression> list) {
-        if (supportDelete()) {
-            if (list.size() == 0) {
-                return false;
-            }
-
-            predicates = new ArrayList<>();
-            RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
-            for (ResolvedExpression filter : list) {
-                Optional<Predicate> predicate = PredicateConverter.convert(rowType, filter);
-                if (predicate.isPresent()
-                        && shouldPushdownDeleteFilter(predicate.get(), list.size())) {
-                    predicates.add(predicate.get());
-                } else {
-                    // convert failed, leave it to flink
-                    return false;
-                }
-            }
-
-            return true;
+        checkDeletable();
+        if (list.size() == 0) {
+            return false;
         }
 
-        return false;
+        predicates = new ArrayList<>();
+        RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
+        for (ResolvedExpression filter : list) {
+            Optional<Predicate> predicate = PredicateConverter.convert(rowType, filter);
+            if (predicate.isPresent() && canPushDownDeleteFilter(predicate.get(), list.size())) {
+                predicates.add(predicate.get());
+            } else {
+                // convert failed, leave it to flink
+                return false;
+            }
+        }
+
+        return true;
     }
 
     @Override
@@ -209,18 +199,18 @@ public class FlinkTableSink extends FlinkTableSinkBase
         return Optional.of(TableUtils.deleteWhere(table, predicates));
     }
 
-    private boolean supportDelete() {
+    private void checkDeletable() {
         if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
-                return true;
+                return;
             }
             throw new UnsupportedOperationException(
                     String.format(
                             "merge engine '%s' can not support delete, currently only %s can support delete.",
                             options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
         } else if (table instanceof ChangelogValueCountFileStoreTable) {
-            return true;
+            return;
         } else if (table instanceof AppendOnlyFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -234,49 +224,16 @@ public class FlinkTableSink extends FlinkTableSinkBase
         }
     }
 
-    private boolean shouldPushdownDeleteFilter(Predicate predicate, int predicateSize) {
-        if (predicate instanceof CompoundPredicate) { // where pk in ('A', 'B', 'C')
-            return shouldPushdownDeleteFilter((CompoundPredicate) predicate);
-        } else if (predicate instanceof LeafPredicate) { // where pk = 'A'
-            LeafPredicate leafPredicate = (LeafPredicate) predicate;
-
-            if (!(leafPredicate.function() instanceof Equal)) {
-                return false;
-            }
-
-            if (table.partitionKeys().contains(leafPredicate.fieldName())) {
-                return predicateSize == 1;
-            } else {
-                return table.primaryKeys().contains(leafPredicate.fieldName());
-            }
+    private boolean canPushDownDeleteFilter(Predicate predicate, int predicateSize) {
+        try {
+            predicate.visit(
+                    new DeletePushDownFunctionVisitor(
+                            table.primaryKeys(), table.partitionKeys(), predicateSize));
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        } catch (RuntimeException e) {
+            return false;
         }
-
-        return false;
-    }
-
-    private boolean shouldPushdownDeleteFilter(CompoundPredicate predicate) {
-        List<Predicate> predicates = Arrays.asList(predicate);
-
-        while (predicates.size() != 0) {
-            List<Predicate> children = new ArrayList<>();
-            for (Predicate item : predicates) {
-                if (item instanceof LeafPredicate) {
-                    LeafPredicate leaf = (LeafPredicate) item;
-                    if (!(leaf.function() instanceof Equal)
-                            || !table.primaryKeys().contains(leaf.fieldName())) {
-                        return false;
-                    }
-                } else if (item instanceof CompoundPredicate) {
-                    CompoundPredicate compound = (CompoundPredicate) item;
-                    if (!(compound.function() instanceof Or)) {
-                        return false;
-                    }
-                    children.addAll(compound.children());
-                }
-            }
-            predicates = children;
-        }
-
-        return predicates.size() == 0;
     }
 }
