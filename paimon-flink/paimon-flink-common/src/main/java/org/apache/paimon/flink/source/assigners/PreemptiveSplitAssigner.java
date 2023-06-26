@@ -28,7 +28,6 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
-import java.util.Queue;
 
 /**
  * Splits are assigned preemptively in the order requested by the task. Only one split is assigned
@@ -38,7 +37,7 @@ public class PreemptiveSplitAssigner implements SplitAssigner {
 
     private final LinkedList<FileStoreSourceSplit> pendingSplitAssignment;
 
-    public PreemptiveSplitAssigner(Queue<FileStoreSourceSplit> splits) {
+    public PreemptiveSplitAssigner(Collection<FileStoreSourceSplit> splits) {
         this.pendingSplitAssignment = new LinkedList<>(splits);
     }
 
@@ -49,7 +48,12 @@ public class PreemptiveSplitAssigner implements SplitAssigner {
     }
 
     @Override
-    public void addSplits(int subtask, List<FileStoreSourceSplit> splits) {
+    public void addSplit(int subtask, FileStoreSourceSplit split) {
+        pendingSplitAssignment.add(split);
+    }
+
+    @Override
+    public void addSplitsBack(int subtask, List<FileStoreSourceSplit> splits) {
         ListIterator<FileStoreSourceSplit> iterator = splits.listIterator(splits.size());
         while (iterator.hasPrevious()) {
             pendingSplitAssignment.addFirst(iterator.previous());

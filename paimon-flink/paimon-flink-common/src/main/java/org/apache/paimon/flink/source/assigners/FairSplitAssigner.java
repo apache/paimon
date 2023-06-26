@@ -67,7 +67,12 @@ public class FairSplitAssigner implements SplitAssigner {
     }
 
     @Override
-    public void addSplits(int subtask, List<FileStoreSourceSplit> splits) {
+    public void addSplit(int subtask, FileStoreSourceSplit split) {
+        pendingSplitAssignment.computeIfAbsent(subtask, k -> new LinkedList<>()).add(split);
+    }
+
+    @Override
+    public void addSplitsBack(int subtask, List<FileStoreSourceSplit> splits) {
         LinkedList<FileStoreSourceSplit> remainingSplits =
                 pendingSplitAssignment.computeIfAbsent(subtask, k -> new LinkedList<>());
         ListIterator<FileStoreSourceSplit> iterator = splits.listIterator(splits.size());
@@ -83,6 +88,8 @@ public class FairSplitAssigner implements SplitAssigner {
         return splits;
     }
 
+    // this method only reload restore for batch execute, because in streaming mode, we need to
+    // assign certain bucket to certain task
     private static Map<Integer, LinkedList<FileStoreSourceSplit>> createSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
         List<List<FileStoreSourceSplit>> assignmentList =

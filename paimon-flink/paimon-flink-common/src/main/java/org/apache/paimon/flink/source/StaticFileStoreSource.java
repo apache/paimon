@@ -30,7 +30,6 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import javax.annotation.Nullable;
 
 import java.util.Collection;
-import java.util.LinkedList;
 import java.util.List;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
@@ -84,10 +83,10 @@ public class StaticFileStoreSource extends FlinkSource {
             case FAIR:
                 return new FairSplitAssigner(splitBatchSize, context, splits);
             case PREEMPTIVE:
-                return new PreemptiveSplitAssigner(new LinkedList<>(splits));
+                return new PreemptiveSplitAssigner(splits);
             default:
                 throw new UnsupportedOperationException(
-                        "Unsupported assign mode " + splitAssignMode.toString());
+                        "Unsupported assign mode " + splitAssignMode);
         }
     }
 }
