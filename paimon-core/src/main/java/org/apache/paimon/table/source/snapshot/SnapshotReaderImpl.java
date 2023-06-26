@@ -93,6 +93,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SplitGenerator splitGenerator() {
+        return splitGenerator;
+    }
+
+    @Override
     public SnapshotReader withSnapshot(long snapshotId) {
         scan.withSnapshot(snapshotId);
         return this;

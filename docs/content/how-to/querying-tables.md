@@ -143,6 +143,35 @@ SELECT * FROM t;
 
 {{< /tabs >}}
 
+## Incremental
+
+Currently, Paimon supports read data incrementally for Flink and Spark.
+
+{{< tabs "incremental-example" >}}
+
+{{< tab "Flink" >}}
+```sql
+-- Read incremental changes between start snapshot (exclusive) and end snapshot
+-- For example, '12,20' means changes between snapshot 12 and snapshot 20.
+SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
+```
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+
+```java
+// Read incremental changes between start snapshot (exclusive) and end snapshot
+// For example, '12,20' means changes between snapshot 12 and snapshot 20.
+spark.read()
+  .format("paimon")
+  .option("incremental-between", "12,20")
+  .load("path/to/table")
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## Consumer ID
 
 {{< hint info >}}

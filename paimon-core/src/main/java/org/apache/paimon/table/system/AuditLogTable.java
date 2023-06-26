@@ -40,6 +40,7 @@ import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
@@ -194,6 +195,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public ConsumerManager consumerManager() {
             return snapshotReader.consumerManager();
+        }
+
+        @Override
+        public SplitGenerator splitGenerator() {
+            return snapshotReader.splitGenerator();
         }
 
         public SnapshotReader withSnapshot(long snapshotId) {

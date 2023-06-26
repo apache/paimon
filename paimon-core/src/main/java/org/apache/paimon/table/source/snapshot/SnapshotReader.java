@@ -25,6 +25,7 @@ import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -39,6 +40,8 @@ public interface SnapshotReader {
     SnapshotManager snapshotManager();
 
     ConsumerManager consumerManager();
+
+    SplitGenerator splitGenerator();
 
     SnapshotReader withSnapshot(long snapshotId);
 
