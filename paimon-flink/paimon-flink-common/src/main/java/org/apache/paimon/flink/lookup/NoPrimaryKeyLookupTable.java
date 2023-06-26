@@ -26,6 +26,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
+import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -35,7 +36,7 @@ import java.util.function.Predicate;
 /** A {@link LookupTable} for table without primary key. */
 public class NoPrimaryKeyLookupTable implements LookupTable {
 
-    private final RocksDBSetState state;
+    private final RocksDBListState state;
 
     private final Predicate<InternalRow> recordFilter;
 
@@ -52,10 +53,11 @@ public class NoPrimaryKeyLookupTable implements LookupTable {
         int[] joinKeyMapping = joinKeys.stream().mapToInt(fieldNames::indexOf).toArray();
         this.joinKeyRow = new KeyProjectedRow(joinKeyMapping);
         this.state =
-                stateFactory.setState(
+                stateFactory.listState(
                         "join-key-index",
                         InternalSerializers.create(TypeUtils.project(rowType, joinKeyMapping)),
                         InternalSerializers.create(rowType),
+                        new ValueEqualiserSupplier(rowType).get(),
                         lruCacheSize);
         this.recordFilter = recordFilter;
     }
@@ -73,8 +75,6 @@ public class NoPrimaryKeyLookupTable implements LookupTable {
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
                 if (recordFilter.test(row)) {
                     state.add(joinKeyRow, row);
-                } else {
-                    state.retract(joinKeyRow, row);
                 }
             } else {
                 state.retract(joinKeyRow, row);

@@ -39,8 +39,6 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('continuous.discovery-interval'='1 ms')",
                 "CREATE TABLE PARTITIONED_DIM (i INT, j INT, k1 INT, k2 INT, PRIMARY KEY (i, j) NOT ENFORCED) "
-                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')",
-                "CREATE TABLE DIM_NO_PK (i INT, j INT, k1 INT, k2 INT) "
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')");
     }
 
@@ -547,9 +545,12 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testLookupNonPkTable() throws Exception {
+    public void testLookupNonPkAppendTable() throws Exception {
+        sql(
+                "CREATE TABLE DIM_NO_PK_APPEND (i INT, j INT, k1 INT, k2 INT) "
+                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')");
         String query =
-                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_NO_PK for system_time as of T.proctime AS D ON T.i "
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_NO_PK_APPEND for system_time as of T.proctime AS D ON T.i "
                         + "= D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
@@ -562,14 +563,61 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         Row.of(2, null, null, null),
                         Row.of(3, null, null, null));
 
-        sql("INSERT INTO DIM_NO_PK VALUES (1, 11, 111, 1111), (1, 12, 112, 1112)");
+        sql(
+                "INSERT INTO DIM_NO_PK_APPEND VALUES (1, 11, 111, 1111), (1, 12, 112, 1112), (1, 11, 111, 1111)");
         Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2), (4)");
+        result = iterator.collect(5);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(1, 12, 112, 1112),
+                        Row.of(2, null, null, null),
+                        Row.of(4, null, null, null));
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupNonPkChangeTable() throws Exception {
+        sql(
+                "CREATE TABLE DIM_NO_PK_CHANGELOG (i INT, j INT, k1 INT, k2 INT) "
+                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms', 'write-mode' = 'change-log')");
+        String query =
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_NO_PK_CHANGELOG for system_time as of T.proctime AS D ON T.i "
+                        + "= D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (1), (2), (3)");
+
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, null, null, null),
+                        Row.of(2, null, null, null),
+                        Row.of(3, null, null, null));
+
+        sql(
+                "INSERT INTO DIM_NO_PK_CHANGELOG VALUES (1, 11, 111, 1111), (1, 12, 112, 1112), (1, 11, 111, 1111)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (1), (2), (4)");
+        result = iterator.collect(5);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(1, 12, 112, 1112),
+                        Row.of(2, null, null, null),
+                        Row.of(4, null, null, null));
+
+        sql("DELETE FROM DIM_NO_PK_CHANGELOG WHERE j = 12");
+        Thread.sleep(2000);
         sql("INSERT INTO T VALUES (1), (2), (4)");
         result = iterator.collect(4);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111, 1111),
-                        Row.of(1, 12, 112, 1112),
+                        Row.of(1, 11, 111, 1111),
                         Row.of(2, null, null, null),
                         Row.of(4, null, null, null));
         iterator.close();

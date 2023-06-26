@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.flink.RocksDBOptions;
@@ -37,6 +38,8 @@ import java.nio.charset.StandardCharsets;
 /** Factory to create state. */
 public class RocksDBStateFactory implements Closeable {
 
+    public static final String MERGE_OPERATOR_NAME = "stringappendtest";
+
     private RocksDB db;
 
     private final ColumnFamilyOptions columnFamilyOptions;
@@ -51,7 +54,8 @@ public class RocksDBStateFactory implements Closeable {
                                 .setCreateIfMissing(true),
                         conf);
         this.columnFamilyOptions =
-                RocksDBOptions.createColumnOptions(new ColumnFamilyOptions(), conf);
+                RocksDBOptions.createColumnOptions(new ColumnFamilyOptions(), conf)
+                        .setMergeOperatorName(MERGE_OPERATOR_NAME);
 
         try {
             this.db = RocksDB.open(new Options(dbOptions, columnFamilyOptions), path);
@@ -78,6 +82,23 @@ public class RocksDBStateFactory implements Closeable {
             throws IOException {
         return new RocksDBSetState(
                 db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
+    }
+
+    public RocksDBListState listState(
+            String name,
+            Serializer<InternalRow> keySerializer,
+            Serializer<InternalRow> valueSerializer,
+            RecordEqualiser equaliser,
+            long lruCacheSize)
+            throws IOException {
+
+        return new RocksDBListState(
+                db,
+                createColumnFamily(name),
+                keySerializer,
+                valueSerializer,
+                equaliser,
+                lruCacheSize);
     }
 
     private ColumnFamilyHandle createColumnFamily(String name) throws IOException {
