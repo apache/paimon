@@ -948,6 +948,12 @@ public class CoreOptions implements Serializable {
         }
 
         String[] split = str.split(",");
+        if (split.length != 2) {
+            throw new IllegalArgumentException(
+                    "The incremental-between must specific start snapshot (exclusive) and end snapshot,"
+                            + " for example, '5,10' means changes between snapshot 5 and snapshot 10. But is: "
+                            + str);
+        }
         return Pair.of(split[0], split[1]);
     }
 
