@@ -25,6 +25,7 @@ import org.apache.paimon.fs.Path;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.SortedMap;
@@ -112,11 +113,8 @@ public class TagManager {
 
         for (FileStatus status : statuses) {
             Path path = status.getPath();
-            if (path.getName().startsWith(TAG_PREFIX)) {
-                tags.put(
-                        Snapshot.fromPath(fileIO, path),
-                        path.getName().substring(TAG_PREFIX.length()));
-            }
+            tags.put(
+                    Snapshot.fromPath(fileIO, path), path.getName().substring(TAG_PREFIX.length()));
         }
         return tags;
     }
@@ -137,7 +135,9 @@ public class TagManager {
                                 tagDirectory));
             }
 
-            return statuses;
+            return Arrays.stream(statuses)
+                    .filter(status -> status.getPath().getName().startsWith(TAG_PREFIX))
+                    .toArray(FileStatus[]::new);
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format("Failed to list status in the '%s' directory.", tagDirectory), e);
