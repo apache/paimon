@@ -45,6 +45,8 @@ configure your HDFS:
 
 The first approach is recommended.
 
+If you do not want to include the value of the environment variable, you can configure `hadoop-conf-loader` to `option`.
+
 {{< /tab >}}
 
 {{< tab "Hive/Spark" >}}
