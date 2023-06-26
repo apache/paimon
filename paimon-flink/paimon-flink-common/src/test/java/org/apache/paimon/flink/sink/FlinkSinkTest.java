@@ -83,8 +83,7 @@ public class FlinkSinkTest {
         DataStreamSource<RowData> source =
                 streamExecutionEnvironment.fromCollection(
                         Collections.singletonList(new FlinkRowData(GenericRow.of(1, 1))));
-        FlinkSink<RowData> flinkSink =
-                new FileStoreSink(fileStoreTable, Lock.emptyFactory(), null, null);
+        FlinkSink<RowData> flinkSink = new FileStoreSink(fileStoreTable, null, null);
         SingleOutputStreamOperator<Committable> written = flinkSink.doWrite(source, "123", 1);
         RowDataStoreWriteOperator operator =
                 ((RowDataStoreWriteOperator)
@@ -128,6 +127,6 @@ public class FlinkSinkTest {
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                FileIOFinder.find(tablePath), tablePath, tableSchema, conf);
+                FileIOFinder.find(tablePath), tablePath, tableSchema, conf, Lock.emptyFactory());
     }
 }
