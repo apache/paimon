@@ -141,7 +141,8 @@ public class FlinkSourceBuilder {
                         table.options(),
                         limit,
                         table instanceof FileStoreTable
-                                && ((FileStoreTable) table).bucketMode() == BucketMode.UNAWARE));
+                                ? ((FileStoreTable) table).bucketMode()
+                                : BucketMode.FIXED));
     }
 
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {

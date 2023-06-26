@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 
@@ -39,21 +39,21 @@ public class ContinuousFileStoreSource extends FlinkSource {
     private static final long serialVersionUID = 4L;
 
     private final Map<String, String> options;
-    private final boolean unawareBucket;
+    private final BucketMode bucketMode;
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
-        this(readBuilder, options, limit, false);
+        this(readBuilder, options, limit, BucketMode.FIXED);
     }
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder,
             Map<String, String> options,
             @Nullable Long limit,
-            boolean unawareBucket) {
+            BucketMode bucketMode) {
         super(readBuilder, limit);
         this.options = options;
-        this.unawareBucket = unawareBucket;
+        this.bucketMode = bucketMode;
     }
 
     @Override
@@ -80,10 +80,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 splits,
                 nextSnapshotId,
                 coreOptions.continuousDiscoveryInterval().toMillis(),
-                coreOptions
-                        .toConfiguration()
-                        .get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                 scan,
-                unawareBucket);
+                bucketMode);
     }
 }

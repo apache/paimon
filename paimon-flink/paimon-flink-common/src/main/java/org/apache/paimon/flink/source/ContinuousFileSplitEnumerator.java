@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -66,34 +67,29 @@ public class ContinuousFileSplitEnumerator
 
     private final StreamTableScan scan;
 
-    /** Default batch splits size to avoid exceed `akka.framesize`. */
-    private final int splitBatchSize;
-
     @Nullable private Long nextSnapshotId;
 
     private boolean finished = false;
 
-    private final boolean unawareBucket;
+    private final BucketMode bucketMode;
 
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
-            int splitBatchSize,
             StreamTableScan scan,
-            boolean unawareBucket) {
+            BucketMode bucketMode) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.bucketSplits = new HashMap<>();
         addSplits(remainSplits);
         this.nextSnapshotId = nextSnapshotId;
         this.discoveryInterval = discoveryInterval;
-        this.splitBatchSize = splitBatchSize;
         this.readersAwaitingSplit = new HashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
-        this.unawareBucket = unawareBucket;
+        this.bucketMode = bucketMode;
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -219,13 +215,7 @@ public class ContinuousFileSplitEnumerator
                         readersAwaitingSplit.remove(subTask);
                         continue;
                     }
-                    List<FileStoreSourceSplit> taskAssignment =
-                            assignment.computeIfAbsent(subTask, i -> new ArrayList<>());
-                    if (taskAssignment.size() < splitBatchSize) {
-                        taskAssignment.add(splits.poll());
-                    } else {
-                        continue;
-                    }
+                    assignment.computeIfAbsent(subTask, i -> new ArrayList<>()).add(splits.poll());
                 }
                 readersId.addLast(polledReader);
             }
@@ -234,7 +224,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     private int assignTask(int bucket, int firstReader) {
-        if (unawareBucket) {
+        if (bucketMode == BucketMode.UNAWARE) {
             // if bucket unaware, we just simply assign the first reader in the loop
             return firstReader;
         } else {
