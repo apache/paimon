@@ -71,8 +71,16 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='1') */"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='1') */"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='0') */")).isEmpty();
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='0') */"))
+                .isEmpty();
 
         assertThat(
                         batchSql(
@@ -82,6 +90,14 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='2') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444));
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='2') */"))
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111),
                         Row.of(2, 22, 222),
@@ -99,6 +115,16 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         Row.of(4, 44, 444));
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='3') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444),
+                        Row.of(5, 55, 555),
+                        Row.of(6, 66, 666));
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='3') */"))
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111),
                         Row.of(2, 22, 222),
