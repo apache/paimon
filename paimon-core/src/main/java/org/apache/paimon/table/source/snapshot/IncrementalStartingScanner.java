@@ -36,18 +36,18 @@ import java.util.Map;
 /** {@link StartingScanner} for incremental changes. */
 public class IncrementalStartingScanner implements StartingScanner {
 
-    private final long s1;
-    private final long s2;
+    private final long start;
+    private final long end;
 
-    public IncrementalStartingScanner(long s1, long s2) {
-        this.s1 = s1;
-        this.s2 = s2;
+    public IncrementalStartingScanner(long start, long end) {
+        this.start = start;
+        this.end = end;
     }
 
     @Override
     public Result scan(SnapshotManager manager, SnapshotReader reader) {
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new HashMap<>();
-        for (long i = s1 + 1; i < s2 + 1; i++) {
+        for (long i = start + 1; i < end + 1; i++) {
             List<DataSplit> splits = readDeltaSplits(reader, manager.snapshot(i));
             for (DataSplit split : splits) {
                 grouped.computeIfAbsent(
@@ -61,11 +61,11 @@ public class IncrementalStartingScanner implements StartingScanner {
             BinaryRow partition = entry.getKey().getLeft();
             int bucket = entry.getKey().getRight();
             for (List<DataFileMeta> files : reader.splitGenerator().split(entry.getValue())) {
-                result.add(new DataSplit(s2, partition, bucket, files, false));
+                result.add(new DataSplit(end, partition, bucket, files, false));
             }
         }
 
-        return new ScannedResult(s2, null, result);
+        return new ScannedResult(end, null, result);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

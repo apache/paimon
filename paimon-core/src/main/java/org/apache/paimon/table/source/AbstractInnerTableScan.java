@@ -40,7 +40,6 @@ import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner
 import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 
 import java.util.List;
 import java.util.Optional;
@@ -136,14 +135,6 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
             case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
                 Pair<String, String> incremental = options.incrementalBetween();
-                Preconditions.checkNotNull(
-                        incremental,
-                        String.format(
-                                "%s can not be null when you use %s for %s",
-                                CoreOptions.INCREMENTAL_BETWEEN.key(),
-                                startupMode,
-                                CoreOptions.SCAN_MODE.key()));
-
                 return new IncrementalStartingScanner(
                         Long.parseLong(incremental.getLeft()),
                         Long.parseLong(incremental.getRight()));
