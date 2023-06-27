@@ -41,7 +41,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Test for {@link org.apache.paimon.flink.lookup.RocksDBListState} */
+/** Test for {@link org.apache.paimon.flink.lookup.RocksDBListState}. */
 public class RocksDBListStateTest {
 
     @TempDir Path tempDir;
