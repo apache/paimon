@@ -172,15 +172,6 @@ public class LookupTableTest {
         assertThat(result).hasSize(2);
         assertRow(result.get(0), 1, 11, 111);
         assertRow(result.get(1), 1, 11, 111);
-
-        table.refresh(singletonList(row(RowKind.DELETE, 1, 11, 111)).iterator());
-        result = table.get(row(11));
-        assertThat(result).hasSize(1);
-        assertRow(result.get(0), 1, 11, 111);
-
-        table.refresh(singletonList(row(RowKind.DELETE, 1, 11, 111)).iterator());
-        result = table.get(row(11));
-        assertThat(result).hasSize(0);
     }
 
     private static InternalRow row(Object... values) {

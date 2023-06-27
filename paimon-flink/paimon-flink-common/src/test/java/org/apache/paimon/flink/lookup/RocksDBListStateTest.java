@@ -30,7 +30,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -58,7 +57,6 @@ public class RocksDBListStateTest {
                         "test",
                         new InternalRowSerializer(keyType),
                         new InternalRowSerializer(valueType),
-                        new ValueEqualiserSupplier(valueType).get(),
                         1);
 
         GenericRow key = row("aaa");
@@ -70,15 +68,7 @@ public class RocksDBListStateTest {
         listState.add(key, row("1"));
         Assertions.assertEquals(Lists.newArrayList("1", "2,3", "1"), getString(listState.get(key)));
         Assertions.assertEquals(Lists.newArrayList("1", "2,3", "1"), getString(listState.get(key)));
-        // retract
-        listState.retract(key, row("1"));
-        Assertions.assertEquals(Lists.newArrayList("2,3", "1"), getString(listState.get(key)));
-        listState.retract(key, row("2,3"));
-        Assertions.assertEquals(Lists.newArrayList("1"), getString(listState.get(key)));
-        listState.retract(key, row("4"));
-        Assertions.assertEquals(Lists.newArrayList("1"), getString(listState.get(key)));
-        listState.retract(key, row("1", RowKind.UPDATE_AFTER));
-        Assertions.assertTrue(listState.get(key).isEmpty());
+        Assertions.assertTrue(listState.get(row("bbb")).isEmpty());
     }
 
     public GenericRow row(String value) {

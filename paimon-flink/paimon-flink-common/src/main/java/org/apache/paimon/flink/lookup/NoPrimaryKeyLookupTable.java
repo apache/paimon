@@ -26,7 +26,6 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
-import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -57,7 +56,6 @@ public class NoPrimaryKeyLookupTable implements LookupTable {
                         "join-key-index",
                         InternalSerializers.create(TypeUtils.project(rowType, joinKeyMapping)),
                         InternalSerializers.create(rowType),
-                        new ValueEqualiserSupplier(rowType).get(),
                         lruCacheSize);
         this.recordFilter = recordFilter;
     }
@@ -77,7 +75,10 @@ public class NoPrimaryKeyLookupTable implements LookupTable {
                     state.add(joinKeyRow, row);
                 }
             } else {
-                state.retract(joinKeyRow, row);
+                throw new RuntimeException(
+                        String.format(
+                                "Received %s message. Only INSERT/UPDATE_AFTER values are expected here.",
+                                row.getRowKind()));
             }
         }
     }

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.flink.RocksDBOptions;
@@ -88,17 +87,11 @@ public class RocksDBStateFactory implements Closeable {
             String name,
             Serializer<InternalRow> keySerializer,
             Serializer<InternalRow> valueSerializer,
-            RecordEqualiser equaliser,
             long lruCacheSize)
             throws IOException {
 
         return new RocksDBListState(
-                db,
-                createColumnFamily(name),
-                keySerializer,
-                valueSerializer,
-                equaliser,
-                lruCacheSize);
+                db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
     private ColumnFamilyHandle createColumnFamily(String name) throws IOException {

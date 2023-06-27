@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 
@@ -28,7 +27,6 @@ import org.rocksdb.RocksDBException;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
@@ -38,17 +36,14 @@ public class RocksDBListState extends RocksDBState<List<InternalRow>> {
     private final ListDelimitedSerializer listSerializer = new ListDelimitedSerializer();
 
     private static final List<InternalRow> EMPTY = Collections.emptyList();
-    private final RecordEqualiser equaliser;
 
     public RocksDBListState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
             Serializer<InternalRow> keySerializer,
             Serializer<InternalRow> valueSerializer,
-            RecordEqualiser equaliser,
             long lruCacheSize) {
         super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
-        this.equaliser = equaliser;
     }
 
     public void add(InternalRow key, InternalRow value) throws IOException {
@@ -79,46 +74,6 @@ public class RocksDBListState extends RocksDBState<List<InternalRow>> {
         } catch (ExecutionException e) {
             throw new IOException(e);
         }
-    }
-
-    public void retract(InternalRow key, InternalRow value) throws IOException {
-        byte[] keyBytes = serializeKey(key);
-        byte[] valueBytes;
-        try {
-            valueBytes = db.get(columnFamily, keyBytes);
-            List<InternalRow> rows = listSerializer.deserializeList(valueBytes, valueSerializer);
-            boolean changed = false;
-            if (rows != null) {
-                Iterator<InternalRow> iterator = rows.iterator();
-                while (iterator.hasNext()) {
-                    InternalRow row = iterator.next();
-                    if (equalsIgnoreRowKind(value, row)) {
-                        iterator.remove();
-                        changed = true;
-                        break;
-                    }
-                }
-                if (changed) {
-                    if (!rows.isEmpty()) {
-                        db.put(
-                                columnFamily,
-                                writeOptions,
-                                keyBytes,
-                                listSerializer.serializeList(rows, valueSerializer));
-                    } else {
-                        db.delete(columnFamily, writeOptions, keyBytes);
-                    }
-                    cache.invalidate(wrap(keyBytes));
-                }
-            }
-        } catch (RocksDBException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private boolean equalsIgnoreRowKind(InternalRow value, InternalRow stored) {
-        stored.setRowKind(value.getRowKind());
-        return equaliser.equals(value, stored);
     }
 
     private byte[] serializeValue(InternalRow value) throws IOException {
