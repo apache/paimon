@@ -19,10 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.LongSerializer;
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.io.DataInputDeserializer;
-import org.apache.paimon.io.DataOutputSerializer;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
@@ -40,9 +37,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class RocksDBSetState extends RocksDBState<List<byte[]>> {
 
     private static final byte[] EMPTY = new byte[0];
-    private final Serializer<Long> countSerializer;
-    private final DataInputDeserializer dataInputView = new DataInputDeserializer();
-    private final DataOutputSerializer dataOutputView = new DataOutputSerializer(8);
 
     public RocksDBSetState(
             RocksDB db,
@@ -51,7 +45,6 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
             Serializer<InternalRow> valueSerializer,
             long lruCacheSize) {
         super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
-        this.countSerializer = LongSerializer.INSTANCE;
     }
 
     public List<InternalRow> get(InternalRow key) throws IOException {
@@ -96,8 +89,7 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
     public void add(InternalRow key, InternalRow value) throws IOException {
         try {
             byte[] bytes = invalidKeyAndGetKVBytes(key, value);
-            long count = toLong(db.get(columnFamily, bytes));
-            db.put(columnFamily, writeOptions, bytes, toBytes(++count));
+            db.put(columnFamily, writeOptions, bytes, EMPTY);
         } catch (RocksDBException e) {
             throw new IOException(e);
         }
@@ -128,19 +120,5 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
         }
 
         return true;
-    }
-
-    private Long toLong(byte[] bytes) throws IOException {
-        if (bytes == null) {
-            return 0L;
-        }
-        dataInputView.setBuffer(bytes);
-        return countSerializer.deserialize(dataInputView);
-    }
-
-    private byte[] toBytes(Long count) throws IOException {
-        dataOutputView.clear();
-        countSerializer.serialize(count, dataOutputView);
-        return dataOutputView.getCopyOfBuffer();
     }
 }
