@@ -42,12 +42,17 @@ public interface LookupTable {
             Predicate<InternalRow> recordFilter,
             long lruCacheSize)
             throws IOException {
-        if (new HashSet<>(primaryKey).equals(new HashSet<>(joinKey))) {
-            return new PrimaryKeyLookupTable(
+        if (primaryKey.isEmpty()) {
+            return new NoPrimaryKeyLookupTable(
                     stateFactory, rowType, joinKey, recordFilter, lruCacheSize);
         } else {
-            return new SecondaryIndexLookupTable(
-                    stateFactory, rowType, primaryKey, joinKey, recordFilter, lruCacheSize);
+            if (new HashSet<>(primaryKey).equals(new HashSet<>(joinKey))) {
+                return new PrimaryKeyLookupTable(
+                        stateFactory, rowType, joinKey, recordFilter, lruCacheSize);
+            } else {
+                return new SecondaryIndexLookupTable(
+                        stateFactory, rowType, primaryKey, joinKey, recordFilter, lruCacheSize);
+            }
         }
     }
 }

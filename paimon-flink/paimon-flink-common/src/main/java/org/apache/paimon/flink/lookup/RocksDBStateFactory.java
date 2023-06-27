@@ -37,6 +37,8 @@ import java.nio.charset.StandardCharsets;
 /** Factory to create state. */
 public class RocksDBStateFactory implements Closeable {
 
+    public static final String MERGE_OPERATOR_NAME = "stringappendtest";
+
     private RocksDB db;
 
     private final ColumnFamilyOptions columnFamilyOptions;
@@ -51,7 +53,8 @@ public class RocksDBStateFactory implements Closeable {
                                 .setCreateIfMissing(true),
                         conf);
         this.columnFamilyOptions =
-                RocksDBOptions.createColumnOptions(new ColumnFamilyOptions(), conf);
+                RocksDBOptions.createColumnOptions(new ColumnFamilyOptions(), conf)
+                        .setMergeOperatorName(MERGE_OPERATOR_NAME);
 
         try {
             this.db = RocksDB.open(new Options(dbOptions, columnFamilyOptions), path);
@@ -77,6 +80,17 @@ public class RocksDBStateFactory implements Closeable {
             long lruCacheSize)
             throws IOException {
         return new RocksDBSetState(
+                db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
+    }
+
+    public RocksDBListState listState(
+            String name,
+            Serializer<InternalRow> keySerializer,
+            Serializer<InternalRow> valueSerializer,
+            long lruCacheSize)
+            throws IOException {
+
+        return new RocksDBListState(
                 db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
