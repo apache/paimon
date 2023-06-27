@@ -60,7 +60,8 @@ public class IncrementalStartingScanner implements StartingScanner {
         for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {
             BinaryRow partition = entry.getKey().getLeft();
             int bucket = entry.getKey().getRight();
-            for (List<DataFileMeta> files : reader.splitGenerator().split(entry.getValue())) {
+            for (List<DataFileMeta> files :
+                    reader.splitGenerator().splitForBatch(entry.getValue())) {
                 result.add(new DataSplit(end, partition, bucket, files, false));
             }
         }
