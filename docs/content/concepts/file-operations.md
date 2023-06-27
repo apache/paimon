@@ -43,6 +43,10 @@ following sections:
 2. [File Layouts]({{< ref "concepts/file-layouts" >}}) and 
 3. How to use Paimon in [Flink]({{< ref "engines/flink" >}}).
 
+```
+Please execute the code in batch mode if there is a {{< label Batch >}} label above it, and you can add an entry `execution.runtime-mode: batch` in flink-conf.yaml to enable batch mode.
+```
+
 ## Create Catalog
 
 Start Flink SQL client via `./sql-client.sh` and execute the following 
@@ -204,6 +208,7 @@ The new file layout as of snapshot-2 looks like
 Now let's delete records that meet the condition `dt>=20230503`. 
 In Flink SQL, execute the following statement:
 
+{{< label Batch >}}
 ```sql
 DELETE FROM T WHERE dt >= '20230503';
 ```
@@ -239,11 +244,10 @@ As you may have noticed, the number of small files will augment over successive
 snapshots, which may lead to decreased read performance. Therefore, a full-compaction
 is needed in order to reduce the number of small files.
 
-Let's trigger the full-compaction now. Make sure you have set execution mode to `batch` 
-(add an entry `execution.runtime-mode: batch`  in `flink-conf.yaml`) and run a 
-dedicated compaction job through `flink run`:
+Let's trigger the full-compaction now, and run a dedicated compaction job through `flink run`:
 
-```bash
+{{< label Batch >}}
+```bash  
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
