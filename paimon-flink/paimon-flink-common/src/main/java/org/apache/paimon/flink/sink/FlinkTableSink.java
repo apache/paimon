@@ -21,18 +21,21 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
-import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.DropPartitionAction;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.DeletePushDownFunctionVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableUtils;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -52,6 +55,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
@@ -170,28 +174,19 @@ public class FlinkTableSink extends FlinkTableSinkBase
                 && predicates.get(0) instanceof LeafPredicate
                 && table.partitionKeys()
                         .contains(((LeafPredicate) predicates.get(0)).fieldName())) {
-            String tablePath = table.options().get(TABLE_PATH_KEY);
-            if (tablePath == null) {
-                throw new RuntimeException(
-                        String.format("Cannot find path from options of table %s.", table.name()));
-            }
 
             LeafPredicate leaf = (LeafPredicate) predicates.get(0);
-            String[] args =
-                    new String[] {
-                        "--path",
-                        tablePath,
-                        "--partition",
-                        String.format("%s=%s", leaf.fieldName(), leaf.literals().get(0))
-                    };
 
-            Optional<Action> action = DropPartitionAction.create(args);
-            try {
-                action.get().run();
-            } catch (Exception e) {
-                throw new RuntimeException(
-                        String.format("DropPartitionAction %s failed.", Arrays.toString(args)), e);
-            }
+            FileStoreCommit commit =
+                    ((AbstractFileStoreTable) table)
+                            .store()
+                            .newCommit(UUID.randomUUID().toString());
+            commit.dropPartitions(
+                    Arrays.asList(
+                            ImmutableMap.of(
+                                    leaf.fieldName(), String.valueOf(leaf.literals().get(0)))),
+                    BatchWriteBuilder.COMMIT_IDENTIFIER);
+
             return Optional.empty();
         }
 
