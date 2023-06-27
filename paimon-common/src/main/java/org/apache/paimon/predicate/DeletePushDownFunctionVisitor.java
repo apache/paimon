@@ -105,7 +105,7 @@ public class DeletePushDownFunctionVisitor implements FunctionVisitor<Boolean> {
     @Override
     public Boolean visitAnd(List<Boolean> children) {
         if (children.size() != 2) {
-            throw new RuntimeException("Illegal children size: " + children.size());
+            return false;
         }
         if (children.get(0) && children.get(1)) {
             return true;
@@ -116,7 +116,7 @@ public class DeletePushDownFunctionVisitor implements FunctionVisitor<Boolean> {
     @Override
     public Boolean visitOr(List<Boolean> children) {
         if (children.size() != 2) {
-            throw new RuntimeException("Illegal children size: " + children.size());
+            return false;
         }
 
         if (children.get(0) || children.get(1)) {
