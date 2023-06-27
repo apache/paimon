@@ -24,9 +24,11 @@ import org.apache.paimon.flink.PredicateConverter;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.DeletePushDownFunctionVisitor;
+import org.apache.paimon.predicate.DeletePushDownPartitionKeyVisitor;
+import org.apache.paimon.predicate.DeletePushDownPrimaryKeyVisitor;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
@@ -34,8 +36,6 @@ import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableUtils;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -53,6 +53,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -65,6 +66,9 @@ public class FlinkTableSink extends FlinkTableSinkBase
         implements SupportsRowLevelUpdate, SupportsRowLevelDelete, SupportsDeletePushDown {
 
     @Nullable protected List<Predicate> predicates;
+    @Nullable protected Predicate predicate;
+    private boolean isDeleteFilterPartitionKey = false;
+    private boolean isDeleteFilterPrimaryKey = false;
 
     private static final String TABLE_PATH_KEY = "path";
 
@@ -156,37 +160,34 @@ public class FlinkTableSink extends FlinkTableSinkBase
         RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
         for (ResolvedExpression filter : list) {
             Optional<Predicate> predicate = PredicateConverter.convert(rowType, filter);
-            if (predicate.isPresent() && canPushDownDeleteFilter(predicate.get(), list.size())) {
+            if (predicate.isPresent()) {
                 predicates.add(predicate.get());
             } else {
                 // convert failed, leave it to flink
                 return false;
             }
         }
-
-        return true;
+        predicate = predicates.isEmpty() ? null : PredicateBuilder.and(predicates);
+        return canPushDownDeleteFilter(predicate);
     }
 
     @Override
     public Optional<Long> executeDeletion() {
         // delete partition
-        if (predicates.size() == 1
-                && predicates.get(0) instanceof LeafPredicate
-                && table.partitionKeys()
-                        .contains(((LeafPredicate) predicates.get(0)).fieldName())) {
-
-            LeafPredicate leaf = (LeafPredicate) predicates.get(0);
+        if (isDeleteFilterPartitionKey) {
+            Map<String, String> partitions =
+                    predicates.stream()
+                            .map(p -> (LeafPredicate) p)
+                            .collect(
+                                    Collectors.toMap(
+                                            LeafPredicate::fieldName,
+                                            x -> String.valueOf(x.literals().get(0))));
 
             FileStoreCommit commit =
                     ((AbstractFileStoreTable) table)
                             .store()
                             .newCommit(UUID.randomUUID().toString());
-            commit.dropPartitions(
-                    Arrays.asList(
-                            ImmutableMap.of(
-                                    leaf.fieldName(), String.valueOf(leaf.literals().get(0)))),
-                    BatchWriteBuilder.COMMIT_IDENTIFIER);
-
+            commit.dropPartitions(Arrays.asList(partitions), BatchWriteBuilder.COMMIT_IDENTIFIER);
             return Optional.empty();
         }
 
@@ -219,13 +220,13 @@ public class FlinkTableSink extends FlinkTableSinkBase
         }
     }
 
-    private boolean canPushDownDeleteFilter(Predicate predicate, int predicateSize) {
-        try {
-            return predicate.visit(
-                    new DeletePushDownFunctionVisitor(
-                            table.primaryKeys(), table.partitionKeys(), predicateSize));
-        } catch (RuntimeException e) {
-            return false;
-        }
+    private boolean canPushDownDeleteFilter(Predicate predicate) {
+        isDeleteFilterPrimaryKey =
+                predicate.visit(
+                        new DeletePushDownPrimaryKeyVisitor(
+                                table.primaryKeys(), table.partitionKeys()));
+        isDeleteFilterPartitionKey =
+                predicate.visit(new DeletePushDownPartitionKeyVisitor(table.partitionKeys()));
+        return isDeleteFilterPartitionKey || isDeleteFilterPrimaryKey;
     }
 }

@@ -21,19 +21,15 @@ package org.apache.paimon.predicate;
 import java.util.List;
 
 /** DeletePushDownFunctionVisitor visit the predicate and check if it can be push down. */
-public class DeletePushDownFunctionVisitor implements FunctionVisitor<Boolean> {
+public class DeletePushDownPrimaryKeyVisitor implements FunctionVisitor<Boolean> {
 
     private final List<String> primaryKeys;
 
     private final List<String> partitionKeys;
 
-    private final int predicatesSize;
-
-    public DeletePushDownFunctionVisitor(
-            List<String> primaryKeys, List<String> partitionKeys, int size) {
+    public DeletePushDownPrimaryKeyVisitor(List<String> primaryKeys, List<String> partitionKeys) {
         this.primaryKeys = primaryKeys;
         this.partitionKeys = partitionKeys;
-        this.predicatesSize = size;
     }
 
     @Override
@@ -73,18 +69,7 @@ public class DeletePushDownFunctionVisitor implements FunctionVisitor<Boolean> {
 
     @Override
     public Boolean visitEqual(FieldRef fieldRef, Object literal) {
-        if (partitionKeys.contains(fieldRef.name())) {
-            if (predicatesSize == 1) {
-                return true;
-            } else {
-                return false;
-            }
-        }
-
-        if (!primaryKeys.contains(fieldRef.name())) {
-            return false;
-        }
-        return true;
+        return primaryKeys.contains(fieldRef.name()) && !partitionKeys.contains(fieldRef.name());
     }
 
     @Override
@@ -104,25 +89,11 @@ public class DeletePushDownFunctionVisitor implements FunctionVisitor<Boolean> {
 
     @Override
     public Boolean visitAnd(List<Boolean> children) {
-        if (children.size() != 2) {
-            return false;
-        }
-        if (children.get(0) && children.get(1)) {
-            return true;
-        }
-        return false;
+        return children.stream().reduce((x, y) -> x && y).get();
     }
 
     @Override
     public Boolean visitOr(List<Boolean> children) {
-        if (children.size() != 2) {
-            return false;
-        }
-
-        if (children.get(0) || children.get(1)) {
-            return true;
-        }
-
-        return false;
+        return children.stream().reduce((x, y) -> x || y).get();
     }
 }
