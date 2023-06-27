@@ -20,6 +20,10 @@ package org.apache.paimon.predicate;
 
 import java.util.List;
 
+/**
+ * DeletePushDownPartitionKeyVisitor visit the predicate and check if it only contains partition
+ * keys and can be push down.
+ */
 public class DeletePushDownPartitionKeyVisitor implements FunctionVisitor<Boolean> {
 
     private final List<String> partitionKeys;

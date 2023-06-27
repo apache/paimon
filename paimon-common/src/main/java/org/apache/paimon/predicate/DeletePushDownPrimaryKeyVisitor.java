@@ -20,7 +20,10 @@ package org.apache.paimon.predicate;
 
 import java.util.List;
 
-/** DeletePushDownFunctionVisitor visit the predicate and check if it can be push down. */
+/**
+ * DeletePushDownPrimaryKeyVisitor visit the predicate and check if it only contains primary keys
+ * and can be push down.
+ */
 public class DeletePushDownPrimaryKeyVisitor implements FunctionVisitor<Boolean> {
 
     private final List<String> primaryKeys;
