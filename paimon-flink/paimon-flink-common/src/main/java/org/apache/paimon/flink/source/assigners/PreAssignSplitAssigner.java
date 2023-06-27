@@ -38,14 +38,14 @@ import java.util.Queue;
  * Pre-calculate which splits each task should process according to the weight, and then distribute
  * the splits fairly.
  */
-public class FairSplitAssigner implements SplitAssigner {
+public class PreAssignSplitAssigner implements SplitAssigner {
 
     /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final int splitBatchSize;
 
     private final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
 
-    public FairSplitAssigner(
+    public PreAssignSplitAssigner(
             int splitBatchSize,
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> splits) {
@@ -88,8 +88,10 @@ public class FairSplitAssigner implements SplitAssigner {
         return splits;
     }
 
-    // this method only reload restore for batch execute, because in streaming mode, we need to
-    // assign certain bucket to certain task
+    /**
+     * this method only reload restore for batch execute, because in streaming mode, we need to
+     * assign certain bucket to certain task.
+     */
     private static Map<Integer, LinkedList<FileStoreSourceSplit>> createSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
         List<List<FileStoreSourceSplit>> assignmentList =

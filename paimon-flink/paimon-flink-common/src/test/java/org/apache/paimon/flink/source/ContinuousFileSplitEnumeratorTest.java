@@ -420,6 +420,47 @@ public class ContinuousFileSplitEnumeratorTest {
         assertThat(toDataSplits(assignments.get(3).getAssignedSplits()).size()).isEqualTo(1);
     }
 
+    @Test
+    public void testEnumeratorDeregisteredByContext() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(2);
+        context.registerReader(0, "test-host");
+        context.registerReader(1, "test-host");
+
+        Queue<TableScan.Plan> results = new LinkedBlockingQueue<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.UNAWARE)
+                        .build();
+        enumerator.start();
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
+        }
+        results.add(new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        // assign to task 0
+        context.registeredReaders().remove(0);
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        assertThat(assignments.size()).isEqualTo(0);
+
+        // assign to task 1
+        enumerator.handleSplitRequest(1, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(1);
+        assertThat(toDataSplits(assignments.get(1).getAssignedSplits()).size()).isEqualTo(1);
+    }
+
     private static List<DataSplit> toDataSplits(List<FileStoreSourceSplit> splits) {
         return splits.stream()
                 .map(FileStoreSourceSplit::split)

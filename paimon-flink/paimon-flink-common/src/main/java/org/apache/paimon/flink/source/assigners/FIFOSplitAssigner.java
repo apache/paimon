@@ -31,13 +31,14 @@ import java.util.ListIterator;
 
 /**
  * Splits are assigned preemptively in the order requested by the task. Only one split is assigned
- * to the task at a time.
+ * to the task at a time. This is unaware of subtask, it does not care about the relationship
+ * between splits and subtask, so only one queue is created and splits are fetched in order.
  */
-public class PreemptiveSplitAssigner implements SplitAssigner {
+public class FIFOSplitAssigner implements SplitAssigner {
 
     private final LinkedList<FileStoreSourceSplit> pendingSplitAssignment;
 
-    public PreemptiveSplitAssigner(Collection<FileStoreSourceSplit> splits) {
+    public FIFOSplitAssigner(Collection<FileStoreSourceSplit> splits) {
         this.pendingSplitAssignment = new LinkedList<>(splits);
     }
 

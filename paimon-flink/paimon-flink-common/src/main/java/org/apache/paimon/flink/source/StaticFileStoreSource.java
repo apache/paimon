@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.flink.source.assigners.FairSplitAssigner;
-import org.apache.paimon.flink.source.assigners.PreemptiveSplitAssigner;
+import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
+import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.source.ReadBuilder;
 
@@ -81,9 +81,9 @@ public class StaticFileStoreSource extends FlinkSource {
             Collection<FileStoreSourceSplit> splits) {
         switch (splitAssignMode) {
             case FAIR:
-                return new FairSplitAssigner(splitBatchSize, context, splits);
+                return new PreAssignSplitAssigner(splitBatchSize, context, splits);
             case PREEMPTIVE:
-                return new PreemptiveSplitAssigner(splits);
+                return new FIFOSplitAssigner(splits);
             default:
                 throw new UnsupportedOperationException(
                         "Unsupported assign mode " + splitAssignMode);

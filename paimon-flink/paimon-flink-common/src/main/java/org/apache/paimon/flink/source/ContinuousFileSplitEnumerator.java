@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.flink.source.assigners.FairSplitAssigner;
-import org.apache.paimon.flink.source.assigners.PreemptiveSplitAssigner;
+import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
+import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
@@ -89,7 +89,10 @@ public class ContinuousFileSplitEnumerator
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
         this.bucketMode = bucketMode;
-        this.splitAssigner = createSplitAssigner();
+        this.splitAssigner =
+                bucketMode == BucketMode.UNAWARE
+                        ? new FIFOSplitAssigner(Collections.emptyList())
+                        : new PreAssignSplitAssigner(1, context, Collections.emptyList());
         addSplits(remainSplits);
     }
 
@@ -189,6 +192,12 @@ public class ContinuousFileSplitEnumerator
         Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
         readersAwaitingSplit.forEach(
                 task -> {
+                    // if the reader that requested another split has failed in the meantime, remove
+                    // it from the list of waiting readers
+                    if (!context.registeredReaders().containsKey(task)) {
+                        readersAwaitingSplit.remove(task);
+                        return;
+                    }
                     List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
                     if (splits.size() > 0) {
                         assignment.put(task, splits);
@@ -206,11 +215,5 @@ public class ContinuousFileSplitEnumerator
             // into the same task
             return bucket % context.currentParallelism();
         }
-    }
-
-    private SplitAssigner createSplitAssigner() {
-        return bucketMode == BucketMode.UNAWARE
-                ? new PreemptiveSplitAssigner(Collections.EMPTY_LIST)
-                : new FairSplitAssigner(1, context, Collections.EMPTY_LIST);
     }
 }
