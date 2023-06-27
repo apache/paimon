@@ -497,6 +497,12 @@ public class FlinkCatalogTest {
                 options.put("scan.snapshot-id", "1");
             } else if (mode == CoreOptions.StartupMode.FROM_TIMESTAMP) {
                 options.put("scan.timestamp-millis", System.currentTimeMillis() + "");
+            } else if (mode == CoreOptions.StartupMode.INCREMENTAL) {
+                options.put("incremental-between", "2,5");
+            }
+
+            if (isStreaming && mode == CoreOptions.StartupMode.INCREMENTAL) {
+                continue;
             }
             allOptions.add(options);
         }
