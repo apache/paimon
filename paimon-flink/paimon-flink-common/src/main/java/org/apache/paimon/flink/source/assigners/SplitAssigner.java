@@ -39,11 +39,14 @@ public interface SplitAssigner {
      */
     List<FileStoreSourceSplit> getNext(int subtask, @Nullable String hostname);
 
+    /** Add one split of a specified subtask to the assigner. */
+    void addSplit(int subtask, FileStoreSourceSplit splits);
+
     /**
      * Adds a set of splits to this assigner. This happens for example when some split processing
      * failed and the splits need to be re-added, or when new splits got discovered.
      */
-    void addSplits(int subtask, List<FileStoreSourceSplit> splits);
+    void addSplitsBack(int subtask, List<FileStoreSourceSplit> splits);
 
     /** Gets the remaining splits that this assigner has pending. */
     Collection<FileStoreSourceSplit> remainingSplits();

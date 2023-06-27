@@ -25,6 +25,7 @@ import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.utils.BinPacking;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.function.Function;
@@ -47,7 +48,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
     }
 
     @Override
-    public List<List<DataFileMeta>> split(List<DataFileMeta> files) {
+    public List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> files) {
         /*
          * The generator aims to parallel the scan execution by slicing the files of each bucket
          * into multiple splits. The generation has one constraint: files with intersected key
@@ -74,6 +75,12 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
                         .partition().stream().map(this::flatRun).collect(Collectors.toList());
 
         return packSplits(sections);
+    }
+
+    @Override
+    public List<List<DataFileMeta>> splitForStreaming(List<DataFileMeta> files) {
+        // We don't split streaming scan files
+        return Collections.singletonList(files);
     }
 
     private List<List<DataFileMeta>> packSplits(List<List<DataFileMeta>> sections) {

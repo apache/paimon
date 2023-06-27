@@ -72,7 +72,7 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> backSplits, int subtaskId) {
-        splitAssigner.addSplits(subtaskId, backSplits);
+        splitAssigner.addSplitsBack(subtaskId, backSplits);
     }
 
     @Override

@@ -38,19 +38,20 @@ import java.util.Queue;
  * Pre-calculate which splits each task should process according to the weight, and then distribute
  * the splits fairly.
  */
-public class FairSplitAssigner implements SplitAssigner {
+public class PreAssignSplitAssigner implements SplitAssigner {
 
     /** Default batch splits size to avoid exceed `akka.framesize`. */
     private final int splitBatchSize;
 
     private final Map<Integer, LinkedList<FileStoreSourceSplit>> pendingSplitAssignment;
 
-    public FairSplitAssigner(
+    public PreAssignSplitAssigner(
             int splitBatchSize,
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> splits) {
         this.splitBatchSize = splitBatchSize;
-        this.pendingSplitAssignment = createSplitAssignment(splits, context.currentParallelism());
+        this.pendingSplitAssignment =
+                createBatchFairSplitAssignment(splits, context.currentParallelism());
     }
 
     @Override
@@ -67,7 +68,12 @@ public class FairSplitAssigner implements SplitAssigner {
     }
 
     @Override
-    public void addSplits(int subtask, List<FileStoreSourceSplit> splits) {
+    public void addSplit(int subtask, FileStoreSourceSplit split) {
+        pendingSplitAssignment.computeIfAbsent(subtask, k -> new LinkedList<>()).add(split);
+    }
+
+    @Override
+    public void addSplitsBack(int subtask, List<FileStoreSourceSplit> splits) {
         LinkedList<FileStoreSourceSplit> remainingSplits =
                 pendingSplitAssignment.computeIfAbsent(subtask, k -> new LinkedList<>());
         ListIterator<FileStoreSourceSplit> iterator = splits.listIterator(splits.size());
@@ -83,7 +89,11 @@ public class FairSplitAssigner implements SplitAssigner {
         return splits;
     }
 
-    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createSplitAssignment(
+    /**
+     * this method only reload restore for batch execute, because in streaming mode, we need to
+     * assign certain bucket to certain task.
+     */
+    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
         List<List<FileStoreSourceSplit>> assignmentList =
                 BinPacking.packForFixedBinNumber(

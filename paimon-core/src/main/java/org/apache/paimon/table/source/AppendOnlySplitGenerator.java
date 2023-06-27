@@ -19,9 +19,11 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.BinPacking;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 
@@ -32,17 +34,31 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
 
     private final long targetSplitSize;
     private final long openFileCost;
+    private final BucketMode bucketMode;
 
-    public AppendOnlySplitGenerator(long targetSplitSize, long openFileCost) {
+    public AppendOnlySplitGenerator(
+            long targetSplitSize, long openFileCost, BucketMode bucketMode) {
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
+        this.bucketMode = bucketMode;
     }
 
     @Override
-    public List<List<DataFileMeta>> split(List<DataFileMeta> input) {
+    public List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> input) {
         List<DataFileMeta> files = new ArrayList<>(input);
         files.sort(fileComparator(false));
         Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
         return BinPacking.packForOrdered(files, weightFunc, targetSplitSize);
+    }
+
+    @Override
+    public List<List<DataFileMeta>> splitForStreaming(List<DataFileMeta> files) {
+        // When the bucket mode is unaware, we spit the files as batch, because unaware-bucket table
+        // only contains one bucket (bucket 0).
+        if (bucketMode == BucketMode.UNAWARE) {
+            return splitForBatch(files);
+        } else {
+            return Collections.singletonList(files);
+        }
     }
 }

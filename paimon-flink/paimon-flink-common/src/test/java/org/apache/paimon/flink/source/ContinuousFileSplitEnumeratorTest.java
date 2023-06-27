@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -116,7 +117,6 @@ public class ContinuousFileSplitEnumeratorTest {
                         .setSplitEnumeratorContext(context)
                         .setInitialSplits(initialSplits)
                         .setDiscoveryInterval(3)
-                        .setSplitBatchSize(10)
                         .build();
 
         // The first time split is allocated, split1 and split2 should be allocated
@@ -125,19 +125,19 @@ public class ContinuousFileSplitEnumeratorTest {
                 context.getSplitAssignments();
         // Only subtask-0 is allocated.
         assertThat(assignments).containsOnlyKeys(0);
-        assertThat(assignments.get(0).getAssignedSplits()).hasSize(10);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(1);
 
         // test second batch assign
         enumerator.handleSplitRequest(0, "test-host");
 
         assertThat(assignments).containsOnlyKeys(0);
-        assertThat(assignments.get(0).getAssignedSplits()).hasSize(18);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(2);
 
         // test third batch assign
         enumerator.handleSplitRequest(0, "test-host");
 
         assertThat(assignments).containsOnlyKeys(0);
-        assertThat(assignments.get(0).getAssignedSplits()).hasSize(18);
+        assertThat(assignments.get(0).getAssignedSplits()).hasSize(3);
     }
 
     @Test
@@ -163,6 +163,7 @@ public class ContinuousFileSplitEnumeratorTest {
 
         // each time a split is allocated from bucket-0 and bucket-1
         enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(0, "test-host");
         Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
                 context.getSplitAssignments();
         // Only subtask-0 is allocated.
@@ -175,6 +176,7 @@ public class ContinuousFileSplitEnumeratorTest {
         assertThat(context.getSplitAssignments()).isEmpty();
 
         // continuing to allocate the rest splits
+        enumerator.handleSplitRequest(0, "test-host");
         enumerator.handleSplitRequest(0, "test-host");
         assignments = context.getSplitAssignments();
         // Only subtask-0 is allocated.
@@ -215,6 +217,13 @@ public class ContinuousFileSplitEnumeratorTest {
                 context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(0);
         assertThat(toDataSplits(assignments.get(0).getAssignedSplits()))
+                .containsExactly(splits.get(0));
+
+        // assign to task 0
+        enumerator.handleSplitRequest(0, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(toDataSplits(assignments.get(0).getAssignedSplits()))
                 .containsExactly(splits.get(0), splits.get(2));
 
         // no more splits task 0
@@ -230,6 +239,13 @@ public class ContinuousFileSplitEnumeratorTest {
         assignments = context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(1);
         assertThat(toDataSplits(assignments.get(1).getAssignedSplits()))
+                .containsExactly(splits.get(1));
+
+        // assign to task 1
+        enumerator.handleSplitRequest(1, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(1);
+        assertThat(toDataSplits(assignments.get(1).getAssignedSplits()))
                 .containsExactly(splits.get(1), splits.get(3));
 
         // no more splits task 1
@@ -237,6 +253,212 @@ public class ContinuousFileSplitEnumeratorTest {
         assignments = context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(1);
         assertThat(assignments.get(1).hasReceivedNoMoreSplitsSignal()).isTrue();
+    }
+
+    @Test
+    public void testUnawareBucketEnumeratorWithBucket() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(3);
+        context.registerReader(0, "test-host");
+
+        Queue<TableScan.Plan> results = new LinkedBlockingQueue<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.UNAWARE)
+                        .build();
+        enumerator.start();
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        splits.add(createDataSplit(snapshot, 1, Collections.emptyList()));
+        results.add(new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        // assign to task 0
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(toDataSplits(assignments.get(0).getAssignedSplits()).size()).isEqualTo(1);
+
+        splits.clear();
+        splits.add(createDataSplit(snapshot, 2, Collections.emptyList()));
+        results.add(new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        // assign to task 0
+        enumerator.handleSplitRequest(0, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(toDataSplits(assignments.get(0).getAssignedSplits()).size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testUnawareBucketEnumeratorLot() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(4);
+        context.registerReader(0, "test-host");
+        context.registerReader(1, "test-host");
+        context.registerReader(2, "test-host");
+        context.registerReader(3, "test-host");
+
+        Queue<TableScan.Plan> results = new LinkedBlockingQueue<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.UNAWARE)
+                        .build();
+        enumerator.start();
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            splits.add(createDataSplit(snapshot, 0, Collections.emptyList()));
+        }
+        results.add(new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        // assign to task 0
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0);
+        assertThat(toDataSplits(assignments.get(0).getAssignedSplits()).size()).isEqualTo(1);
+
+        // assign to task 1
+        enumerator.handleSplitRequest(1, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        assertThat(toDataSplits(assignments.get(1).getAssignedSplits()).size()).isEqualTo(1);
+
+        // assign to task 2
+        enumerator.handleSplitRequest(2, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1, 2);
+        assertThat(toDataSplits(assignments.get(2).getAssignedSplits()).size()).isEqualTo(1);
+
+        for (int i = 0; i < 97; i++) {
+            enumerator.handleSplitRequest(3, "test-host");
+            assignments = context.getSplitAssignments();
+            assertThat(assignments).containsOnlyKeys(0, 1, 2, 3);
+            assertThat(toDataSplits(assignments.get(3).getAssignedSplits()).size())
+                    .isEqualTo(i + 1);
+        }
+
+        enumerator.handleSplitRequest(3, "test-host");
+        context.triggerAllActions();
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1, 2, 3);
+        assertThat(assignments.get(3).hasReceivedNoMoreSplitsSignal()).isTrue();
+    }
+
+    @Test
+    public void testUnawareBucketEnumeratorAssignLater() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(4);
+        context.registerReader(0, "test-host");
+        context.registerReader(1, "test-host");
+        context.registerReader(2, "test-host");
+        context.registerReader(3, "test-host");
+
+        Queue<TableScan.Plan> results = new LinkedBlockingQueue<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.UNAWARE)
+                        .build();
+        enumerator.start();
+
+        // assign to task 0, but no assigned. add to wait list
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        assertThat(assignments.size()).isEqualTo(0);
+
+        // assign to task 1, but no assigned. add to wait list
+        enumerator.handleSplitRequest(1, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments.size()).isEqualTo(0);
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            splits.add(createDataSplit(snapshot, 0, Collections.emptyList()));
+        }
+        results.add(new DataFilePlan(splits));
+        // trigger assign task 0 and task 1 will get their assignment
+        context.triggerAllActions();
+
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        assertThat(assignments.get(0).getAssignedSplits().size()).isEqualTo(1);
+        assertThat(assignments.get(1).getAssignedSplits().size()).isEqualTo(1);
+
+        // assign to task 2
+        enumerator.handleSplitRequest(2, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1, 2);
+        assertThat(toDataSplits(assignments.get(2).getAssignedSplits()).size()).isEqualTo(1);
+
+        // assign to task 3
+        enumerator.handleSplitRequest(3, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1, 2, 3);
+        assertThat(toDataSplits(assignments.get(3).getAssignedSplits()).size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testEnumeratorDeregisteredByContext() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(2);
+        context.registerReader(0, "test-host");
+        context.registerReader(1, "test-host");
+
+        Queue<TableScan.Plan> results = new LinkedBlockingQueue<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.UNAWARE)
+                        .build();
+        enumerator.start();
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
+        }
+        results.add(new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        // assign to task 0
+        context.registeredReaders().remove(0);
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        assertThat(assignments.size()).isEqualTo(0);
+
+        // assign to task 1
+        enumerator.handleSplitRequest(1, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(1);
+        assertThat(toDataSplits(assignments.get(1).getAssignedSplits()).size()).isEqualTo(1);
     }
 
     private static List<DataSplit> toDataSplits(List<FileStoreSourceSplit> splits) {
@@ -264,8 +486,8 @@ public class ContinuousFileSplitEnumeratorTest {
         private Collection<FileStoreSourceSplit> initialSplits = Collections.emptyList();
         private long discoveryInterval = Long.MAX_VALUE;
 
-        private int splitBatchSize = 10;
         private StreamTableScan scan;
+        private BucketMode bucketMode = BucketMode.FIXED;
 
         public Builder setSplitEnumeratorContext(
                 SplitEnumeratorContext<FileStoreSourceSplit> context) {
@@ -283,19 +505,19 @@ public class ContinuousFileSplitEnumeratorTest {
             return this;
         }
 
-        public Builder setSplitBatchSize(int splitBatchSize) {
-            this.splitBatchSize = splitBatchSize;
-            return this;
-        }
-
         public Builder setScan(StreamTableScan scan) {
             this.scan = scan;
             return this;
         }
 
+        public Builder withBucketMode(BucketMode bucketMode) {
+            this.bucketMode = bucketMode;
+            return this;
+        }
+
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, splitBatchSize, scan);
+                    context, initialSplits, null, discoveryInterval, scan, bucketMode);
         }
     }
 

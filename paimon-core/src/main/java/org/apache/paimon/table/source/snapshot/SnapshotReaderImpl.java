@@ -285,17 +285,20 @@ public class SnapshotReaderImpl implements SnapshotReader {
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
                 int bucket = bucketEntry.getKey();
                 if (isIncremental) {
-                    // Don't split when incremental
-                    splits.add(
-                            new DataSplit(
-                                    snapshotId,
-                                    partition,
-                                    bucket,
-                                    bucketEntry.getValue(),
-                                    true,
-                                    reverseRowKind));
+                    // streaming splits incremental data files
+                    splitGenerator.splitForStreaming(bucketEntry.getValue()).stream()
+                            .map(
+                                    files ->
+                                            new DataSplit(
+                                                    snapshotId,
+                                                    partition,
+                                                    bucket,
+                                                    files,
+                                                    true,
+                                                    reverseRowKind))
+                            .forEach(splits::add);
                 } else {
-                    splitGenerator.split(bucketEntry.getValue()).stream()
+                    splitGenerator.splitForBatch(bucketEntry.getValue()).stream()
                             .map(
                                     files ->
                                             new DataSplit(
