@@ -258,11 +258,13 @@ public class SchemaValidation {
             CoreOptions options,
             List<ConfigOption<?>> illegalOptions,
             List<ConfigOption<?>> legalOptions) {
-        checkArgument(
-                illegalOptions.stream().noneMatch(op -> options.toConfiguration().contains(op)),
-                "[%s] must be null when you set [%s]",
-                concatConfigKeys(illegalOptions),
-                concatConfigKeys(legalOptions));
+        for (ConfigOption<?> illegalOption : illegalOptions) {
+            checkArgument(
+                    !options.toConfiguration().contains(illegalOption),
+                    "[%s] must be null when you set [%s]",
+                    illegalOption.key(),
+                    concatConfigKeys(legalOptions));
+        }
     }
 
     private static String concatConfigKeys(List<ConfigOption<?>> configOptions) {
