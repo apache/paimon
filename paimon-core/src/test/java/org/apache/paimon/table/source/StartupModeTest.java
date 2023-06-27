@@ -194,6 +194,33 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
+    public void testTimeTravelFromExpiredSnapshot() throws Exception {
+        Map<String, String> properties = new HashMap<>();
+        // retaine 2 snapshots
+        properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
+        properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "2");
+        // specify consume from a expired snapshot
+        properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        initializeTable(StartupMode.FROM_SNAPSHOT, properties);
+        initializeTestData(); // initialize 3 commits, expired snapshot 1
+
+        // streaming Mode
+        StreamTableScan dataTableScan = table.newStreamScan();
+        TableScan.Plan firstPlan = dataTableScan.plan();
+        TableScan.Plan secondPlan = dataTableScan.plan();
+
+        assertThat(firstPlan.splits()).isEmpty();
+        // ceiled up to the earliest snapshot id = 2
+        assertThat(secondPlan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.DELTA).read().splits());
+
+        // batch mode
+        TableScan batchScan = table.newScan();
+        TableScan.Plan plan = batchScan.plan();
+        assertThat(plan.splits()).isEmpty();
+    }
+
+    @Test
     public void testStartFromSnapshotFull() throws Exception {
         Map<String, String> properties = new HashMap<>();
         properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
@@ -214,6 +241,33 @@ public class StartupModeTest extends ScannerTestBase {
         TableScan.Plan plan = batchScan.plan();
         assertThat(plan.splits())
                 .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.ALL).read().splits());
+    }
+
+    @Test
+    public void testTimeTravelFromExpiredSnapshotFull() throws Exception {
+        Map<String, String> properties = new HashMap<>();
+        // retaine 2 snapshots
+        properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "2");
+        properties.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "2");
+        // specify consume from a expired snapshot
+        properties.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        initializeTable(StartupMode.FROM_SNAPSHOT_FULL, properties);
+        initializeTestData(); // initialize 3 commits, expired snapshot 1
+
+        StreamTableScan dataTableScan = table.newStreamScan();
+        TableScan.Plan firstPlan = dataTableScan.plan();
+        TableScan.Plan secondPlan = dataTableScan.plan();
+
+        // ceiled up to the earliest snapshot id = 2
+        assertThat(firstPlan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(2).withKind(ScanKind.ALL).read().splits());
+        assertThat(secondPlan.splits())
+                .isEqualTo(snapshotReader.withSnapshot(3).withKind(ScanKind.DELTA).read().splits());
+
+        // batch mode
+        TableScan batchScan = table.newScan();
+        TableScan.Plan plan = batchScan.plan();
+        assertThat(plan.splits()).isEmpty();
     }
 
     private void initializeTable(CoreOptions.StartupMode startupMode) throws Exception {

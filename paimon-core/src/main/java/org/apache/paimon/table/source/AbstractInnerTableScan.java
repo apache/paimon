@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
+import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
@@ -126,7 +127,9 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                     return new StaticFromTagStartingScanner(options().scanTagName());
                 }
             case FROM_SNAPSHOT_FULL:
-                return new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
+                return isStreaming
+                        ? new ContinuousFromSnapshotFullStartingScanner(options.scanSnapshotId())
+                        : new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());
