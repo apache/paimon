@@ -41,8 +41,8 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -85,7 +85,7 @@ public class ContinuousFileSplitEnumerator
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
         this.discoveryInterval = discoveryInterval;
-        this.readersAwaitingSplit = new HashSet<>();
+        this.readersAwaitingSplit = new LinkedHashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
         this.bucketMode = bucketMode;
