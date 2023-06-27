@@ -19,10 +19,9 @@
 package org.apache.paimon.predicate;
 
 import java.util.List;
-import java.util.Optional;
 
 /** DeletePushDownFunctionVisitor visit the predicate and check if it can be push down. */
-public class DeletePushDownFunctionVisitor implements FunctionVisitor<Optional<Long>> {
+public class DeletePushDownFunctionVisitor implements FunctionVisitor<Boolean> {
 
     private final List<String> primaryKeys;
 
@@ -38,100 +37,92 @@ public class DeletePushDownFunctionVisitor implements FunctionVisitor<Optional<L
     }
 
     @Override
-    public Optional<Long> visitIsNotNull(FieldRef fieldRef) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitIsNotNull(FieldRef fieldRef) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitIsNull(FieldRef fieldRef) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitIsNull(FieldRef fieldRef) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitStartsWith(FieldRef fieldRef, Object literal) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitLessThan(FieldRef fieldRef, Object literal) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitNotEqual(FieldRef fieldRef, Object literal) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitEqual(FieldRef fieldRef, Object literal) {
+    public Boolean visitEqual(FieldRef fieldRef, Object literal) {
         if (partitionKeys.contains(fieldRef.name())) {
             if (predicatesSize == 1) {
-                return Optional.empty();
+                return true;
             } else {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Not support delete pushdown for field %s because partition predicate is mixed with others",
-                                fieldRef.name()));
+                return false;
             }
         }
 
         if (!primaryKeys.contains(fieldRef.name())) {
-            throw new IllegalArgumentException(
-                    String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+            return false;
         }
-        return Optional.empty();
+        return true;
     }
 
     @Override
-    public Optional<Long> visitGreaterThan(FieldRef fieldRef, Object literal) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitIn(FieldRef fieldRef, List<Object> literals) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        throw new IllegalArgumentException(
-                String.format("Not support delete pushdown for field %s.", fieldRef.name()));
+    public Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
+        return false;
     }
 
     @Override
-    public Optional<Long> visitAnd(List<Optional<Long>> children) {
-        throw new IllegalArgumentException(String.format("Not support delete pushdown."));
-    }
-
-    @Override
-    public Optional<Long> visitOr(List<Optional<Long>> children) {
+    public Boolean visitAnd(List<Boolean> children) {
         if (children.size() != 2) {
-            throw new RuntimeException("Illegal or children: " + children.size());
+            throw new RuntimeException("Illegal children size: " + children.size());
+        }
+        if (children.get(0) && children.get(1)) {
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public Boolean visitOr(List<Boolean> children) {
+        if (children.size() != 2) {
+            throw new RuntimeException("Illegal children size: " + children.size());
         }
 
-        if (children.get(0).isPresent() || children.get(1).isPresent()) {
-            throw new RuntimeException("Illegal children");
+        if (children.get(0) || children.get(1)) {
+            return true;
         }
 
-        return Optional.empty();
+        return false;
     }
 }

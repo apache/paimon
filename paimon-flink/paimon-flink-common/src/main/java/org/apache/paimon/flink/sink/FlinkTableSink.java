@@ -221,12 +221,9 @@ public class FlinkTableSink extends FlinkTableSinkBase
 
     private boolean canPushDownDeleteFilter(Predicate predicate, int predicateSize) {
         try {
-            predicate.visit(
+            return predicate.visit(
                     new DeletePushDownFunctionVisitor(
                             table.primaryKeys(), table.partitionKeys(), predicateSize));
-            return true;
-        } catch (IllegalArgumentException e) {
-            return false;
         } catch (RuntimeException e) {
             return false;
         }
