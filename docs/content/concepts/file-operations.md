@@ -43,10 +43,6 @@ following sections:
 2. [File Layouts]({{< ref "concepts/file-layouts" >}}) and 
 3. How to use Paimon in [Flink]({{< ref "engines/flink" >}}).
 
-```
-Please execute the code in batch mode if there is a {{< label Batch >}} label above it, and you can add an entry `execution.runtime-mode: batch` in flink-conf.yaml to enable batch mode.
-```
-
 ## Create Catalog
 
 Start Flink SQL client via `./sql-client.sh` and execute the following 
