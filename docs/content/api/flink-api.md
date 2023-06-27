@@ -149,47 +149,44 @@ Paimon supports ingest data into Paimon tables with schema evolution.
 - You can use Java API to write cdc records into Paimon Tables.
 - You can write records to Paimon's partial-update table with adding columns dynamically.
 
-Here is an example to use `CdcSinkBuilder` API:
+Here is an example to use `RichCdcSinkBuilder` API:
 
 ```java
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.sink.cdc.CdcRecord;
-import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
-import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.flink.sink.cdc.RichCdcRecord;
+import org.apache.paimon.flink.sink.cdc.RichCdcSinkBuilder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
-import java.util.List;
-import java.util.Optional;
+import static org.apache.paimon.types.RowKind.INSERT;
 
 public class WriteCdcToTable {
 
     public static void writeTo() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
-        // create a Cdc DataStream
-        DataStream<String> dataStream =
+        DataStream<RichCdcRecord> dataStream =
                 env.fromElements(
-                        "INSERT INTO T VALUES (1, 1)",
-                        "INSERT INTO T VALUES (2, 2)",
-                        "ALTER TABLE T ADD (c INT)",
-                        "INSERT INTO T VALUES (3, 3, 3)",
-                        "INSERT INTO T VALUES (4, 4, 4)");
+                        RichCdcRecord.builder(INSERT)
+                                .field("order_id", DataTypes.BIGINT(), "123")
+                                .field("price", DataTypes.DOUBLE(), "62.2")
+                                .build(),
+                        // dt field will be added with schema evolution
+                        RichCdcRecord.builder(INSERT)
+                                .field("order_id", DataTypes.BIGINT(), "245")
+                                .field("price", DataTypes.DOUBLE(), "82.1")
+                                .field("dt", DataTypes.TIMESTAMP(), "2023-06-12 20:21:12")
+                                .build());
 
-        CdcSinkBuilder<String> builder = new CdcSinkBuilder<>();
-        builder.withInput(dataStream);
-        builder.withTable(createTableIfNotExists());
-        builder.withParserFactory(new EventParserFactory());
-        builder.build();
+        new RichCdcSinkBuilder().withInput(dataStream).withTable(createTableIfNotExists()).build();
 
         env.execute();
     }
@@ -199,9 +196,9 @@ public class WriteCdcToTable {
         Catalog catalog = CatalogFactory.createCatalog(context);
 
         Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.primaryKey("a");
-        schemaBuilder.column("a", DataTypes.INT());
-        schemaBuilder.column("b", DataTypes.INT());
+        schemaBuilder.primaryKey("order_id");
+        schemaBuilder.column("order_id", DataTypes.BIGINT());
+        schemaBuilder.column("price", DataTypes.DOUBLE());
         Schema schema = schemaBuilder.build();
         Identifier identifier = Identifier.create("my_db", "T");
         try {
@@ -210,34 +207,6 @@ public class WriteCdcToTable {
             // do something
         }
         return catalog.getTable(identifier);
-    }
-
-    private static class EventParserFactory implements EventParser.Factory<String> {
-
-        @Override
-        public EventParser<String> create() {
-            return new EventParser<String>() {
-
-                private String event;
-
-                @Override
-                public void setRawEvent(String rawEvent) {
-                    event = rawEvent;
-                }
-
-                @Override
-                public List<DataField> parseSchemaChange() {
-                    // parse from ADD (c INT)
-                    return ...;
-                }
-
-                @Override
-                public List<CdcRecord> parseRecords() {
-                    // parse from VALUES (1, 1)
-                    return ...;
-                }
-            };
-        }
     }
 }
 ```
