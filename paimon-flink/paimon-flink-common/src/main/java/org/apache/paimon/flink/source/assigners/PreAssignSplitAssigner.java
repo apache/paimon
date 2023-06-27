@@ -50,7 +50,8 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> splits) {
         this.splitBatchSize = splitBatchSize;
-        this.pendingSplitAssignment = createSplitAssignment(splits, context.currentParallelism());
+        this.pendingSplitAssignment =
+                createBatchFairSplitAssignment(splits, context.currentParallelism());
     }
 
     @Override
@@ -92,7 +93,7 @@ public class PreAssignSplitAssigner implements SplitAssigner {
      * this method only reload restore for batch execute, because in streaming mode, we need to
      * assign certain bucket to certain task.
      */
-    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createSplitAssignment(
+    private static Map<Integer, LinkedList<FileStoreSourceSplit>> createBatchFairSplitAssignment(
             Collection<FileStoreSourceSplit> splits, int numReaders) {
         List<List<FileStoreSourceSplit>> assignmentList =
                 BinPacking.packForFixedBinNumber(
