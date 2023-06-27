@@ -50,6 +50,8 @@ SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
 
 {{< tab "Spark3" >}}
 
+Requires Spark 3.3+.
+
 you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
 
 ```sql
