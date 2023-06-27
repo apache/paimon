@@ -39,42 +39,16 @@ public class IncrementalTableTest extends TableTestBase {
 
     @Test
     public void testPrimaryKeyTable() throws Exception {
-        innerTest(
-                true,
-                "2,5",
-                GenericRow.of(1, 1, 4),
-                GenericRow.of(1, 2, 4),
-                GenericRow.of(2, 1, 4),
-                GenericRow.of(2, 2, 1));
-    }
-
-    @Test
-    public void testAppendTable() throws Exception {
-        innerTest(
-                false,
-                "2,4",
-                GenericRow.of(1, 1, 3),
-                GenericRow.of(1, 2, 3),
-                GenericRow.of(2, 1, 3),
-                GenericRow.of(2, 2, 1),
-                GenericRow.of(1, 1, 4),
-                GenericRow.of(1, 2, 4),
-                GenericRow.of(2, 1, 4));
-    }
-
-    private void innerTest(boolean primary, String incremental, InternalRow... expected)
-            throws Exception {
         Identifier identifier = identifier("T");
-        Schema.Builder schemaBuilder =
+        Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
                         .column("pk", DataTypes.INT())
                         .column("col1", DataTypes.INT())
-                        .partitionKeys("pt");
-        if (primary) {
-            schemaBuilder.primaryKey("pk", "pt");
-        }
-        catalog.createTable(identifier, schemaBuilder.build(), true);
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .build();
+        catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
 
         // snapshot 1: append
@@ -107,10 +81,70 @@ public class IncrementalTableTest extends TableTestBase {
         // snapshot 5: append
         write(table, GenericRow.of(1, 1, 4), GenericRow.of(1, 2, 4), GenericRow.of(2, 1, 4));
 
-        // snapshot 5
+        // snapshot 6: append
         write(table, GenericRow.of(1, 1, 5), GenericRow.of(1, 2, 5), GenericRow.of(2, 1, 5));
 
-        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, incremental));
-        assertThat(result).containsExactlyInAnyOrder(expected);
+        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, "2,5"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 4),
+                        GenericRow.of(1, 2, 4),
+                        GenericRow.of(2, 1, 4),
+                        GenericRow.of(2, 2, 1));
+    }
+
+    @Test
+    public void testAppendTable() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+
+        // snapshot 1: append
+        write(
+                table,
+                GenericRow.of(1, 1, 1),
+                GenericRow.of(1, 2, 1),
+                GenericRow.of(1, 3, 1),
+                GenericRow.of(2, 1, 1));
+
+        // snapshot 2: append
+        write(
+                table,
+                GenericRow.of(1, 1, 2),
+                GenericRow.of(1, 2, 2),
+                GenericRow.of(1, 4, 1),
+                GenericRow.of(2, 1, 2));
+
+        // snapshot 3: append
+        write(
+                table,
+                GenericRow.of(1, 1, 3),
+                GenericRow.of(1, 2, 3),
+                GenericRow.of(2, 1, 3),
+                GenericRow.of(2, 2, 1));
+
+        // snapshot 4: append
+        write(table, GenericRow.of(1, 1, 4), GenericRow.of(1, 2, 4), GenericRow.of(2, 1, 4));
+
+        // snapshot 5: append
+        write(table, GenericRow.of(1, 1, 5), GenericRow.of(1, 2, 5), GenericRow.of(2, 1, 5));
+
+        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, "2,4"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 3),
+                        GenericRow.of(1, 2, 3),
+                        GenericRow.of(2, 1, 3),
+                        GenericRow.of(2, 2, 1),
+                        GenericRow.of(1, 1, 4),
+                        GenericRow.of(1, 2, 4),
+                        GenericRow.of(2, 1, 4));
     }
 }
