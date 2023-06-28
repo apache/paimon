@@ -34,6 +34,7 @@ import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.DataSplit;
@@ -44,6 +45,8 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
 import java.util.function.BiConsumer;
 
 /** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
@@ -54,17 +57,22 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     private transient AppendOnlyFileStore lazyStore;
 
     AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, Lock.emptyFactory());
+        this(fileIO, path, tableSchema, Lock.emptyFactory(), Collections.emptyList());
     }
 
     AppendOnlyFileStoreTable(
-            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
-        super(fileIO, path, tableSchema, lockFactory);
+            FileIO fileIO,
+            Path path,
+            TableSchema tableSchema,
+            Lock.Factory lockFactory,
+            List<CommitCallback.Factory> commitCallbackFactories) {
+        super(fileIO, path, tableSchema, lockFactory, commitCallbackFactories);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new AppendOnlyFileStoreTable(fileIO, path, newTableSchema, lockFactory);
+        return new AppendOnlyFileStoreTable(
+                fileIO, path, newTableSchema, lockFactory, commitCallbackFactories);
     }
 
     @Override

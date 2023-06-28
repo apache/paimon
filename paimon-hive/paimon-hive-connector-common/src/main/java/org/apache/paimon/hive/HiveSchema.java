@@ -34,7 +34,7 @@ import org.apache.paimon.shade.guava30.com.google.common.base.Splitter;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hive.serde.serdeConstants;
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
@@ -46,11 +46,14 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -89,8 +92,9 @@ public class HiveSchema {
     /** Extract {@link HiveSchema} from Hive serde properties. */
     public static HiveSchema extract(@Nullable Configuration configuration, Properties properties) {
         String location = LocationKeyExtractor.getLocation(properties);
-        Optional<TableSchema> tableSchema = getExistsSchema(configuration, location);
-        String columnProperty = properties.getProperty(serdeConstants.LIST_COLUMNS);
+        Optional<TableSchema> tableSchema = getExistingSchema(configuration, location);
+        String columnProperty = properties.getProperty(hive_metastoreConstants.META_TABLE_COLUMNS);
+
         // Create hive external table with empty ddl
         if (StringUtils.isEmpty(columnProperty)) {
             if (!tableSchema.isPresent()) {
@@ -109,35 +113,54 @@ public class HiveSchema {
                         // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive
                         // versions, so we use a constant string instead
                         "column.name.delimite", String.valueOf(SerDeUtils.COMMA));
+
         List<String> columnNames = Arrays.asList(columnProperty.split(columnNameDelimiter));
-        String columnTypes = properties.getProperty(serdeConstants.LIST_COLUMN_TYPES);
+        String columnTypes =
+                properties.getProperty(hive_metastoreConstants.META_TABLE_COLUMN_TYPES);
         List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
         List<DataType> dataTypes =
                 typeInfos.stream()
                         .map(HiveTypeUtils::typeInfoToLogicalType)
                         .collect(Collectors.toList());
+
+        // Partitions are only used for checking. They are not contained in the fields of a Hive
+        // table.
+        String partitionProperty =
+                properties.getProperty(hive_metastoreConstants.META_TABLE_PARTITION_COLUMNS);
+        List<String> partitionKeys =
+                StringUtils.isEmpty(partitionProperty)
+                        ? Collections.emptyList()
+                        : Arrays.asList(partitionProperty.split("/"));
+        String partitionTypes =
+                properties.getProperty(hive_metastoreConstants.META_TABLE_PARTITION_COLUMN_TYPES);
+        List<TypeInfo> partitionTypeInfos =
+                TypeInfoUtils.getTypeInfosFromTypeString(partitionTypes);
+
         List<String> comments =
                 Lists.newArrayList(
                         Splitter.on('\0').split(properties.getProperty("columns.comments")));
-        // Both Paimon table schema and Hive table schema exist
+
         if (tableSchema.isPresent() && columnNames.size() > 0 && typeInfos.size() > 0) {
+            // Both Paimon table schema and Hive table schema exist
             LOG.debug(
                     "Extract schema with exists DDL and exists paimon table, table location:[{}].",
                     location);
-            checkSchemaMatched(columnNames, typeInfos, tableSchema.get());
+            checkSchemaMatched(
+                    columnNames, typeInfos, partitionKeys, partitionTypeInfos, tableSchema.get());
+
             // Use paimon table data types and column comments when the paimon table exists.
             // Using paimon data types first because hive's TypeInfoFactory.timestampTypeInfo
             // doesn't contain precision and thus may cause casting problems
             Map<String, DataField> paimonFields =
                     tableSchema.get().fields().stream()
                             .collect(Collectors.toMap(DataField::name, Function.identity()));
-
             for (int i = 0; i < columnNames.size(); i++) {
                 String columnName = columnNames.get(i);
                 dataTypes.set(i, paimonFields.get(columnName).type());
                 comments.set(i, paimonFields.get(columnName).description());
             }
         }
+
         RowType.Builder builder = RowType.builder();
         for (int i = 0; i < columnNames.size(); i++) {
             builder.field(columnNames.get(i), dataTypes.get(i), comments.get(i));
@@ -145,7 +168,7 @@ public class HiveSchema {
         return new HiveSchema(builder.build());
     }
 
-    private static Optional<TableSchema> getExistsSchema(
+    private static Optional<TableSchema> getExistingSchema(
             @Nullable Configuration configuration, @Nullable String location) {
         if (location == null) {
             return Optional.empty();
@@ -162,55 +185,123 @@ public class HiveSchema {
     }
 
     private static void checkSchemaMatched(
-            List<String> names, List<TypeInfo> typeInfos, TableSchema tableSchema) {
-        List<String> ddlNames = new ArrayList<>(names);
-        List<TypeInfo> ddlTypeInfos = new ArrayList<>(typeInfos);
-        List<String> schemaNames = tableSchema.fieldNames();
-        List<TypeInfo> schemaTypeInfos =
-                tableSchema.logicalRowType().getFieldTypes().stream()
-                        .map(HiveTypeUtils::logicalTypeToTypeInfo)
-                        .collect(Collectors.toList());
+            List<String> hiveFieldNames,
+            List<TypeInfo> hiveFieldTypeInfos,
+            List<String> hivePartitionKeys,
+            List<TypeInfo> hivePartitionTypeInfos,
+            TableSchema tableSchema) {
+        // compare field names and type infos
 
-        // make the lengths of lists equal
-        while (ddlNames.size() < schemaNames.size()) {
-            ddlNames.add(null);
-        }
-        while (schemaNames.size() < ddlNames.size()) {
-            schemaNames.add(null);
-        }
-        while (ddlTypeInfos.size() < schemaTypeInfos.size()) {
-            ddlTypeInfos.add(null);
-        }
-        while (schemaTypeInfos.size() < ddlTypeInfos.size()) {
-            schemaTypeInfos.add(null);
+        Set<String> schemaPartitionKeySet = new HashSet<>(tableSchema.partitionKeys());
+        List<String> schemaFieldNames = new ArrayList<>();
+        List<TypeInfo> schemaFieldTypeInfos = new ArrayList<>();
+        for (DataField field : tableSchema.fields()) {
+            // case #1: if the Hive table is not a partitioned table, pick all fields
+            // case #2: if the Hive table is a partitioned table, we only pick fields which are not
+            //          part of partition keys
+            if (hivePartitionKeys.isEmpty() || !schemaPartitionKeySet.contains(field.name())) {
+                schemaFieldNames.add(field.name());
+                schemaFieldTypeInfos.add(HiveTypeUtils.logicalTypeToTypeInfo(field.type()));
+            }
         }
 
-        // compare names and type infos
+        if (schemaFieldNames.size() != hiveFieldNames.size()) {
+            throw new IllegalArgumentException(
+                    "Hive DDL and paimon schema mismatched! "
+                            + "It is recommended not to write any column definition "
+                            + "as Paimon external table can read schema from the specified location.\n"
+                            + "There are "
+                            + hiveFieldNames.size()
+                            + " fields in Hive DDL: "
+                            + String.join(", ", hiveFieldNames)
+                            + "\n"
+                            + "There are "
+                            + schemaFieldNames.size()
+                            + " fields in Paimon schema: "
+                            + String.join(", ", schemaFieldNames)
+                            + "\n");
+        }
+
         List<String> mismatched = new ArrayList<>();
-        for (int i = 0; i < ddlNames.size(); i++) {
-            if (!Objects.equals(ddlNames.get(i), schemaNames.get(i))
-                    || !Objects.equals(ddlTypeInfos.get(i), schemaTypeInfos.get(i))) {
+        for (int i = 0; i < hiveFieldNames.size(); i++) {
+            if (!Objects.equals(hiveFieldNames.get(i), schemaFieldNames.get(i))
+                    || !Objects.equals(hiveFieldTypeInfos.get(i), schemaFieldTypeInfos.get(i))) {
                 String ddlField =
-                        ddlNames.get(i) == null
-                                ? "null"
-                                : ddlNames.get(i) + " " + ddlTypeInfos.get(i).getTypeName();
+                        hiveFieldNames.get(i) + " " + hiveFieldTypeInfos.get(i).getTypeName();
                 String schemaField =
-                        schemaNames.get(i) == null
-                                ? "null"
-                                : schemaNames.get(i) + " " + schemaTypeInfos.get(i).getTypeName();
+                        schemaFieldNames.get(i) + " " + schemaFieldTypeInfos.get(i).getTypeName();
                 mismatched.add(
                         String.format(
                                 "Field #%d\n" + "Hive DDL          : %s\n" + "Paimon Schema: %s\n",
                                 i, ddlField, schemaField));
             }
         }
-
         if (mismatched.size() > 0) {
             throw new IllegalArgumentException(
                     "Hive DDL and paimon schema mismatched! "
                             + "It is recommended not to write any column definition "
                             + "as Paimon external table can read schema from the specified location.\n"
                             + "Mismatched fields are:\n"
+                            + String.join("--------------------\n", mismatched));
+        }
+
+        // compare partition keys and type infos
+
+        if (hivePartitionKeys.isEmpty()) {
+            // only partitioned Hive table needs to consider this part
+            return;
+        }
+
+        List<String> schemaPartitionKeys = tableSchema.partitionKeys();
+        List<TypeInfo> schemaPartitionTypeInfos =
+                tableSchema.logicalPartitionType().getFields().stream()
+                        .map(f -> HiveTypeUtils.logicalTypeToTypeInfo(f.type()))
+                        .collect(Collectors.toList());
+
+        if (schemaPartitionKeys.size() != hivePartitionKeys.size()) {
+            throw new IllegalArgumentException(
+                    "Hive DDL and paimon schema mismatched! "
+                            + "It is recommended not to write any column definition "
+                            + "as Paimon external table can read schema from the specified location.\n"
+                            + "There are "
+                            + hivePartitionKeys.size()
+                            + " partition keys in Hive DDL: "
+                            + String.join(", ", hivePartitionKeys)
+                            + "\n"
+                            + "There are "
+                            + schemaPartitionKeys.size()
+                            + " partition keys in Paimon schema: "
+                            + String.join(", ", schemaPartitionKeys)
+                            + "\n");
+        }
+
+        mismatched = new ArrayList<>();
+        for (int i = 0; i < hivePartitionKeys.size(); i++) {
+            if (!Objects.equals(hivePartitionKeys.get(i), schemaPartitionKeys.get(i))
+                    || !Objects.equals(
+                            hivePartitionTypeInfos.get(i), schemaPartitionTypeInfos.get(i))) {
+                String ddlField =
+                        hivePartitionKeys.get(i)
+                                + " "
+                                + hivePartitionTypeInfos.get(i).getTypeName();
+                String schemaField =
+                        schemaPartitionKeys.get(i)
+                                + " "
+                                + schemaPartitionTypeInfos.get(i).getTypeName();
+                mismatched.add(
+                        String.format(
+                                "Partition Key #%d\n"
+                                        + "Hive DDL          : %s\n"
+                                        + "Paimon Schema: %s\n",
+                                i, ddlField, schemaField));
+            }
+        }
+        if (mismatched.size() > 0) {
+            throw new IllegalArgumentException(
+                    "Hive DDL and paimon schema mismatched! "
+                            + "It is recommended not to write any column definition "
+                            + "as Paimon external table can read schema from the specified location.\n"
+                            + "Mismatched partition keys are:\n"
                             + String.join("--------------------\n", mismatched));
         }
     }

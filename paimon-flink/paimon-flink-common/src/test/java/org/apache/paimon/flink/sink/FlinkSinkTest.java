@@ -53,7 +53,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.Collections;
 
 /** Test class for {@link FlinkSink}. */
@@ -123,10 +122,15 @@ public class FlinkSinkTest {
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.emptyList(),
-                                Arrays.asList("pk"),
+                                Collections.singletonList("pk"),
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                FileIOFinder.find(tablePath), tablePath, tableSchema, conf, Lock.emptyFactory());
+                FileIOFinder.find(tablePath),
+                tablePath,
+                tableSchema,
+                conf,
+                Lock.emptyFactory(),
+                Collections.emptyList());
     }
 }

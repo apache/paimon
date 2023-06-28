@@ -38,6 +38,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -62,17 +63,22 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     private transient KeyValueFileStore lazyStore;
 
     ChangelogValueCountFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, Lock.emptyFactory());
+        this(fileIO, path, tableSchema, Lock.emptyFactory(), Collections.emptyList());
     }
 
     ChangelogValueCountFileStoreTable(
-            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
-        super(fileIO, path, tableSchema, lockFactory);
+            FileIO fileIO,
+            Path path,
+            TableSchema tableSchema,
+            Lock.Factory lockFactory,
+            List<CommitCallback.Factory> commitCallbackFactories) {
+        super(fileIO, path, tableSchema, lockFactory, commitCallbackFactories);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new ChangelogValueCountFileStoreTable(fileIO, path, newTableSchema, lockFactory);
+        return new ChangelogValueCountFileStoreTable(
+                fileIO, path, newTableSchema, lockFactory, commitCallbackFactories);
     }
 
     @Override

@@ -22,8 +22,10 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.CommitCallback;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -46,6 +48,16 @@ public interface Catalog extends AutoCloseable {
      * object store.
      */
     Optional<CatalogLock.Factory> lockFactory();
+
+    /**
+     * Get a list of {@link CommitCallback.Factory} related to {@code identifier} from catalog.
+     * {@link CommitCallback} is called after a series of changes to the table is successfully
+     * committed. For example, {@link CommitCallback} can be used to register newly created
+     * partitions into Hive metastore. See {@link CommitCallback} for more details.
+     */
+    default List<CommitCallback.Factory> commitCallbackFactories(Identifier identifier) {
+        return Collections.emptyList();
+    }
 
     /**
      * Get the names of all databases in this catalog.

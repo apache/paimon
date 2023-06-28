@@ -25,12 +25,16 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.TableType;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
@@ -64,11 +68,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
@@ -81,7 +88,11 @@ import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
 public class HiveCatalog extends AbstractCatalog {
+
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
+
+    private static final ConfigOption<Boolean> ADD_PARTITION_TO_METASTORE =
+            ConfigOptions.key("add-partition-to-metastore").booleanType().defaultValue(false);
 
     // we don't include paimon-hive-connector as dependencies because it depends on
     // hive-exec
@@ -141,6 +152,28 @@ public class HiveCatalog extends AbstractCatalog {
     private boolean lockEnabled() {
         return Boolean.parseBoolean(
                 hiveConf.get(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
+    }
+
+    @Override
+    public List<CommitCallback.Factory> commitCallbackFactories(Identifier identifier) {
+        return addPartitionToMetastore(identifier)
+                ? Collections.singletonList(
+                        new AddPartitionCommitCallback.Factory(
+                                identifier, hiveConf, clientClassName))
+                : Collections.emptyList();
+    }
+
+    private boolean addPartitionToMetastore(Identifier identifier) {
+        try {
+            return addPartitionToMetastore(getDataTableSchema(identifier).options());
+        } catch (TableNotExistException e) {
+            throw new RuntimeException(
+                    "Table " + identifier + " not found. This is unexpected.", e);
+        }
+    }
+
+    private boolean addPartitionToMetastore(Map<String, String> options) {
+        return new Options(options).get(ADD_PARTITION_TO_METASTORE);
     }
 
     @Override
@@ -467,20 +500,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private void updateHmsTable(Table table, Identifier identifier, TableSchema schema) {
-        StorageDescriptor sd = convertToStorageDescriptor(schema);
-        table.setSd(sd);
-
-        // update location
-        locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());
-    }
-
-    private StorageDescriptor convertToStorageDescriptor(TableSchema schema) {
         StorageDescriptor sd = new StorageDescriptor();
-
-        sd.setCols(
-                schema.fields().stream()
-                        .map(this::convertToFieldSchema)
-                        .collect(Collectors.toList()));
 
         sd.setInputFormat(INPUT_FORMAT_CLASS_NAME);
         sd.setOutputFormat(OUTPUT_FORMAT_CLASS_NAME);
@@ -490,7 +510,34 @@ public class HiveCatalog extends AbstractCatalog {
         serDeInfo.setSerializationLib(SERDE_CLASS_NAME);
         sd.setSerdeInfo(serDeInfo);
 
-        return sd;
+        if (addPartitionToMetastore(schema.options())) {
+            Map<String, DataField> fieldMap =
+                    schema.fields().stream()
+                            .collect(Collectors.toMap(DataField::name, Function.identity()));
+            List<FieldSchema> partitionFields = new ArrayList<>();
+            for (String partitionKey : schema.partitionKeys()) {
+                partitionFields.add(convertToFieldSchema(fieldMap.get(partitionKey)));
+            }
+            table.setPartitionKeys(partitionFields);
+
+            Set<String> partitionKeys = new HashSet<>(schema.partitionKeys());
+            List<FieldSchema> normalFields = new ArrayList<>();
+            for (DataField field : schema.fields()) {
+                if (!partitionKeys.contains(field.name())) {
+                    normalFields.add(convertToFieldSchema(field));
+                }
+            }
+            sd.setCols(normalFields);
+        } else {
+            sd.setCols(
+                    schema.fields().stream()
+                            .map(this::convertToFieldSchema)
+                            .collect(Collectors.toList()));
+        }
+        table.setSd(sd);
+
+        // update location
+        locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());
     }
 
     @VisibleForTesting

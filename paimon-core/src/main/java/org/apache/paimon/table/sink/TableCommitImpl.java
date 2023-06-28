@@ -24,6 +24,7 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
 
@@ -46,6 +47,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class TableCommitImpl implements InnerTableCommit {
 
     private final FileStoreCommit commit;
+    private final List<CommitCallback> commitCallbacks;
     @Nullable private final FileStoreExpire expire;
     @Nullable private final PartitionExpire partitionExpire;
     private final Lock lock;
@@ -59,6 +61,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
     public TableCommitImpl(
             FileStoreCommit commit,
+            List<CommitCallback> commitCallbacks,
             @Nullable FileStoreExpire expire,
             @Nullable PartitionExpire partitionExpire,
             Lock lock,
@@ -73,6 +76,7 @@ public class TableCommitImpl implements InnerTableCommit {
         }
 
         this.commit = commit;
+        this.commitCallbacks = commitCallbacks;
         this.expire = expire;
         this.partitionExpire = partitionExpire;
         this.lock = lock;
@@ -156,6 +160,8 @@ public class TableCommitImpl implements InnerTableCommit {
             commit.overwrite(overwritePartition, committable, Collections.emptyMap());
             expire(committable.identifier());
         }
+
+        commitCallbacks.forEach(c -> c.call(committables));
     }
 
     public int filterAndCommitMultiple(List<ManifestCommittable> committables) {
@@ -164,6 +170,15 @@ public class TableCommitImpl implements InnerTableCommit {
                         committables.stream()
                                 .map(ManifestCommittable::identifier)
                                 .collect(Collectors.toSet()));
+
+        // commitCallback may fail after the snapshot file is successfully created,
+        // so we have to try all of them again
+        List<ManifestCommittable> succeededCommittables =
+                committables.stream()
+                        .filter(c -> !retryIdentifiers.contains(c.identifier()))
+                        .collect(Collectors.toList());
+        commitCallbacks.forEach(c -> c.call(succeededCommittables));
+
         List<ManifestCommittable> retryCommittables =
                 committables.stream()
                         .filter(c -> retryIdentifiers.contains(c.identifier()))
@@ -193,9 +208,10 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public void close() throws Exception {
-        if (lock != null) {
-            lock.close();
+        for (CommitCallback commitCallback : commitCallbacks) {
+            IOUtils.closeQuietly(commitCallback);
         }
+        IOUtils.closeQuietly(lock);
     }
 
     @Override

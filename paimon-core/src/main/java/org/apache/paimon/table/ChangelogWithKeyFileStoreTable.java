@@ -40,6 +40,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -50,6 +51,7 @@ import org.apache.paimon.table.source.ValueContentRowDataRecordIterator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
@@ -67,17 +69,22 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     private transient KeyValueFileStore lazyStore;
 
     ChangelogWithKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, Lock.emptyFactory());
+        this(fileIO, path, tableSchema, Lock.emptyFactory(), Collections.emptyList());
     }
 
     ChangelogWithKeyFileStoreTable(
-            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
-        super(fileIO, path, tableSchema, lockFactory);
+            FileIO fileIO,
+            Path path,
+            TableSchema tableSchema,
+            Lock.Factory lockFactory,
+            List<CommitCallback.Factory> commitCallbackFactories) {
+        super(fileIO, path, tableSchema, lockFactory, commitCallbackFactories);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new ChangelogWithKeyFileStoreTable(fileIO, path, newTableSchema, lockFactory);
+        return new ChangelogWithKeyFileStoreTable(
+                fileIO, path, newTableSchema, lockFactory, commitCallbackFactories);
     }
 
     @Override

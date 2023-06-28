@@ -385,13 +385,13 @@ public abstract class HiveCatalogITCaseBase {
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_pk_ddl_option ("
-                                                        + "                            user_id BIGINT,"
-                                                        + "                            item_id BIGINT,"
-                                                        + "                            behavior STRING,"
-                                                        + "                            dt STRING,"
-                                                        + "                            hh STRING,"
-                                                        + "                            PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
-                                                        + "                        ) WITH ('primary-key' = 'dt')")
+                                                        + "    user_id BIGINT,"
+                                                        + "    item_id BIGINT,"
+                                                        + "    behavior STRING,"
+                                                        + "    dt STRING,"
+                                                        + "    hh STRING,"
+                                                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
+                                                        + ") WITH ('primary-key' = 'dt')")
                                         .await())
                 .hasRootCauseMessage(
                         "Cannot define primary key on DDL and table options at the same time.");
@@ -419,12 +419,12 @@ public abstract class HiveCatalogITCaseBase {
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_partition_ddl_option ("
-                                                        + "                            user_id BIGINT,"
-                                                        + "                            item_id BIGINT,"
-                                                        + "                            behavior STRING,"
-                                                        + "                            dt STRING,"
-                                                        + "                            hh STRING"
-                                                        + "                        ) PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')")
+                                                        + "    user_id BIGINT,"
+                                                        + "    item_id BIGINT,"
+                                                        + "    behavior STRING,"
+                                                        + "    dt STRING,"
+                                                        + "    hh STRING"
+                                                        + ") PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')")
                                         .await())
                 .hasRootCauseMessage(
                         "Cannot define partition on DDL and table options at the same time.");
@@ -676,6 +676,71 @@ public abstract class HiveCatalogITCaseBase {
         Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
         Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
         Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
+    }
+
+    @Test
+    public void testAddPartitionsToMetastore() throws Exception {
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE TABLE t (",
+                        "    pta INT,",
+                        "    k INT,",
+                        "    ptb VARCHAR(10),",
+                        "    v BIGINT,",
+                        "    PRIMARY KEY (k, pta, ptb) NOT ENFORCED",
+                        ") PARTITIONED BY (ptb, pta) WITH (",
+                        "    'bucket' = '2',",
+                        "    'add-partition-to-metastore' = 'true'",
+                        ")"));
+        List<String> values = new ArrayList<>();
+        for (int pta = 1; pta <= 3; pta++) {
+            int k = pta * 10;
+            int v = pta * 1000;
+            for (int ptb = 0; ptb < 2; ptb++) {
+                for (int i = 0; i < 5; i++) {
+                    values.add(String.format("(%d, %d, '%d%c', %d)", pta, k, pta, 'a' + ptb, v));
+                    k++;
+                    v++;
+                }
+            }
+        }
+        tEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+
+        assertThat(hiveShell.executeQuery("show partitions t"))
+                .containsExactlyInAnyOrder(
+                        "ptb=1a/pta=1",
+                        "ptb=1b/pta=1",
+                        "ptb=2a/pta=2",
+                        "ptb=2b/pta=2",
+                        "ptb=3a/pta=3",
+                        "ptb=3b/pta=3");
+
+        String sql1 =
+                "select v, ptb, k from t where "
+                        + "pta >= 2 and ptb <= '3a' and (k % 10) >= 1 and (k % 10) <= 2";
+        assertThat(hiveShell.executeQuery(sql1))
+                .containsExactlyInAnyOrder(
+                        "2001\t2a\t21", "2002\t2a\t22", "3001\t3a\t31", "3002\t3a\t32");
+        assertThat(collect(sql1).stream().map(Objects::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "+I[2001, 2a, 21]",
+                        "+I[2002, 2a, 22]",
+                        "+I[3001, 3a, 31]",
+                        "+I[3002, 3a, 32]");
+
+        String sql2 =
+                "select v, ptb, k from t where "
+                        + "pta >= 2 and ptb <= '3a' and (v % 10) >= 3 and (v % 10) <= 4";
+        assertThat(hiveShell.executeQuery(sql2))
+                .containsExactlyInAnyOrder(
+                        "2003\t2a\t23", "2004\t2a\t24", "3003\t3a\t33", "3004\t3a\t34");
+        assertThat(collect(sql2).stream().map(Objects::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "+I[2003, 2a, 23]",
+                        "+I[2004, 2a, 24]",
+                        "+I[3003, 3a, 33]",
+                        "+I[3004, 3a, 34]");
     }
 
     protected List<Row> collect(String sql) throws Exception {

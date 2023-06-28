@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
@@ -51,10 +52,12 @@ import org.apache.paimon.utils.TagManager;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiConsumer;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -68,9 +71,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final Lock.Factory lockFactory;
+    protected final List<CommitCallback.Factory> commitCallbackFactories;
 
     public AbstractFileStoreTable(
-            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
+            FileIO fileIO,
+            Path path,
+            TableSchema tableSchema,
+            Lock.Factory lockFactory,
+            List<CommitCallback.Factory> commitCallbackFactories) {
         this.fileIO = fileIO;
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
@@ -81,6 +89,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.lockFactory = lockFactory;
+        this.commitCallbackFactories = commitCallbackFactories;
     }
 
     @Override
@@ -230,6 +239,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     public TableCommitImpl newCommit(String commitUser) {
         return new TableCommitImpl(
                 store().newCommit(commitUser),
+                commitCallbackFactories.stream()
+                        .map(f -> f.create(this))
+                        .collect(Collectors.toList()),
                 coreOptions().writeOnly() ? null : store().newExpire(),
                 coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
                 lockFactory.create(),
