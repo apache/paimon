@@ -327,7 +327,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         private int[] readProjection;
 
         private AuditLogRead(InnerTableRead dataRead) {
-            this.dataRead = dataRead;
+            this.dataRead = dataRead.forceKeepDelete();
             this.readProjection = defaultProjection();
         }
 

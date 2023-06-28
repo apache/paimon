@@ -141,6 +141,12 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                     RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
                 return new ValueCountRowDataRecordIterator(kvRecordIterator);
             }
+
+            @Override
+            public InnerTableRead forceKeepDelete() {
+                read.forceKeepDelete();
+                return this;
+            }
         };
     }
 

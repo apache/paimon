@@ -24,6 +24,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
+import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -146,5 +148,55 @@ public class IncrementalTableTest extends TableTestBase {
                         GenericRow.of(1, 1, 4),
                         GenericRow.of(1, 2, 4),
                         GenericRow.of(2, 1, 4));
+    }
+
+    @Test
+    public void testAuditLog() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+
+        // snapshot 1: append
+        write(
+                table,
+                GenericRow.of(1, 1, 1),
+                GenericRow.of(1, 2, 1),
+                GenericRow.of(1, 3, 1),
+                GenericRow.of(2, 1, 1));
+
+        // snapshot 2: append + and -
+        write(
+                table,
+                GenericRow.ofKind(RowKind.DELETE, 1, 1, 1),
+                GenericRow.ofKind(RowKind.DELETE, 1, 2, 1),
+                GenericRow.of(1, 4, 1),
+                GenericRow.of(2, 1, 2));
+
+        // snapshot 3: append + and -
+        write(
+                table,
+                GenericRow.ofKind(RowKind.DELETE, 1, 3, 1),
+                GenericRow.of(1, 1, 2),
+                GenericRow.of(2, 1, 3),
+                GenericRow.of(2, 2, 1));
+
+        Table auditLog = catalog.getTable(identifier("T$audit_log"));
+        List<InternalRow> result = read(auditLog, Pair.of(INCREMENTAL_BETWEEN, "1,3"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(fromString("+I"), 2, 1, 3),
+                        GenericRow.of(fromString("+I"), 2, 2, 1),
+                        GenericRow.of(fromString("+I"), 1, 1, 2),
+                        GenericRow.of(fromString("+I"), 1, 4, 1),
+                        GenericRow.of(fromString("-D"), 1, 2, 1),
+                        GenericRow.of(fromString("-D"), 1, 3, 1));
     }
 }

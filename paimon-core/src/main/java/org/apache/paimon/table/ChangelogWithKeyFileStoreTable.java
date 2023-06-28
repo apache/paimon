@@ -212,6 +212,12 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     RecordReader.RecordIterator<KeyValue> kvRecordIterator) {
                 return new ValueContentRowDataRecordIterator(kvRecordIterator);
             }
+
+            @Override
+            public InnerTableRead forceKeepDelete() {
+                read.forceKeepDelete();
+                return this;
+            }
         };
     }
 
