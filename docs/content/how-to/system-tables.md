@@ -157,3 +157,22 @@ SELECT * FROM MyTable$files /*+ OPTIONS('scan.snapshot-id'='1') */;
 +-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+------------------------+-------------------------+-------------------------+-----------------------+
 3 rows in set
 ```
+
+## Tags Table
+
+You can query the tag history information of the table through tags table, including which snapshots are the tags based on
+and some historical information of the snapshots. You can also get all tag names and time travel to a specific tag data by name.
+
+```sql
+SELECT * FROM MyTable$snapshots;
+
+/*
++----------+-------------+-----------+-------------------------+--------------+
+| tag_name | snapshot_id | schema_id |             commit_time | record_count |
++----------+-------------+-----------+-------------------------+--------------+
+|     tag1 |           1 |         0 | 2023-06-28 14:55:29.344 |            3 |
+|     tag3 |           3 |         0 | 2023-06-28 14:58:24.691 |            7 |
++----------+-------------+-----------+-------------------------+--------------+
+2 rows in set
+*/
+```

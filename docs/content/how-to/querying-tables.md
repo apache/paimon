@@ -34,7 +34,7 @@ Paimon's batch read returns all the data in a snapshot of the table. By default,
 
 ### Batch Time Travel
 
-Paimon batch reads with time travel can specify a snapshot and read the corresponding data.
+Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.
 
 {{< tabs "time-travel-example" >}}
 
@@ -45,6 +45,9 @@ SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
 
 -- read the snapshot from specified timestamp in unix milliseconds
 SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
+
+-- read tag 'my-tag'
+SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
 ```
 {{< /tab >}}
 
@@ -63,6 +66,9 @@ SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
 
 -- read the snapshot from specified timestamp in unix seconds
 SELECT * FROM t TIMESTAMP AS OF 1678883047;
+
+-- read tag 'my-tag'
+SELECT * FROM t VERSION AS OF 'my-tag';
 ```
 
 {{< /tab >}}
