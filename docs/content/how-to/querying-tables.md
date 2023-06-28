@@ -106,6 +106,17 @@ spark.read()
 
 {{< /tabs >}}
 
+In Batch SQL, the `DELETE` records are not allowed to be returned, so records of `-D` will be dropped.
+If you want see `DELETE` records, you can use audit_log table:
+
+{{< tabs "incremental-audit_log" >}}
+{{< tab "Flink" >}}
+```sql
+SELECT * FROM t$audit_log /*+ OPTIONS('incremental-between' = '12,20') */;
+```
+{{< /tab >}}
+{{< /tabs >}}
+
 ## Streaming Query
 
 By default, Streaming read produces the latest snapshot on the table upon first startup,

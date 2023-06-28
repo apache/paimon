@@ -80,6 +80,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     @Nullable private int[][] pushdownProjection;
     @Nullable private int[][] outerProjection;
 
+    private boolean forceKeepDelete = false;
+
     public KeyValueFileStoreRead(
             FileIO fileIO,
             SchemaManager schemaManager,
@@ -128,6 +130,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     public KeyValueFileStoreRead withIOManager(IOManager ioManager) {
         this.mergeSorter.setIOManager(ioManager);
+        return this;
+    }
+
+    public KeyValueFileStoreRead forceKeepDelete() {
+        this.forceKeepDelete = true;
         return this;
     }
 
@@ -227,8 +234,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                         mergeFuncWrapper,
                                         mergeSorter));
             }
-            DropDeleteReader reader =
-                    new DropDeleteReader(ConcatRecordReader.create(sectionReaders));
+
+            RecordReader<KeyValue> reader = ConcatRecordReader.create(sectionReaders);
+            if (!forceKeepDelete) {
+                reader = new DropDeleteReader(reader);
+            }
 
             // Project results from SortMergeReader using ProjectKeyRecordReader.
             return keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);
