@@ -83,13 +83,21 @@ public class TagManager {
         }
     }
 
-    public void deleteTag(String tagName, TagDeletion tagDeletion, Snapshot earliestSnapshot) {
+    public void deleteTag(
+            String tagName, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = taggedSnapshot(tagName);
         List<Snapshot> taggedSnapshots = taggedSnapshots();
+        fileIO.deleteQuietly(tagPath(tagName));
 
+        // skip file deletion if snapshot exists
+        if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
+            return;
+        }
+
+        Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
         Map<BinaryRow, Map<Integer, Set<String>>> dataFileSkipped = new HashMap<>();
         Set<String> manifestSkipped = new HashSet<>();
 
@@ -117,8 +125,6 @@ public class TagManager {
 
         // delete manifests
         tagDeletion.deleteManifestFiles(taggedSnapshot, manifestSkipped);
-
-        fileIO.deleteQuietly(tagPath(tagName));
     }
 
     /** Check if a tag exists. */
@@ -193,7 +199,7 @@ public class TagManager {
         List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
         for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
             if (taggedSnapshots.get(i).id() <= latestSnapshot.id()) {
-                if (i + 1 <= taggedSnapshots.size()) {
+                if (i + 1 < taggedSnapshots.size()) {
                     rollbackInternal(tags, i + 1, latestSnapshot, tagDeletion);
                 }
                 return;

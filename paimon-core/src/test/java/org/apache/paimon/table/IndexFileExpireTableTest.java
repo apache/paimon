@@ -142,7 +142,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testIndexFileRollback() throws Exception {
+    public void testIndexFileRollbackSnapshot() throws Exception {
         prepareExpireTable();
 
         long indexFileSize = indexFileSize();
@@ -164,6 +164,28 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 3);
 
         table.rollbackTo(1);
+        checkIndexFiles(1);
+        assertThat(indexFileSize()).isEqualTo(3);
+        assertThat(indexManifestSize()).isEqualTo(1);
+    }
+
+    @Test
+    public void testIndexFileRollbackTag() throws Exception {
+        prepareExpireTable();
+
+        long indexFileSize = indexFileSize();
+        long indexManifestSize = indexManifestSize();
+
+        table.createTag("tag1", 1);
+        table.createTag("tag5", 5);
+        table.createTag("tag7", 7);
+
+        table.rollbackTo(5);
+        checkIndexFiles(5);
+        assertThat(indexFileSize()).isEqualTo(indexFileSize - 2);
+        assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 2);
+
+        table.rollbackTo("tag1");
         checkIndexFiles(1);
         assertThat(indexFileSize()).isEqualTo(3);
         assertThat(indexManifestSize()).isEqualTo(1);

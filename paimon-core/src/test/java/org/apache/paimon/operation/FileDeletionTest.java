@@ -399,7 +399,7 @@ public class FileDeletionTest {
             assertPathExists(fileIO, pathFactory.toManifestListPath(manifestListName));
         }
 
-        tagManager.deleteTag("tag1", store.newTagDeletion(), snapshotManager.earliestSnapshot());
+        tagManager.deleteTag("tag1", store.newTagDeletion(), snapshotManager);
 
         // check data files
         assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
@@ -475,7 +475,7 @@ public class FileDeletionTest {
             assertPathExists(fileIO, pathFactory.toManifestListPath(manifestListName));
         }
 
-        tagManager.deleteTag("tag2", store.newTagDeletion(), snapshotManager.earliestSnapshot());
+        tagManager.deleteTag("tag2", store.newTagDeletion(), snapshotManager);
 
         // check data files
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
