@@ -23,12 +23,12 @@ import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.table.{FileStoreTable, Table}
+import org.apache.paimon.table.{FileStoreTable, Table, BucketMode}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.{Column, DataFrame, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
@@ -93,29 +93,31 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
       withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(withBucketDataEncoder)
     }
 
-    val commitMessages =
-      withAssignedBucket
-        .toDF()
-        .repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
-        .mapPartitions {
-          iter =>
-            val write = writeBuilder.newWrite()
-            write.withIOManager(createIOManager)
-            try {
-              iter.foreach {
-                row =>
-                  val bucket = row.getInt(bucketColIdx)
-                  val bucketColDropped = originFromRow(toRow(row))
-                  write.write(new DynamicBucketRow(new SparkRow(rowType, bucketColDropped), bucket))
-              }
-              val serializer = new CommitMessageSerializer
-              write.prepareCommit().asScala.map(serializer.serialize).toIterator
-            } finally {
-              write.close()
-            }
+    var df = withAssignedBucket
+      .toDF()
+    if (!isUnawareBucketTable) {
+      // unaware bucket mode, we don't shuffle while writing
+      df = df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
+    }
+
+    val commitMessages = df.mapPartitions {
+      iter =>
+        val write = writeBuilder.newWrite()
+        write.withIOManager(createIOManager)
+        try {
+          iter.foreach {
+            row =>
+              val bucket = row.getInt(bucketColIdx)
+              val bucketColDropped = originFromRow(toRow(row))
+              write.write(new DynamicBucketRow(new SparkRow(rowType, bucketColDropped), bucket))
+          }
+          val serializer = new CommitMessageSerializer
+          write.prepareCommit().asScala.map(serializer.serialize).toIterator
+        } finally {
+          write.close()
         }
-        .collect()
-        .map(deserializeCommitMessage(serializer, _))
+    }.collect()
+      .map(deserializeCommitMessage(serializer, _))
 
     try {
       val tableCommit = if (overwritePartition == null) {
