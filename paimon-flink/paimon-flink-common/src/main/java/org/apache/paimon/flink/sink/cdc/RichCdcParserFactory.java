@@ -28,7 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** A {@link EventParser.Factory} for {@link RichCdcRecord} */
+/** A {@link EventParser.Factory} for {@link RichCdcRecord}. */
 public class RichCdcParserFactory implements EventParser.Factory<RichCdcRecord> {
 
     @Override
