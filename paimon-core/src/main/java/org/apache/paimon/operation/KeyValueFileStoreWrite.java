@@ -147,7 +147,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         partition,
                         bucket,
                         options.fileCompressionPerLevel(),
-                        options.fileCompression());
+                        options.fileCompression(),
+                        options);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         UniversalCompaction universalCompaction =
@@ -210,7 +211,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         partition,
                         bucket,
                         options.fileCompressionPerLevel(),
-                        options.fileCompression());
+                        options.fileCompression(),
+                        options);
         MergeSorter mergeSorter = new MergeSorter(options, keyType, valueType, ioManager);
         switch (options.changelogProducer()) {
             case FULL_COMPACTION:

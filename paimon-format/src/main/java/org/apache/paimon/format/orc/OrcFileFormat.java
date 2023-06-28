@@ -33,6 +33,7 @@ import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.statistics.Stats;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -86,8 +87,8 @@ public class OrcFileFormat extends FileFormat {
     }
 
     @Override
-    public Optional<TableStatsExtractor> createStatsExtractor(RowType type) {
-        return Optional.of(new OrcTableStatsExtractor(type));
+    public Optional<TableStatsExtractor> createStatsExtractor(RowType type, Stats[] stats) {
+        return Optional.of(new OrcTableStatsExtractor(type, stats));
     }
 
     @Override

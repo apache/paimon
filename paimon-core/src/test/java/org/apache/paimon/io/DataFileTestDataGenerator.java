@@ -22,6 +22,8 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.TableStatsCollector;
+import org.apache.paimon.statistics.FullStats;
+import org.apache.paimon.statistics.Stats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 
 import java.util.ArrayList;
@@ -29,6 +31,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 /** Random {@link DataFileMeta} generator. */
 public class DataFileTestDataGenerator {
@@ -100,9 +103,17 @@ public class DataFileTestDataGenerator {
 
     private Data createDataFile(List<KeyValue> kvs, int level, BinaryRow partition, int bucket) {
         TableStatsCollector keyStatsCollector =
-                new TableStatsCollector(TestKeyValueGenerator.KEY_TYPE);
+            new TableStatsCollector(
+                TestKeyValueGenerator.KEY_TYPE,
+                IntStream.range(0, TestKeyValueGenerator.KEY_TYPE.getFieldCount())
+                    .mapToObj(i -> new FullStats())
+                    .toArray(Stats[]::new));
         TableStatsCollector valueStatsCollector =
-                new TableStatsCollector(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
+            new TableStatsCollector(
+                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                IntStream.range(0, TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFieldCount())
+                    .mapToObj(i -> new FullStats())
+                    .toArray(Stats[]::new));
         FieldStatsArraySerializer keyStatsSerializer =
                 new FieldStatsArraySerializer(TestKeyValueGenerator.KEY_TYPE);
         FieldStatsArraySerializer valueStatsSerializer =

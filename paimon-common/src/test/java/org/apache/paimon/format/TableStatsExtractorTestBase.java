@@ -30,6 +30,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.statistics.Stats;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.CharType;
@@ -44,8 +45,9 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -55,6 +57,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,10 +69,14 @@ public abstract class TableStatsExtractorTestBase {
 
     private final FileIO fileIO = new LocalFileIO();
 
-    @Test
-    public void testExtract() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "counts", "full", "truncate(3)", "truncate(12)"})
+    public void testExtract(String mode) throws Exception {
         FileFormat format = createFormat();
         RowType rowType = rowType();
+        int count = rowType().getFieldCount();
+        Stats[] stats =
+                IntStream.range(0, count).mapToObj(p -> Stats.from(mode)).toArray(Stats[]::new);
 
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");
@@ -82,13 +89,13 @@ public abstract class TableStatsExtractorTestBase {
         }
         writer.finish();
 
-        TableStatsCollector collector = new TableStatsCollector(rowType);
+        TableStatsCollector collector = new TableStatsCollector(rowType, stats);
         for (GenericRow row : data) {
             collector.collect(row);
         }
         FieldStats[] expected = collector.extract();
 
-        TableStatsExtractor extractor = format.createStatsExtractor(rowType).get();
+        TableStatsExtractor extractor = format.createStatsExtractor(rowType, stats).get();
         assertThat(extractor).isNotNull();
         FieldStats[] actual = extractor.extract(fileIO, path);
         for (int i = 0; i < expected.length; i++) {

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
@@ -29,6 +30,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.StatsUtils;
 
 import javax.annotation.Nullable;
 
@@ -47,6 +49,7 @@ public class KeyValueFileWriterFactory {
     private final long suggestedFileSize;
     private final Map<Integer, String> levelCompressions;
     private final String fileCompression;
+    private final CoreOptions options;
 
     private KeyValueFileWriterFactory(
             FileIO fileIO,
@@ -58,7 +61,8 @@ public class KeyValueFileWriterFactory {
             DataFilePathFactory pathFactory,
             long suggestedFileSize,
             Map<Integer, String> levelCompressions,
-            String fileCompression) {
+            String fileCompression,
+            CoreOptions options) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.keyType = keyType;
@@ -69,6 +73,7 @@ public class KeyValueFileWriterFactory {
         this.suggestedFileSize = suggestedFileSize;
         this.levelCompressions = levelCompressions;
         this.fileCompression = fileCompression;
+        this.options = options;
     }
 
     public RowType keyType() {
@@ -118,7 +123,8 @@ public class KeyValueFileWriterFactory {
                 tableStatsExtractor,
                 schemaId,
                 level,
-                compression);
+                compression,
+                options);
     }
 
     public void deleteFile(String filename) {
@@ -169,7 +175,8 @@ public class KeyValueFileWriterFactory {
                 BinaryRow partition,
                 int bucket,
                 Map<Integer, String> levelCompressions,
-                String fileCompression) {
+                String fileCompression,
+                CoreOptions options) {
             RowType recordType = KeyValue.schema(keyType, valueType);
             return new KeyValueFileWriterFactory(
                     fileIO,
@@ -177,11 +184,17 @@ public class KeyValueFileWriterFactory {
                     keyType,
                     valueType,
                     fileFormat.createWriterFactory(recordType),
-                    fileFormat.createStatsExtractor(recordType).orElse(null),
+                    fileFormat
+                            .createStatsExtractor(
+                                    recordType,
+                                    StatsUtils.getFieldsStatsMode(
+                                            options, recordType.getFieldNames()))
+                            .orElse(null),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     suggestedFileSize,
                     levelCompressions,
-                    fileCompression);
+                    fileCompression,
+                    options);
         }
     }
 }

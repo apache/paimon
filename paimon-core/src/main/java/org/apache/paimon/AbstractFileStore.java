@@ -38,6 +38,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StatsUtils;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
@@ -104,7 +105,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFormat(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                forWrite ? writeManifestCache : null);
+                forWrite ? writeManifestCache : null,
+                StatsUtils.getFieldsStatsMode(options, partitionType.getFieldNames()));
     }
 
     @VisibleForTesting

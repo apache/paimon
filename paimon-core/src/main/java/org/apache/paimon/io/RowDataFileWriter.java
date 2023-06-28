@@ -24,6 +24,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.statistics.Stats;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
@@ -52,7 +53,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             @Nullable TableStatsExtractor tableStatsExtractor,
             long schemaId,
             LongCounter seqNumCounter,
-            String fileCompression) {
+            String fileCompression,
+            Stats[] stats) {
         super(
                 fileIO,
                 factory,
@@ -60,7 +62,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 Function.identity(),
                 writeSchema,
                 tableStatsExtractor,
-                fileCompression);
+                fileCompression,
+                stats);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);

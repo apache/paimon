@@ -26,6 +26,7 @@ import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.format.orc.OrcReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.statistics.Stats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
@@ -53,9 +54,14 @@ import java.util.stream.IntStream;
 public class OrcTableStatsExtractor implements TableStatsExtractor {
 
     private final RowType rowType;
+    private final Stats[] stats;
 
-    public OrcTableStatsExtractor(RowType rowType) {
+    public OrcTableStatsExtractor(RowType rowType, Stats[] stats) {
         this.rowType = rowType;
+        this.stats = stats;
+        Preconditions.checkArgument(
+            rowType.getFieldCount() == stats.length,
+            "The stats is not aligned to write schema.");
     }
 
     @Override
@@ -74,17 +80,18 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                                 DataField field = rowType.getFields().get(i);
                                 int fieldIdx = columnNames.indexOf(field.name());
                                 int colId = columnTypes.get(fieldIdx).getId();
-                                return toFieldStats(field, columnStatistics[colId], rowCount);
+                                return toFieldStats(field, columnStatistics[colId], rowCount, i);
                             })
                     .toArray(FieldStats[]::new);
         }
     }
 
-    private FieldStats toFieldStats(DataField field, ColumnStatistics stats, long rowCount) {
+    private FieldStats toFieldStats(
+            DataField field, ColumnStatistics stats, long rowCount, int idx) {
         long nullCount = rowCount - stats.getNumberOfValues();
         if (nullCount == rowCount) {
             // all nulls
-            return new FieldStats(null, null, nullCount);
+            return this.stats[idx].convert(new FieldStats(null, null, nullCount));
         }
         Preconditions.checkState(
                 (nullCount > 0) == stats.hasNull(),
@@ -94,86 +101,120 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
                         + stats.hasNull()
                         + "!");
 
+        FieldStats fieldStats;
         switch (field.type().getTypeRoot()) {
             case CHAR:
             case VARCHAR:
                 assertStatsClass(field, stats, StringColumnStatistics.class);
                 StringColumnStatistics stringStats = (StringColumnStatistics) stats;
-                return new FieldStats(
-                        BinaryString.fromString(stringStats.getMinimum()),
-                        BinaryString.fromString(stringStats.getMaximum()),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                BinaryString.fromString(stringStats.getMinimum()),
+                                BinaryString.fromString(stringStats.getMaximum()),
+                                nullCount);
+                break;
             case BOOLEAN:
                 assertStatsClass(field, stats, BooleanColumnStatistics.class);
                 BooleanColumnStatistics boolStats = (BooleanColumnStatistics) stats;
-                return new FieldStats(
-                        boolStats.getFalseCount() == 0, boolStats.getTrueCount() != 0, nullCount);
+                fieldStats =
+                        new FieldStats(
+                                boolStats.getFalseCount() == 0,
+                                boolStats.getTrueCount() != 0,
+                                nullCount);
+                break;
             case DECIMAL:
                 assertStatsClass(field, stats, DecimalColumnStatistics.class);
                 DecimalColumnStatistics decimalStats = (DecimalColumnStatistics) stats;
                 DecimalType decimalType = (DecimalType) (field.type());
                 int precision = decimalType.getPrecision();
                 int scale = decimalType.getScale();
-                return new FieldStats(
-                        Decimal.fromBigDecimal(
-                                decimalStats.getMinimum().bigDecimalValue(), precision, scale),
-                        Decimal.fromBigDecimal(
-                                decimalStats.getMaximum().bigDecimalValue(), precision, scale),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                Decimal.fromBigDecimal(
+                                        decimalStats.getMinimum().bigDecimalValue(),
+                                        precision,
+                                        scale),
+                                Decimal.fromBigDecimal(
+                                        decimalStats.getMaximum().bigDecimalValue(),
+                                        precision,
+                                        scale),
+                                nullCount);
+                break;
             case TINYINT:
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics byteStats = (IntegerColumnStatistics) stats;
-                return new FieldStats(
-                        (byte) byteStats.getMinimum(), (byte) byteStats.getMaximum(), nullCount);
+                fieldStats =
+                        new FieldStats(
+                                (byte) byteStats.getMinimum(),
+                                (byte) byteStats.getMaximum(),
+                                nullCount);
+                break;
             case SMALLINT:
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics shortStats = (IntegerColumnStatistics) stats;
-                return new FieldStats(
-                        (short) shortStats.getMinimum(),
-                        (short) shortStats.getMaximum(),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                (short) shortStats.getMinimum(),
+                                (short) shortStats.getMaximum(),
+                                nullCount);
+                break;
             case INTEGER:
             case TIME_WITHOUT_TIME_ZONE:
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics intStats = (IntegerColumnStatistics) stats;
-                return new FieldStats(
-                        Long.valueOf(intStats.getMinimum()).intValue(),
-                        Long.valueOf(intStats.getMaximum()).intValue(),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                Long.valueOf(intStats.getMinimum()).intValue(),
+                                Long.valueOf(intStats.getMaximum()).intValue(),
+                                nullCount);
+                break;
             case BIGINT:
                 assertStatsClass(field, stats, IntegerColumnStatistics.class);
                 IntegerColumnStatistics longStats = (IntegerColumnStatistics) stats;
-                return new FieldStats(longStats.getMinimum(), longStats.getMaximum(), nullCount);
+                fieldStats =
+                        new FieldStats(longStats.getMinimum(), longStats.getMaximum(), nullCount);
+                break;
             case FLOAT:
                 assertStatsClass(field, stats, DoubleColumnStatistics.class);
                 DoubleColumnStatistics floatStats = (DoubleColumnStatistics) stats;
-                return new FieldStats(
-                        (float) floatStats.getMinimum(),
-                        (float) floatStats.getMaximum(),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                (float) floatStats.getMinimum(),
+                                (float) floatStats.getMaximum(),
+                                nullCount);
+                break;
             case DOUBLE:
                 assertStatsClass(field, stats, DoubleColumnStatistics.class);
                 DoubleColumnStatistics doubleStats = (DoubleColumnStatistics) stats;
-                return new FieldStats(
-                        doubleStats.getMinimum(), doubleStats.getMaximum(), nullCount);
+                fieldStats =
+                        new FieldStats(
+                                doubleStats.getMinimum(), doubleStats.getMaximum(), nullCount);
+                break;
             case DATE:
                 assertStatsClass(field, stats, DateColumnStatistics.class);
                 DateColumnStatistics dateStats = (DateColumnStatistics) stats;
-                return new FieldStats(
-                        DateTimeUtils.toInternal(new Date(dateStats.getMinimum().getTime())),
-                        DateTimeUtils.toInternal(new Date(dateStats.getMaximum().getTime())),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                DateTimeUtils.toInternal(
+                                        new Date(dateStats.getMinimum().getTime())),
+                                DateTimeUtils.toInternal(
+                                        new Date(dateStats.getMaximum().getTime())),
+                                nullCount);
+                break;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 assertStatsClass(field, stats, TimestampColumnStatistics.class);
                 TimestampColumnStatistics timestampStats = (TimestampColumnStatistics) stats;
-                return new FieldStats(
-                        Timestamp.fromSQLTimestamp(timestampStats.getMinimum()),
-                        Timestamp.fromSQLTimestamp(timestampStats.getMaximum()),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                Timestamp.fromSQLTimestamp(timestampStats.getMinimum()),
+                                Timestamp.fromSQLTimestamp(timestampStats.getMaximum()),
+                                nullCount);
+                break;
             default:
-                return new FieldStats(null, null, nullCount);
+                fieldStats = new FieldStats(null, null, nullCount);
         }
+        return this.stats[idx].convert(fieldStats);
     }
 
     private void assertStatsClass(

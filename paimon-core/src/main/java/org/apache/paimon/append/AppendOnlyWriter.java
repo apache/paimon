@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
+import org.apache.paimon.statistics.Stats;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -64,6 +65,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     private final String fileCompression;
 
     private RowDataRollingFileWriter writer;
+    private Stats[] stats;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -76,7 +78,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             boolean forceCompact,
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
-            String fileCompression) {
+            String fileCompression,
+            Stats[] stats) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -98,6 +101,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
+        this.stats = stats;
     }
 
     @Override
@@ -173,7 +177,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
                 writeSchema,
                 pathFactory,
                 seqNumCounter,
-                fileCompression);
+                fileCompression,
+                stats);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

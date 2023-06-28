@@ -25,11 +25,13 @@ import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.statistics.Stats;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.parquet.column.statistics.BinaryStatistics;
 import org.apache.parquet.column.statistics.BooleanStatistics;
@@ -58,9 +60,14 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
     private final RowType rowType;
     private static final OffsetDateTime EPOCH = Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC);
     private static final LocalDate EPOCH_DAY = EPOCH.toLocalDate();
+    private final Stats[] stats;
 
-    public ParquetTableStatsExtractor(RowType rowType) {
+    public ParquetTableStatsExtractor(RowType rowType, Stats[] stats) {
         this.rowType = rowType;
+        this.stats = stats;
+        Preconditions.checkArgument(
+                rowType.getFieldCount() == stats.length,
+                "The stats is not aligned to write schema.");
     }
 
     @Override
@@ -71,79 +78,100 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
                 .mapToObj(
                         i -> {
                             DataField field = rowType.getFields().get(i);
-                            return toFieldStats(field, stats.get(field.name()));
+                            return toFieldStats(field, stats.get(field.name()), i);
                         })
                 .toArray(FieldStats[]::new);
     }
 
-    private FieldStats toFieldStats(DataField field, Statistics<?> stats) {
+    private FieldStats toFieldStats(DataField field, Statistics<?> stats, int idx) {
         if (stats == null) {
             return new FieldStats(null, null, null);
         }
         long nullCount = stats.getNumNulls();
         if (!stats.hasNonNullValue()) {
-            return new FieldStats(null, null, nullCount);
+            return this.stats[idx].convert(new FieldStats(null, null, nullCount));
         }
 
+        FieldStats fieldStats;
         switch (field.type().getTypeRoot()) {
             case CHAR:
             case VARCHAR:
                 assertStatsClass(field, stats, BinaryStatistics.class);
                 BinaryStatistics stringStats = (BinaryStatistics) stats;
-                return new FieldStats(
-                        BinaryString.fromString(stringStats.minAsString()),
-                        BinaryString.fromString(stringStats.maxAsString()),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                BinaryString.fromString(stringStats.minAsString()),
+                                BinaryString.fromString(stringStats.maxAsString()),
+                                nullCount);
+                break;
             case BOOLEAN:
                 assertStatsClass(field, stats, BooleanStatistics.class);
                 BooleanStatistics boolStats = (BooleanStatistics) stats;
-                return new FieldStats(boolStats.getMin(), boolStats.getMax(), nullCount);
+                fieldStats = new FieldStats(boolStats.getMin(), boolStats.getMax(), nullCount);
+                break;
             case DECIMAL:
                 PrimitiveType primitive = stats.type();
                 DecimalType decimalType = (DecimalType) (field.type());
                 int precision = decimalType.getPrecision();
                 int scale = decimalType.getScale();
-                return convertStatsToDecimalFieldStats(
-                        primitive, field, stats, precision, scale, nullCount);
+                fieldStats =
+                        convertStatsToDecimalFieldStats(
+                                primitive, field, stats, precision, scale, nullCount);
+                break;
             case TINYINT:
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics byteStats = (IntStatistics) stats;
-                return new FieldStats(
-                        (byte) byteStats.getMin(), (byte) byteStats.getMax(), nullCount);
+                fieldStats =
+                        new FieldStats(
+                                (byte) byteStats.getMin(), (byte) byteStats.getMax(), nullCount);
+                break;
             case SMALLINT:
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics shortStats = (IntStatistics) stats;
-                return new FieldStats(
-                        (short) shortStats.getMin(), (short) shortStats.getMax(), nullCount);
+                fieldStats =
+                        new FieldStats(
+                                (short) shortStats.getMin(),
+                                (short) shortStats.getMax(),
+                                nullCount);
+                break;
             case INTEGER:
             case DATE:
             case TIME_WITHOUT_TIME_ZONE:
                 assertStatsClass(field, stats, IntStatistics.class);
                 IntStatistics intStats = (IntStatistics) stats;
-                return new FieldStats(
-                        Long.valueOf(intStats.getMin()).intValue(),
-                        Long.valueOf(intStats.getMax()).intValue(),
-                        nullCount);
+                fieldStats =
+                        new FieldStats(
+                                Long.valueOf(intStats.getMin()).intValue(),
+                                Long.valueOf(intStats.getMax()).intValue(),
+                                nullCount);
+                break;
             case BIGINT:
                 assertStatsClass(field, stats, LongStatistics.class);
                 LongStatistics longStats = (LongStatistics) stats;
-                return new FieldStats(longStats.getMin(), longStats.getMax(), nullCount);
+                fieldStats = new FieldStats(longStats.getMin(), longStats.getMax(), nullCount);
+                break;
             case FLOAT:
                 assertStatsClass(field, stats, FloatStatistics.class);
                 FloatStatistics floatStats = (FloatStatistics) stats;
-                return new FieldStats(floatStats.getMin(), floatStats.getMax(), nullCount);
+                fieldStats = new FieldStats(floatStats.getMin(), floatStats.getMax(), nullCount);
+                break;
             case DOUBLE:
                 assertStatsClass(field, stats, DoubleStatistics.class);
                 DoubleStatistics doubleStats = (DoubleStatistics) stats;
-                return new FieldStats(doubleStats.getMin(), doubleStats.getMax(), nullCount);
+                fieldStats = new FieldStats(doubleStats.getMin(), doubleStats.getMax(), nullCount);
+                break;
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return toTimestampStats(stats, ((TimestampType) field.type()).getPrecision());
+                fieldStats = toTimestampStats(stats, ((TimestampType) field.type()).getPrecision());
+                break;
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return toTimestampStats(
-                        stats, ((LocalZonedTimestampType) field.type()).getPrecision());
+                fieldStats =
+                        toTimestampStats(
+                                stats, ((LocalZonedTimestampType) field.type()).getPrecision());
+                break;
             default:
-                return new FieldStats(null, null, nullCount);
+                fieldStats = new FieldStats(null, null, nullCount);
         }
+        return this.stats[idx].convert(fieldStats);
     }
 
     private FieldStats toTimestampStats(Statistics<?> stats, int precision) {

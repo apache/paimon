@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
@@ -30,6 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.StatsUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,7 +78,8 @@ public class KeyValueDataFileWriter
             @Nullable TableStatsExtractor tableStatsExtractor,
             long schemaId,
             int level,
-            String compression) {
+            String compression,
+            CoreOptions options) {
         super(
                 fileIO,
                 factory,
@@ -84,7 +87,9 @@ public class KeyValueDataFileWriter
                 converter,
                 KeyValue.schema(keyType, valueType),
                 tableStatsExtractor,
-                compression);
+                compression,
+                StatsUtils.getFieldsStatsMode(
+                        options, KeyValue.schema(keyType, valueType).getFieldNames()));
 
         this.keyType = keyType;
         this.valueType = valueType;

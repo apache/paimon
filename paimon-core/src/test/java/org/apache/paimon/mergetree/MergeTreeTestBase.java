@@ -187,13 +187,15 @@ public abstract class MergeTreeTestBase {
                         BinaryRow.EMPTY_ROW,
                         0,
                         options.fileCompressionPerLevel(),
-                        options.fileCompression());
+                        options.fileCompression(),
+                        options);
         compactWriterFactory =
                 writerFactoryBuilder.build(
                         BinaryRow.EMPTY_ROW,
                         0,
                         options.fileCompressionPerLevel(),
-                        options.fileCompression());
+                        options.fileCompression(),
+                        options);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 
