@@ -58,6 +58,11 @@ public class CdcRecord implements Serializable {
     }
 
     @Override
+    public int hashCode() {
+        return Objects.hash(kind, fields);
+    }
+
+    @Override
     public String toString() {
         return kind.shortString() + " " + fields;
     }
