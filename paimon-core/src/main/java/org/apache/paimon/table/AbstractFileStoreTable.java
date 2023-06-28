@@ -25,7 +25,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -45,7 +44,6 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
@@ -251,7 +249,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                     }
                 } else {
                     String tagName = coreOptions.scanTagName();
-                    TagManager tagManager = new TagManager(fileIO, path);
+                    TagManager tagManager = tagManager();
                     if (tagManager.tagExists(tagName)) {
                         long schemaId = tagManager.taggedSnapshot(tagName).schemaId();
                         return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
@@ -274,11 +272,10 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(long snapshotId) {
-        try {
-            snapshotManager().rollbackTo(store().newSnapshotDeletion(), snapshotId);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
+        rollbackToSnapshotInternal(snapshotId);
+
+        tagManager()
+                .rollbackLargerThan(snapshotManager().latestSnapshot(), store().newTagDeletion());
     }
 
     @Override
@@ -290,19 +287,52 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fromSnapshotId);
 
         Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
-        TagManager tagManager = new TagManager(fileIO, path);
-        tagManager.createTag(snapshot, tagName);
+        tagManager().createTag(snapshot, tagName);
     }
 
     @Override
     public void deleteTag(String tagName) {
-        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        tagManager()
+                .deleteTag(tagName, store().newTagDeletion(), snapshotManager().earliestSnapshot());
+    }
 
-        TagManager tagManager = new TagManager(fileIO, path);
-        Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
+    @Override
+    public void rollbackTo(String tagName) {
+        TagManager tagManager = tagManager();
+        SnapshotManager snapshotManager = snapshotManager();
+        checkArgument(tagManager.tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
-        TagDeletion tagDeletion = store().newTagDeletion();
-        tagDeletion.delete(taggedSnapshot);
-        fileIO.deleteQuietly(tagManager.tagPath(tagName));
+        // try to write snapshot file to snapshot directory first
+        long taggedSnapshotId = tagManager.taggedSnapshot(tagName).id();
+        try {
+            if (!snapshotManager.snapshotExists(taggedSnapshotId)) {
+                fileIO.writeFileUtf8(
+                        snapshotManager().snapshotPath(taggedSnapshotId),
+                        fileIO.readFileUtf8(tagManager.tagPath(tagName)));
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to write snapshot file, stopping rollback.", e);
+        }
+
+        // rollback snapshot first
+        rollbackToSnapshotInternal(taggedSnapshotId);
+
+        tagManager.rollbackTo(tagName, snapshotManager.latestSnapshot(), store().newTagDeletion());
+    }
+
+    private void rollbackToSnapshotInternal(long snapshotId) {
+        try {
+            snapshotManager()
+                    .rollbackTo(
+                            store().newSnapshotDeletion(),
+                            snapshotId,
+                            tagManager().taggedSnapshots());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private TagManager tagManager() {
+        return new TagManager(fileIO, path);
     }
 }

@@ -75,6 +75,10 @@ public interface Table extends Serializable {
     @Experimental
     void deleteTag(String tagName);
 
+    /** Rollback table's state to a specific tag. */
+    @Experimental
+    void rollbackTo(String tagName);
+
     // =============== Read & Write Operations ==================
 
     /** Returns a new read builder. */

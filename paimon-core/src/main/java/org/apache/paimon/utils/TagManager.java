@@ -19,13 +19,19 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.TagDeletion;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -77,6 +83,44 @@ public class TagManager {
         }
     }
 
+    public void deleteTag(String tagName, TagDeletion tagDeletion, Snapshot earliestSnapshot) {
+        checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
+        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
+
+        Snapshot taggedSnapshot = taggedSnapshot(tagName);
+        List<Snapshot> taggedSnapshots = taggedSnapshots();
+
+        Map<BinaryRow, Map<Integer, Set<String>>> dataFileSkipped = new HashMap<>();
+        Set<String> manifestSkipped = new HashSet<>();
+
+        // collect skipping sets from the earliest snapshot
+        tagDeletion.collectSkippedDataFiles(dataFileSkipped, earliestSnapshot);
+        manifestSkipped.addAll(tagDeletion.collectManifestSkippingSet(earliestSnapshot));
+
+        // collect from the neighbor tags
+        int index = findIndex(taggedSnapshot, taggedSnapshots);
+        if (index - 1 >= 0) {
+            tagDeletion.collectSkippedDataFiles(dataFileSkipped, taggedSnapshots.get(index - 1));
+            manifestSkipped.addAll(
+                    tagDeletion.collectManifestSkippingSet(taggedSnapshots.get(index - 1)));
+        }
+        if (index + 1 < taggedSnapshots.size()) {
+            tagDeletion.collectSkippedDataFiles(dataFileSkipped, taggedSnapshots.get(index + 1));
+            manifestSkipped.addAll(
+                    tagDeletion.collectManifestSkippingSet(taggedSnapshots.get(index + 1)));
+        }
+
+        // delete data files and empty directories
+        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
+        tagDeletion.deleteDataFiles(taggedSnapshot, dataFileSkipped, deletionBuckets);
+        tagDeletion.tryDeleteDirectories(deletionBuckets);
+
+        // delete manifests
+        tagDeletion.deleteManifestFiles(taggedSnapshot, manifestSkipped);
+
+        fileIO.deleteQuietly(tagPath(tagName));
+    }
+
     /** Check if a tag exists. */
     public boolean tagExists(String tagName) {
         Path path = tagPath(tagName);
@@ -126,5 +170,103 @@ public class TagManager {
             throw new RuntimeException(e);
         }
         return tags;
+    }
+
+    /** Rollback to tag. */
+    public void rollbackTo(String tagName, Snapshot latestSnapshot, TagDeletion tagDeletion) {
+        SortedMap<Snapshot, String> tags = tags();
+        List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
+        Snapshot rollback = taggedSnapshot(tagName);
+        int index = taggedSnapshots.indexOf(rollback);
+        if (index + 1 < taggedSnapshots.size()) {
+            rollbackInternal(tags, index + 1, latestSnapshot, tagDeletion);
+        }
+    }
+
+    /** Delete tags backwards whose id is larger than given tag's. */
+    public void rollbackLargerThan(Snapshot latestSnapshot, TagDeletion tagDeletion) {
+        SortedMap<Snapshot, String> tags = tags();
+        if (tags.isEmpty()) {
+            return;
+        }
+
+        List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
+        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
+            if (taggedSnapshots.get(i).id() <= latestSnapshot.id()) {
+                if (i + 1 <= taggedSnapshots.size()) {
+                    rollbackInternal(tags, i + 1, latestSnapshot, tagDeletion);
+                }
+                return;
+            }
+        }
+        rollbackInternal(tags, 0, latestSnapshot, tagDeletion);
+    }
+
+    private void rollbackInternal(
+            SortedMap<Snapshot, String> tags,
+            int toIndex,
+            Snapshot latestSnapshot,
+            TagDeletion tagDeletion) {
+        checkArgument(toIndex >= 0 && toIndex < tags.size());
+        List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
+
+        // delete tag files
+        for (int i = tags.size() - 1; i >= toIndex; i--) {
+            Snapshot snapshot = taggedSnapshots.get(i);
+            fileIO.deleteQuietly(tagPath(tags.get(snapshot)));
+        }
+
+        // if old snapshots has been expired, rollback-snapshot cannot delete files used by tag
+        // so here have to delete them
+        Map<BinaryRow, Map<Integer, Set<String>>> dataFileSkipped = new HashMap<>();
+        tagDeletion.collectSkippedDataFiles(dataFileSkipped, latestSnapshot);
+        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
+        for (int i = taggedSnapshots.size() - 1; i >= toIndex; i--) {
+            tagDeletion.deleteDataFiles(taggedSnapshots.get(i), dataFileSkipped, deletionBuckets);
+        }
+
+        tagDeletion.tryDeleteDirectories(deletionBuckets);
+
+        Set<String> manifestSkipped = tagDeletion.collectManifestSkippingSet(latestSnapshot);
+        for (int i = taggedSnapshots.size() - 1; i >= toIndex; i--) {
+            tagDeletion.deleteManifestFiles(taggedSnapshots.get(i), manifestSkipped);
+        }
+    }
+
+    private FileStatus[] listStatus() {
+        Path tagDirectory = tagDirectory();
+        try {
+            if (!fileIO.exists(tagDirectory)) {
+                return new FileStatus[0];
+            }
+
+            FileStatus[] statuses = fileIO.listStatus(tagDirectory);
+
+            if (statuses == null) {
+                throw new RuntimeException(
+                        String.format(
+                                "The return value is null of the listStatus for the '%s' directory.",
+                                tagDirectory));
+            }
+
+            return Arrays.stream(statuses)
+                    .filter(status -> status.getPath().getName().startsWith(TAG_PREFIX))
+                    .toArray(FileStatus[]::new);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    String.format("Failed to list status in the '%s' directory.", tagDirectory), e);
+        }
+    }
+
+    private int findIndex(Snapshot taggedSnapshot, List<Snapshot> taggedSnapshots) {
+        for (int i = 0; i < taggedSnapshots.size(); i++) {
+            if (taggedSnapshot.id() == taggedSnapshots.get(i).id()) {
+                return i;
+            }
+        }
+        throw new RuntimeException(
+                String.format(
+                        "Didn't find tag with snapshot id '%s'.This is unexpected.",
+                        taggedSnapshot.id()));
     }
 }

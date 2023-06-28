@@ -195,7 +195,6 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     public TagDeletion newTagDeletion() {
         return new TagDeletion(
                 fileIO,
-                options.path(),
                 pathFactory(),
                 manifestListFactory().create(),
                 manifestFileFactory().create(),

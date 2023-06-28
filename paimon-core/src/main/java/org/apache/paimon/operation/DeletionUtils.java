@@ -144,6 +144,10 @@ public class DeletionUtils {
                 snapshot.dataManifests(manifestList).stream()
                         .map(ManifestFileMeta::fileName)
                         .collect(Collectors.toCollection(HashSet::new));
+
+        skip.add(snapshot.baseManifestList());
+        skip.add(snapshot.deltaManifestList());
+
         String indexManifest = snapshot.indexManifest();
         if (indexManifest != null) {
             skip.add(indexManifest);

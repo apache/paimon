@@ -656,18 +656,19 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
-    public void testRollbackTo() throws Exception {
+    public void testRollbackToSnapshot() throws Exception {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
-        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 1;
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 2;
         for (int i = 0; i < commitTimes; i++) {
             write.write(rowData(i, 10 * i, 100L * i));
             commit.commit(i, write.prepareCommit(false, i));
         }
         write.close();
 
+        table.createTag("test", commitTimes);
         table.rollbackTo(1);
         ReadBuilder readBuilder = table.newReadBuilder();
         List<String> result =
@@ -680,7 +681,7 @@ public abstract class FileStoreTableTestBase {
 
         List<java.nio.file.Path> files =
                 Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(14);
+        assertThat(files.size()).isEqualTo(15);
         // table-path
         // table-path/snapshot
         // table-path/snapshot/LATEST
@@ -695,6 +696,61 @@ public abstract class FileStoreTableTestBase {
         // table-path/manifest/manifest-list-0
         // table-path/schema
         // table-path/schema/schema-0
+        // table-path/tag
+    }
+
+    @Test
+    public void testRollbackToTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        for (int i = 0; i < commitTimes; i++) {
+            write.write(rowData(i, 10 * i, 100L * i));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+
+        table.createTag("test1", 1);
+        table.createTag("test2", commitTimes - 3);
+        table.createTag("test3", commitTimes);
+
+        // expire snapshots
+        Options options = new Options();
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 3);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
+        table.copy(options.toMap()).store().newExpire().expire();
+
+        table.rollbackTo("test1");
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
+        List<java.nio.file.Path> files =
+                Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
+        assertThat(files.size()).isEqualTo(16);
+        // table-path
+        // table-path/snapshot
+        // table-path/snapshot/LATEST
+        // table-path/snapshot/EARLIEST
+        // table-path/snapshot/snapshot-1
+        // table-path/pt=0
+        // table-path/pt=0/bucket-0
+        // table-path/pt=0/bucket-0/data-0.orc
+        // table-path/manifest
+        // table-path/manifest/manifest-list-1
+        // table-path/manifest/manifest-0
+        // table-path/manifest/manifest-list-0
+        // table-path/schema
+        // table-path/schema/schema-0
+        // table-path/tag
+        // table-path/tag/tag-test1
     }
 
     @Test

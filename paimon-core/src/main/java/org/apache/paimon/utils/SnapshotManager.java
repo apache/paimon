@@ -107,6 +107,11 @@ public class SnapshotManager implements Serializable {
         }
     }
 
+    public @Nullable Snapshot earliestSnapshot() {
+        Long snapshotId = earliestSnapshotId();
+        return snapshotId == null ? null : snapshot(snapshotId);
+    }
+
     public @Nullable Long earliestSnapshotId() {
         try {
             return findEarliest();
@@ -335,7 +340,9 @@ public class SnapshotManager implements Serializable {
         fileIO.writeFileUtf8(hintFile, String.valueOf(snapshotId));
     }
 
-    public void rollbackTo(SnapshotDeletion deletion, long snapshotId) throws IOException {
+    public void rollbackTo(
+            SnapshotDeletion deletion, long snapshotId, List<Snapshot> taggedSnapshots)
+            throws IOException {
         if (!snapshotExists(snapshotId)) {
             throw new IllegalArgumentException("Rollback snapshot not exist: " + snapshotId);
         }
@@ -351,8 +358,11 @@ public class SnapshotManager implements Serializable {
         // delete snapshots first, cannot be read now.
         List<Snapshot> snapshots = new ArrayList<>();
         for (long i = latest; i > snapshotId; i--) {
-            snapshots.add(snapshot(i));
-            fileIO().deleteQuietly(snapshotPath(i));
+            // if rollback to a snapshot based by tag, some snapshots may have been expired
+            if (snapshotExists(i)) {
+                snapshots.add(snapshot(i));
+                fileIO().deleteQuietly(snapshotPath(i));
+            }
         }
 
         // delete data files
@@ -368,6 +378,15 @@ public class SnapshotManager implements Serializable {
 
         // delete manifest files.
         Set<String> manifestSkipped = deletion.collectManifestSkippingSet(snapshot(snapshotId));
+        // tags' manifests should be cleaned by tag deletion
+        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
+            Snapshot tag = taggedSnapshots.get(i);
+            if (tag.id() <= snapshotId) {
+                break;
+            }
+            manifestSkipped.addAll(deletion.collectManifestSkippingSet(tag));
+        }
+
         for (Snapshot snapshot : snapshots) {
             deletion.deleteManifestFiles(manifestSkipped, snapshot);
         }
