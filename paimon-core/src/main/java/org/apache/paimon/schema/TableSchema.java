@@ -76,6 +76,9 @@ public class TableSchema implements Serializable {
 
         // try to trim to validate primary keys
         trimmedPrimaryKeys();
+
+        // try to validate bucket keys
+        originalBucketKeys();
     }
 
     public long id() {
