@@ -240,7 +240,7 @@ public class HiveSchema {
                 mismatched.add(
                         String.format(
                                 "Field #%d\n" + "Hive DDL          : %s\n" + "Paimon Schema: %s\n",
-                                i, ddlField, schemaField));
+                                i + 1, ddlField, schemaField));
             }
         }
         if (mismatched.size() > 0) {
@@ -300,7 +300,7 @@ public class HiveSchema {
                                 "Partition Key #%d\n"
                                         + "Hive DDL          : %s\n"
                                         + "Paimon Schema: %s\n",
-                                i, ddlField, schemaField));
+                                i + 1, ddlField, schemaField));
             }
         }
         if (mismatched.size() > 0) {

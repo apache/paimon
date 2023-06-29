@@ -44,7 +44,6 @@ import java.util.List;
 public class AddPartitionCommitCallback implements CommitCallback {
 
     private final Identifier identifier;
-    private final String tablePath;
     private final RowDataPartitionComputer partitionComputer;
 
     private final IMetaStoreClient client;
@@ -53,7 +52,6 @@ public class AddPartitionCommitCallback implements CommitCallback {
     public AddPartitionCommitCallback(
             Identifier identifier, FileStoreTable table, IMetaStoreClient client) {
         this.identifier = identifier;
-        this.tablePath = table.location().toString();
         this.partitionComputer =
                 new RowDataPartitionComputer(
                         table.coreOptions().partitionDefaultName(),
@@ -93,7 +91,9 @@ public class AddPartitionCommitCallback implements CommitCallback {
                 // partition not found, create new partition
                 StorageDescriptor newSd = new StorageDescriptor(sd);
                 newSd.setLocation(
-                        tablePath + "/" + PartitionPathUtils.generatePartitionPath(partitionMap));
+                        sd.getLocation()
+                                + "/"
+                                + PartitionPathUtils.generatePartitionPath(partitionMap));
 
                 Partition hivePartition = new Partition();
                 hivePartition.setDbName(identifier.getDatabaseName());
