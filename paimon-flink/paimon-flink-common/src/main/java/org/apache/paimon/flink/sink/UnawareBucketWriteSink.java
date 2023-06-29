@@ -57,18 +57,17 @@ public class UnawareBucketWriteSink extends FileStoreSink {
         // do the actually writing action, no snapshot generated in this stage
         DataStream<Committable> written = doWrite(input, initialCommitUser, parallelism);
 
+        boolean isStreamingMode =
+                input.getExecutionEnvironment()
+                                .getConfiguration()
+                                .get(ExecutionOptions.RUNTIME_MODE)
+                        == RuntimeExecutionMode.STREAMING;
         // if enable compaction, we need to add compaction topology to this job
-        if (enableCompaction) {
-            boolean isStreamingMode =
-                    input.getExecutionEnvironment()
-                                    .getConfiguration()
-                                    .get(ExecutionOptions.RUNTIME_MODE)
-                            == RuntimeExecutionMode.STREAMING;
-
+        if (enableCompaction && isStreamingMode) {
             UnawareBucketCompactionTopoBuilder builder =
                     new UnawareBucketCompactionTopoBuilder(
                             input.getExecutionEnvironment(), table.name(), table);
-            builder.withContinuousMode(isStreamingMode);
+            builder.withContinuousMode(true);
             written = written.union(builder.fetchUncommitted(initialCommitUser));
         }
 

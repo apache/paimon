@@ -28,6 +28,7 @@ import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -36,6 +37,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
+import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -121,42 +123,42 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAutoCompaction() {
+    public void testNoCompactionInBatchMode() {
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
 
-        assertAutoCompaction(
+        assertExecuteExpected(
                 "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB')",
                 1L,
                 Snapshot.CommitKind.APPEND);
-        assertAutoCompaction(
+        assertExecuteExpected(
                 "INSERT INTO append_table VALUES (3, 'CCC'), (4, 'DDD')",
                 2L,
                 Snapshot.CommitKind.APPEND);
-        assertAutoCompaction(
+        assertExecuteExpected(
                 "INSERT INTO append_table VALUES (1, 'AAA'), (2, 'BBB'), (3, 'CCC'), (4, 'DDD')",
                 3L,
                 Snapshot.CommitKind.APPEND);
-        assertAutoCompaction(
+        assertExecuteExpected(
                 "INSERT INTO append_table VALUES (5, 'EEE'), (6, 'FFF')",
                 4L,
                 Snapshot.CommitKind.APPEND);
-        assertAutoCompaction(
+        assertExecuteExpected(
                 "INSERT INTO append_table VALUES (7, 'HHH'), (8, 'III')",
-                6L,
-                Snapshot.CommitKind.COMPACT);
-        assertAutoCompaction(
+                5L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
                 "INSERT INTO append_table VALUES (9, 'JJJ'), (10, 'KKK')",
+                6L,
+                Snapshot.CommitKind.APPEND);
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (11, 'LLL'), (12, 'MMM')",
                 7L,
                 Snapshot.CommitKind.APPEND);
-        assertAutoCompaction(
-                "INSERT INTO append_table VALUES (11, 'LLL'), (12, 'MMM')",
+        assertExecuteExpected(
+                "INSERT INTO append_table VALUES (13, 'NNN'), (14, 'OOO')",
                 8L,
                 Snapshot.CommitKind.APPEND);
-        assertAutoCompaction(
-                "INSERT INTO append_table VALUES (13, 'NNN'), (14, 'OOO')",
-                10L,
-                Snapshot.CommitKind.COMPACT);
 
         List<Row> rows = batchSql("SELECT * FROM append_table");
         assertThat(rows.size()).isEqualTo(18);
@@ -180,6 +182,28 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                         Row.of(12, "MMM"),
                         Row.of(13, "NNN"),
                         Row.of(14, "OOO"));
+    }
+
+    @Test
+    public void testCompactionInStreamingMode() throws Exception {
+        batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
+        batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
+
+        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(500));
+        sEnv.executeSql(
+                "CREATE TEMPORARY TABLE Orders_in (\n"
+                        + "    f0        INT,\n"
+                        + "    f1        STRING\n"
+                        + ") WITH (\n"
+                        + "    'connector' = 'datagen',\n"
+                        + "    'rows-per-second' = '1',\n"
+                        + "    'number-of-rows' = '4'\n"
+                        + ")");
+
+        assertStreamingHasCompact("INSERT INTO append_table SELECT * FROM Orders_in", 60000);
+
+        List<Row> rows = batchSql("SELECT * FROM append_table");
+        assertThat(rows.size()).isEqualTo(4);
     }
 
     @Test
@@ -308,11 +332,33 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 .hasRootCauseMessage("Append only writer can not accept row with RowKind %s", kind);
     }
 
-    private void assertAutoCompaction(
+    private void assertExecuteExpected(
             String sql, long expectedSnapshotId, Snapshot.CommitKind expectedCommitKind) {
         batchSql(sql);
         Snapshot snapshot = findLatestSnapshot("append_table");
         assertThat(snapshot.id()).isEqualTo(expectedSnapshotId);
         assertThat(snapshot.commitKind()).isEqualTo(expectedCommitKind);
+    }
+
+    private void assertStreamingHasCompact(String sql, long timeout) throws Exception {
+        long start = System.currentTimeMillis();
+        long currentId = 1;
+        sEnv.executeSql(sql);
+        Snapshot snapshot;
+        while (true) {
+            snapshot = findSnapshot("append_table", currentId);
+            if (snapshot != null) {
+                if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
+                    break;
+                }
+                currentId++;
+            }
+            long now = System.currentTimeMillis();
+            if (now - start > timeout) {
+                throw new RuntimeException(
+                        "Time up for streaming execute, don't get expected result.");
+            }
+            Thread.sleep(1000);
+        }
     }
 }
