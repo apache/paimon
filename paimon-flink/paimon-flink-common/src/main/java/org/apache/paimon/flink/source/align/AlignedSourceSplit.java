@@ -22,6 +22,8 @@ import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.connector.source.SourceSplit;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /**
@@ -31,11 +33,17 @@ import java.util.List;
 public class AlignedSourceSplit implements SourceSplit {
     private final List<Split> splits;
     private final long nextSnapshotId;
+    private final @Nullable Long watermark;
     private final boolean placeHolder;
 
-    public AlignedSourceSplit(List<Split> splits, long nextSnapshotId, boolean placeHolder) {
+    public AlignedSourceSplit(
+            List<Split> splits,
+            long nextSnapshotId,
+            @Nullable Long watermark,
+            boolean placeHolder) {
         this.splits = splits;
         this.nextSnapshotId = nextSnapshotId;
+        this.watermark = watermark;
         this.placeHolder = placeHolder;
     }
 
@@ -50,6 +58,11 @@ public class AlignedSourceSplit implements SourceSplit {
 
     public List<Split> getSplits() {
         return splits;
+    }
+
+    @Nullable
+    public Long getWatermark() {
+        return watermark;
     }
 
     public boolean isPlaceHolder() {

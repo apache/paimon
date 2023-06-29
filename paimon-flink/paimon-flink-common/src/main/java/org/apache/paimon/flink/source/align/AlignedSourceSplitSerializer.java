@@ -51,6 +51,12 @@ public class AlignedSourceSplitSerializer implements SimpleVersionedSerializer<A
                 InstantiationUtil.serializeObject(view, split);
             }
             view.writeLong(alignedSourceSplit.getNextSnapshotId());
+            if (alignedSourceSplit.getWatermark() == null) {
+                view.writeBoolean(true);
+            } else {
+                view.writeBoolean(false);
+                view.writeLong(alignedSourceSplit.getWatermark());
+            }
             view.writeBoolean(alignedSourceSplit.isPlaceHolder());
             return baos.toByteArray();
         }
@@ -73,8 +79,13 @@ public class AlignedSourceSplitSerializer implements SimpleVersionedSerializer<A
                 throw new IOException(e);
             }
             long nextSnapshotId = view.readLong();
+            Long watermark = null;
+            boolean isNull = view.readBoolean();
+            if (!isNull) {
+                watermark = view.readLong();
+            }
             boolean isPlaceHolder = view.readBoolean();
-            return new AlignedSourceSplit(splits, nextSnapshotId, isPlaceHolder);
+            return new AlignedSourceSplit(splits, nextSnapshotId, watermark, isPlaceHolder);
         }
     }
 }

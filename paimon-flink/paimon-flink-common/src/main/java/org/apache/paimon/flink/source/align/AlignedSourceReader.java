@@ -158,7 +158,7 @@ public class AlignedSourceReader
             }
 
             if (emitSnapshotWatermark) {
-                Long watermark = scan.watermark();
+                Long watermark = alignedSourceSplit.getWatermark();
                 if (watermark != null) {
                     readerOutput.emitWatermark(new Watermark(watermark));
                 }
@@ -187,7 +187,7 @@ public class AlignedSourceReader
         if (pendingSplits.isEmpty() && snapshotIdByNextCheckpoint != null) {
             return Collections.singletonList(
                     new AlignedSourceSplit(
-                            Collections.emptyList(), snapshotIdByNextCheckpoint, true));
+                            Collections.emptyList(), snapshotIdByNextCheckpoint, null, true));
         } else {
             return new ArrayList<>(pendingSplits);
         }
@@ -280,7 +280,8 @@ public class AlignedSourceReader
                 TableScan.Plan plan = scan.plan();
                 if (!(plan instanceof SnapshotNotExistPlan)) {
                     pendingSplits.add(
-                            new AlignedSourceSplit(plan.splits(), scan.checkpoint(), false));
+                            new AlignedSourceSplit(
+                                    plan.splits(), scan.checkpoint(), scan.watermark(), false));
                     switchToAvailable();
                 }
             } catch (EndOfScanException e) {
