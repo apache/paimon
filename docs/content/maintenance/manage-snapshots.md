@@ -1,6 +1,6 @@
 ---
 title: "Manage Snapshots"
-weight: 3
+weight: 4
 type: docs
 aliases:
 - /maintenance/manage-snapshots.html

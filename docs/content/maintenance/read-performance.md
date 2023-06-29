@@ -31,6 +31,11 @@ under the License.
 Configure 'full-compaction.delta-commits' perform full-compaction periodically in Flink writing.
 And it can ensure that partitions are full compacted before writing ends.
 
+{{< hint info >}}
+Paimon defaults to handling small files and providing decent read performance. Please do not configure
+this full-compaction option without any requirements, as it will have a significant impact on performance.
+{{< /hint >}}
+
 ### Primary Key Table
 
 For Primary Key Table, it's a 'MergeOnRead' technology. When reading data, multiple layers of LSM data are merged,

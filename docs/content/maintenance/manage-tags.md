@@ -1,6 +1,6 @@
 ---
 title: "Manage Tags"
-weight: 7
+weight: 8
 type: docs
 aliases:
 - /maintenance/manage-tags.html
