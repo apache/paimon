@@ -173,6 +173,14 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         return id == null ? null : snapshotManager.snapshot(id);
     }
 
+    @Nullable
+    protected Snapshot findSnapshot(String tableName, long snapshotId) {
+        SnapshotManager snapshotManager =
+                new SnapshotManager(LocalFileIO.create(), getTableDirectory(tableName));
+        Long id = snapshotManager.latestSnapshotId();
+        return id == null ? null : id >= snapshotId ? snapshotManager.snapshot(snapshotId) : null;
+    }
+
     protected String toWarehouse(String path) {
         return path;
     }
