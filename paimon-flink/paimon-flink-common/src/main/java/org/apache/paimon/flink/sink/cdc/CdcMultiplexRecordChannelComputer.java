@@ -51,11 +51,10 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
 
     @Override
     public int channel(CdcMultiplexRecord multiplexRecord) {
-        return Objects.hash(
-                        multiplexRecord.databaseName(),
-                        multiplexRecord.tableName(),
-                        computeChannelComputer(multiplexRecord).channel(multiplexRecord.record()))
-                % numChannels;
+        return Math.floorMod(
+                Objects.hash(multiplexRecord.databaseName(), multiplexRecord.tableName())
+                        + computeChannelComputer(multiplexRecord).channel(multiplexRecord.record()),
+                numChannels);
     }
 
     private ChannelComputer<CdcRecord> computeChannelComputer(CdcMultiplexRecord record) {

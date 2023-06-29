@@ -132,7 +132,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         }
 
         FlinkCdcMultiTableSink sink = new FlinkCdcMultiTableSink(catalogLoader);
-        sink.sinkFrom(newlyAddedTableStream);
+        sink.sinkFrom(new DataStream<>(input.getExecutionEnvironment(), partitioned));
     }
 
     private void buildForDynamicBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {

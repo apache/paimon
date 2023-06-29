@@ -885,6 +885,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", databaseName);
+        mySqlConfig.put("scan.incremental.snapshot.chunk.size", "1");
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(2);
         env.enableCheckpointing(1000);
@@ -893,7 +894,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(2) + 2));
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
                         mySqlConfig,

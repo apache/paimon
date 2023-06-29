@@ -196,8 +196,8 @@ class MySqlActionUtils {
                 .getOptional(MySqlSourceOptions.SERVER_TIME_ZONE)
                 .ifPresent(sourceBuilder::serverTimeZone);
         mySqlConfig
-                .getOptional(MySqlSourceOptions.SCAN_SNAPSHOT_FETCH_SIZE)
-                .ifPresent(sourceBuilder::fetchSize);
+                .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE)
+                .ifPresent(sourceBuilder::splitSize);
         mySqlConfig
                 .getOptional(MySqlSourceOptions.CONNECT_TIMEOUT)
                 .ifPresent(sourceBuilder::connectTimeout);
