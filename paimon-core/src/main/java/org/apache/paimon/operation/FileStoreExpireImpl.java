@@ -189,8 +189,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                         snapshotManager.snapshot(endExclusiveId));
         for (Snapshot snapshot :
                 tagFileKeeper.findOverlappedSnapshots(beginInclusiveId, endExclusiveId)) {
-            skipManifestFiles.add(snapshot.baseManifestList());
-            skipManifestFiles.add(snapshot.deltaManifestList());
             skipManifestFiles.addAll(snapshotDeletion.collectManifestSkippingSet(snapshot));
         }
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
