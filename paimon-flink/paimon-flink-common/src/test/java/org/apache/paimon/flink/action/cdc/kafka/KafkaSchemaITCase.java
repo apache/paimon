@@ -32,7 +32,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KafkaSchema}. */
-public class KafkaSchemaTest extends KafkaActionITCaseBase {
+public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testKafkaSchema() throws Exception {
