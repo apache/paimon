@@ -382,10 +382,9 @@ public class SnapshotManager implements Serializable {
             }
             skippedSnapshots.add(tag);
         }
-        Predicate<String> manifestSkipper = deletion.manifestSkipper(skippedSnapshots);
 
         for (Snapshot snapshot : snapshots) {
-            deletion.cleanUnusedManifests(snapshot, manifestSkipper);
+            deletion.cleanUnusedManifests(snapshot, skippedSnapshots);
         }
     }
 }

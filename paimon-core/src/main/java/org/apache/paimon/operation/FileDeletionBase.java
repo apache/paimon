@@ -91,11 +91,9 @@ public abstract class FileDeletionBase {
      * index manifests and manifest lists.
      *
      * @param snapshot {@link Snapshot} that will be cleaned
-     * @param skipper if the test result of a manifest file is true, it will be skipped when
-     *     deleting; else it will be deleted and if testing this file again, the result will be true
-     *     to avoid deleting non-existing file
+     * @param skippingSnapshots manifests that still used by these snapshots will be skipped
      */
-    public abstract void cleanUnusedManifests(Snapshot snapshot, Predicate<String> skipper);
+    public abstract void cleanUnusedManifests(Snapshot snapshot, List<Snapshot> skippingSnapshots);
 
     /** Try to delete data directories that may be empty after data file deletion. */
     public void cleanDataDirectories() {
@@ -141,22 +139,26 @@ public abstract class FileDeletionBase {
     }
 
     protected void cleanUnusedManifests(
-            Snapshot snapshot, Predicate<String> skipper, boolean deleteChangelog) {
+            Snapshot snapshot, List<Snapshot> skippingSnapshots, boolean deleteChangelog) {
+        Set<String> skippingSet = manifestSkippingSet(skippingSnapshots);
+
         // clean base and delta manifests
         List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
         toExpireManifests.addAll(tryReadManifestList(snapshot.baseManifestList()));
         toExpireManifests.addAll(tryReadManifestList(snapshot.deltaManifestList()));
         for (ManifestFileMeta manifest : toExpireManifests) {
             String fileName = manifest.fileName();
-            if (!skipper.test(fileName)) {
+            if (!skippingSet.contains(fileName)) {
                 manifestFile.delete(fileName);
+                // to avoid other snapshots trying to delete again
+                skippingSet.add(fileName);
             }
         }
 
-        if (!skipper.test(snapshot.baseManifestList())) {
+        if (!skippingSet.contains(snapshot.baseManifestList())) {
             manifestList.delete(snapshot.baseManifestList());
         }
-        if (!skipper.test(snapshot.deltaManifestList())) {
+        if (!skippingSet.contains(snapshot.deltaManifestList())) {
             manifestList.delete(snapshot.deltaManifestList());
         }
 
@@ -174,12 +176,12 @@ public abstract class FileDeletionBase {
         // check exists, it may have been deleted by other snapshots
         if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
             for (IndexManifestEntry entry : indexFileHandler.readManifest(indexManifest)) {
-                if (!skipper.test(entry.indexFile().fileName())) {
+                if (!skippingSet.contains(entry.indexFile().fileName())) {
                     indexFileHandler.deleteIndexFile(entry);
                 }
             }
 
-            if (!skipper.test(indexManifest)) {
+            if (!skippingSet.contains(indexManifest)) {
                 indexFileHandler.deleteManifest(indexManifest);
             }
         }
@@ -220,36 +222,29 @@ public abstract class FileDeletionBase {
                                 });
     }
 
-    /** Changelogs were not checked. Let the subclass determine whether to delete changelogs. */
-    public Predicate<String> manifestSkipper(List<Snapshot> fromSnapshots) {
-        Set<String> skipped = new HashSet<>();
-        for (Snapshot snapshot : fromSnapshots) {
+    /** Changelogs were not checked. Let the subclass determine whether to delete them. */
+    private Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
+        Set<String> skippingSet = new HashSet<>();
+        for (Snapshot snapshot : skippingSnapshots) {
             // data manifests
-            skipped.add(snapshot.baseManifestList());
-            skipped.add(snapshot.deltaManifestList());
+            skippingSet.add(snapshot.baseManifestList());
+            skippingSet.add(snapshot.deltaManifestList());
             snapshot.dataManifests(manifestList).stream()
                     .map(ManifestFileMeta::fileName)
-                    .forEach(skipped::add);
+                    .forEach(skippingSet::add);
 
             // index manifests
             String indexManifest = snapshot.indexManifest();
             if (indexManifest != null) {
-                skipped.add(indexManifest);
+                skippingSet.add(indexManifest);
                 indexFileHandler.readManifest(indexManifest).stream()
                         .map(IndexManifestEntry::indexFile)
                         .map(IndexFileMeta::fileName)
-                        .forEach(skipped::add);
+                        .forEach(skippingSet::add);
             }
         }
 
-        return manifestFileName -> {
-            if (skipped.contains(manifestFileName)) {
-                return true;
-            } else {
-                skipped.add(manifestFileName);
-                return false;
-            }
-        };
+        return skippingSet;
     }
 
     /**

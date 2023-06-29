@@ -67,9 +67,9 @@ public class TagDeletion extends FileDeletionBase {
     }
 
     @Override
-    public void cleanUnusedManifests(Snapshot taggedSnapshot, Predicate<String> skipper) {
+    public void cleanUnusedManifests(Snapshot taggedSnapshot, List<Snapshot> skippedSnapshots) {
         // doesn't clean changelog files because they are handled by SnapshotDeletion
-        cleanUnusedManifests(taggedSnapshot, skipper, false);
+        cleanUnusedManifests(taggedSnapshot, skippedSnapshots, false);
     }
 
     public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> fromSnapshots) {

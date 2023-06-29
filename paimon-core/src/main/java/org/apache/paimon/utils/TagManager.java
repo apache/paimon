@@ -113,8 +113,7 @@ public class TagManager {
         tagDeletion.cleanDataDirectories();
 
         // delete manifests
-        Predicate<String> manifestSkipper = tagDeletion.manifestSkipper(skippedSnapshots);
-        tagDeletion.cleanUnusedManifests(taggedSnapshot, manifestSkipper);
+        tagDeletion.cleanUnusedManifests(taggedSnapshot, skippedSnapshots);
     }
 
     /** Check if a tag exists. */
@@ -222,9 +221,8 @@ public class TagManager {
 
         tagDeletion.cleanDataDirectories();
 
-        Predicate<String> manifestSkipper = tagDeletion.manifestSkipper(skippedSnapshots);
         for (int i = taggedSnapshots.size() - 1; i >= toIndex; i--) {
-            tagDeletion.cleanUnusedManifests(taggedSnapshots.get(i), manifestSkipper);
+            tagDeletion.cleanUnusedManifests(taggedSnapshots.get(i), skippedSnapshots);
         }
     }
 

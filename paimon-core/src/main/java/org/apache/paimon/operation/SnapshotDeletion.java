@@ -54,8 +54,8 @@ public class SnapshotDeletion extends FileDeletionBase {
     }
 
     @Override
-    public void cleanUnusedManifests(Snapshot snapshot, Predicate<String> skipper) {
-        cleanUnusedManifests(snapshot, skipper, true);
+    public void cleanUnusedManifests(Snapshot snapshot, List<Snapshot> skippingSnapshots) {
+        cleanUnusedManifests(snapshot, skippingSnapshots, true);
     }
 
     @VisibleForTesting

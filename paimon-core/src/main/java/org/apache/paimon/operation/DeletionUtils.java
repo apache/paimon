@@ -20,16 +20,10 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.ParallellyExecuteUtils;
 
 import org.slf4j.Logger;
@@ -37,7 +31,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -92,70 +85,5 @@ public class DeletionUtils {
             }
         }
         return false;
-    }
-
-    /** Try to delete directories that may be empty. */
-    public static void tryDeleteDirectories(
-            Map<BinaryRow, Set<Integer>> deletionBuckets,
-            FileStorePathFactory pathFactory,
-            FileIO fileIO) {
-        // All directory paths are deduplicated and sorted by hierarchy level
-        Map<Integer, Set<Path>> deduplicate = new HashMap<>();
-        for (Map.Entry<BinaryRow, Set<Integer>> entry : deletionBuckets.entrySet()) {
-            // try to delete bucket directories
-            for (Integer bucket : entry.getValue()) {
-                tryDeleteEmptyDirectory(pathFactory.bucketPath(entry.getKey(), bucket), fileIO);
-            }
-
-            List<Path> hierarchicalPaths = pathFactory.getHierarchicalPartitionPath(entry.getKey());
-            int hierarchies = hierarchicalPaths.size();
-            if (hierarchies == 0) {
-                continue;
-            }
-
-            if (tryDeleteEmptyDirectory(hierarchicalPaths.get(hierarchies - 1), fileIO)) {
-                // deduplicate high level partition directories
-                for (int hierarchy = 0; hierarchy < hierarchies - 1; hierarchy++) {
-                    Path path = hierarchicalPaths.get(hierarchy);
-                    deduplicate.computeIfAbsent(hierarchy, i -> new HashSet<>()).add(path);
-                }
-            }
-        }
-
-        // from deepest to shallowest
-        for (int hierarchy = deduplicate.size() - 1; hierarchy >= 0; hierarchy--) {
-            deduplicate.get(hierarchy).forEach(path -> tryDeleteEmptyDirectory(path, fileIO));
-        }
-    }
-
-    private static boolean tryDeleteEmptyDirectory(Path path, FileIO fileIO) {
-        try {
-            fileIO.delete(path, false);
-            return true;
-        } catch (IOException e) {
-            LOG.debug("Failed to delete directory '{}'. Check whether it is empty.", path);
-            return false;
-        }
-    }
-
-    public static Set<String> collectManifestSkippingSet(
-            Snapshot snapshot, ManifestList manifestList, IndexFileHandler indexFileHandler) {
-        Set<String> skip =
-                snapshot.dataManifests(manifestList).stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toCollection(HashSet::new));
-
-        skip.add(snapshot.baseManifestList());
-        skip.add(snapshot.deltaManifestList());
-
-        String indexManifest = snapshot.indexManifest();
-        if (indexManifest != null) {
-            skip.add(indexManifest);
-            indexFileHandler.readManifest(indexManifest).stream()
-                    .map(IndexManifestEntry::indexFile)
-                    .map(IndexFileMeta::fileName)
-                    .forEach(skip::add);
-        }
-        return skip;
     }
 }
