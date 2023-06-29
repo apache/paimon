@@ -23,114 +23,60 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 
-import javax.annotation.Nullable;
-
-import java.util.HashSet;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import static org.apache.paimon.operation.DeletionUtils.addMergedDataFiles;
 import static org.apache.paimon.operation.DeletionUtils.containsDataFile;
-import static org.apache.paimon.operation.DeletionUtils.readEntries;
 
-/**
- * Delete tag files. This class doesn't check changelog files because they are handled by {@link
- * SnapshotDeletion}.
- */
-public class TagDeletion {
-
-    private final FileIO fileIO;
-    private final FileStorePathFactory pathFactory;
-    private final ManifestList manifestList;
-    private final ManifestFile manifestFile;
-    private final IndexFileHandler indexFileHandler;
-    @Nullable private final Integer scanManifestParallelism;
+/** Delete tag files. */
+public class TagDeletion extends FileDeletionBase {
 
     public TagDeletion(
             FileIO fileIO,
             FileStorePathFactory pathFactory,
-            ManifestList manifestList,
             ManifestFile manifestFile,
-            IndexFileHandler indexFileHandler,
-            @Nullable Integer scanManifestParallelism) {
-        this.fileIO = fileIO;
-        this.pathFactory = pathFactory;
-        this.manifestList = manifestList;
-        this.manifestFile = manifestFile;
-        this.indexFileHandler = indexFileHandler;
-        this.scanManifestParallelism = scanManifestParallelism;
+            ManifestList manifestList,
+            IndexFileHandler indexFileHandler) {
+        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler);
     }
 
-    public void collectSkippedDataFiles(
-            Map<BinaryRow, Map<Integer, Set<String>>> skipped, Snapshot snapshot) {
-        addMergedDataFiles(skipped, snapshot, manifestList, manifestFile, scanManifestParallelism);
-    }
+    @Override
+    public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ManifestEntry> skipper) {
+        Iterable<ManifestEntry> entries = tryReadDataManifestEntries(taggedSnapshot);
 
-    public Set<String> collectManifestSkippingSet(Snapshot snapshot) {
-        return DeletionUtils.collectManifestSkippingSet(snapshot, manifestList, indexFileHandler);
-    }
-
-    public void deleteDataFiles(
-            Snapshot taggedSnapshot,
-            Map<BinaryRow, Map<Integer, Set<String>>> skipped,
-            Map<BinaryRow, Set<Integer>> deletionBuckets) {
-        // delete data files
-        Iterable<ManifestEntry> entries =
-                readEntries(
-                        taggedSnapshot.dataManifests(manifestList),
-                        manifestFile,
-                        scanManifestParallelism);
         for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
-            if (!containsDataFile(skipped, entry)) {
+            if (!skipper.test(entry)) {
                 Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
                 fileIO.deleteQuietly(new Path(bucketPath, entry.file().fileName()));
                 for (String file : entry.file().extraFiles()) {
                     fileIO.deleteQuietly(new Path(bucketPath, file));
                 }
 
-                deletionBuckets
-                        .computeIfAbsent(entry.partition(), p -> new HashSet<>())
-                        .add(entry.bucket());
+                recordDeletionBuckets(entry);
             }
         }
     }
 
-    public void deleteManifestFiles(Snapshot taggedSnapshot, Set<String> skipped) {
-        for (ManifestFileMeta manifest : taggedSnapshot.dataManifests(manifestList)) {
-            String fileName = manifest.fileName();
-            if (!skipped.contains(fileName)) {
-                manifestFile.delete(fileName);
-            }
-        }
-
-        // delete manifest lists
-        manifestList.delete(taggedSnapshot.baseManifestList());
-        manifestList.delete(taggedSnapshot.deltaManifestList());
-
-        // delete index files
-        String indexManifest = taggedSnapshot.indexManifest();
-        // check exists, it may have been deleted by other snapshots
-        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            for (IndexManifestEntry entry : indexFileHandler.readManifest(indexManifest)) {
-                if (!skipped.contains(entry.indexFile().fileName())) {
-                    indexFileHandler.deleteIndexFile(entry);
-                }
-            }
-
-            if (!skipped.contains(indexManifest)) {
-                indexFileHandler.deleteManifest(indexManifest);
-            }
-        }
+    @Override
+    public void cleanUnusedManifests(Snapshot taggedSnapshot, Predicate<String> skipper) {
+        // doesn't clean changelog files because they are handled by SnapshotDeletion
+        cleanUnusedManifests(taggedSnapshot, skipper, false);
     }
 
-    public void tryDeleteDirectories(Map<BinaryRow, Set<Integer>> deletionBuckets) {
-        DeletionUtils.tryDeleteDirectories(deletionBuckets, pathFactory, fileIO);
+    public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> fromSnapshots) {
+        Map<BinaryRow, Map<Integer, Set<String>>> skipped = new HashMap<>();
+        for (Snapshot snapshot : fromSnapshots) {
+            addMergedDataFiles(skipped, snapshot, manifestList, manifestFile, null);
+        }
+        return entry -> containsDataFile(skipped, entry);
     }
 }

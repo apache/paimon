@@ -20,7 +20,6 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.SnapshotDeletion;
@@ -31,12 +30,9 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
@@ -366,29 +362,30 @@ public class SnapshotManager implements Serializable {
         }
 
         // delete data files
-        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
         for (Snapshot snapshot : snapshots) {
             // delete data files
-            deletion.deleteAddedDataFiles(snapshot.deltaManifestList(), deletionBuckets);
-            deletion.deleteAddedDataFiles(snapshot.changelogManifestList(), deletionBuckets);
+            deletion.deleteAddedDataFiles(snapshot.deltaManifestList());
+            deletion.deleteAddedDataFiles(snapshot.changelogManifestList());
         }
 
         // delete directories
-        deletion.tryDeleteDirectories(deletionBuckets);
+        deletion.cleanDataDirectories();
 
-        // delete manifest files.
-        Set<String> manifestSkipped = deletion.collectManifestSkippingSet(snapshot(snapshotId));
+        // delete manifest files
+        List<Snapshot> skippedSnapshots = new ArrayList<>();
+        skippedSnapshots.add(snapshot(snapshotId));
         // tags' manifests should be cleaned by tag deletion
         for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
             Snapshot tag = taggedSnapshots.get(i);
             if (tag.id() <= snapshotId) {
                 break;
             }
-            manifestSkipped.addAll(deletion.collectManifestSkippingSet(tag));
+            skippedSnapshots.add(tag);
         }
+        Predicate<String> manifestSkipper = deletion.manifestSkipper(skippedSnapshots);
 
         for (Snapshot snapshot : snapshots) {
-            deletion.deleteManifestFiles(manifestSkipped, snapshot);
+            deletion.cleanUnusedManifests(snapshot, manifestSkipper);
         }
     }
 }

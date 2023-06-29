@@ -196,10 +196,9 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         return new TagDeletion(
                 fileIO,
                 pathFactory(),
-                manifestListFactory().create(),
                 manifestFileFactory().create(),
-                newIndexFileHandler(),
-                options.scanManifestParallelism());
+                manifestListFactory().create(),
+                newIndexFileHandler());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();

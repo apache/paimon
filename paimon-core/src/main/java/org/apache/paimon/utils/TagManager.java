@@ -19,21 +19,20 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.TagDeletion;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -97,34 +96,25 @@ public class TagManager {
             return;
         }
 
-        Snapshot earliestSnapshot = snapshotManager.earliestSnapshot();
-        Map<BinaryRow, Map<Integer, Set<String>>> dataFileSkipped = new HashMap<>();
-        Set<String> manifestSkipped = new HashSet<>();
-
-        // collect skipping sets from the earliest snapshot
-        tagDeletion.collectSkippedDataFiles(dataFileSkipped, earliestSnapshot);
-        manifestSkipped.addAll(tagDeletion.collectManifestSkippingSet(earliestSnapshot));
-
-        // collect from the neighbor tags
+        // collect skipping sets from the earliest snapshot and neighbor tags
+        List<Snapshot> skippedSnapshots = new ArrayList<>();
+        skippedSnapshots.add(snapshotManager.earliestSnapshot());
         int index = findIndex(taggedSnapshot, taggedSnapshots);
         if (index - 1 >= 0) {
-            tagDeletion.collectSkippedDataFiles(dataFileSkipped, taggedSnapshots.get(index - 1));
-            manifestSkipped.addAll(
-                    tagDeletion.collectManifestSkippingSet(taggedSnapshots.get(index - 1)));
+            skippedSnapshots.add(taggedSnapshots.get(index - 1));
         }
         if (index + 1 < taggedSnapshots.size()) {
-            tagDeletion.collectSkippedDataFiles(dataFileSkipped, taggedSnapshots.get(index + 1));
-            manifestSkipped.addAll(
-                    tagDeletion.collectManifestSkippingSet(taggedSnapshots.get(index + 1)));
+            skippedSnapshots.add(taggedSnapshots.get(index + 1));
         }
 
         // delete data files and empty directories
-        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
-        tagDeletion.deleteDataFiles(taggedSnapshot, dataFileSkipped, deletionBuckets);
-        tagDeletion.tryDeleteDirectories(deletionBuckets);
+        Predicate<ManifestEntry> dataFileSkipper = tagDeletion.dataFileSkipper(skippedSnapshots);
+        tagDeletion.cleanUnusedDataFiles(taggedSnapshot, dataFileSkipper);
+        tagDeletion.cleanDataDirectories();
 
         // delete manifests
-        tagDeletion.deleteManifestFiles(taggedSnapshot, manifestSkipped);
+        Predicate<String> manifestSkipper = tagDeletion.manifestSkipper(skippedSnapshots);
+        tagDeletion.cleanUnusedManifests(taggedSnapshot, manifestSkipper);
     }
 
     /** Check if a tag exists. */
@@ -224,18 +214,17 @@ public class TagManager {
 
         // if old snapshots has been expired, rollback-snapshot cannot delete files used by tag
         // so here have to delete them
-        Map<BinaryRow, Map<Integer, Set<String>>> dataFileSkipped = new HashMap<>();
-        tagDeletion.collectSkippedDataFiles(dataFileSkipped, latestSnapshot);
-        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
+        List<Snapshot> skippedSnapshots = Collections.singletonList(latestSnapshot);
+        Predicate<ManifestEntry> dataFileSkipper = tagDeletion.dataFileSkipper(skippedSnapshots);
         for (int i = taggedSnapshots.size() - 1; i >= toIndex; i--) {
-            tagDeletion.deleteDataFiles(taggedSnapshots.get(i), dataFileSkipped, deletionBuckets);
+            tagDeletion.cleanUnusedDataFiles(taggedSnapshots.get(i), dataFileSkipper);
         }
 
-        tagDeletion.tryDeleteDirectories(deletionBuckets);
+        tagDeletion.cleanDataDirectories();
 
-        Set<String> manifestSkipped = tagDeletion.collectManifestSkippingSet(latestSnapshot);
+        Predicate<String> manifestSkipper = tagDeletion.manifestSkipper(skippedSnapshots);
         for (int i = taggedSnapshots.size() - 1; i >= toIndex; i--) {
-            tagDeletion.deleteManifestFiles(taggedSnapshots.get(i), manifestSkipped);
+            tagDeletion.cleanUnusedManifests(taggedSnapshots.get(i), manifestSkipper);
         }
     }
 

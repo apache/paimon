@@ -21,17 +21,15 @@ package org.apache.paimon.operation;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
 import java.util.OptionalLong;
-import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Predicate;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -154,17 +152,13 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
         // id should be (beginInclusiveId, endExclusiveId]
-        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
         for (long id = beginInclusiveId + 1; id <= endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete merge tree files not used by snapshot #" + id);
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             // expire merge tree files and collect changed buckets
-            snapshotDeletion.deleteExpiredDataFiles(
-                    snapshot.deltaManifestList(),
-                    deletionBuckets,
-                    tagFileKeeper.tagDataFileSkipper(id));
+            snapshotDeletion.cleanUnusedDataFiles(snapshot, tagFileKeeper.tagDataFileSkipper(id));
         }
 
         // delete changelog files
@@ -174,30 +168,26 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.changelogManifestList() != null) {
-                snapshotDeletion.deleteAddedDataFiles(
-                        snapshot.changelogManifestList(), deletionBuckets);
+                snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
             }
         }
 
         // data files and changelog files in bucket directories has been deleted
         // then delete changed bucket directories if they are empty
-        snapshotDeletion.tryDeleteDirectories(deletionBuckets);
+        snapshotDeletion.cleanDataDirectories();
 
         // delete manifests and indexFiles
-        Set<String> skipManifestFiles =
-                snapshotDeletion.collectManifestSkippingSet(
-                        snapshotManager.snapshot(endExclusiveId));
-        for (Snapshot snapshot :
-                tagFileKeeper.findOverlappedSnapshots(beginInclusiveId, endExclusiveId)) {
-            skipManifestFiles.addAll(snapshotDeletion.collectManifestSkippingSet(snapshot));
-        }
+        List<Snapshot> snapshots =
+                tagFileKeeper.findOverlappedSnapshots(beginInclusiveId, endExclusiveId);
+        snapshots.add(snapshotManager.snapshot(endExclusiveId));
+        Predicate<String> manifestSkipper = snapshotDeletion.manifestSkipper(snapshots);
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete manifests in snapshot #" + id);
             }
 
             Snapshot snapshot = snapshotManager.snapshot(id);
-            snapshotDeletion.deleteManifestFiles(skipManifestFiles, snapshot);
+            snapshotDeletion.cleanUnusedManifests(snapshot, manifestSkipper);
 
             // delete snapshot last
             snapshotManager.fileIO().deleteQuietly(snapshotManager.snapshotPath(id));
