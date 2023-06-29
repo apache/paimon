@@ -34,9 +34,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
-import static org.apache.paimon.operation.DeletionUtils.addMergedDataFiles;
-import static org.apache.paimon.operation.DeletionUtils.containsDataFile;
-
 /** Delete tag files. */
 public class TagDeletion extends FileDeletionBase {
 
@@ -75,7 +72,7 @@ public class TagDeletion extends FileDeletionBase {
     public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> fromSnapshots) {
         Map<BinaryRow, Map<Integer, Set<String>>> skipped = new HashMap<>();
         for (Snapshot snapshot : fromSnapshots) {
-            addMergedDataFiles(skipped, snapshot, manifestList, manifestFile, null);
+            addMergedDataFiles(skipped, snapshot);
         }
         return entry -> containsDataFile(skipped, entry);
     }

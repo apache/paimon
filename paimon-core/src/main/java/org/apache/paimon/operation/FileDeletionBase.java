@@ -187,15 +187,47 @@ public abstract class FileDeletionBase {
         }
     }
 
-    protected Iterable<ManifestEntry> tryReadManifestEntries(String manifestListName) {
-        return readManifestEntries(tryReadManifestList(manifestListName));
+    /**
+     * It is possible that a job was killed during expiration and some manifest files have been
+     * deleted, so if the clean methods need to get manifests of a snapshot to be cleaned, we should
+     * try to read manifests and return empty list if failed instead of calling {@link
+     * Snapshot#dataManifests} directly.
+     */
+    protected List<ManifestFileMeta> tryReadManifestList(String manifestListName) {
+        try {
+            return manifestList.read(manifestListName);
+        } catch (Exception e) {
+            LOG.warn("Failed to read manifest list file " + manifestListName, e);
+            return Collections.emptyList();
+        }
     }
 
-    protected Iterable<ManifestEntry> tryReadDataManifestEntries(Snapshot snapshot) {
-        return readManifestEntries(tryReadDataManifests(snapshot));
+    /**
+     * Try to read base and delta manifest lists at one time. If failed to read either one, the
+     * return will be empty to avoid error merging result.
+     */
+    public Iterable<ManifestEntry> tryReadDataManifestEntries(Snapshot snapshot) {
+        List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
+
+        try {
+            manifestFileMetas.addAll(manifestList.read(snapshot.baseManifestList()));
+        } catch (Exception e) {
+            LOG.warn("Failed to read manifest list file " + snapshot.baseManifestList(), e);
+            return Collections.emptyList();
+        }
+
+        try {
+            manifestFileMetas.addAll(manifestList.read(snapshot.deltaManifestList()));
+        } catch (Exception e) {
+            LOG.warn("Failed to read manifest list file " + snapshot.deltaManifestList(), e);
+            return Collections.emptyList();
+        }
+
+        return readManifestEntries(manifestFileMetas);
     }
 
-    private Iterable<ManifestEntry> readManifestEntries(List<ManifestFileMeta> manifestFileMetas) {
+    protected Iterable<ManifestEntry> readManifestEntries(
+            List<ManifestFileMeta> manifestFileMetas) {
         Queue<String> files =
                 manifestFileMetas.stream()
                         .map(ManifestFileMeta::fileName)
@@ -222,6 +254,29 @@ public abstract class FileDeletionBase {
                                 });
     }
 
+    protected void addMergedDataFiles(
+            Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, Snapshot snapshot) {
+        Iterable<ManifestEntry> entries = tryReadDataManifestEntries(snapshot);
+        for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
+            dataFiles
+                    .computeIfAbsent(entry.partition(), p -> new HashMap<>())
+                    .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
+                    .add(entry.file().fileName());
+        }
+    }
+
+    protected boolean containsDataFile(
+            Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, ManifestEntry testee) {
+        Map<Integer, Set<String>> buckets = dataFiles.get(testee.partition());
+        if (buckets != null) {
+            Set<String> fileNames = buckets.get(testee.bucket());
+            if (fileNames != null) {
+                return fileNames.contains(testee.file().fileName());
+            }
+        }
+        return false;
+    }
+
     /** Changelogs were not checked. Let the subclass determine whether to delete them. */
     private Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
         Set<String> skippingSet = new HashSet<>();
@@ -245,44 +300,6 @@ public abstract class FileDeletionBase {
         }
 
         return skippingSet;
-    }
-
-    /**
-     * It is possible that a job was killed during expiration and some manifest files have been
-     * deleted, so if the clean methods need to read manifests of a snapshot to be cleaned, use this
-     * method instead of calling {@link Snapshot#dataManifests} directly.
-     */
-    private List<ManifestFileMeta> tryReadManifestList(String manifestListName) {
-        try {
-            return manifestList.read(manifestListName);
-        } catch (Exception e) {
-            LOG.warn("Failed to read manifest list file " + manifestListName, e);
-            return Collections.emptyList();
-        }
-    }
-
-    /**
-     * Try to read base and delta manifest lists at one time. If failed to read either list, the
-     * result will be empty to avoid error merging result.
-     */
-    private List<ManifestFileMeta> tryReadDataManifests(Snapshot snapshot) {
-        List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
-
-        try {
-            manifestFileMetas.addAll(manifestList.read(snapshot.baseManifestList()));
-        } catch (Exception e) {
-            LOG.warn("Failed to read manifest list file " + snapshot.baseManifestList(), e);
-            return Collections.emptyList();
-        }
-
-        try {
-            manifestFileMetas.addAll(manifestList.read(snapshot.deltaManifestList()));
-        } catch (Exception e) {
-            LOG.warn("Failed to read manifest list file " + snapshot.deltaManifestList(), e);
-            return Collections.emptyList();
-        }
-
-        return manifestFileMetas;
     }
 
     private boolean tryDeleteEmptyDirectory(Path path) {

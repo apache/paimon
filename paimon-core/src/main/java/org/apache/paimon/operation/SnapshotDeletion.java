@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
@@ -29,11 +30,13 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.TagManager;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 /** Delete snapshot files. */
@@ -114,5 +117,28 @@ public class SnapshotDeletion extends FileDeletionBase {
                 recordDeletionBuckets(entry);
             }
         }
+    }
+
+    private Iterable<ManifestEntry> tryReadManifestEntries(String manifestListName) {
+        return readManifestEntries(tryReadManifestList(manifestListName));
+    }
+
+    /** Used to record which tag is cached in tagged snapshots list. */
+    private int cachedTagIndex = -1;
+
+    /** Used to cache data files used by current tag. */
+    private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles = new HashMap<>();
+
+    public Predicate<ManifestEntry> dataFileSkipper(
+            List<Snapshot> taggedSnapshots, long expiringSnapshotId) {
+        int index = TagManager.findPreviousTag(taggedSnapshots, expiringSnapshotId);
+        // refresh tag data files
+        if (index >= 0 && cachedTagIndex != index) {
+            cachedTagIndex = index;
+            cachedTagDataFiles.clear();
+            addMergedDataFiles(cachedTagDataFiles, taggedSnapshots.get(index));
+        }
+
+        return entry -> index >= 0 && containsDataFile(cachedTagDataFiles, entry);
     }
 }

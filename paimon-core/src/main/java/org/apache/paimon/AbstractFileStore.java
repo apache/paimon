@@ -31,7 +31,6 @@ import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
-import org.apache.paimon.operation.TagFileKeeper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
@@ -174,11 +173,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.snapshotTimeRetain().toMillis(),
                 snapshotManager(),
                 newSnapshotDeletion(),
-                new TagFileKeeper(
-                        manifestListFactory().create(),
-                        manifestFileFactory().create(),
-                        new TagManager(fileIO, options.path()),
-                        options.scanManifestParallelism()));
+                new TagManager(fileIO, options.path()));
     }
 
     @Override

@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +53,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
 
-    private final TagFileKeeper tagFileKeeper;
+    private final TagManager tagManager;
 
     private Lock lock;
 
@@ -62,7 +63,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             long millisRetained,
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
-            TagFileKeeper tagFileKeeper) {
+            TagManager tagManager) {
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
@@ -70,7 +71,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.snapshotDeletion = snapshotDeletion;
-        this.tagFileKeeper = tagFileKeeper;
+        this.tagManager = tagManager;
     }
 
     @Override
@@ -146,7 +147,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
         }
 
-        tagFileKeeper.reloadTags();
+        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
 
         // delete merge tree files
         // deleted merge tree files in a snapshot are not used by the next snapshot, so the range of
@@ -157,7 +158,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             // expire merge tree files and collect changed buckets
-            snapshotDeletion.cleanUnusedDataFiles(snapshot, tagFileKeeper.tagDataFileSkipper(id));
+            snapshotDeletion.cleanUnusedDataFiles(
+                    snapshot, snapshotDeletion.dataFileSkipper(taggedSnapshots, id));
         }
 
         // delete changelog files
@@ -177,7 +179,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         // delete manifests and indexFiles
         List<Snapshot> skippingSnapshots =
-                tagFileKeeper.findOverlappedSnapshots(beginInclusiveId, endExclusiveId);
+                TagManager.findOverlappedSnapshots(
+                        taggedSnapshots, beginInclusiveId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.snapshot(endExclusiveId));
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
