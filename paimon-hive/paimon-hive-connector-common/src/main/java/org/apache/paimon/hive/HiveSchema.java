@@ -56,6 +56,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
@@ -134,11 +135,17 @@ public class HiveSchema {
         String partitionTypes =
                 properties.getProperty(hive_metastoreConstants.META_TABLE_PARTITION_COLUMN_TYPES);
         List<TypeInfo> partitionTypeInfos =
-                TypeInfoUtils.getTypeInfosFromTypeString(partitionTypes);
+                StringUtils.isEmpty(partitionTypes)
+                        ? Collections.emptyList()
+                        : TypeInfoUtils.getTypeInfosFromTypeString(partitionTypes);
 
+        String commentProperty = properties.getProperty("columns.comments");
         List<String> comments =
-                Lists.newArrayList(
-                        Splitter.on('\0').split(properties.getProperty("columns.comments")));
+                StringUtils.isEmpty(commentProperty)
+                        ? IntStream.range(0, columnNames.size())
+                                .mapToObj(i -> "")
+                                .collect(Collectors.toList())
+                        : Lists.newArrayList(Splitter.on('\0').split(commentProperty));
 
         if (tableSchema.isPresent() && columnNames.size() > 0 && typeInfos.size() > 0) {
             // Both Paimon table schema and Hive table schema exist
