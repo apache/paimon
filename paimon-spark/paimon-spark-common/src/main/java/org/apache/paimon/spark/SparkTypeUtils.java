@@ -168,13 +168,16 @@ public class SparkTypeUtils {
                     mapType.getValueType().isNullable());
         }
 
+        /**
+         * For simplicity, as a temporary solution, we directly convert the non-null attribute to
+         * nullable on the Spark side.
+         */
         @Override
         public DataType visit(RowType rowType) {
             List<StructField> fields = new ArrayList<>(rowType.getFieldCount());
             for (DataField field : rowType.getFields()) {
                 StructField structField =
-                        DataTypes.createStructField(
-                                field.name(), field.type().accept(this), field.type().isNullable());
+                        DataTypes.createStructField(field.name(), field.type().accept(this), true);
                 structField =
                         Optional.ofNullable(field.description())
                                 .map(structField::withComment)
