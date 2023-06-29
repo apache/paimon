@@ -39,7 +39,7 @@ Maven dependency:
 
 <dependency>
   <groupId>org.apache.flink</groupId>
-  <artifactId>flink-table-api-java-bridge_2.12</artifactId>
+  <artifactId>flink-table-api-java-bridge</artifactId>
   <version>1.17.0</version>
   <scope>provided</scope>
 </dependency>
