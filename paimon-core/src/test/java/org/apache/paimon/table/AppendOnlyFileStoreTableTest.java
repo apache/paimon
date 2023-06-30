@@ -33,13 +33,16 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -169,6 +172,40 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         .mapToInt(Integer::intValue)
                         .toArray();
         assertThat(partitions).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    public void testStreamingSplitInUnawareBucketMode() throws Exception {
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        options -> options.set(CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1 M"));
+
+        StreamTableScan scan = table.newStreamScan();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(rowData(3, 33, 303L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(rowData(1, 10, 100L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(rowData(2, 22, 202L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+        Assertions.assertEquals(scan.plan().splits().size(), 3);
+
+        write.write(rowData(3, 33, 303L));
+        result.addAll(write.prepareCommit(true, 1));
+        write.write(rowData(1, 10, 100L));
+        result.addAll(write.prepareCommit(true, 1));
+        write.write(rowData(2, 22, 202L));
+        result.addAll(write.prepareCommit(true, 1));
+        commit.commit(1, result);
+        Assertions.assertEquals(scan.plan().splits().size(), 3);
+
+        write.close();
     }
 
     @Test
@@ -370,6 +407,25 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         new Schema(
                                 OVERWRITE_TEST_ROW_TYPE.getFields(),
                                 Arrays.asList("pt0", "pt1"),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+    }
+
+    protected FileStoreTable createUnawareBucketFileStoreTable(Consumer<Options> configure)
+            throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
+        conf.set(CoreOptions.BUCKET, -1);
+        configure.accept(conf);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Collections.emptyList(),
                                 Collections.emptyList(),
                                 conf.toMap(),
                                 ""));

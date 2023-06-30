@@ -37,7 +37,7 @@ public class ForceUpLevel0CompactionTest {
     @Test
     public void testForceCompaction0() {
         ForceUpLevel0Compaction compaction =
-                new ForceUpLevel0Compaction(new UniversalCompaction(200, 1, 5, Integer.MAX_VALUE));
+                new ForceUpLevel0Compaction(new UniversalCompaction(200, 1, 5));
 
         Optional<CompactUnit> result = compaction.pick(3, Arrays.asList(run(0, 1), run(0, 1)));
         assertThat(result).isPresent();

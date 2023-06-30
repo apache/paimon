@@ -1,6 +1,6 @@
 ---
 title: "CDC Ingestion"
-weight: 7
+weight: 8
 type: docs
 aliases:
 - /how-to/cdc-ingestion.html

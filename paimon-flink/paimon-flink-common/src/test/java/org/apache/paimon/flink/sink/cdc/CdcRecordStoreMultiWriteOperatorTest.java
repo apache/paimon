@@ -647,7 +647,14 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                         catalogLoader,
                         (t, commitUser, state, ioManager, memoryPool) ->
                                 new StoreSinkWriteImpl(
-                                        t, commitUser, state, ioManager, false, false, memoryPool),
+                                        t,
+                                        commitUser,
+                                        state,
+                                        ioManager,
+                                        false,
+                                        false,
+                                        true,
+                                        memoryPool),
                         commitUser,
                         Options.fromMap(new HashMap<>()));
         TypeSerializer<CdcMultiplexRecord> inputSerializer = new JavaSerializer<>();

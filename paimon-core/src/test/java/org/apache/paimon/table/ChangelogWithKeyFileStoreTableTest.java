@@ -25,6 +25,7 @@ import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.ScanKind;
@@ -358,13 +359,26 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testStreamingFullChangelog() throws Exception {
+        innerTestStreamingFullChangelog(options -> {});
+    }
+
+    @Test
+    public void testStreamingFullChangelogWithSpill() throws Exception {
+        innerTestStreamingFullChangelog(
+                options -> options.set(CoreOptions.SORT_SPILL_THRESHOLD, 2));
+    }
+
+    private void innerTestStreamingFullChangelog(Consumer<Options> configure) throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
-                        conf ->
-                                conf.set(
-                                        CoreOptions.CHANGELOG_PRODUCER,
-                                        ChangelogProducer.FULL_COMPACTION));
-        StreamTableWrite write = table.newWrite(commitUser);
+                        conf -> {
+                            conf.set(
+                                    CoreOptions.CHANGELOG_PRODUCER,
+                                    ChangelogProducer.FULL_COMPACTION);
+                            configure.accept(conf);
+                        });
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
         StreamTableCommit commit = table.newCommit(commitUser);
 
         write.write(rowData(1, 10, 110L));

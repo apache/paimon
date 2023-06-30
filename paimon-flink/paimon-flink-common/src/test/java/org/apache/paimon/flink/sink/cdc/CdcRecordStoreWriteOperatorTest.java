@@ -257,7 +257,14 @@ public class CdcRecordStoreWriteOperatorTest {
                         table,
                         (t, commitUser, state, ioManager, memoryPool) ->
                                 new StoreSinkWriteImpl(
-                                        t, commitUser, state, ioManager, false, false, memoryPool),
+                                        t,
+                                        commitUser,
+                                        state,
+                                        ioManager,
+                                        false,
+                                        false,
+                                        true,
+                                        memoryPool),
                         commitUser);
         TypeSerializer<CdcRecord> inputSerializer = new JavaSerializer<>();
         TypeSerializer<Committable> outputSerializer =

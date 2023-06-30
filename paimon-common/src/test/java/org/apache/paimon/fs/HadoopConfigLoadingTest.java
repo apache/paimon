@@ -208,7 +208,9 @@ public class HadoopConfigLoadingTest {
         final Options options = new Options();
         options.setString(HadoopUtils.PATH_HADOOP_CONFIG, hadoopConfEntryDir.getAbsolutePath());
 
-        final Configuration hadoopConf;
+        final Configuration hadoopConf1;
+        final Configuration hadoopConf2;
+        final Configuration hadoopConf3;
 
         final Map<String, String> originalEnv = System.getenv();
         final Map<String, String> newEnv = new HashMap<>(originalEnv);
@@ -216,19 +218,34 @@ public class HadoopConfigLoadingTest {
         newEnv.put(HadoopUtils.HADOOP_HOME_ENV, hadoopHome.getAbsolutePath());
         try {
             CommonTestUtils.setEnv(newEnv);
-            hadoopConf = HadoopUtils.getHadoopConfiguration(options);
+            hadoopConf1 = HadoopUtils.getHadoopConfiguration(options);
+
+            options.set(HadoopUtils.HADOOP_CONF_LOADER, HadoopUtils.HadoopConfigLoader.ENV);
+            hadoopConf2 = HadoopUtils.getHadoopConfiguration(options);
+
+            options.set(HadoopUtils.HADOOP_CONF_LOADER, HadoopUtils.HadoopConfigLoader.OPTION);
+            hadoopConf3 = HadoopUtils.getHadoopConfiguration(options);
         } finally {
             CommonTestUtils.setEnv(originalEnv);
         }
 
-        // contains extra entries
-        assertEquals(v1, hadoopConf.get(k1, null));
-        assertEquals(v2, hadoopConf.get(k2, null));
-        assertEquals(v4, hadoopConf.get(k4, null));
-        assertEquals(v5, hadoopConf.get(k5, null));
+        assertEquals(v1, hadoopConf1.get(k1, null));
+        assertEquals(v2, hadoopConf1.get(k2, null));
+        assertEquals(v4, hadoopConf1.get(k4, null));
+        assertEquals(v5, hadoopConf1.get(k5, null));
+        assertEquals(IN_CP_CONFIG_VALUE, hadoopConf1.get(IN_CP_CONFIG_KEY, null));
 
-        // also contains classpath defaults
-        assertEquals(IN_CP_CONFIG_VALUE, hadoopConf.get(IN_CP_CONFIG_KEY, null));
+        assertEquals("from HADOOP_CONF_DIR", hadoopConf2.get(k1, null));
+        assertEquals("from HADOOP_HOME/etc/hadoop", hadoopConf2.get(k2, null));
+        assertEquals("from HADOOP_HOME/etc/hadoop", hadoopConf2.get(k4, null));
+        assertEquals("from HADOOP_HOME/conf", hadoopConf2.get(k5, null));
+        assertEquals(IN_CP_CONFIG_VALUE, hadoopConf2.get(IN_CP_CONFIG_KEY, null));
+
+        assertEquals("from Paimon config `hadoop-conf-dir`", hadoopConf3.get(k1, null));
+        assertEquals("from Paimon config `hadoop-conf-dir`", hadoopConf3.get(k2, null));
+        assertNull(hadoopConf3.get(k4, null));
+        assertNull(hadoopConf3.get(k5, null));
+        assertEquals(IN_CP_CONFIG_VALUE, hadoopConf3.get(IN_CP_CONFIG_KEY, null));
     }
 
     @Test

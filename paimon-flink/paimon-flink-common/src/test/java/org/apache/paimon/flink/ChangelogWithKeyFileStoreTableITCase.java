@@ -474,8 +474,6 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
     private List<TableResult> testRandom(
             TableEnvironment tEnv, int numProducers, boolean enableFailure, String tableProperties)
             throws Exception {
-        assert LIMIT > NUM_VALUES;
-
         String failingName = UUID.randomUUID().toString();
         String failingPath = FailingFileIO.getFailingPath(failingName, path);
 
@@ -523,7 +521,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         List<TableResult> results = new ArrayList<>();
 
         if (enableFailure) {
-            FailingFileIO.reset(failingName, 100, 10000);
+            FailingFileIO.reset(failingName, 2, 10000);
         }
         for (int i = 0; i < numProducers; i++) {
             // for the last `NUM_PARTS * NUM_KEYS` records, we update every key to a specific value

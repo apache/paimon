@@ -86,7 +86,9 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public SplitGenerator splitGenerator() {
         return new AppendOnlySplitGenerator(
-                store().options().splitTargetSize(), store().options().splitOpenFileCost());
+                store().options().splitTargetSize(),
+                store().options().splitOpenFileCost(),
+                bucketMode());
     }
 
     /**

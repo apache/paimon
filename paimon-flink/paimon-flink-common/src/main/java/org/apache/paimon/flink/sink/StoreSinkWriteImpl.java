@@ -50,6 +50,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final IOManager ioManager;
     private final boolean ignorePreviousFiles;
     private final boolean waitCompaction;
+    private final boolean isStreamingMode;
     @Nullable private final MemorySegmentPool memoryPool;
 
     protected TableWriteImpl<?> write;
@@ -61,12 +62,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             IOManager ioManager,
             boolean ignorePreviousFiles,
             boolean waitCompaction,
+            boolean isStreamingMode,
             @Nullable MemorySegmentPool memoryPool) {
         this.commitUser = commitUser;
         this.state = state;
         this.ioManager = ioManager;
         this.ignorePreviousFiles = ignorePreviousFiles;
         this.waitCompaction = waitCompaction;
+        this.isStreamingMode = isStreamingMode;
         this.memoryPool = memoryPool;
         this.write = newTableWrite(table);
     }
@@ -83,7 +86,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                 : new HeapMemorySegmentPool(
                                         table.coreOptions().writeBufferSize(),
                                         table.coreOptions().pageSize()))
-                .withIgnorePreviousFiles(ignorePreviousFiles);
+                .withIgnorePreviousFiles(ignorePreviousFiles)
+                .isStreamingMode(isStreamingMode);
     }
 
     @Override
@@ -136,6 +140,11 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     @Override
     public void snapshotState() throws Exception {
         // do nothing
+    }
+
+    @Override
+    public boolean streamingMode() {
+        return isStreamingMode;
     }
 
     @Override

@@ -25,6 +25,8 @@ import org.apache.paimon.utils.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
@@ -47,7 +49,7 @@ public class IOManagerImpl implements IOManager {
      *
      * @param tempDirs The basic directories for files underlying anonymous channels.
      */
-    public IOManagerImpl(String[] tempDirs) {
+    public IOManagerImpl(String... tempDirs) {
         this.fileChannelManager =
                 new FileChannelManagerImpl(Preconditions.checkNotNull(tempDirs), DIR_NAME_PREFIX);
         if (LOG.isInfoEnabled()) {
@@ -121,5 +123,11 @@ public class IOManagerImpl implements IOManager {
     @Override
     public BufferFileReader createBufferFileReader(FileIOChannel.ID channelID) throws IOException {
         return new BufferFileReaderImpl(channelID);
+    }
+
+    public static String[] splitPaths(@Nonnull String separatedPaths) {
+        return separatedPaths.length() > 0
+                ? separatedPaths.split(",|" + File.pathSeparator)
+                : new String[0];
     }
 }

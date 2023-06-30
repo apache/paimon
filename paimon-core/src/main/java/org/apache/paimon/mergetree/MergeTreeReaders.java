@@ -18,18 +18,16 @@
 
 package org.apache.paimon.mergetree;
 
-import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
-import org.apache.paimon.mergetree.compact.SortMergeReader;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.utils.IOUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -47,9 +45,9 @@ public class MergeTreeReaders {
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
             MergeFunction<KeyValue> mergeFunction,
-            SortEngine sortEngine)
+            MergeSorter mergeSorter)
             throws IOException {
-        List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             readers.add(
                     () ->
@@ -58,7 +56,7 @@ public class MergeTreeReaders {
                                     readerFactory,
                                     userKeyComparator,
                                     new ReducerMergeFunctionWrapper(mergeFunction),
-                                    sortEngine));
+                                    mergeSorter));
         }
         RecordReader<KeyValue> reader = ConcatRecordReader.create(readers);
         if (dropDelete) {
@@ -67,25 +65,23 @@ public class MergeTreeReaders {
         return reader;
     }
 
-    public static RecordReader<KeyValue> readerForSection(
+    public static <T> RecordReader<T> readerForSection(
             List<SortedRun> section,
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
-            MergeFunctionWrapper<KeyValue> mergeFunctionWrapper,
-            SortEngine sortEngine)
+            MergeFunctionWrapper<T> mergeFunctionWrapper,
+            MergeSorter mergeSorter)
             throws IOException {
-        List<RecordReader<KeyValue>> readers = readerForSection(section, readerFactory);
-        if (readers.size() == 1) {
-            return readers.get(0);
-        } else {
-            return SortMergeReader.createSortMergeReader(
-                    readers, userKeyComparator, mergeFunctionWrapper, sortEngine);
+        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        for (SortedRun run : section) {
+            readers.add(() -> readerForRun(run, readerFactory));
         }
+        return mergeSorter.mergeSort(readers, userKeyComparator, mergeFunctionWrapper);
     }
 
     public static RecordReader<KeyValue> readerForRun(
             SortedRun run, KeyValueFileReaderFactory readerFactory) throws IOException {
-        List<ConcatRecordReader.ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {
             readers.add(
                     () ->
@@ -93,20 +89,5 @@ public class MergeTreeReaders {
                                     file.schemaId(), file.fileName(), file.level()));
         }
         return ConcatRecordReader.create(readers);
-    }
-
-    public static List<RecordReader<KeyValue>> readerForSection(
-            List<SortedRun> runs, KeyValueFileReaderFactory readerFactory) throws IOException {
-        List<RecordReader<KeyValue>> readers = new ArrayList<>();
-        try {
-            for (SortedRun run : runs) {
-                readers.add(readerForRun(run, readerFactory));
-            }
-        } catch (IOException e) {
-            // if one of the readers creating failed, we need to close them all.
-            readers.forEach(IOUtils::closeQuietly);
-            throw e;
-        }
-        return readers;
     }
 }

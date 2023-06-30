@@ -318,6 +318,88 @@ public class FlinkActionsE2eTest extends E2eTestBase {
         checkResult("1, Hi", "2, World");
     }
 
+    @Test
+    public void testCreateAndDeleteTag() throws Exception {
+        String tableTDdl =
+                "CREATE TABLE IF NOT EXISTS T (\n"
+                        + "    k INT,\n"
+                        + "    v STRING,\n"
+                        + "    PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ");\n";
+
+        // 3 snapshots
+        String inserts =
+                "INSERT INTO T VALUES (1, 'Hi');\n"
+                        + "INSERT INTO T VALUES (2, 'Hello');\n"
+                        + "INSERT INTO T VALUES (3, 'Paimon');\n";
+
+        runSql("SET 'table.dml-sync' = 'true';\n" + inserts, catalogDdl, useCatalogCmd, tableTDdl);
+
+        // create tag at snapshot 2 and check
+        Container.ExecResult execResult =
+                jobManager.execInContainer(
+                        "bin/flink",
+                        "run",
+                        "lib/paimon-flink-action.jar",
+                        "create-tag",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--table",
+                        "T",
+                        "--tag-name",
+                        "tag2",
+                        "--snapshot",
+                        "2");
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
+
+        runSql(
+                "INSERT INTO _tags1 SELECT tag_name, snapshot_id FROM T\\$tags;",
+                catalogDdl,
+                useCatalogCmd,
+                createResultSink("_tags1", "tag_name STRING, snapshot_id BIGINT"));
+        checkResult("tag2, 2");
+        clearCurrentResults();
+
+        // read tag2
+        runSql(
+                "SET 'execution.runtime-mode' = 'batch';\n"
+                        + "INSERT INTO result1 SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag2') */;",
+                catalogDdl,
+                useCatalogCmd,
+                createResultSink("result1", "k INT, v STRING"));
+        checkResult("1, Hi", "2, Hello");
+        clearCurrentResults();
+
+        // delete tag2 and check
+        execResult =
+                jobManager.execInContainer(
+                        "bin/flink",
+                        "run",
+                        "lib/paimon-flink-action.jar",
+                        "delete-tag",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--table",
+                        "T",
+                        "--tag-name",
+                        "tag2");
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
+
+        runSql(
+                "INSERT INTO _tags2 SELECT tag_name, snapshot_id FROM T\\$tags;",
+                catalogDdl,
+                useCatalogCmd,
+                createResultSink("_tags2", "tag_name STRING, snapshot_id BIGINT"));
+        Thread.sleep(5000);
+        checkResult();
+    }
+
     private void runSql(String sql, String... ddls) throws Exception {
         runSql(String.join("\n", ddls) + "\n" + sql);
     }

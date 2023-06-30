@@ -18,15 +18,17 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions.SortEngine;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.DropDeleteReader;
+import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
@@ -35,7 +37,6 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory.AdjustedProjection;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -56,7 +57,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.SORT_ENGINE;
 import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
@@ -69,7 +69,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final Comparator<InternalRow> keyComparator;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final boolean valueCountMode;
-    private final SortEngine sortEngine;
+    private final MergeSorter mergeSorter;
 
     @Nullable private int[][] keyProjectedFields;
 
@@ -79,6 +79,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     @Nullable private int[][] pushdownProjection;
     @Nullable private int[][] outerProjection;
+
+    private boolean forceKeepDelete = false;
 
     public KeyValueFileStoreRead(
             FileIO fileIO,
@@ -105,7 +107,9 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
         this.valueCountMode = tableSchema.trimmedPrimaryKeys().isEmpty();
-        this.sortEngine = Options.fromMap(tableSchema.options()).get(SORT_ENGINE);
+        this.mergeSorter =
+                new MergeSorter(
+                        CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
     }
 
     public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
@@ -121,6 +125,16 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         if (pushdownProjection != null) {
             readerFactoryBuilder.withValueProjection(pushdownProjection);
         }
+        return this;
+    }
+
+    public KeyValueFileStoreRead withIOManager(IOManager ioManager) {
+        this.mergeSorter.setIOManager(ioManager);
+        return this;
+    }
+
+    public KeyValueFileStoreRead forceKeepDelete() {
+        this.forceKeepDelete = true;
         return this;
     }
 
@@ -218,10 +232,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                                 : nonOverlappedSectionFactory,
                                         keyComparator,
                                         mergeFuncWrapper,
-                                        sortEngine));
+                                        mergeSorter));
             }
-            DropDeleteReader reader =
-                    new DropDeleteReader(ConcatRecordReader.create(sectionReaders));
+
+            RecordReader<KeyValue> reader = ConcatRecordReader.create(sectionReaders);
+            if (!forceKeepDelete) {
+                reader = new DropDeleteReader(reader);
+            }
 
             // Project results from SortMergeReader using ProjectKeyRecordReader.
             return keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);

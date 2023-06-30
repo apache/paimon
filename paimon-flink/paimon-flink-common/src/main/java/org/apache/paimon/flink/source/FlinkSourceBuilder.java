@@ -28,6 +28,8 @@ import org.apache.paimon.flink.source.operator.MonitorFunction;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 
@@ -134,7 +136,13 @@ public class FlinkSourceBuilder {
 
     private DataStream<RowData> buildContinuousFileSource() {
         return toDataStream(
-                new ContinuousFileStoreSource(createReadBuilder(), table.options(), limit));
+                new ContinuousFileStoreSource(
+                        createReadBuilder(),
+                        table.options(),
+                        limit,
+                        table instanceof FileStoreTable
+                                ? ((FileStoreTable) table).bucketMode()
+                                : BucketMode.FIXED));
     }
 
     private DataStream<RowData> toDataStream(Source<RowData, ?, ?> source) {

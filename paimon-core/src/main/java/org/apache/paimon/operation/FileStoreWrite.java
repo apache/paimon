@@ -99,6 +99,13 @@ public interface FileStoreWrite<T> {
             throws Exception;
 
     /**
+     * We detect whether it is in batch mode, if so, we do some optimization.
+     *
+     * @param isStreamingMode whether in streaming mode
+     */
+    void isStreamingMode(boolean isStreamingMode);
+
+    /**
      * Close the writer.
      *
      * @throws Exception the thrown exception

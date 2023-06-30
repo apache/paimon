@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.table.source.ReadBuilder;
 
 import org.apache.flink.api.connector.source.Source;
@@ -25,9 +27,12 @@ import org.apache.flink.api.connector.source.SourceReader;
 import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
+
+import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
 
 /** A Flink {@link Source} for paimon. */
 public abstract class FlinkSource
@@ -46,7 +51,10 @@ public abstract class FlinkSource
 
     @Override
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
-        return new FileStoreSourceReader(context, readBuilder.newRead(), limit);
+        IOManager ioManager =
+                new IOManagerImpl(splitPaths(context.getConfiguration().get(CoreOptions.TMP_DIRS)));
+        return new FileStoreSourceReader(
+                context, readBuilder.newRead().withIOManager(ioManager), limit);
     }
 
     @Override

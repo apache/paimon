@@ -248,6 +248,9 @@ Lookup will cache data on the memory and local disk, you can use the following o
     </tbody>
 </table>
 
+Lookup changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
+changelog for the same record.
+
 ### Full Compaction
 
 If you think the resource consumption of 'lookup' is too large, you can consider using 'full-compaction' changelog producer,
@@ -264,6 +267,9 @@ By specifying `full-compaction.delta-commits` table property, full compaction wi
 Full compaction changelog producer can produce complete changelog for any type of source. However it is not as efficient as the input changelog producer and the latency to produce changelog might be high.
 
 {{< /hint >}}
+
+Full-compaction changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
+changelog for the same record.
 
 ## Sequence Field
 

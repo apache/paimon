@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -53,7 +54,13 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     @Override
     public void open() throws Exception {
         super.open();
-        this.read = readBuilder.newRead();
+        IOManagerImpl ioManager =
+                new IOManagerImpl(
+                        getContainingTask()
+                                .getEnvironment()
+                                .getIOManager()
+                                .getSpillingDirectoriesPaths());
+        this.read = readBuilder.newRead().withIOManager(ioManager);
         this.reuseRow = new FlinkRowData(null);
         this.reuseRecord = new StreamRecord<>(reuseRow);
     }

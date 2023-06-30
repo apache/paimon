@@ -18,6 +18,10 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
+import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
+import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -35,10 +39,10 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -54,8 +58,6 @@ public class ContinuousFileSplitEnumerator
 
     private final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
-    private final Map<Integer, LinkedList<FileStoreSourceSplit>> bucketSplits;
-
     private final long discoveryInterval;
 
     private final Set<Integer> readersAwaitingSplit;
@@ -64,8 +66,9 @@ public class ContinuousFileSplitEnumerator
 
     private final StreamTableScan scan;
 
-    /** Default batch splits size to avoid exceed `akka.framesize`. */
-    private final int splitBatchSize;
+    private final SplitAssigner splitAssigner;
+
+    private final BucketMode bucketMode;
 
     @Nullable private Long nextSnapshotId;
 
@@ -76,18 +79,21 @@ public class ContinuousFileSplitEnumerator
             Collection<FileStoreSourceSplit> remainSplits,
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
-            int splitBatchSize,
-            StreamTableScan scan) {
+            StreamTableScan scan,
+            BucketMode bucketMode) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
-        this.bucketSplits = new HashMap<>();
-        addSplits(remainSplits);
         this.nextSnapshotId = nextSnapshotId;
         this.discoveryInterval = discoveryInterval;
-        this.splitBatchSize = splitBatchSize;
-        this.readersAwaitingSplit = new HashSet<>();
+        this.readersAwaitingSplit = new LinkedHashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
+        this.bucketMode = bucketMode;
+        this.splitAssigner =
+                bucketMode == BucketMode.UNAWARE
+                        ? new FIFOSplitAssigner(Collections.emptyList())
+                        : new PreAssignSplitAssigner(1, context, Collections.emptyList());
+        addSplits(remainSplits);
     }
 
     private void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -95,19 +101,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void addSplit(FileStoreSourceSplit split) {
-        bucketSplits
-                .computeIfAbsent(((DataSplit) split.split()).bucket(), i -> new LinkedList<>())
-                .add(split);
-    }
-
-    private void addSplitsBack(Collection<FileStoreSourceSplit> splits) {
-        new LinkedList<>(splits).descendingIterator().forEachRemaining(this::addSplitToHead);
-    }
-
-    private void addSplitToHead(FileStoreSourceSplit split) {
-        bucketSplits
-                .computeIfAbsent(((DataSplit) split.split()).bucket(), i -> new LinkedList<>())
-                .addFirst(split);
+        splitAssigner.addSplit(assignTask(((DataSplit) split.split()).bucket()), split);
     }
 
     @Override
@@ -139,13 +133,13 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void addSplitsBack(List<FileStoreSourceSplit> splits, int subtaskId) {
         LOG.debug("File Source Enumerator adds splits back: {}", splits);
-        addSplitsBack(splits);
+        splitAssigner.addSplitsBack(subtaskId, splits);
     }
 
     @Override
     public PendingSplitsCheckpoint snapshotState(long checkpointId) {
         List<FileStoreSourceSplit> splits = new ArrayList<>();
-        bucketSplits.values().forEach(splits::addAll);
+        splits.addAll(splitAssigner.remainingSplits());
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(splits, nextSnapshotId);
 
@@ -196,28 +190,30 @@ public class ContinuousFileSplitEnumerator
 
     private Map<Integer, List<FileStoreSourceSplit>> createAssignment() {
         Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
-        bucketSplits.forEach(
-                (bucket, splits) -> {
+        readersAwaitingSplit.forEach(
+                task -> {
+                    // if the reader that requested another split has failed in the meantime, remove
+                    // it from the list of waiting readers
+                    if (!context.registeredReaders().containsKey(task)) {
+                        readersAwaitingSplit.remove(task);
+                        return;
+                    }
+                    List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
                     if (splits.size() > 0) {
-                        // To ensure the order of consumption, the data of the same bucket is given
-                        // to a task to be consumed.
-                        int task = bucket % context.currentParallelism();
-                        if (readersAwaitingSplit.contains(task)) {
-                            // if the reader that requested another split has failed in the
-                            // meantime, remove
-                            // it from the list of waiting readers
-                            if (!context.registeredReaders().containsKey(task)) {
-                                readersAwaitingSplit.remove(task);
-                                return;
-                            }
-                            List<FileStoreSourceSplit> taskAssignment =
-                                    assignment.computeIfAbsent(task, i -> new ArrayList<>());
-                            if (taskAssignment.size() < splitBatchSize) {
-                                taskAssignment.add(splits.poll());
-                            }
-                        }
+                        assignment.put(task, splits);
                     }
                 });
         return assignment;
+    }
+
+    private int assignTask(int bucket) {
+        if (bucketMode == BucketMode.UNAWARE) {
+            // we just assign task 0 when bucket unaware
+            return 0;
+        } else {
+            // if not bucket unaware, we assign the bucket % parallelism, the same bucket data go
+            // into the same task
+            return bucket % context.currentParallelism();
+        }
     }
 }

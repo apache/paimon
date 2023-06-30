@@ -1,6 +1,6 @@
 ---
 title: "Manage Files"
-weight: 5
+weight: 6
 type: docs
 aliases:
 - /maintenance/manage-files.html

@@ -32,6 +32,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -144,6 +145,33 @@ public class LookupTableTest {
 
         table.refresh(singletonList(row(3, 33, 333)).iterator());
         assertThat(table.get(row(33))).hasSize(0);
+    }
+
+    @Test
+    public void testNoPrimaryKeyTable() throws IOException {
+        LookupTable table =
+                LookupTable.create(
+                        stateFactory,
+                        rowType,
+                        Collections.emptyList(),
+                        singletonList("f1"),
+                        r -> r.getInt(2) < 222,
+                        ThreadLocalRandom.current().nextInt(2) * 10);
+
+        table.refresh(singletonList(row(1, 11, 333)).iterator());
+        List<InternalRow> result = table.get(row(11));
+        assertThat(result).hasSize(0);
+
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
+        result = table.get(row(11));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, 11, 111);
+
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
+        result = table.get(row(11));
+        assertThat(result).hasSize(2);
+        assertRow(result.get(0), 1, 11, 111);
+        assertRow(result.get(1), 1, 11, 111);
     }
 
     private static InternalRow row(Object... values) {

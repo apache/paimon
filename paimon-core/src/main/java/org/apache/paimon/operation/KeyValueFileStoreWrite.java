@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
@@ -36,6 +37,7 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupLevels;
+import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
@@ -152,8 +154,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
-                        options.numSortedRunCompactionTrigger(),
-                        options.maxSortedRunNum());
+                        options.numSortedRunCompactionTrigger());
         CompactStrategy compactStrategy =
                 options.changelogProducer() == ChangelogProducer.LOOKUP
                         ? new LookupCompaction(universalCompaction)
@@ -174,8 +175,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 restoreIncrement);
     }
 
-    private boolean bufferSpillable() {
-        return options.writeBufferSpillable(fileIO.isObjectStore());
+    @VisibleForTesting
+    public boolean bufferSpillable() {
+        return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
     }
 
     private CompactManager createCompactManager(
@@ -209,6 +211,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         bucket,
                         options.fileCompressionPerLevel(),
                         options.fileCompression());
+        MergeSorter mergeSorter = new MergeSorter(options, keyType, valueType, ioManager);
         switch (options.changelogProducer()) {
             case FULL_COMPACTION:
                 return new FullChangelogMergeTreeCompactRewriter(
@@ -217,7 +220,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         writerFactory,
                         keyComparator,
                         mfFactory,
-                        options.sortEngine(),
+                        mergeSorter,
                         valueEqualiserSupplier.get(),
                         options.changelogRowDeduplicate());
             case LOOKUP:
@@ -228,16 +231,12 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         writerFactory,
                         keyComparator,
                         mfFactory,
-                        options.sortEngine(),
+                        mergeSorter,
                         valueEqualiserSupplier.get(),
                         options.changelogRowDeduplicate());
             default:
                 return new MergeTreeCompactRewriter(
-                        readerFactory,
-                        writerFactory,
-                        keyComparator,
-                        mfFactory,
-                        options.sortEngine());
+                        readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
         }
     }
 

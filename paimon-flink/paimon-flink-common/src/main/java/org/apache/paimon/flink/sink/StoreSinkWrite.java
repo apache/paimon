@@ -49,6 +49,8 @@ public interface StoreSinkWrite {
 
     void snapshotState() throws Exception;
 
+    boolean streamingMode();
+
     void close() throws Exception;
 
     /**

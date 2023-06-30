@@ -20,6 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.reader.RecordReader;
 
@@ -37,6 +38,12 @@ public abstract class KeyValueTableRead implements InnerTableRead {
 
     protected KeyValueTableRead(KeyValueFileStoreRead read) {
         this.read = read;
+    }
+
+    @Override
+    public TableRead withIOManager(IOManager ioManager) {
+        read.withIOManager(ioManager);
+        return this;
     }
 
     @Override

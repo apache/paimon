@@ -60,7 +60,6 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A lookup {@link TableFunction} for file store. */
 public class FileStoreLookupFunction implements Serializable, Closeable {
@@ -85,11 +84,6 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
-        checkArgument(
-                table.primaryKeys().size() > 0,
-                String.format(
-                        "Currently only support primary key table, the lookup table is [%s].",
-                        table.name()));
         TableScanUtils.streamingReadingValidate(table);
 
         this.table = table;

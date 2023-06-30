@@ -67,7 +67,16 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='1') */"))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
 
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='1') */"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='0') */")).isEmpty();
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='0') */"))
+                .isEmpty();
 
         assertThat(
                         batchSql(
@@ -77,6 +86,14 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='2') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444));
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='2') */"))
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111),
                         Row.of(2, 22, 222),
@@ -94,6 +111,16 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         Row.of(4, 44, 444));
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='3') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111),
+                        Row.of(2, 22, 222),
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444),
+                        Row.of(5, 55, 555),
+                        Row.of(6, 66, 666));
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id'='3') */"))
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111),
                         Row.of(2, 22, 222),
@@ -122,7 +149,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                                 time3)))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
-                        "[scan.snapshot-id,scan.tag-name] must be null when you set [scan.timestamp-millis]");
+                        "[scan.snapshot-id] must be null when you set [scan.timestamp-millis]");
 
         assertThatThrownBy(
                         () ->
@@ -145,5 +172,19 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         () -> batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='unknown') */"))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage("Tag 'unknown' doesn't exist.");
+    }
+
+    @Test
+    public void testSortSpillMerge() {
+        sql(
+                "CREATE TABLE IF NOT EXISTS KT (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('sort-spill-threshold'='2')");
+        sql("INSERT INTO KT VALUES (1, 1)");
+        sql("INSERT INTO KT VALUES (1, 2)");
+        sql("INSERT INTO KT VALUES (1, 3)");
+        sql("INSERT INTO KT VALUES (1, 4)");
+        sql("INSERT INTO KT VALUES (1, 5)");
+        sql("INSERT INTO KT VALUES (1, 6)");
+        sql("INSERT INTO KT VALUES (1, 7)");
+        assertThat(sql("SELECT * FROM KT")).containsExactlyInAnyOrder(Row.of(1, 7));
     }
 }
