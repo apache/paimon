@@ -46,8 +46,10 @@ import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
@@ -116,7 +118,12 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
     @Override
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
         // delegate to the session catalog because all tables share the same namespace
-        return getSessionCatalog().listTables(namespace);
+        // note: distinct for InMemoryCatalog specifically
+        return Stream.concat(
+                        Arrays.stream(getSessionCatalog().listTables(namespace)),
+                        Arrays.stream(paimonCatalog.listTables(namespace)))
+                .distinct()
+                .toArray(Identifier[]::new);
     }
 
     @Override
