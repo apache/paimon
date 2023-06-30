@@ -62,7 +62,7 @@ public class StateUtils {
                             + ". This is unexpected.");
         }
 
-        if (values.isEmpty()){
+        if (values.isEmpty()) {
             values.add(defaultValue);
         }
 
