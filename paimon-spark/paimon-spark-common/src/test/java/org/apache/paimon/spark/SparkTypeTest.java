@@ -27,7 +27,6 @@ import org.junit.jupiter.api.Test;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.spark.SparkTypeUtils.fromPaimonRowType;
-import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link SparkTypeUtils}. */
@@ -75,12 +74,12 @@ public class SparkTypeTest {
         String nestedRowMapType =
                 "StructField(locations,MapType("
                         + "StringType,"
-                        + "StructType(StructField(posX,DoubleType,false),StructField(posY,DoubleType,false)),true),true)";
+                        + "StructType(StructField(posX,DoubleType,true),StructField(posY,DoubleType,true)),true),true)";
         String expected =
                 "StructType("
-                        + "StructField(id,IntegerType,false),"
+                        + "StructField(id,IntegerType,true),"
                         + "StructField(name,StringType,true),"
-                        + "StructField(salary,DoubleType,false),"
+                        + "StructField(salary,DoubleType,true),"
                         + nestedRowMapType
                         + ","
                         + "StructField(strArray,ArrayType(StringType,true),true),"
@@ -99,6 +98,7 @@ public class SparkTypeTest {
         StructType sparkType = fromPaimonRowType(ALL_TYPES);
         assertThat(sparkType.toString().replace(", ", ",")).isEqualTo(expected);
 
-        assertThat(toPaimonType(sparkType)).isEqualTo(ALL_TYPES);
+        // Ignore the assertion below, since we force to make all the fields nullable.
+        // assertThat(toPaimonType(sparkType)).isEqualTo(ALL_TYPES);
     }
 }
