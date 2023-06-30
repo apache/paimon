@@ -238,9 +238,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             tableList = "(" + String.join("|", monitoredTables) + ")";
         }
         mySqlConfig.set(MySqlSourceOptions.TABLE_NAME, tableList);
-        if (mode == MySqlDatabaseSyncMode.DYNAMIC) {
-            mySqlConfig.set(MySqlSourceOptions.SCAN_NEWLY_ADDED_TABLE_ENABLED, true);
-        }
         MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig);
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
