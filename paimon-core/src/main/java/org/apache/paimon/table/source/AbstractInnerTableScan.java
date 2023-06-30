@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.IncrementalStartingScanner;
+import org.apache.paimon.table.source.snapshot.IncrementalTimeStampStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
@@ -132,12 +133,20 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 return isStreaming
                         ? new ContinuousFromSnapshotFullStartingScanner(options.scanSnapshotId())
                         : new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
-            case INCREMENTAL:
+            case INCREMENTAL_TIMESTAMP:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
-                Pair<String, String> incremental = options.incrementalBetween();
+
+                Pair<String, String> incrementalTimestamp = options.incrementalBetweenTimestamp();
+                return new IncrementalTimeStampStartingScanner(
+                        Long.parseLong(incrementalTimestamp.getLeft()),
+                        Long.parseLong(incrementalTimestamp.getRight()));
+            case INCREMENTAL_SNAPSHOT:
+                checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
+
+                Pair<String, String> incrementalSnapshot = options.incrementalBetweenSnapshot();
                 return new IncrementalStartingScanner(
-                        Long.parseLong(incremental.getLeft()),
-                        Long.parseLong(incremental.getRight()));
+                        Long.parseLong(incrementalSnapshot.getLeft()),
+                        Long.parseLong(incrementalSnapshot.getRight()));
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());
