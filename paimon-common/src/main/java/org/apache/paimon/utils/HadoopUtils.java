@@ -24,7 +24,6 @@ import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.InlineElement;
 
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -192,6 +191,105 @@ public class HadoopUtils {
         @Override
         public InlineElement getDescription() {
             return text(description);
+        }
+    }
+
+    /** Copied from org.apache.hadoop.hdfs.HdfsConfiguration to reduce dependency. */
+    private static class HdfsConfiguration extends Configuration {
+
+        private static void addDeprecatedKeys() {
+            Configuration.addDeprecations(
+                    new Configuration.DeprecationDelta[] {
+                        new Configuration.DeprecationDelta(
+                                "dfs.backup.address", "dfs.namenode.backup.address"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.backup.http.address", "dfs.namenode.backup.http-address"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.balance.bandwidthPerSec",
+                                "dfs.datanode.balance.bandwidthPerSec"),
+                        new Configuration.DeprecationDelta("dfs.data.dir", "dfs.datanode.data.dir"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.http.address", "dfs.namenode.http-address"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.https.address", "dfs.namenode.https-address"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.max.objects", "dfs.namenode.max.objects"),
+                        new Configuration.DeprecationDelta("dfs.name.dir", "dfs.namenode.name.dir"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.name.dir.restore", "dfs.namenode.name.dir.restore"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.name.edits.dir", "dfs.namenode.edits.dir"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.read.prefetch.size", "dfs.client.read.prefetch.size"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.safemode.extension", "dfs.namenode.safemode.extension"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.safemode.threshold.pct",
+                                "dfs.namenode.safemode.threshold-pct"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.secondary.http.address",
+                                "dfs.namenode.secondary.http-address"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.socket.timeout", "dfs.client.socket-timeout"),
+                        new Configuration.DeprecationDelta(
+                                "fs.checkpoint.dir", "dfs.namenode.checkpoint.dir"),
+                        new Configuration.DeprecationDelta(
+                                "fs.checkpoint.edits.dir", "dfs.namenode.checkpoint.edits.dir"),
+                        new Configuration.DeprecationDelta(
+                                "fs.checkpoint.period", "dfs.namenode.checkpoint.period"),
+                        new Configuration.DeprecationDelta(
+                                "heartbeat.recheck.interval",
+                                "dfs.namenode.heartbeat.recheck-interval"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.https.client.keystore.resource",
+                                "dfs.client.https.keystore.resource"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.https.need.client.auth", "dfs.client.https.need-auth"),
+                        new Configuration.DeprecationDelta(
+                                "slave.host.name", "dfs.datanode.hostname"),
+                        new Configuration.DeprecationDelta("session.id", "dfs.metrics.session-id"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.access.time.precision", "dfs.namenode.accesstime.precision"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.replication.considerLoad",
+                                "dfs.namenode.replication.considerLoad"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.replication.interval", "dfs.namenode.replication.interval"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.replication.min", "dfs.namenode.replication.min"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.replication.pending.timeout.sec",
+                                "dfs.namenode.replication.pending.timeout-sec"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.max-repl-streams", "dfs.namenode.replication.max-streams"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.permissions", "dfs.permissions.enabled"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.permissions.supergroup", "dfs.permissions.superusergroup"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.write.packet.size", "dfs.client-write-packet-size"),
+                        new Configuration.DeprecationDelta("dfs.block.size", "dfs.blocksize"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.datanode.max.xcievers", "dfs.datanode.max.transfer.threads"),
+                        new Configuration.DeprecationDelta(
+                                "io.bytes.per.checksum", "dfs.bytes-per-checksum"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.federation.nameservices", "dfs.nameservices"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.federation.nameservice.id", "dfs.nameservice.id"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.client.file-block-storage-locations.timeout",
+                                "dfs.client.file-block-storage-locations.timeout.millis"),
+                        new Configuration.DeprecationDelta(
+                                "dfs.encryption.key.provider.uri",
+                                "hadoop.security.key.provider.path")
+                    });
+        }
+
+        static {
+            addDeprecatedKeys();
+            Configuration.addDefaultResource("hdfs-default.xml");
+            Configuration.addDefaultResource("hdfs-site.xml");
         }
     }
 }
