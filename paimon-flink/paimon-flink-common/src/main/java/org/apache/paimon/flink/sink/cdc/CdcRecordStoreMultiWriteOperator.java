@@ -103,6 +103,8 @@ public class CdcRecordStoreMultiWriteOperator
 
         FileStoreTable table = getTable(tableId);
 
+        // TODO memoryPool should not be null
+        // TODO set executor service to write
         StoreSinkWrite write =
                 writes.computeIfAbsent(
                         tableId,
