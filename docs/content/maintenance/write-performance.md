@@ -58,13 +58,53 @@ It is recommended that the parallelism of sink should be less than or equal to t
     </tbody>
 </table>
 
-## Write Initialize
-
-In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
-here (For example, writing a large number of partitions simultaneously), you can use `write-manifest-cache` to cache
-the read manifest data to accelerate initialization.
-
 ## Compaction
+
+### Number of Sorted Runs to Pause Writing
+
+When number of sorted runs is small, Paimon writers will perform compaction asynchronously in separated threads, so
+records can be continuously written into the table. However to avoid unbounded growth of sorted runs, writers will
+have to pause writing when the number of sorted runs hits the threshold. The following table property determines
+the threshold.
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Option</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>num-sorted-run.stop-trigger</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>Integer</td>
+      <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 1.</td>
+    </tr>
+    </tbody>
+</table>
+
+Write stalls will become less frequent when `num-sorted-run.stop-trigger` becomes larger, thus improving writing
+performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the
+table. If you are concerned about the OOM of memory, please configure the following option `sort-spill-threshold`.
+Its value depends on your memory size.
+
+### Prioritize write throughput
+
+If you expect a mode to have maximum write throughput, the compaction can be done slowly and not in a hurry.
+You can use the following strategies for your table:
+
+```shell
+num-sorted-run.stop-trigger = 2147483647
+sort-spill-threshold = 10
+```
+
+This configuration will generate more files during peak write periods and gradually merge into optimal read
+performance during low write periods.
 
 ### Number of Sorted Runs to Trigger Compaction
 
@@ -95,32 +135,11 @@ One can easily see that too many sorted runs will result in poor query performan
 
 Compaction will become less frequent when `num-sorted-run.compaction-trigger` becomes larger, thus improving writing performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the table. This is a trade-off between writing and query performance.
 
-### Number of Sorted Runs to Pause Writing
+## Write Initialize
 
-When number of sorted runs is small, Paimon writers will perform compaction asynchronously in separated threads, so records can be continuously written into the table. However to avoid unbounded growth of sorted runs, writers will have to pause writing when the number of sorted runs hits the threshold. The following table property determines the threshold.
-
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 20%">Option</th>
-      <th class="text-left" style="width: 5%">Required</th>
-      <th class="text-left" style="width: 5%">Default</th>
-      <th class="text-left" style="width: 10%">Type</th>
-      <th class="text-left" style="width: 60%">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-      <td><h5>num-sorted-run.stop-trigger</h5></td>
-      <td>No</td>
-      <td style="word-wrap: break-word;">(none)</td>
-      <td>Integer</td>
-      <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 1.</td>
-    </tr>
-    </tbody>
-</table>
-
-Write stalls will become less frequent when `num-sorted-run.stop-trigger` becomes larger, thus improving writing performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the table. This is a trade-off between writing and query performance.
+In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
+here (For example, writing a large number of partitions simultaneously), you can use `write-manifest-cache` to cache
+the read manifest data to accelerate initialization.
 
 ## Memory
 
