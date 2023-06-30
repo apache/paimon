@@ -38,6 +38,18 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAdaptiveParallelism() {
+        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+        assertThatThrownBy(() -> batchSql("INSERT INTO T SELECT a, b, c FROM T GROUP BY a,b,c"))
+                .hasMessageContaining(
+                        "Paimon Sink does not support Flink's Adaptive Parallelism mode.");
+
+        // work fine
+        batchSql(
+                "INSERT INTO T /*+ OPTIONS('sink.parallelism'='1') */ SELECT a, b, c FROM T GROUP BY a,b,c");
+    }
+
+    @Test
     public void testOverwriteEmpty() {
         batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
         assertThat(batchSql("SELECT * FROM T"))

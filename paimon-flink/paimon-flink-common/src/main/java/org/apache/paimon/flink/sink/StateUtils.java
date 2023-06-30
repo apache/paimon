@@ -52,6 +52,7 @@ public class StateUtils {
                         values.get(i).equals(values.get(i - 1)),
                         "Values in list state are not the same. This is unexpected.");
             }
+
         } else {
             Preconditions.checkState(
                     values.isEmpty(),
