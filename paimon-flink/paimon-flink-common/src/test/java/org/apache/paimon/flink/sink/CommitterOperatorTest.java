@@ -133,6 +133,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         }
 
         // checkpoint is completed but not notified, so no snapshot is committed
+        testHarness.snapshot(cpId, 1);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
         SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
