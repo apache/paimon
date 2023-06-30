@@ -24,10 +24,7 @@ import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
-/**
- * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_TAG} startup mode of a batch
- * read.
- */
+/** {@link StartingScanner} for the {@link CoreOptions#SCAN_TAG_NAME} of a batch read. */
 public class StaticFromTagStartingScanner implements StartingScanner {
 
     private final String tagName;
