@@ -50,7 +50,10 @@ import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-/** TODO WIP. */
+/**
+ * Base class for file deletion including methods for clean data files, manifest files and empty
+ * data directories.
+ */
 public abstract class FileDeletionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileDeletionBase.class);
