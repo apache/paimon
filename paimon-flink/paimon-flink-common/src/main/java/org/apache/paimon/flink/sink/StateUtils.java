@@ -19,6 +19,8 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -58,10 +60,15 @@ public class StateUtils {
                     "Expecting 0 value for a fresh state but found "
                             + values.size()
                             + ". This is unexpected.");
-            state.add(defaultValue);
+        }
+
+        if (values.isEmpty()){
             values.add(defaultValue);
         }
 
-        return values.get(0);
+        T value = values.get(0);
+        state.update(Lists.newArrayList(value));
+
+        return value;
     }
 }
