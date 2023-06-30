@@ -197,7 +197,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<SortEngine> SORT_ENGINE =
             key("sort-engine")
                     .enumType(SortEngine.class)
-                    .defaultValue(SortEngine.LOSER_TREE)
+                    .defaultValue(SortEngine.MIN_HEAP)
                     .withDescription("Specify the sort engine for table with primary key.");
 
     public static final ConfigOption<Integer> SORT_SPILL_THRESHOLD =
