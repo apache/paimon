@@ -69,12 +69,12 @@ public class SparkTypeTest {
         String nestedRowMapType =
                 "StructField(locations,MapType("
                         + "StringType,"
-                        + "StructType(StructField(posX,DoubleType,false), StructField(posY,DoubleType,false)),true),true)";
+                        + "StructType(StructField(posX,DoubleType,true), StructField(posY,DoubleType,true)),true),true)";
         String expected =
                 "StructType("
-                        + "StructField(id,IntegerType,false), "
+                        + "StructField(id,IntegerType,true), "
                         + "StructField(name,StringType,true), "
-                        + "StructField(salary,DoubleType,false), "
+                        + "StructField(salary,DoubleType,true), "
                         + nestedRowMapType
                         + ", "
                         + "StructField(strArray,ArrayType(StringType,true),true), "

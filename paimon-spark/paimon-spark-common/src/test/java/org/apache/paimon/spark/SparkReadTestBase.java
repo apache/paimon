@@ -203,6 +203,6 @@ public abstract class SparkReadTestBase {
 
     // default schema
     protected String defaultShowCreateString(String table) {
-        return showCreateString(table, "a INT NOT NULL", "b BIGINT", "c STRING");
+        return showCreateString(table, "a INT", "b BIGINT", "c STRING");
     }
 }
