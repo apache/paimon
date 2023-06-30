@@ -1701,7 +1701,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step3: prepare delete statement 'where pk = x'
         String deleteStatement =
-                String.format("DELETE FROM %s WHERE id = 1 and dt = '2022-01-01'", table);
+                String.format("DELETE FROM %s WHERE id = 2 and dt = '2022-01-01'", table);
 
         // Step4: execute delete statement and verify result
         List<Row> expectedRecords =
