@@ -18,76 +18,88 @@
 
 package org.apache.paimon.predicate;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * DeletePushDownPrimaryKeyVisitor visit the predicate and check if it only contains primary keys
  * and can be push down.
+ *
+ * <p>We will check: 1. all the primary keys are in the predicate with equal operator. 2. if step1
+ * is satisfied, the other fields in the predicate could be ignored (e.g. return true).
  */
 public class DeletePushDownPrimaryKeyVisitor implements FunctionVisitor<Boolean> {
 
     private final List<String> primaryKeys;
 
-    private final List<String> partitionKeys;
+    private Map<String, Boolean> hit;
 
-    public DeletePushDownPrimaryKeyVisitor(List<String> primaryKeys, List<String> partitionKeys) {
+    public DeletePushDownPrimaryKeyVisitor(List<String> primaryKeys) {
         this.primaryKeys = primaryKeys;
-        this.partitionKeys = partitionKeys;
+        this.hit = new HashMap<>();
+    }
+
+    public boolean isHitAll() {
+        return hit.size() == primaryKeys.size();
     }
 
     @Override
     public Boolean visitIsNotNull(FieldRef fieldRef) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitIsNull(FieldRef fieldRef) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitEqual(FieldRef fieldRef, Object literal) {
-        return primaryKeys.contains(fieldRef.name()) && !partitionKeys.contains(fieldRef.name());
+        if (primaryKeys.contains(fieldRef.name())) {
+            hit.put(fieldRef.name(), true);
+        }
+        return true;
     }
 
     @Override
     public Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override
     public Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
-        return false;
+        return !primaryKeys.contains(fieldRef.name());
     }
 
     @Override

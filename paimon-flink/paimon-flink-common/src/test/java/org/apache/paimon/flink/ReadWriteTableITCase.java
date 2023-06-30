@@ -1693,21 +1693,22 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 "(1, 'US Dollar', 114, '2022-01-01')",
                 "(2, 'UNKNOWN', -1, '2022-01-01')",
                 "(3, 'Euro', 119, '2022-01-02')",
-                "(4, 'CNY', 119, '2022-01-03')",
+                "(4, 'CNY', 119, '2022-01-02')",
                 "(5, 'HKD', 119, '2022-01-03')",
                 "(6, 'CAD', 119, '2022-01-03')",
                 "(7, 'INR', 119, '2022-01-03')",
                 "(8, 'MOP', 119, '2022-01-03')");
 
         // Step3: prepare delete statement 'where pk = x'
-        String deleteStatement = String.format("DELETE FROM %s WHERE id = 2", table);
+        String deleteStatement =
+                String.format("DELETE FROM %s WHERE id = 1 and dt = '2022-01-01'", table);
 
         // Step4: execute delete statement and verify result
         List<Row> expectedRecords =
                 Arrays.asList(
                         changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
                         changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"),
-                        changelogRow("+I", 4L, "CNY", 119L, "2022-01-03"),
+                        changelogRow("+I", 4L, "CNY", 119L, "2022-01-02"),
                         changelogRow("+I", 5L, "HKD", 119L, "2022-01-03"),
                         changelogRow("+I", 6L, "CAD", 119L, "2022-01-03"),
                         changelogRow("+I", 7L, "INR", 119L, "2022-01-03"),
@@ -1722,7 +1723,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         }
 
         // Step5: prepare delete statement 'where pk = x or pk = y'
-        String deleteStatement1 = String.format("DELETE FROM %s WHERE id =3 or id = 4", table);
+        String deleteStatement1 =
+                String.format("DELETE FROM %s WHERE id = 3 or id = 4 and dt = '2022-01-02'", table);
         List<Row> expectedRecords1 =
                 Arrays.asList(
                         changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
@@ -1740,7 +1742,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         }
 
         // Step5: prepare delete statement 'where pk in (x, y, z)'
-        String deleteStatement2 = String.format("DELETE FROM %s WHERE id in (5, 6, 7, 8)", table);
+        String deleteStatement2 =
+                String.format(
+                        "DELETE FROM %s WHERE id in (5, 6, 7, 8) and dt = '2022-01-03'", table);
         List<Row> expectedRecords2 =
                 Arrays.asList(changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"));
         if (supportUpdateEngines.contains(mergeEngine)) {
@@ -1790,7 +1794,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step3: partition key not delete push down
         String deleteStatement =
-                String.format("DELETE FROM %s WHERE dt = '2022-01-03' AND id = 4", table);
+                String.format("DELETE FROM %s WHERE dt = '2022-01-03' AND currency = 'CNY'", table);
 
         // Step4: execute delete statement and verify result
         List<Row> expectedRecords =

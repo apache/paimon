@@ -142,13 +142,8 @@ public class FlinkTableSink extends FlinkTableSinkBase
         return new RowLevelDeleteInfo() {};
     }
 
-    /*
-    supported filters:
-    1. where primary key = x
-    2. where primary key = x or key = y
-    3. where primary key in (x, y, z)
-    4. where partition key = x
-    */
+    // supported filters push down please refer DeletePushDownVisitorTest
+
     @Override
     public boolean applyDeleteFilters(List<ResolvedExpression> list) {
         checkDeletable();
@@ -221,10 +216,9 @@ public class FlinkTableSink extends FlinkTableSinkBase
     }
 
     private boolean canPushDownDeleteFilter(Predicate predicate) {
-        isDeleteFilterPrimaryKey =
-                predicate.visit(
-                        new DeletePushDownPrimaryKeyVisitor(
-                                table.primaryKeys(), table.partitionKeys()));
+        DeletePushDownPrimaryKeyVisitor pkVisitor =
+                new DeletePushDownPrimaryKeyVisitor(table.primaryKeys());
+        isDeleteFilterPrimaryKey = predicate.visit(pkVisitor) && pkVisitor.isHitAll();
         isDeleteFilterPartitionKey =
                 predicate.visit(new DeletePushDownPartitionKeyVisitor(table.partitionKeys()));
         return isDeleteFilterPartitionKey || isDeleteFilterPrimaryKey;
