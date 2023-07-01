@@ -91,28 +91,40 @@ public class LookupLevelsTest {
         LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         // only in level 1
-        KeyValue kv = lookupLevels.lookup(row(1), 1);
+        KeyValue kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.Low2Higher, 1, 2, row(1)));
         assertThat(kv).isNotNull();
         assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(11);
 
         // only in level 2
-        kv = lookupLevels.lookup(row(2), 1);
+        kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.Low2Higher, 1, 2, row(2)));
         assertThat(kv).isNotNull();
         assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
         assertThat(kv.level()).isEqualTo(2);
         assertThat(kv.value().getInt(1)).isEqualTo(22);
 
         // both in level 1 and level 2
-        kv = lookupLevels.lookup(row(5), 1);
+        kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.Low2Higher, 1, 2, row(5)));
         assertThat(kv).isNotNull();
         assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(5);
 
         // no exists
-        kv = lookupLevels.lookup(row(4), 1);
+        kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.Low2Higher, 1, 2, row(4)));
         assertThat(kv).isNull();
 
         lookupLevels.close();
@@ -146,7 +158,13 @@ public class LookupLevelsTest {
                     }
                 };
         for (Map.Entry<Integer, Integer> entry : contains.entrySet()) {
-            KeyValue kv = lookupLevels.lookup(row(entry.getKey()), 1);
+            KeyValue kv =
+                    lookupLevels.lookup(
+                            new LookupLevels.LookupContext(
+                                    LookupLevels.LookupOrder.Low2Higher,
+                                    1,
+                                    1,
+                                    row(entry.getKey())));
             assertThat(kv).isNotNull();
             assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
             assertThat(kv.level()).isEqualTo(1);
@@ -155,7 +173,10 @@ public class LookupLevelsTest {
 
         int[] notContains = new int[] {0, 3, 6, 9, 12};
         for (int key : notContains) {
-            KeyValue kv = lookupLevels.lookup(row(key), 1);
+            KeyValue kv =
+                    lookupLevels.lookup(
+                            new LookupLevels.LookupContext(
+                                    LookupLevels.LookupOrder.Low2Higher, 1, 1, row(key)));
             assertThat(kv).isNull();
         }
 
@@ -180,7 +201,10 @@ public class LookupLevelsTest {
         LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofKibiBytes(20));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
-            KeyValue kv = lookupLevels.lookup(row(i), 1);
+            KeyValue kv =
+                    lookupLevels.lookup(
+                            new LookupLevels.LookupContext(
+                                    LookupLevels.LookupOrder.Low2Higher, 1, 1, row(i)));
             assertThat(kv).isNotNull();
             assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
             assertThat(kv.level()).isEqualTo(1);
@@ -196,6 +220,62 @@ public class LookupLevelsTest {
 
         lookupLevels.close();
         assertThat(lookupLevels.lookupFiles().size()).isEqualTo(0);
+    }
+
+    @Test
+    public void testLookupOrder() throws Exception {
+        Levels levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(
+                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
+                                newFile(2, kv(2, 22), kv(5, 55)),
+                                newFile(3, kv(1, 33), kv(5, 55)),
+                                newFile(4, kv(1, 44), kv(5, 55))),
+                        3);
+        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        // high2Low in level 1, 3, 4
+        KeyValue kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.High2Lower, 4, 1, row(1)));
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(4);
+        assertThat(kv.value().getInt(1)).isEqualTo(44);
+
+        // high2Low in 1
+        kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.High2Lower, 4, 1, row(3)));
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(1);
+        assertThat(kv.value().getInt(1)).isEqualTo(33);
+        // high2Low in 1
+        kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.High2Lower, 4, 2, row(3)));
+        assertThat(kv).isNull();
+        // low2High in level 1, 3, 4
+        kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.Low2Higher, 2, 4, row(1)));
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(3);
+        assertThat(kv.value().getInt(1)).isEqualTo(33);
+
+        // low2High in level 1
+        kv =
+                lookupLevels.lookup(
+                        new LookupLevels.LookupContext(
+                                LookupLevels.LookupOrder.Low2Higher, 2, 4, row(3)));
+        assertThat(kv).isNull();
     }
 
     private LookupLevels createLookupLevels(Levels levels, MemorySize maxDiskSize) {

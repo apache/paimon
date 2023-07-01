@@ -22,9 +22,14 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReusingTestData;
 import org.apache.paimon.utils.TestReusingRecordReader;
 
+import org.assertj.core.util.Lists;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
@@ -137,6 +142,27 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
                             "7, 456, +, 300"),
                     sortEngine);
             runTest(parseData("1, 2, +, 100", "1, 1, +, -100"), sortEngine);
+        }
+    }
+
+    /** Test for {@link SortMergeReader} with {@link FirstRowMergeFunction}. */
+    public static class WithFirstRowMergeFunctionTest extends SortMergeReaderTestBase {
+
+        @Override
+        protected boolean addOnly() {
+            return true;
+        }
+
+        @Override
+        protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
+            return MergeFunctionTestUtils.getExpectedForFirstRow(input);
+        }
+
+        @Override
+        protected MergeFunction<KeyValue> createMergeFunction() {
+            return new FirstRowMergeFunction(
+                    new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
+                    new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))));
         }
     }
 }

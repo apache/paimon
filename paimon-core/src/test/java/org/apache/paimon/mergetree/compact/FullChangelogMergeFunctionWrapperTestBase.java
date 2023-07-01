@@ -20,7 +20,9 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +47,10 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
     protected abstract MergeFunction<KeyValue> createMergeFunction();
 
     protected abstract boolean changelogRowDeduplicate();
+
+    protected List<List<KeyValue>> getInputKvs() {
+        return INPUT_KVS;
+    }
 
     @BeforeEach
     public void beforeEach() {
@@ -107,9 +113,10 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
 
     @Test
     public void testFullChangelogMergeFunctionWrapper() {
-        for (int i = 0; i < INPUT_KVS.size(); i++) {
+        List<List<KeyValue>> inputs = getInputKvs();
+        for (int i = 0; i < inputs.size(); i++) {
             wrapper.reset();
-            List<KeyValue> kvs = INPUT_KVS.get(i);
+            List<KeyValue> kvs = inputs.get(i);
             kvs.forEach(kv -> wrapper.add(kv));
             ChangelogResult actualResult = wrapper.getResult();
             List<KeyValue> expectedChangelogs = new ArrayList<>();
@@ -213,6 +220,115 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
         @Override
         protected boolean changelogRowDeduplicate() {
             return true;
+        }
+    }
+
+    /** Test for {@link FirstRowMergeFunction} with {@link FullChangelogMergeFunctionWrapper}. */
+    public static class FirstRowMergeFunctionTest
+            extends FullChangelogMergeFunctionWrapperTestBase {
+
+        private static final List<List<KeyValue>> INPUT_KVS =
+                Arrays.asList(
+                        // only 1 insert record, not from top level
+                        Collections.singletonList(
+                                new KeyValue()
+                                        .replace(row(1), 1, RowKind.INSERT, row(1))
+                                        .setLevel(0)),
+                        // only 1 delete record, not from top level
+                        Collections.singletonList(
+                                new KeyValue()
+                                        .replace(row(2), 2, RowKind.DELETE, row(0))
+                                        .setLevel(0)),
+                        // only 1 insert record, from top level
+                        Collections.singletonList(
+                                new KeyValue()
+                                        .replace(row(3), 3, RowKind.INSERT, row(3))
+                                        .setLevel(MAX_LEVEL)),
+                        // multiple records, none from top level
+                        Arrays.asList(
+                                new KeyValue()
+                                        .replace(row(4), 4, RowKind.INSERT, row(3))
+                                        .setLevel(0),
+                                new KeyValue()
+                                        .replace(row(4), 5, RowKind.INSERT, row(-3))
+                                        .setLevel(0)),
+                        // multiple records, one from top level
+                        Arrays.asList(
+                                new KeyValue()
+                                        .replace(row(6), 8, RowKind.INSERT, row(3))
+                                        .setLevel(MAX_LEVEL),
+                                new KeyValue()
+                                        .replace(row(6), 9, RowKind.INSERT, row(-3))
+                                        .setLevel(0)),
+                        Arrays.asList(
+                                new KeyValue()
+                                        .replace(row(8), 14, RowKind.INSERT, row(3))
+                                        .setLevel(MAX_LEVEL),
+                                new KeyValue()
+                                        .replace(row(8), 15, RowKind.INSERT, row(3))
+                                        .setLevel(0)));
+
+        @Override
+        protected List<List<KeyValue>> getInputKvs() {
+            return INPUT_KVS;
+        }
+
+        private final List<KeyValue> expectedBefore =
+                Arrays.asList(
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        changelogRowDeduplicate()
+                                ? null
+                                : new KeyValue()
+                                        .replace(row(8), 14, RowKind.UPDATE_BEFORE, row(3)));
+
+        private final List<KeyValue> expectedAfter =
+                Arrays.asList(
+                        new KeyValue().replace(row(1), 1, RowKind.INSERT, row(1)),
+                        null,
+                        null,
+                        new KeyValue().replace(row(4), 4, RowKind.INSERT, row(3)),
+                        null,
+                        changelogRowDeduplicate()
+                                ? null
+                                : new KeyValue().replace(row(8), 15, RowKind.UPDATE_AFTER, row(3)));
+
+        private final List<KeyValue> expectedResult =
+                Arrays.asList(
+                        new KeyValue().replace(row(1), 1, RowKind.INSERT, row(1)),
+                        null,
+                        new KeyValue().replace(row(3), 3, RowKind.INSERT, row(3)),
+                        new KeyValue().replace(row(4), 4, RowKind.INSERT, row(3)),
+                        new KeyValue().replace(row(6), 8, RowKind.INSERT, row(3)),
+                        new KeyValue().replace(row(8), 14, RowKind.INSERT, row(3)));
+
+        @Override
+        protected MergeFunction<KeyValue> createMergeFunction() {
+            return new FirstRowMergeFunction(
+                    RowType.of(DataTypes.INT()), RowType.of(DataTypes.INT()));
+        }
+
+        @Override
+        protected boolean changelogRowDeduplicate() {
+            return true;
+        }
+
+        @Override
+        protected KeyValue getExpectedBefore(int idx) {
+            return expectedBefore.get(idx);
+        }
+
+        @Override
+        protected KeyValue getExpectedAfter(int idx) {
+            return expectedAfter.get(idx);
+        }
+
+        @Override
+        protected KeyValue getExpectedResult(int idx) {
+            return expectedResult.get(idx);
         }
     }
 }

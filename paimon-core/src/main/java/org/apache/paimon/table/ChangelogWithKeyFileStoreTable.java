@@ -28,6 +28,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
@@ -95,8 +96,9 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             Options conf = Options.fromMap(tableSchema.options());
             CoreOptions options = new CoreOptions(conf);
             CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
-            MergeFunctionFactory<KeyValue> mfFactory;
             KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
+
+            MergeFunctionFactory<KeyValue> mfFactory;
 
             switch (mergeEngine) {
                 case DEDUPLICATE:
@@ -112,6 +114,11 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                                     tableSchema.fieldNames(),
                                     rowType.getFieldTypes(),
                                     tableSchema.primaryKeys());
+                    break;
+                case FIRST_ROW:
+                    mfFactory =
+                            FirstRowMergeFunction.factory(
+                                    new RowType(extractor.keyFields(tableSchema)), rowType);
                     break;
                 default:
                     throw new UnsupportedOperationException(

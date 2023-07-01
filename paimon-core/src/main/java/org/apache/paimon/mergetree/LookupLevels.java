@@ -34,6 +34,7 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
 import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
@@ -102,26 +103,59 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     }
 
     @Nullable
-    public KeyValue lookup(InternalRow key, int startLevel) throws IOException {
-        if (startLevel == 0) {
-            throw new IllegalArgumentException("Start level can not be zero.");
-        }
-
+    public KeyValue lookup(LookupContext context) throws IOException {
         KeyValue kv = null;
-        for (int i = startLevel; i < levels.numberOfLevels(); i++) {
-            SortedRun level = levels.runOfLevel(i);
-            kv = lookup(key, level);
-            if (kv != null) {
-                break;
-            }
-        }
 
-        return kv;
+        switch (context.order) {
+            case High2Lower:
+                Preconditions.checkArgument(
+                        context.endLevel > 0, "The end level should bigger than zero");
+
+                Preconditions.checkArgument(
+                        context.startLevel <= levels.numberOfLevels() - 1,
+                        String.format(
+                                "The start level: %d should lower than the highest level: %d",
+                                context.startLevel, levels.numberOfLevels() - 1));
+
+                for (int i = context.startLevel; i >= context.endLevel; i--) {
+                    SortedRun level = levels.runOfLevel(i);
+                    kv = lookup(context.key, level);
+                    if (kv != null) {
+                        break;
+                    }
+                }
+                return kv;
+            case Low2Higher:
+                Preconditions.checkArgument(
+                        context.startLevel > 0, "The start level should bigger than zero");
+
+                Preconditions.checkArgument(
+                        context.endLevel <= levels.numberOfLevels() - 1,
+                        String.format(
+                                "The end level: %d should lower than the highest level: %d",
+                                context.endLevel, levels.numberOfLevels() - 1));
+
+                for (int i = context.startLevel; i <= context.endLevel; i++) {
+                    SortedRun level = levels.runOfLevel(i);
+                    kv = lookup(context.key, level);
+                    if (kv != null) {
+                        break;
+                    }
+                }
+
+                return kv;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported lookup order " + context.order);
+        }
     }
 
     @Nullable
     private KeyValue lookup(InternalRow target, SortedRun level) throws IOException {
         List<DataFileMeta> files = level.files();
+        if (files.isEmpty()) {
+            return null;
+        }
         int left = 0;
         int right = files.size() - 1;
 
@@ -220,6 +254,10 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile));
     }
 
+    public int maxLevel() {
+        return levels.numberOfLevels() - 1;
+    }
+
     @Override
     public void close() throws IOException {
         lookupFiles.invalidateAll();
@@ -259,6 +297,42 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         public void close() throws IOException {
             reader.close();
             FileIOUtils.deleteFileOrDirectory(localFile);
+        }
+    }
+
+    /** The order of lookup. */
+    public enum LookupOrder {
+        // lookup from the higher level to lower.
+        High2Lower,
+
+        // lookup from the low level to higher.
+        Low2Higher
+    }
+
+    /** The lookup context. */
+    public static class LookupContext {
+        public final LookupOrder order;
+        // inclusive
+        public final int startLevel;
+        // inclusive
+        public final int endLevel;
+        public final InternalRow key;
+
+        public LookupContext(LookupOrder order, int startLevel, int endLevel, InternalRow key) {
+            this.order = order;
+            this.startLevel = startLevel;
+            this.endLevel = endLevel;
+            this.key = key;
+            switch (order) {
+                case High2Lower:
+                    Preconditions.checkArgument(startLevel >= endLevel);
+                    break;
+                case Low2Higher:
+                    Preconditions.checkArgument(startLevel <= endLevel);
+                    break;
+                default:
+                    throw new UnsupportedOperationException("Unsupported lookup order " + order);
+            }
         }
     }
 }

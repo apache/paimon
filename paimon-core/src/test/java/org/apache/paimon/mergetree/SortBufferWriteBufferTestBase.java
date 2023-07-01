@@ -24,6 +24,7 @@ import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
+import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionTestUtils;
@@ -40,6 +41,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReusingKeyValue;
 import org.apache.paimon.utils.ReusingTestData;
 
+import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 
 import java.io.EOFException;
@@ -264,6 +266,28 @@ public abstract class SortBufferWriteBufferTestBase {
                             RowType.of(DataTypes.INT()),
                             RowType.of(DataTypes.BIGINT()))
                     .create();
+        }
+    }
+
+    /** Test for {@link SortBufferWriteBuffer} with {@link FirstRowMergeFunction}. */
+    public static class WithFirstRowMergeFunctionTest extends SortBufferWriteBufferTestBase {
+
+        @Override
+        protected boolean addOnly() {
+            return true;
+        }
+
+        @Override
+        protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
+            return MergeFunctionTestUtils.getExpectedForFirstRow(input);
+        }
+
+        @Override
+        protected MergeFunction<KeyValue> createMergeFunction() {
+            return FirstRowMergeFunction.factory(
+                    new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
+                    new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))))
+                .create();
         }
     }
 }

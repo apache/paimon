@@ -1218,7 +1218,9 @@ public class CoreOptions implements Serializable {
 
         PARTIAL_UPDATE("partial-update", "Partial update non-null fields."),
 
-        AGGREGATE("aggregation", "Aggregate fields with same primary key.");
+        AGGREGATE("aggregation", "Aggregate fields with same primary key."),
+
+        FIRST_ROW("first-row", "De-duplicate and keep the first row.");
 
         private final String value;
         private final String description;

@@ -63,7 +63,8 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
         this.mergeFunction = mergeFunction;
         this.maxLevel = maxLevel;
         this.valueEqualiser = valueEqualiser;
-        this.changelogRowDeduplicate = changelogRowDeduplicate;
+        this.changelogRowDeduplicate =
+                changelogRowDeduplicate || mergeFunction instanceof FirstRowMergeFunction;
     }
 
     @Override

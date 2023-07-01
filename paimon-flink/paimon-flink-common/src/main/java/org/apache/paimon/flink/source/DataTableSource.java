@@ -139,6 +139,10 @@ public class DataTableSource extends FlinkTableSource {
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
 
+            if (new CoreOptions(options).mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+                return ChangelogMode.insertOnly();
+            }
+
             if (options.get(LOG_SCAN_REMOVE_NORMALIZE)) {
                 return ChangelogMode.all();
             }
