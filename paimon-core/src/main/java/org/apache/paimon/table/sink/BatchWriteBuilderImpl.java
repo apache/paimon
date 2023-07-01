@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.options.Options;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 
@@ -35,7 +34,6 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     private final InnerTable table;
     private final String commitUser = UUID.randomUUID().toString();
 
-    private Options options = new Options();
     private Map<String, String> staticPartition;
 
     public BatchWriteBuilderImpl(InnerTable table) {
@@ -53,12 +51,6 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     @Override
-    public BatchWriteBuilder withOption(String key, String value) {
-        options.set(key, value);
-        return this;
-    }
-
-    @Override
     public BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition) {
         this.staticPartition = staticPartition;
         return this;
@@ -73,8 +65,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
 
     @Override
     public BatchTableCommit newCommit() {
-        InnerTableCommit commit =
-                table.newCommit(commitUser, options).withOverwrite(staticPartition);
+        InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartition);
         commit.ignoreEmptyCommit(true);
         return commit;
     }

@@ -28,13 +28,13 @@ import java.io.IOException
 /** Helper trait for all paimon commands. */
 trait PaimonCommand {
 
-  val table: Table
-
   val BUCKET_COL = "_bucket_"
 
+  def getTable: Table
+
   def isDynamicBucketTable: Boolean = {
-    table.isInstanceOf[FileStoreTable] &&
-    table.asInstanceOf[FileStoreTable].bucketMode == BucketMode.DYNAMIC
+    getTable.isInstanceOf[FileStoreTable] &&
+    getTable.asInstanceOf[FileStoreTable].bucketMode == BucketMode.DYNAMIC
   }
 
   def deserializeCommitMessage(

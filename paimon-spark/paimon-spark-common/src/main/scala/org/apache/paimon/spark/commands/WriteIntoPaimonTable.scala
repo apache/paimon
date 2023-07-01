@@ -23,7 +23,7 @@ import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.{FileStoreTable, Table}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, InnerTableCommit, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
@@ -41,11 +41,13 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 /** Used to write a [[DataFrame]] into a paimon table. */
-case class WriteIntoPaimonTable(table: FileStoreTable, saveMode: SaveMode, data: DataFrame)
+case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data: DataFrame)
   extends RunnableCommand
   with PaimonCommand {
 
   import WriteIntoPaimonTable._
+
+  private var table = _table
 
   private lazy val tableSchema = table.schema()
 
@@ -60,6 +62,9 @@ case class WriteIntoPaimonTable(table: FileStoreTable, saveMode: SaveMode, data:
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode(
       sparkSession.sessionState.conf.resolver)
+    // use the extra options to rebuild the table object
+    table = table.copy(
+      Map(DYNAMIC_PARTITION_OVERWRITE.key() -> dynamicPartitionOverwriteMode.toString).asJava)
 
     val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala.map(col)
     val partitionCols = tableSchema.partitionKeys().asScala.map(col)
@@ -116,7 +121,6 @@ case class WriteIntoPaimonTable(table: FileStoreTable, saveMode: SaveMode, data:
 
     try {
       val tableCommit = writeBuilder
-        .withOption(DYNAMIC_PARTITION_OVERWRITE.key(), dynamicPartitionOverwriteMode.toString)
         .withOverwrite(overwritePartition.asJava)
         .newCommit()
       tableCommit.commit(commitMessages.toList.asJava)
@@ -148,6 +152,8 @@ case class WriteIntoPaimonTable(table: FileStoreTable, saveMode: SaveMode, data:
 
   override def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan]): LogicalPlan =
     this.asInstanceOf[WriteIntoPaimonTable]
+
+  override def getTable: Table = table
 }
 
 object WriteIntoPaimonTable {
