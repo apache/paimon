@@ -72,7 +72,12 @@ public interface FileStoreCommit {
      *
      * @param partitions A list of partition {@link Map}s. NOTE: cannot be empty!
      */
-    void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier);
+    void dropPartitions(
+            List<Map<String, String>> partitions, long commitIdentifier, boolean dryRun);
+
+    default void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier) {
+        dropPartitions(partitions, commitIdentifier, false);
+    };
 
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);

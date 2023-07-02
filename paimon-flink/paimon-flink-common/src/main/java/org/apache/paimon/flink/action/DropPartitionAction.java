@@ -44,14 +44,18 @@ public class DropPartitionAction extends TableActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(DropPartitionAction.class);
 
     private final List<Map<String, String>> partitions;
+
     private final FileStoreCommit commit;
+
+    private final boolean dryRun;
 
     DropPartitionAction(
             String warehouse,
             String databaseName,
             String tableName,
             List<Map<String, String>> partitions,
-            Map<String, String> catalogConfig) {
+            Map<String, String> catalogConfig,
+            boolean dryRun) {
         super(warehouse, databaseName, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
@@ -61,9 +65,9 @@ public class DropPartitionAction extends TableActionBase {
         }
 
         this.partitions = partitions;
-
         AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
         this.commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
+        this.dryRun = dryRun;
     }
 
     public static Optional<Action> create(String[] args) {
@@ -83,9 +87,15 @@ public class DropPartitionAction extends TableActionBase {
 
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 
+        boolean dryRun = params.has("dry-run");
         return Optional.of(
                 new DropPartitionAction(
-                        tablePath.f0, tablePath.f1, tablePath.f2, partitions, catalogConfig));
+                        tablePath.f0,
+                        tablePath.f1,
+                        tablePath.f2,
+                        partitions,
+                        catalogConfig,
+                        dryRun));
     }
 
     private static void printHelp() {
@@ -99,6 +109,11 @@ public class DropPartitionAction extends TableActionBase {
                         + "--table <table-name> --partition <partition-name> [--partition <partition-name> ...]");
         System.out.println(
                 "  drop-partition --path <table-path> --partition <partition-name> [--partition <partition-name> ...]");
+        System.out.println();
+        System.out.println("If you are unsure whether the partition will be dropped as expected,");
+        System.out.println("or the data files of the partition are referenced by metadata,");
+        System.out.println(
+                "you can try the --dry-run arg to understand the details without actually executing.");
         System.out.println();
 
         System.out.println("Partition name syntax:");
@@ -114,6 +129,6 @@ public class DropPartitionAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+        commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER, dryRun);
     }
 }

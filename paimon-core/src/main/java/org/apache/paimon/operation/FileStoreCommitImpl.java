@@ -40,6 +40,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -371,7 +372,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier) {
+    public void dropPartitions(
+            List<Map<String, String>> partitions, long commitIdentifier, boolean dryRun) {
         Preconditions.checkArgument(!partitions.isEmpty(), "Partitions list cannot be empty.");
 
         if (LOG.isDebugEnabled()) {
@@ -385,14 +387,60 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         .map(partition -> PredicateBuilder.partition(partition, partitionType))
                         .reduce(PredicateBuilder::or)
                         .orElseThrow(() -> new RuntimeException("Failed to get partition filter."));
+        if (dryRun) {
+            Long latestSnapshotId = snapshotManager.latestSnapshotId();
+            if (latestSnapshotId == null) {
+                throw new RuntimeException("There is no snapshot found.");
+            }
 
-        tryOverwrite(
-                partitionFilter,
-                Collections.emptyList(),
-                Collections.emptyList(),
-                commitIdentifier,
-                null,
-                Collections.emptyMap());
+            List<ManifestEntry> currentEntries =
+                    scan.withSnapshot(latestSnapshotId)
+                            .withPartitionFilter(partitionFilter)
+                            .plan()
+                            .files();
+
+            if (currentEntries.isEmpty()) {
+                LOG.info("There is no datafile in Partition list {} ", partitions);
+                return;
+            }
+
+            List<DataField> partitionFields = partitionType.getFields();
+            Map<BinaryRow, List<ManifestEntry>> entryGroupByPartition =
+                    currentEntries.stream()
+                            .collect(Collectors.groupingBy(ManifestEntry::partition));
+            StringBuilder partitionInfos = new StringBuilder();
+            for (Map.Entry<BinaryRow, List<ManifestEntry>> binaryRowListEntry :
+                    entryGroupByPartition.entrySet()) {
+                BinaryRow row = binaryRowListEntry.getKey();
+                Object[] convert = partitionObjectConverter.convert(row);
+
+                StringBuilder paritions = new StringBuilder();
+                for (int i = 0; i < convert.length; i++) {
+                    DataField dataField = partitionFields.get(i);
+                    if (paritions.length() == 0) {
+                        paritions.append(String.format("%s=%s", dataField.name(), convert[i]));
+                    } else {
+                        paritions.append(String.format(",%s=%s", dataField.name(), convert[i]));
+                    }
+                }
+
+                paritions.append(
+                        String.format(
+                                "Parition [%s] with %s file \n",
+                                paritions, binaryRowListEntry.getValue().size()));
+                partitionInfos.append(paritions);
+            }
+
+            LOG.info("{} need to be drop", partitionInfos);
+        } else {
+            tryOverwrite(
+                    partitionFilter,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    commitIdentifier,
+                    null,
+                    Collections.emptyMap());
+        }
     }
 
     @Override
