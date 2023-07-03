@@ -18,7 +18,7 @@
 
 package org.apache.paimon.predicate;
 
-import com.google.common.collect.Sets;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 
 import java.util.Collections;
 import java.util.List;
