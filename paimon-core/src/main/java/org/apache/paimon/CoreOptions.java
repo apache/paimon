@@ -411,7 +411,8 @@ public class CoreOptions implements Serializable {
             key("scan.tag-name")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription("Optional tag name used in case of \"from-tag\" scan mode.");
+                    .withDescription(
+                            "Optional tag name used in case of \"from-snapshot\" scan mode.");
 
     public static final ConfigOption<Long> SCAN_BOUNDED_WATERMARK =
             key("scan.bounded.watermark")
