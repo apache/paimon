@@ -459,12 +459,82 @@ CREATE TABLE T (
 
 
 -- ################################################################################
---  MySqlSyncDatabaseActionITCase#testTableAffix
+--  MySqlSyncDatabaseActionITCase#testNewlyAddedTables
 -- ################################################################################
 
 CREATE DATABASE paimon_sync_database_newly_added_tables;
 USE paimon_sync_database_newly_added_tables;
 
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
+CREATE DATABASE paimon_sync_database_newly_added_tables_1;
+USE paimon_sync_database_newly_added_tables_1;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
+
+CREATE DATABASE paimon_sync_database_newly_added_tables_2;
+USE paimon_sync_database_newly_added_tables_2;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
+
+CREATE DATABASE paimon_sync_database_newly_added_tables_3;
+USE paimon_sync_database_newly_added_tables_3;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    v2 BIGINT,
+    PRIMARY KEY (k1, k2)
+);
+
+
+CREATE DATABASE paimon_sync_database_newly_added_tables_4;
+USE paimon_sync_database_newly_added_tables_4;
 
 CREATE TABLE t1 (
     k INT,

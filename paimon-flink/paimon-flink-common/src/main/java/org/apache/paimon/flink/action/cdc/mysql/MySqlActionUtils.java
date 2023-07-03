@@ -195,9 +195,11 @@ class MySqlActionUtils {
         mySqlConfig
                 .getOptional(MySqlSourceOptions.SERVER_TIME_ZONE)
                 .ifPresent(sourceBuilder::serverTimeZone);
+        // MySQL CDC using increment snapshot, splitSize is used instead of fetchSize (as in JDBC
+        // connector). splitSize is the number of records in each snapshot split.
         mySqlConfig
-                .getOptional(MySqlSourceOptions.SCAN_SNAPSHOT_FETCH_SIZE)
-                .ifPresent(sourceBuilder::fetchSize);
+                .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE)
+                .ifPresent(sourceBuilder::splitSize);
         mySqlConfig
                 .getOptional(MySqlSourceOptions.CONNECT_TIMEOUT)
                 .ifPresent(sourceBuilder::connectTimeout);
