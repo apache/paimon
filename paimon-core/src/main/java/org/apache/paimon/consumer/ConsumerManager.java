@@ -36,7 +36,8 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.FileUtils.*;
+import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
+import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 
 /** Manage consumer groups. */
 public class ConsumerManager implements Serializable {
