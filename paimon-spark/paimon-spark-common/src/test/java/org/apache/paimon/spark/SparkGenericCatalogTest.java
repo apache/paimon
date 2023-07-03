@@ -78,6 +78,7 @@ public class SparkGenericCatalogTest {
     public void testCsvTable() {
         spark.sql("CREATE TABLE CT (a INT, b INT, c STRING) USING csv");
         testReadWrite("CT");
+        spark.sql("DROP TABLE CT");
     }
 
     @Test
