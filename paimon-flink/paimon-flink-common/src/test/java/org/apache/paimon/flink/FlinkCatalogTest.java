@@ -497,13 +497,11 @@ public class FlinkCatalogTest {
                 options.put("scan.snapshot-id", "1");
             } else if (mode == CoreOptions.StartupMode.FROM_TIMESTAMP) {
                 options.put("scan.timestamp-millis", System.currentTimeMillis() + "");
-            } else if (mode == CoreOptions.StartupMode.INCREMENTAL_TIMESTAMP) {
-                options.put("incremental-between-timestamp", String.format("%s,%s", System.currentTimeMillis(), System.currentTimeMillis()));
-            } else if (mode == CoreOptions.StartupMode.INCREMENTAL_SNAPSHOT) {
-                options.put("incremental-between-snapshot", "2,5");
+            } else if (mode == CoreOptions.StartupMode.INCREMENTAL) {
+                options.put("incremental-between", "2,5");
             }
 
-            if (isStreaming && mode == CoreOptions.StartupMode.INCREMENTAL_SNAPSHOT) {
+            if (isStreaming && mode == CoreOptions.StartupMode.INCREMENTAL) {
                 continue;
             }
             allOptions.add(options);

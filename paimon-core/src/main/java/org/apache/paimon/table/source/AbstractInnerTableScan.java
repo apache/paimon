@@ -133,20 +133,18 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 return isStreaming
                         ? new ContinuousFromSnapshotFullStartingScanner(options.scanSnapshotId())
                         : new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
-            case INCREMENTAL_TIMESTAMP:
+            case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
-
-                Pair<String, String> incrementalTimestamp = options.incrementalBetweenTimestamp();
-                return new IncrementalTimeStampStartingScanner(
-                        Long.parseLong(incrementalTimestamp.getLeft()),
-                        Long.parseLong(incrementalTimestamp.getRight()));
-            case INCREMENTAL_SNAPSHOT:
-                checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
-
-                Pair<String, String> incrementalSnapshot = options.incrementalBetweenSnapshot();
-                return new IncrementalStartingScanner(
-                        Long.parseLong(incrementalSnapshot.getLeft()),
-                        Long.parseLong(incrementalSnapshot.getRight()));
+                Pair<String, String> incrementalBetween = options.incrementalBetween();
+                if (options.toMap().get(CoreOptions.INCREMENTAL_BETWEEN.key()) != null) {
+                    return new IncrementalStartingScanner(
+                            Long.parseLong(incrementalBetween.getLeft()),
+                            Long.parseLong(incrementalBetween.getRight()));
+                } else {
+                    return new IncrementalTimeStampStartingScanner(
+                            Long.parseLong(incrementalBetween.getLeft()),
+                            Long.parseLong(incrementalBetween.getRight()));
+                }
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());

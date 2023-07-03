@@ -37,7 +37,7 @@ import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link CoreOptions#INCREMENTAL_BETWEEN_SNAPSHOT}. */
+/** Test for {@link CoreOptions#INCREMENTAL_BETWEEN_TIMESTAMP}. */
 public class IncrementalTimeStampTableTest extends TableTestBase {
 
     @Test
@@ -56,6 +56,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
         SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
 
+        Long timestamp_earliest = System.currentTimeMillis();
         // snapshot 1: append
         write(
                 table,
@@ -71,7 +72,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                 GenericRow.of(1, 2, 2),
                 GenericRow.of(1, 4, 1),
                 GenericRow.of(2, 1, 2));
-        Long startTimestamp = snapshotManager.snapshot(2).timeMillis();
+        Long timestamp_snapshot2 = snapshotManager.snapshot(2).timeMillis();
 
         // snapshot 3: compact
         compact(table, row(1), 0);
@@ -86,13 +87,41 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
 
         // snapshot 5: append
         write(table, GenericRow.of(1, 1, 4), GenericRow.of(1, 2, 4), GenericRow.of(2, 1, 4));
-        Long endTimestamp = snapshotManager.snapshot(5).timeMillis();
+        Long timestamp_snapshot4 = snapshotManager.snapshot(5).timeMillis();
 
         // snapshot 6: append
         write(table, GenericRow.of(1, 1, 5), GenericRow.of(1, 2, 5), GenericRow.of(2, 1, 5));
 
-        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN_TIMESTAMP, String.format("%s,%s", startTimestamp, endTimestamp)));
-        assertThat(result)
+        List<InternalRow> result1 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format(
+                                        "%s,%s", timestamp_earliest - 1, timestamp_earliest)));
+        assertThat(result1).isEmpty();
+
+        List<InternalRow> result2 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format("%s,%s", timestamp_earliest, timestamp_snapshot2)));
+        assertThat(result2)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 2),
+                        GenericRow.of(1, 2, 2),
+                        GenericRow.of(1, 3, 1),
+                        GenericRow.of(1, 4, 1),
+                        GenericRow.of(2, 1, 2));
+
+        List<InternalRow> result3 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format("%s,%s", timestamp_snapshot2, timestamp_snapshot4)));
+        assertThat(result3)
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, 4),
                         GenericRow.of(1, 2, 4),
@@ -107,13 +136,14 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
                         .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
                         .partitionKeys("pt")
                         .build();
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
         SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
-
+        Long timestamp_earliest = System.currentTimeMillis();
         // snapshot 1: append
         write(
                 table,
@@ -129,7 +159,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                 GenericRow.of(1, 2, 2),
                 GenericRow.of(1, 4, 1),
                 GenericRow.of(2, 1, 2));
-        Long startTimestamp = snapshotManager.snapshot(2).timeMillis();
+        Long timestamp_snapshot_2 = snapshotManager.snapshot(2).timeMillis();
 
         // snapshot 3: append
         write(
@@ -145,10 +175,42 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
         // snapshot 5: append
         write(table, GenericRow.of(1, 1, 5), GenericRow.of(1, 2, 5), GenericRow.of(2, 1, 5));
 
-        Long endTimestamp = snapshotManager.snapshot(5).timeMillis();
+        Long timestamp_snapshot_4 = snapshotManager.snapshot(4).timeMillis();
 
-        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN_TIMESTAMP, String.format("%s,%s", startTimestamp, endTimestamp)));
-        assertThat(result)
+        List<InternalRow> result1 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format(
+                                        "%s,%s", timestamp_earliest - 1, timestamp_earliest)));
+        assertThat(result1).isEmpty();
+
+        List<InternalRow> result2 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format("%s,%s", timestamp_earliest, timestamp_snapshot_2)));
+        assertThat(result2)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 1, 1),
+                        GenericRow.of(1, 1, 2),
+                        GenericRow.of(1, 2, 1),
+                        GenericRow.of(1, 2, 2),
+                        GenericRow.of(1, 3, 1),
+                        GenericRow.of(1, 4, 1),
+                        GenericRow.of(2, 1, 1),
+                        GenericRow.of(2, 1, 2));
+
+        List<InternalRow> result3 =
+                read(
+                        table,
+                        Pair.of(
+                                INCREMENTAL_BETWEEN_TIMESTAMP,
+                                String.format(
+                                        "%s,%s", timestamp_snapshot_2, timestamp_snapshot_4)));
+        assertThat(result3)
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, 3),
                         GenericRow.of(1, 2, 3),

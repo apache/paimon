@@ -89,7 +89,7 @@ For example, '5,10' means changes between snapshot 5 and snapshot 10.
 
 {{< tab "Flink" >}}
 ```sql
-SELECT * FROM t /*+ OPTIONS('incremental-between-snapshot' = '12,20') */;
+SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
 ```
 {{< /tab >}}
 
@@ -98,7 +98,7 @@ SELECT * FROM t /*+ OPTIONS('incremental-between-snapshot' = '12,20') */;
 ```java
 spark.read()
   .format("paimon")
-  .option("incremental-between-snapshot", "12,20")
+  .option("incremental-between", "12,20")
   .load("path/to/table")
 ```
 

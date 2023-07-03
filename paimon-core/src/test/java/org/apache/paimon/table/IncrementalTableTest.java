@@ -30,11 +30,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_SNAPSHOT;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link CoreOptions#INCREMENTAL_BETWEEN_SNAPSHOT}. */
+/** Test for {@link CoreOptions#INCREMENTAL_BETWEEN}. */
 public class IncrementalTableTest extends TableTestBase {
 
     @Test
@@ -84,7 +84,7 @@ public class IncrementalTableTest extends TableTestBase {
         // snapshot 6: append
         write(table, GenericRow.of(1, 1, 5), GenericRow.of(1, 2, 5), GenericRow.of(2, 1, 5));
 
-        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN_SNAPSHOT, "2,5"));
+        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, "2,5"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, 4),
@@ -136,7 +136,7 @@ public class IncrementalTableTest extends TableTestBase {
         // snapshot 5: append
         write(table, GenericRow.of(1, 1, 5), GenericRow.of(1, 2, 5), GenericRow.of(2, 1, 5));
 
-        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN_SNAPSHOT, "2,4"));
+        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, "2,4"));
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, 3),

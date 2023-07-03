@@ -34,11 +34,22 @@ public class IncrementalTimeStampStartingScanner implements StartingScanner {
 
     @Override
     public Result scan(SnapshotManager manager, SnapshotReader reader) {
+        Snapshot earliestSnapshot = manager.snapshot(manager.earliestSnapshotId());
+        Snapshot latestSnapshot = manager.latestSnapshot();
+        if (startTimestamp > latestSnapshot.timeMillis()
+                || endTimestamp < earliestSnapshot.timeMillis()) {
+            return new NoSnapshot();
+        }
         Snapshot startSnapshot = manager.earlierOrEqualTimeMills(startTimestamp);
-        Long startSnapshotId = (startSnapshot == null) ? manager.snapshot(manager.earliestSnapshotId()).id() - 1 : startSnapshot.id();
+        Long startSnapshotId =
+                (startSnapshot == null)
+                        ? manager.snapshot(manager.earliestSnapshotId()).id() - 1
+                        : startSnapshot.id();
         Snapshot endSnapshot = manager.earlierOrEqualTimeMills(endTimestamp);
-        Long endSnapshotId = (endSnapshot == null) ?  manager.latestSnapshot().id() : endSnapshot.id();
-        IncrementalStartingScanner incrementalStartingScanner = new IncrementalStartingScanner(startSnapshotId, endSnapshotId);
+        Long endSnapshotId =
+                (endSnapshot == null) ? manager.latestSnapshot().id() : endSnapshot.id();
+        IncrementalStartingScanner incrementalStartingScanner =
+                new IncrementalStartingScanner(startSnapshotId, endSnapshotId);
         return incrementalStartingScanner.scan(manager, reader);
     }
 }

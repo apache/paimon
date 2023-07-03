@@ -36,8 +36,8 @@ import java.util.Map;
 /** {@link StartingScanner} for incremental changes by snapshot. */
 public class IncrementalStartingScanner implements StartingScanner {
 
-    private  long start;
-    private  long end;
+    private long start;
+    private long end;
 
     public IncrementalStartingScanner(long start, long end) {
         this.start = start;

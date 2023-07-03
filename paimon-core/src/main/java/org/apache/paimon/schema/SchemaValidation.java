@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
-import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_SNAPSHOT;
+import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
@@ -192,39 +192,49 @@ public class SchemaValidation {
                     options, SCAN_TIMESTAMP_MILLIS, CoreOptions.StartupMode.FROM_TIMESTAMP);
             checkOptionsConflict(
                     options,
-                    Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TAG_NAME, INCREMENTAL_BETWEEN_TIMESTAMP, INCREMENTAL_BETWEEN_SNAPSHOT),
+                    Arrays.asList(
+                            SCAN_SNAPSHOT_ID,
+                            SCAN_TAG_NAME,
+                            INCREMENTAL_BETWEEN_TIMESTAMP,
+                            INCREMENTAL_BETWEEN),
                     Collections.singletonList(SCAN_TIMESTAMP_MILLIS));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
             checkExactOneOptionExistInMode(
                     options, options.startupMode(), SCAN_SNAPSHOT_ID, SCAN_TAG_NAME);
             checkOptionsConflict(
                     options,
-                    Arrays.asList(SCAN_TIMESTAMP_MILLIS, INCREMENTAL_BETWEEN_TIMESTAMP, INCREMENTAL_BETWEEN_SNAPSHOT),
+                    Arrays.asList(
+                            SCAN_TIMESTAMP_MILLIS,
+                            INCREMENTAL_BETWEEN_TIMESTAMP,
+                            INCREMENTAL_BETWEEN),
                     Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TAG_NAME));
-        } else if (options.startupMode() == CoreOptions.StartupMode.INCREMENTAL_TIMESTAMP) {
-            checkOptionExistInMode(options, INCREMENTAL_BETWEEN_TIMESTAMP, options.startupMode());
+        } else if (options.startupMode() == CoreOptions.StartupMode.INCREMENTAL) {
+            checkExactOneOptionExistInMode(
+                    options,
+                    options.startupMode(),
+                    INCREMENTAL_BETWEEN,
+                    INCREMENTAL_BETWEEN_TIMESTAMP);
             checkOptionsConflict(
                     options,
-                    Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS, SCAN_TAG_NAME, INCREMENTAL_BETWEEN_SNAPSHOT),
-                    Collections.singletonList(INCREMENTAL_BETWEEN_TIMESTAMP));
-        } else if (options.startupMode() == CoreOptions.StartupMode.INCREMENTAL_SNAPSHOT) {
-            checkOptionExistInMode(options, INCREMENTAL_BETWEEN_SNAPSHOT, options.startupMode());
-            checkOptionsConflict(
-                    options,
-                    Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS, SCAN_TAG_NAME, INCREMENTAL_BETWEEN_TIMESTAMP),
-                    Collections.singletonList(INCREMENTAL_BETWEEN_SNAPSHOT));
+                    Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS, SCAN_TAG_NAME),
+                    Arrays.asList(INCREMENTAL_BETWEEN, INCREMENTAL_BETWEEN_TIMESTAMP));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
             checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionsConflict(
                     options,
-                    Arrays.asList(SCAN_TIMESTAMP_MILLIS, SCAN_TAG_NAME, INCREMENTAL_BETWEEN_TIMESTAMP, INCREMENTAL_BETWEEN_SNAPSHOT),
+                    Arrays.asList(
+                            SCAN_TIMESTAMP_MILLIS,
+                            SCAN_TAG_NAME,
+                            INCREMENTAL_BETWEEN_TIMESTAMP,
+                            INCREMENTAL_BETWEEN),
                     Collections.singletonList(SCAN_SNAPSHOT_ID));
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
             checkOptionNotExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionNotExistInMode(options, SCAN_TAG_NAME, options.startupMode());
-            checkOptionNotExistInMode(options, INCREMENTAL_BETWEEN_TIMESTAMP, options.startupMode());
-            checkOptionNotExistInMode(options, INCREMENTAL_BETWEEN_SNAPSHOT, options.startupMode());
+            checkOptionNotExistInMode(
+                    options, INCREMENTAL_BETWEEN_TIMESTAMP, options.startupMode());
+            checkOptionNotExistInMode(options, INCREMENTAL_BETWEEN, options.startupMode());
         }
     }
 
