@@ -706,21 +706,23 @@ public class CoreOptions implements Serializable {
                                     .text(
                                             "The mode of metadata stats collection. none, counts, truncate(16), full is available.")
                                     .linebreak()
-                                    .text("none means disable the metadata stats collection.")
-                                    .linebreak()
-                                    .text("counts means only collect the null count.")
-                                    .linebreak()
-                                    .text("full means collect the null count, min/max value.")
-                                    .linebreak()
-                                    .text(
-                                            "truncate(16) means collect the null count, min/max value with truncated length of 16.")
-                                    .linebreak()
-                                    .text(
-                                            "Field level stats mode can be specified by "
-                                                    + FIELD_STATS_MODE_PREFIX
-                                                    + "."
-                                                    + "{field_name}."
-                                                    + FIELD_STATS_MODE_SUFFIX)
+                                    .list(
+                                            text(
+                                                    "\"none\": means disable the metadata stats collection."))
+                                    .list(text("\"counts\" means only collect the null count."))
+                                    .list(
+                                            text(
+                                                    "\"full\": means collect the null count, min/max value."))
+                                    .list(
+                                            text(
+                                                    "\"truncate(16)\": means collect the null count, min/max value with truncated length of 16."))
+                                    .list(
+                                            text(
+                                                    "Field level stats mode can be specified by "
+                                                            + FIELD_STATS_MODE_PREFIX
+                                                            + "."
+                                                            + "{field_name}."
+                                                            + FIELD_STATS_MODE_SUFFIX))
                                     .build());
 
     private final Options options;
