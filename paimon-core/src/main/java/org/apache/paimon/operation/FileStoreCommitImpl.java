@@ -396,6 +396,17 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
+    public void purgeTable(long commitIdentifier) {
+        tryOverwrite(
+                null,
+                Collections.emptyList(),
+                Collections.emptyList(),
+                commitIdentifier,
+                null,
+                new HashMap<>());
+    }
+
+    @Override
     public void abort(List<CommitMessage> commitMessages) {
         Map<Pair<BinaryRow, Integer>, DataFilePathFactory> factoryMap = new HashMap<>();
         for (CommitMessage message : commitMessages) {

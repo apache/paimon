@@ -24,7 +24,9 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -89,35 +91,31 @@ public class DeletePushDownVisitorTest {
                 new LeafPredicate(
                         IsNotNull.INSTANCE, DataTypes.INT(), 6, "f", Collections.singletonList(6));
 
-        /** filters contain all the primary keys with AND of Equal *********** */
+        /* filters contain all the primary keys with AND of Equal *********** */
 
         // where a=1 and b=2 and c=3 and d=4, push down
-        DeletePushDownPrimaryKeyVisitor visitor = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
+        AllPrimaryKeyEqualVisitor visitor = new AllPrimaryKeyEqualVisitor(primaryKeys);
         Predicate compoundPredicate =
                 PredicateBuilder.and(Arrays.asList(predicateA, predicateB, predicateC, predicateD));
-        Boolean visitResult = compoundPredicate.visit(visitor);
-        Boolean hit = visitor.isHitAll();
-        assertThat(visitResult).isTrue();
-        assertThat(hit).isTrue();
+        Set<String> visitResult = compoundPredicate.visit(visitor);
+        assertThat(visitResult).containsAnyElementsOf(primaryKeys);
 
         // where a=1 and b=2 and c=3 and d=4 and e is not null, push down
-        DeletePushDownPrimaryKeyVisitor visitor1 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
+        AllPrimaryKeyEqualVisitor visitor1 = new AllPrimaryKeyEqualVisitor(primaryKeys);
         Predicate predicateABCDE =
                 PredicateBuilder.and(
                         Arrays.asList(predicateA, predicateB, predicateC, predicateD, predicateE));
-        assertThat(predicateABCDE.visit(visitor1)).isTrue();
-        assertThat(visitor1.isHitAll()).isTrue();
+        assertThat(predicateABCDE.visit(visitor1)).containsAnyElementsOf(primaryKeys);
 
         // where a=1 and b=2 and c=3 and d=4 and f=6, push down
-        DeletePushDownPrimaryKeyVisitor visitor2 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
+        AllPrimaryKeyEqualVisitor visitor2 = new AllPrimaryKeyEqualVisitor(primaryKeys);
         Predicate predicateABCDF =
                 PredicateBuilder.and(
                         Arrays.asList(predicateA, predicateB, predicateC, predicateD, predicateF));
-        assertThat(predicateABCDF.visit(visitor2)).isTrue();
-        assertThat(visitor2.isHitAll()).isTrue();
+        assertThat(predicateABCDF.visit(visitor2)).containsAnyElementsOf(primaryKeys);
 
         // where a=1 and b=2 and c=3 and d=4 and e is not null and f=6, push down
-        DeletePushDownPrimaryKeyVisitor visitor3 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
+        AllPrimaryKeyEqualVisitor visitor3 = new AllPrimaryKeyEqualVisitor(primaryKeys);
         Predicate predicateABCDEF =
                 PredicateBuilder.and(
                         Arrays.asList(
@@ -127,11 +125,10 @@ public class DeletePushDownVisitorTest {
                                 predicateD,
                                 predicateE,
                                 predicateF));
-        assertThat(predicateABCDEF.visit(visitor3)).isTrue();
-        assertThat(visitor3.isHitAll()).isTrue();
+        assertThat(predicateABCDEF.visit(visitor3)).containsAnyElementsOf(primaryKeys);
 
         // where a in (1,2) and b=2 and c=3 and d=4, push down
-        DeletePushDownPrimaryKeyVisitor visitor4 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
+        AllPrimaryKeyEqualVisitor visitor4 = new AllPrimaryKeyEqualVisitor(primaryKeys);
         Predicate predicateAABCD =
                 PredicateBuilder.and(
                         Arrays.asList(
@@ -140,41 +137,46 @@ public class DeletePushDownVisitorTest {
                                 predicateC,
                                 predicateD,
                                 predicateE));
-        assertThat(predicateAABCD.visit(visitor4)).isTrue();
-        assertThat(visitor4.isHitAll()).isTrue();
+        assertThat(predicateAABCD.visit(visitor4)).containsAnyElementsOf(primaryKeys);
 
-        /** not all the primary keys filters are of Equal func ************* */
+        /* not all the primary keys filters are of Equal func ************* */
 
         // where a=1 and b=1 and c is not null and d=4, do not push down
-        DeletePushDownPrimaryKeyVisitor visitor5 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
+        AllPrimaryKeyEqualVisitor visitor5 = new AllPrimaryKeyEqualVisitor(primaryKeys);
         Predicate predicateABCNotNull =
                 PredicateBuilder.and(
                         Arrays.asList(predicateA, predicateB, predicateCIsNotNull, predicateD));
-        assertThat(predicateABCNotNull.visit(visitor5)).isFalse();
-        assertThat(visitor5.isHitAll()).isFalse();
+        assertThat(predicateABCNotNull.visit(visitor5)).isNotEqualTo(new HashSet<>(primaryKeys));
 
-        /** filters not contain all the primary keys ****************** */
+        /* filters not contain all the primary keys ****************** */
 
         // where a=1, do not push down
-        DeletePushDownPrimaryKeyVisitor visitor6 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
-        PredicateBuilder.and(Arrays.asList(predicateA)).visit(visitor6);
-        assertThat(visitor6.isHitAll()).isFalse();
+        AllPrimaryKeyEqualVisitor visitor6 = new AllPrimaryKeyEqualVisitor(primaryKeys);
+        assertThat(PredicateBuilder.and(Collections.singletonList(predicateA)).visit(visitor6))
+                .isNotEqualTo(new HashSet<>(primaryKeys));
 
         // where a=1 and b=2 and d=4, do not push down
-        DeletePushDownPrimaryKeyVisitor visitor7 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
-        PredicateBuilder.and(Arrays.asList(predicateA, predicateB, predicateD)).visit(visitor7);
-        assertThat(visitor7.isHitAll()).isFalse();
+        AllPrimaryKeyEqualVisitor visitor7 = new AllPrimaryKeyEqualVisitor(primaryKeys);
+        assertThat(
+                        PredicateBuilder.and(Arrays.asList(predicateA, predicateB, predicateD))
+                                .visit(visitor7))
+                .isNotEqualTo(new HashSet<>(primaryKeys));
 
         // where a=1 and c=3 and d=4, do not push down
-        DeletePushDownPrimaryKeyVisitor visitor8 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
-        PredicateBuilder.and(Arrays.asList(predicateA, predicateC, predicateD)).visit(visitor8);
-        assertThat(visitor8.isHitAll()).isFalse();
+        AllPrimaryKeyEqualVisitor visitor8 = new AllPrimaryKeyEqualVisitor(primaryKeys);
+        assertThat(
+                        PredicateBuilder.and(Arrays.asList(predicateA, predicateC, predicateD))
+                                .visit(visitor8))
+                .isNotEqualTo(new HashSet<>(primaryKeys));
 
         // where b=2 and c=3 and d=4 and f=6, not push down
-        DeletePushDownPrimaryKeyVisitor visitor9 = new DeletePushDownPrimaryKeyVisitor(primaryKeys);
-        PredicateBuilder.and(Arrays.asList(predicateB, predicateC, predicateD, predicateF))
-                .visit(visitor9);
-        assertThat(visitor9.isHitAll()).isFalse();
+        AllPrimaryKeyEqualVisitor visitor9 = new AllPrimaryKeyEqualVisitor(primaryKeys);
+        assertThat(
+                        PredicateBuilder.and(
+                                        Arrays.asList(
+                                                predicateB, predicateC, predicateD, predicateF))
+                                .visit(visitor9))
+                .isNotEqualTo(new HashSet<>(primaryKeys));
     }
 
     @Test
@@ -205,31 +207,27 @@ public class DeletePushDownVisitorTest {
                 new LeafPredicate(
                         Equal.INSTANCE, DataTypes.INT(), 5, "e", Collections.singletonList(5));
 
-        /** filters only contain partition keys with func Equal ****************** */
+        /* filters only contain partition keys with func Equal ****************** */
 
         // where b=2 and c=3 and d=4, push down
-        DeletePushDownPartitionKeyVisitor visitor =
-                new DeletePushDownPartitionKeyVisitor(partitionKeys);
+        OnlyPartitionKeyEqualVisitor visitor = new OnlyPartitionKeyEqualVisitor(partitionKeys);
         assertThat(
                         PredicateBuilder.and(Arrays.asList(predicateB, predicateC, predicateD))
                                 .visit(visitor))
                 .isTrue();
 
         // where b=2 and c=3, push down
-        DeletePushDownPartitionKeyVisitor visitor1 =
-                new DeletePushDownPartitionKeyVisitor(partitionKeys);
+        OnlyPartitionKeyEqualVisitor visitor1 = new OnlyPartitionKeyEqualVisitor(partitionKeys);
         assertThat(PredicateBuilder.and(Arrays.asList(predicateB, predicateC)).visit(visitor1))
                 .isTrue();
 
         // where b=2 and d=4, push down
-        DeletePushDownPartitionKeyVisitor visitor2 =
-                new DeletePushDownPartitionKeyVisitor(partitionKeys);
+        OnlyPartitionKeyEqualVisitor visitor2 = new OnlyPartitionKeyEqualVisitor(partitionKeys);
         assertThat(PredicateBuilder.and(Arrays.asList(predicateB, predicateD)).visit(visitor2))
                 .isTrue();
 
         // where b=2 and c=3 and d=4 and e=5, do not push down
-        DeletePushDownPartitionKeyVisitor visitor3 =
-                new DeletePushDownPartitionKeyVisitor(partitionKeys);
+        OnlyPartitionKeyEqualVisitor visitor3 = new OnlyPartitionKeyEqualVisitor(partitionKeys);
         assertThat(
                         PredicateBuilder.and(
                                         Arrays.asList(
@@ -238,8 +236,7 @@ public class DeletePushDownVisitorTest {
                 .isFalse();
 
         // where b=2 and c=3 or d=4, do not push down
-        DeletePushDownPartitionKeyVisitor visitor4 =
-                new DeletePushDownPartitionKeyVisitor(partitionKeys);
+        OnlyPartitionKeyEqualVisitor visitor4 = new OnlyPartitionKeyEqualVisitor(partitionKeys);
         assertThat(
                         PredicateBuilder.and(
                                         Arrays.asList(
@@ -249,8 +246,7 @@ public class DeletePushDownVisitorTest {
                 .isFalse();
 
         // where b=2 and c=3 and d>5, do not push down
-        DeletePushDownPartitionKeyVisitor visitor5 =
-                new DeletePushDownPartitionKeyVisitor(partitionKeys);
+        OnlyPartitionKeyEqualVisitor visitor5 = new OnlyPartitionKeyEqualVisitor(partitionKeys);
         assertThat(
                         PredicateBuilder.and(
                                         Arrays.asList(predicateB, predicateC, predicateDgreater))
