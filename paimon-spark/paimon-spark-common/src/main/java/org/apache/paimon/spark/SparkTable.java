@@ -79,6 +79,7 @@ public class SparkTable
         Set<TableCapability> capabilities = new HashSet<>();
         capabilities.add(TableCapability.BATCH_READ);
         capabilities.add(TableCapability.V1_BATCH_WRITE);
+        capabilities.add(TableCapability.OVERWRITE_BY_FILTER);
         return capabilities;
     }
 

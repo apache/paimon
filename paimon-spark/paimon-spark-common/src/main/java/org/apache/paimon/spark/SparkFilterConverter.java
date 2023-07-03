@@ -129,6 +129,12 @@ public class SparkFilterConverter {
                 filter + " is unsupported. Support Filters: " + SUPPORT_FILTERS);
     }
 
+    public Object convertLiteral(String field, Object value) {
+        int index = fieldIndex(field);
+        DataType type = rowType.getTypeAt(index);
+        return convertJavaObject(type, value);
+    }
+
     private int fieldIndex(String field) {
         int index = rowType.getFieldIndex(field);
         // TODO: support nested field

@@ -15,22 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark
+package org.apache.spark.paimon
 
-import org.apache.paimon.spark.commands.WriteIntoPaimonTable
-import org.apache.paimon.table.FileStoreTable
+import org.apache.spark.util.{Utils => SparkUtils}
 
-import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.connector.write.V1Write
-import org.apache.spark.sql.sources.InsertableRelation
+import java.io.File
 
-/** Spark {@link V1Write}, it is required to use v1 write for grouping by bucket. */
-class SparkWrite(val table: FileStoreTable, saveMode: SaveMode) extends V1Write {
+/**
+ * A wrapper that some Objects or Classes is limited to access beyond [[org.apache.spark]] package.
+ */
+object Utils {
 
-  override def toInsertableRelation: InsertableRelation = {
-    (data: DataFrame, overwrite: Boolean) =>
-      {
-        WriteIntoPaimonTable(table, saveMode, data).run(data.sparkSession)
-      }
-  }
+  def createTempDir: File = SparkUtils.createTempDir()
+
 }
