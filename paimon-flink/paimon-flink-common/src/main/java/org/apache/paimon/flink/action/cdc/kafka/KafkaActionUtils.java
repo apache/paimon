@@ -26,6 +26,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.configuration.Configuration;
@@ -158,10 +159,11 @@ class KafkaActionUtils {
 
     static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
         KafkaSourceBuilder kafkaSourceBuilder = KafkaSource.builder();
+        String groupId = kafkaConfig.get(KafkaConnectorOptions.PROPS_GROUP_ID);
         kafkaSourceBuilder
                 .setTopics(kafkaConfig.get(KafkaConnectorOptions.TOPIC))
                 .setValueOnlyDeserializer(new SimpleStringSchema())
-                .setGroupId(UUID.randomUUID().toString());
+                .setGroupId(StringUtils.isEmpty(groupId) ? UUID.randomUUID().toString() : groupId);
         Properties properties = new Properties();
         for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
             String key = entry.getKey();
