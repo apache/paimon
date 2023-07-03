@@ -194,7 +194,7 @@ public abstract class FlinkSink<T> implements Serializable {
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
-    private void assertStreamingConfiguration(StreamExecutionEnvironment env) {
+    public static void assertStreamingConfiguration(StreamExecutionEnvironment env) {
         checkArgument(
                 !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
                 "Paimon sink currently does not support unaligned checkpoints. Please set "

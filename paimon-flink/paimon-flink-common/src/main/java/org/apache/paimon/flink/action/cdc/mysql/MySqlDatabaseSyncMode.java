@@ -21,11 +21,14 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import java.io.Serializable;
 
 /**
- * There are two modes for database sync. 1) STATIC mode, only write record from static tables.
- * Newly added tables during runtime are not synced. 2) DYNAMIC mode, all records from static tables
- * and newly added tables are routed into unified operator.
+ * There are two modes for database sync.
+ *
+ * <p>1) SEPARATE mode, start a sink for each table, the synchronization of the new table requires
+ * restarting the job.
+ *
+ * <p>2) UNIFIED mode, start a unified sink, the new table will be automatically synchronized.
  */
 public enum MySqlDatabaseSyncMode implements Serializable {
-    STATIC,
-    DYNAMIC
+    SEPARATE,
+    UNIFIED
 }

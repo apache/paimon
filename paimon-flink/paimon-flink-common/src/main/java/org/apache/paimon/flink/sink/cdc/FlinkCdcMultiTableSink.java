@@ -31,25 +31,21 @@ import org.apache.paimon.flink.sink.StoreMultiCommitter;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableFunction;
 
-import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.environment.CheckpointConfig;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
 import java.io.Serializable;
 import java.util.UUID;
+
+import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
 
 /**
  * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
@@ -89,11 +85,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
             String commitUser,
             StoreSinkWrite.Provider sinkProvider) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
-        CheckpointConfig checkpointConfig = env.getCheckpointConfig();
-
-        assertCheckpointConfiguration(env);
-
+        assertStreamingConfiguration(env);
         MultiTableCommittableTypeInfo typeInfo = new MultiTableCommittableTypeInfo();
         SingleOutputStreamOperator<MultiTableCommittable> written =
                 input.transform(
@@ -114,19 +106,6 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
-    }
-
-    private void assertCheckpointConfiguration(StreamExecutionEnvironment env) {
-        Preconditions.checkArgument(
-                !env.getCheckpointConfig().isUnalignedCheckpointsEnabled(),
-                "Paimon sink currently does not support unaligned checkpoints. Please set "
-                        + ExecutionCheckpointingOptions.ENABLE_UNALIGNED.key()
-                        + " to false.");
-        Preconditions.checkArgument(
-                env.getCheckpointConfig().getCheckpointingMode() == CheckpointingMode.EXACTLY_ONCE,
-                "Paimon sink currently only supports EXACTLY_ONCE checkpoint mode. Please set "
-                        + ExecutionCheckpointingOptions.CHECKPOINTING_MODE.key()
-                        + " to exactly-once");
     }
 
     protected OneInputStreamOperator<CdcMultiplexRecord, MultiTableCommittable> createWriteOperator(

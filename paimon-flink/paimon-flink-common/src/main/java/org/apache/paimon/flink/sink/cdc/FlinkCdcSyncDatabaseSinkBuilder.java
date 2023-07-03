@@ -29,7 +29,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 
 import javax.annotation.Nullable;
@@ -37,6 +36,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode.UNIFIED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
@@ -94,15 +94,14 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         Preconditions.checkNotNull(input);
         Preconditions.checkNotNull(parserFactory);
 
-        StreamExecutionEnvironment env = input.getExecutionEnvironment();
-        if (mode == MySqlDatabaseSyncMode.DYNAMIC) {
-            buildDynamicCdcSink(env);
+        if (mode == UNIFIED) {
+            buildUnifiedCdcSink();
         } else {
-            buildStaticCdcSink(env);
+            buildStaticCdcSink();
         }
     }
 
-    private void buildDynamicCdcSink(StreamExecutionEnvironment env) {
+    private void buildUnifiedCdcSink() {
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(
@@ -145,7 +144,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         new FlinkCdcSink(table).sinkFrom(partitioned);
     }
 
-    private void buildStaticCdcSink(StreamExecutionEnvironment env) {
+    private void buildStaticCdcSink() {
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))

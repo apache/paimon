@@ -27,6 +27,7 @@ import org.apache.paimon.flink.sink.StateUtils;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -158,6 +159,11 @@ public class CdcRecordStoreMultiWriteOperator
                 }
                 Thread.sleep(RETRY_SLEEP_TIME.defaultValue().toMillis());
             }
+        }
+
+        if (table.bucketMode() != BucketMode.FIXED) {
+            throw new UnsupportedOperationException(
+                    "Unified Sink only supports FIXED bucket mode, but is " + table.bucketMode());
         }
         return table;
     }

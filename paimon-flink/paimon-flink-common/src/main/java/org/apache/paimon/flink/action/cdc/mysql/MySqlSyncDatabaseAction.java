@@ -61,6 +61,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
 import static org.apache.paimon.flink.action.Action.optionalConfigMap;
+import static org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode.SEPARATE;
+import static org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode.UNIFIED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -133,7 +135,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 null,
                 catalogConfig,
                 tableConfig,
-                MySqlDatabaseSyncMode.STATIC);
+                SEPARATE);
     }
 
     public MySqlSyncDatabaseAction(
@@ -225,7 +227,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
         String tableList;
 
-        if (mode == MySqlDatabaseSyncMode.DYNAMIC) {
+        if (mode == UNIFIED) {
             // First excluding all tables that failed the excludingPattern and those does not
             //     have a primary key. Then including other table using regex so that newly
             //     added table DDLs and DMLs during job runtime will be captured
@@ -377,10 +379,10 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         String excludingTables = params.get("excluding-tables");
         String mode = params.get("mode");
         MySqlDatabaseSyncMode syncMode;
-        if ("dynamic".equalsIgnoreCase(mode)) {
-            syncMode = MySqlDatabaseSyncMode.DYNAMIC;
+        if ("unified".equalsIgnoreCase(mode)) {
+            syncMode = UNIFIED;
         } else {
-            syncMode = MySqlDatabaseSyncMode.STATIC;
+            syncMode = SEPARATE;
         }
 
         Map<String, String> mySqlConfig = optionalConfigMap(params, "mysql-conf");
