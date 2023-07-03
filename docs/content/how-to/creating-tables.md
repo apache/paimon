@@ -221,7 +221,7 @@ CREATE TABLE MyTable (
 By configuring [partition.expiration-time]({{< ref "maintenance/manage-partition" >}}), expired partitions can be automatically deleted.
 {{< /hint >}}
 
-### Pick Partition Fields
+#### Pick Partition Fields
 
 {{< hint info >}}
 Partition fields must be a subset of primary keys if primary keys are defined.
@@ -247,6 +247,73 @@ Paimon will automatically collect the statistics of the data file for speeding u
 
 The statistics collector mode can be configured by `'metadata.stats-mode'`, by default is `'truncate(16)'`.
 You can configure the field level by setting `'fields.{field_name}.stats-mode'`.
+
+
+### Field Default Value
+
+Paimon table currently supports setting default values for fields in table properties,
+note that partition fields and primary key fields can not be specified.
+{{< tabs "default-value-example" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING,
+    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
+) PARTITIONED BY (dt, hh)
+with(
+    'fields.item_id.deafult-value'='0'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING
+) PARTITIONED BY (dt, hh) TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id',
+    'fields.item_id.deafult-value'='0'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Hive" >}}
+
+```sql
+SET hive.metastore.warehouse.dir=warehouse_path;
+
+CREATE TABLE MyTable (
+    user_id BIGINT,
+    item_id BIGINT,
+    behavior STRING,
+    dt STRING,
+    hh STRING
+)
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+TBLPROPERTIES (
+    'primary-key' = 'dt,hh,user_id',
+    'partition'='dt,hh',
+    'fields.item_id.deafult-value'='0'
+);
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 
 ## Create Table As
 

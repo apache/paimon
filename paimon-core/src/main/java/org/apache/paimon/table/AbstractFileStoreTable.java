@@ -21,12 +21,15 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.DefaultValueAssiger;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
@@ -37,8 +40,10 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.InnerTableScanImpl;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
@@ -107,12 +112,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 coreOptions(),
                 snapshotManager(),
                 splitGenerator(),
-                nonPartitionFilterConsumer());
+                nonPartitionFilterConsumer(),
+                new DefaultValueAssiger(tableSchema));
     }
 
     @Override
     public InnerTableScan newScan() {
-        return new InnerTableScanImpl(coreOptions(), newSnapshotReader(), snapshotManager());
+        return new InnerTableScanImpl(
+                coreOptions(),
+                newSnapshotReader(),
+                snapshotManager(),
+                new DefaultValueAssiger(tableSchema));
     }
 
     @Override
@@ -121,7 +131,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 coreOptions(),
                 newSnapshotReader(),
                 snapshotManager(),
-                supportStreamingReadOverwrite());
+                supportStreamingReadOverwrite(),
+                new DefaultValueAssiger(tableSchema));
     }
 
     public abstract SplitGenerator splitGenerator();
@@ -280,6 +291,42 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotId);
 
         rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
+    }
+
+    abstract InnerTableRead innerRead();
+
+    @Override
+    public InnerTableRead newRead() {
+        InnerTableRead innerTableRead = innerRead();
+        DefaultValueAssiger defaultValueAssiger = new DefaultValueAssiger(tableSchema);
+        return new InnerTableRead() {
+            @Override
+            public InnerTableRead withFilter(Predicate predicate) {
+                innerTableRead.withFilter(defaultValueAssiger.handlePredicate(predicate));
+                return this;
+            }
+
+            @Override
+            public InnerTableRead withProjection(int[][] projection) {
+                defaultValueAssiger.handleProject(projection);
+                innerTableRead.withProjection(projection);
+                return this;
+            }
+
+            @Override
+            public RecordReader<InternalRow> createReader(Split split) throws IOException {
+                RecordReader<InternalRow> reader =
+                        defaultValueAssiger.assignFieldsDefaultValue(
+                                innerTableRead.createReader(split));
+                return reader;
+            }
+
+            @Override
+            public InnerTableRead forceKeepDelete() {
+                innerTableRead.forceKeepDelete();
+                return this;
+            }
+        };
     }
 
     @Override

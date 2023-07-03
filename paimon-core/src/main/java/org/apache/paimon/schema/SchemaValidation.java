@@ -20,6 +20,9 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
+import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastExecutors;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
@@ -29,6 +32,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -73,6 +77,8 @@ public class SchemaValidation {
         validatePrimaryKeysType(schema.fields(), schema.primaryKeys());
 
         CoreOptions options = new CoreOptions(schema.options());
+
+        validateDefaultValues(schema);
 
         validateStartupMode(options);
 
@@ -287,5 +293,63 @@ public class SchemaValidation {
 
     private static String concatConfigKeys(List<ConfigOption<?>> configOptions) {
         return configOptions.stream().map(ConfigOption::key).collect(Collectors.joining(","));
+    }
+
+    private static void validateDefaultValues(TableSchema schema) {
+        CoreOptions coreOptions = new CoreOptions(schema.options());
+        Map<String, String> defaultValues = coreOptions.getFieldDefaultValues().toMap();
+
+        if (!defaultValues.isEmpty()) {
+
+            List<String> partitionKeys = schema.partitionKeys();
+            for (String partitionKey : partitionKeys) {
+                if (defaultValues.containsKey(partitionKey)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Partition key %s should not be assign default column.",
+                                    partitionKey));
+                }
+            }
+
+            List<String> primaryKeys = schema.primaryKeys();
+            for (String primaryKey : primaryKeys) {
+                if (defaultValues.containsKey(primaryKey)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "Primary key %s should not be assign default column.",
+                                    primaryKey));
+                }
+            }
+
+            List<DataField> fields = schema.fields();
+
+            for (int i = 0; i < fields.size(); i++) {
+                DataField dataField = fields.get(i);
+                String defaultValueStr = defaultValues.get(dataField.name());
+                if (defaultValueStr == null) {
+                    continue;
+                }
+
+                CastExecutor<Object, Object> resolve =
+                        (CastExecutor<Object, Object>)
+                                CastExecutors.resolve(VarCharType.STRING_TYPE, dataField.type());
+                if (resolve == null) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "The column %s with datatype %s is currently not supported for default value.",
+                                    dataField.name(), dataField.type().asSQLString()));
+                }
+
+                try {
+                    resolve.cast(BinaryString.fromString(defaultValueStr));
+                } catch (Exception e) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "The default value %s of the column %s can not be cast to datatype: %s",
+                                    defaultValueStr, dataField.name(), dataField.type()),
+                            e);
+                }
+            }
+        }
     }
 }

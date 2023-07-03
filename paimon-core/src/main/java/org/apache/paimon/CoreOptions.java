@@ -53,6 +53,7 @@ import static org.apache.paimon.options.description.TextElement.text;
 
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
+    public static final String DEFAULT_VALUE_SUFFIX = "default-value";
 
     public static final String FIELDS_PREFIX = "fields";
 
@@ -1084,6 +1085,20 @@ public class CoreOptions implements Serializable {
 
     public Duration consumerExpireTime() {
         return options.get(CONSUMER_EXPIRATION_TIME);
+    }
+
+    public Options getFieldDefaultValues() {
+        Map<String, String> defultValues = new HashMap<>();
+        for (Map.Entry<String, String> option : options.toMap().entrySet()) {
+            String key = option.getKey();
+            String fieldPrefix = FIELDS_PREFIX + ".";
+            String defaultValueSuffix = "." + DEFAULT_VALUE_SUFFIX;
+            if (key != null && key.startsWith(fieldPrefix) && key.endsWith(defaultValueSuffix)) {
+                String fieldName = key.replace(fieldPrefix, "").replace(defaultValueSuffix, "");
+                defultValues.put(fieldName, option.getValue());
+            }
+        }
+        return new Options(defultValues);
     }
 
     public List<CommitCallback> commitCallbacks() {

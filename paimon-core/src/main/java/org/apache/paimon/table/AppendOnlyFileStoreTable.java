@@ -108,7 +108,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public InnerTableRead newRead() {
+    public InnerTableRead innerRead() {
         AppendOnlyFileStoreRead read = store().newRead();
         return new InnerTableRead() {
             @Override

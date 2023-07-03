@@ -121,7 +121,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public InnerTableRead newRead() {
+    public InnerTableRead innerRead() {
         return new KeyValueTableRead(store().newRead()) {
 
             @Override

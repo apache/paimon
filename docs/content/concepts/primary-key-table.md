@@ -122,6 +122,47 @@ INSERT INTO T VALUES (1, 3, 3, 1, 3, 3, 3);
 SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
 ```
 
+#### Default Value
+If the order of the data cannot be guaranteed and field is written only by overwriting null values,
+fields that have not been overwritten will be displayed as null when reading table.
+
+```sql
+CREATE TABLE T (
+                  k INT,
+                  a INT,
+                  b INT,
+                  c INT,
+                  PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+     'merge-engine'='partial-update'
+     );
+INSERT INTO T VALUES (1, 1,null,null);
+INSERT INTO T VALUES (1, null,null,1);
+
+SELECT * FROM T; -- output 1, 1, null, 1
+```
+If it is expected that fields which have not been overwritten have a default value instead of null when reading table,
+'fields.name.default-value' is required.
+```sql
+CREATE TABLE T (
+    k INT,
+    a INT,
+    b INT,
+    c INT,
+    PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+    'merge-engine'='partial-update',
+    'fields.b.default-value'='0'
+);
+
+INSERT INTO T VALUES (1, 1,null,null);
+INSERT INTO T VALUES (1, null,null,1);
+
+SELECT * FROM T; -- output 1, 1, 0, 1
+```
+
+
+
 ### Aggregation
 
 {{< hint info >}}
