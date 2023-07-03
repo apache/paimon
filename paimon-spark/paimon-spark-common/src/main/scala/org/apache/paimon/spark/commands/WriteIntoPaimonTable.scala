@@ -24,12 +24,11 @@ import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMod
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.table.{FileStoreTable, Table}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, InnerTableCommit, RowPartitionKeyExtractor}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
-import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
@@ -60,8 +59,7 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
-    val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode(
-      sparkSession.sessionState.conf.resolver)
+    val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()
     // use the extra options to rebuild the table object
     table = table.copy(
       Map(DYNAMIC_PARTITION_OVERWRITE.key() -> dynamicPartitionOverwriteMode.toString).asJava)
@@ -120,9 +118,11 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
         .map(deserializeCommitMessage(serializer, _))
 
     try {
-      val tableCommit = writeBuilder
-        .withOverwrite(overwritePartition.asJava)
-        .newCommit()
+      val tableCommit = if (overwritePartition == null) {
+        writeBuilder.newCommit()
+      } else {
+        writeBuilder.withOverwrite(overwritePartition.asJava).newCommit()
+      }
       tableCommit.commit(commitMessages.toList.asJava)
     } catch {
       case e: Throwable => throw new RuntimeException(e);
@@ -131,7 +131,7 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
     Seq.empty
   }
 
-  private def parseSaveMode(resolver: Resolver): (Boolean, Map[String, String]) = {
+  private def parseSaveMode(): (Boolean, Map[String, String]) = {
     var dynamicPartitionOverwriteMode = false
     val overwritePartition = saveMode match {
       case InsertInto => null
@@ -141,7 +141,7 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
         } else if (isTruncate(filter.get)) {
           Map.empty[String, String]
         } else {
-          convertFilterToMap(filter.get, tableSchema.partitionKeys().asScala, resolver)
+          convertFilterToMap(filter.get, tableSchema.logicalPartitionType())
         }
       case DynamicOverWrite =>
         dynamicPartitionOverwriteMode = true

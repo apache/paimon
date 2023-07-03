@@ -20,9 +20,10 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.WriteMode.{APPEND_ONLY, CHANGE_LOG}
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.types._
 import org.scalactic.source.Position
 
-class InsertOverwriteSuite extends PaimonSparkTestBase {
+class InsertOverwriteTest extends PaimonSparkTestBase {
 
   // 3: fixed bucket, -1: dynamic bucket
   private val bucketModes = Seq(3, -1)
@@ -168,6 +169,53 @@ class InsertOverwriteSuite extends PaimonSparkTestBase {
                 "ptv3",
                 22) :: Nil)
           }
+      }
+  }
+
+  // These cases that date/timestamp/bool is used as the partition field type are to be supported.
+  Seq(IntegerType, LongType, FloatType, DoubleType, DecimalType).foreach {
+    dataType =>
+      test(s"insert overwrite table using $dataType as the partition field type") {
+        case class PartitionSQLAndValue(sql: Any, value: Any)
+
+        val (ptField, sv1, sv2) = dataType match {
+          case IntegerType =>
+            ("INT", PartitionSQLAndValue(1, 1), PartitionSQLAndValue(2, 2))
+          case LongType =>
+            ("LONG", PartitionSQLAndValue(1L, 1L), PartitionSQLAndValue(2L, 2L))
+          case FloatType =>
+            ("FLOAT", PartitionSQLAndValue(12.3f, 12.3f), PartitionSQLAndValue(45.6f, 45.6f))
+          case DoubleType =>
+            ("DOUBLE", PartitionSQLAndValue(12.3d, 12.3), PartitionSQLAndValue(45.6d, 45.6))
+          case DecimalType =>
+            (
+              "DECIMAL(5, 2)",
+              PartitionSQLAndValue(11.222, 11.22),
+              PartitionSQLAndValue(66.777, 66.78))
+        }
+
+        spark.sql(s"""
+                     |CREATE TABLE T (a INT, b STRING, pt $ptField)
+                     |PARTITIONED BY (pt)
+                     |""".stripMargin)
+
+        spark.sql(s"INSERT INTO T SELECT 1, 'a', ${sv1.sql} UNION ALL SELECT 2, 'b', ${sv2.sql}")
+        checkAnswer(
+          spark.sql("SELECT * FROM T ORDER BY a"),
+          Row(1, "a", sv1.value) :: Row(2, "b", sv2.value) :: Nil)
+
+        // overwrite the whole table
+        spark.sql(
+          s"INSERT OVERWRITE T SELECT 3, 'c', ${sv1.sql} UNION ALL SELECT 4, 'd', ${sv2.sql}")
+        checkAnswer(
+          spark.sql("SELECT * FROM T ORDER BY a"),
+          Row(3, "c", sv1.value) :: Row(4, "d", sv2.value) :: Nil)
+
+        // overwrite the a=1 partition
+        spark.sql(s"INSERT OVERWRITE T PARTITION (pt = ${sv1.value}) VALUES (5, 'e'), (7, 'g')")
+        checkAnswer(
+          spark.sql("SELECT * FROM T ORDER BY a"),
+          Row(4, "d", sv2.value) :: Row(5, "e", sv1.value) :: Row(7, "g", sv1.value) :: Nil)
       }
   }
 }

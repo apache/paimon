@@ -17,8 +17,11 @@
  */
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.predicate.PredicateBuilder
+import org.apache.paimon.spark.SparkFilterConverter
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageSerializer}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter, Not, Or}
@@ -61,19 +64,15 @@ trait PaimonCommand {
    * For the 'INSERT OVERWRITE T PARTITION (partitionVal, ...)' semantics of SQL, Spark will
    * transform `partitionVal`s to EqualNullSafe Filters.
    */
-  def convertFilterToMap(
-      filter: Filter,
-      partitionColumns: Seq[String],
-      resolver: Resolver): Map[String, String] = {
+  def convertFilterToMap(filter: Filter, partitionRowType: RowType): Map[String, String] = {
+    val converter = new SparkFilterConverter(partitionRowType)
     splitConjunctiveFilters(filter).map {
       case EqualNullSafe(attribute, value) =>
         if (isNestedFilterInValue(value)) {
           throw new RuntimeException(
             s"Not support the complex partition value in EqualNullSafe when run `INSERT OVERWRITE`.")
         } else {
-          partitionColumns.find(resolver(_, attribute)).map((_, value.toString)).getOrElse {
-            throw new RuntimeException(s"this $attribute is not recognized in partition columns.")
-          }
+          (attribute, converter.convertLiteral(attribute, value).toString)
         }
       case _ =>
         throw new RuntimeException(
