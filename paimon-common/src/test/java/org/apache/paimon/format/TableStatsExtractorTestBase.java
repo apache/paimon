@@ -59,8 +59,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link org.apache.paimon.format.FileStatsExtractor}. */
-public abstract class FileStatsExtractorTestBase {
+/** Tests for {@link TableStatsExtractor}. */
+public abstract class TableStatsExtractorTestBase {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -82,13 +82,13 @@ public abstract class FileStatsExtractorTestBase {
         }
         writer.finish();
 
-        FieldStatsCollector collector = new FieldStatsCollector(rowType);
+        TableStatsCollector collector = new TableStatsCollector(rowType);
         for (GenericRow row : data) {
             collector.collect(row);
         }
         FieldStats[] expected = collector.extract();
 
-        FileStatsExtractor extractor = format.createStatsExtractor(rowType).get();
+        TableStatsExtractor extractor = format.createStatsExtractor(rowType).get();
         assertThat(extractor).isNotNull();
         FieldStats[] actual = extractor.extract(fileIO, path);
         for (int i = 0; i < expected.length; i++) {

@@ -75,7 +75,7 @@ public abstract class FileFormat {
         return createReaderFactory(rowType, projection, new ArrayList<>());
     }
 
-    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
+    public Optional<TableStatsExtractor> createStatsExtractor(RowType type) {
         return Optional.empty();
     }
 

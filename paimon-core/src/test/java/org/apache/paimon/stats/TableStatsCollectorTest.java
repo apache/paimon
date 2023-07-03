@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.FieldStatsCollector;
+import org.apache.paimon.format.TableStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -32,14 +32,14 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link FieldStatsCollector}. */
-public class FieldStatsCollectorTest {
+/** Tests for {@link TableStatsCollector}. */
+public class TableStatsCollectorTest {
 
     @Test
     public void testCollect() {
         RowType rowType =
                 RowType.of(new IntType(), new VarCharType(10), new ArrayType(new IntType()));
-        FieldStatsCollector collector = new FieldStatsCollector(rowType);
+        TableStatsCollector collector = new TableStatsCollector(rowType);
 
         collector.collect(
                 GenericRow.of(

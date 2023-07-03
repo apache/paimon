@@ -24,7 +24,7 @@ import org.apache.paimon.fs.Path;
 import java.io.IOException;
 
 /** Extracts statistics directly from file. */
-public interface FileStatsExtractor {
+public interface TableStatsExtractor {
 
     FieldStats[] extract(FileIO fileIO, Path path) throws IOException;
 }

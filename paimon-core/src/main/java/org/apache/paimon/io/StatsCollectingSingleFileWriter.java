@@ -21,9 +21,9 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.FieldStatsCollector;
-import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.TableStatsCollector;
+import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
@@ -42,8 +42,8 @@ import java.util.function.Function;
  */
 public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWriter<T, R> {
 
-    @Nullable private final FileStatsExtractor fileStatsExtractor;
-    @Nullable private FieldStatsCollector fieldStatsCollector = null;
+    @Nullable private final TableStatsExtractor tableStatsExtractor;
+    @Nullable private TableStatsCollector tableStatsCollector = null;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
@@ -51,29 +51,29 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             Path path,
             Function<T, InternalRow> converter,
             RowType writeSchema,
-            @Nullable FileStatsExtractor fileStatsExtractor,
+            @Nullable TableStatsExtractor tableStatsExtractor,
             String compression) {
         super(fileIO, factory, path, converter, compression);
-        this.fileStatsExtractor = fileStatsExtractor;
-        if (this.fileStatsExtractor == null) {
-            this.fieldStatsCollector = new FieldStatsCollector(writeSchema);
+        this.tableStatsExtractor = tableStatsExtractor;
+        if (this.tableStatsExtractor == null) {
+            this.tableStatsCollector = new TableStatsCollector(writeSchema);
         }
     }
 
     @Override
     public void write(T record) throws IOException {
         InternalRow rowData = writeImpl(record);
-        if (fieldStatsCollector != null) {
-            fieldStatsCollector.collect(rowData);
+        if (tableStatsCollector != null) {
+            tableStatsCollector.collect(rowData);
         }
     }
 
     public FieldStats[] fieldStats() throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
-        if (fileStatsExtractor != null) {
-            return fileStatsExtractor.extract(fileIO, path);
+        if (tableStatsExtractor != null) {
+            return tableStatsExtractor.extract(fileIO, path);
         } else {
-            return fieldStatsCollector.extract();
+            return tableStatsCollector.extract();
         }
     }
 }

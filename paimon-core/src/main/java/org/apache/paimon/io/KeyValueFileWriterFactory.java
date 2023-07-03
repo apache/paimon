@@ -23,8 +23,8 @@ import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
@@ -42,7 +42,7 @@ public class KeyValueFileWriterFactory {
     private final RowType keyType;
     private final RowType valueType;
     private final FormatWriterFactory writerFactory;
-    @Nullable private final FileStatsExtractor fileStatsExtractor;
+    @Nullable private final TableStatsExtractor tableStatsExtractor;
     private final DataFilePathFactory pathFactory;
     private final long suggestedFileSize;
     private final Map<Integer, String> levelCompressions;
@@ -54,7 +54,7 @@ public class KeyValueFileWriterFactory {
             RowType keyType,
             RowType valueType,
             FormatWriterFactory writerFactory,
-            @Nullable FileStatsExtractor fileStatsExtractor,
+            @Nullable TableStatsExtractor tableStatsExtractor,
             DataFilePathFactory pathFactory,
             long suggestedFileSize,
             Map<Integer, String> levelCompressions,
@@ -64,7 +64,7 @@ public class KeyValueFileWriterFactory {
         this.keyType = keyType;
         this.valueType = valueType;
         this.writerFactory = writerFactory;
-        this.fileStatsExtractor = fileStatsExtractor;
+        this.tableStatsExtractor = tableStatsExtractor;
         this.pathFactory = pathFactory;
         this.suggestedFileSize = suggestedFileSize;
         this.levelCompressions = levelCompressions;
@@ -115,7 +115,7 @@ public class KeyValueFileWriterFactory {
                 kvSerializer::toRow,
                 keyType,
                 valueType,
-                fileStatsExtractor,
+                tableStatsExtractor,
                 schemaId,
                 level,
                 compression);

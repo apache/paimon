@@ -21,7 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.format.FieldStatsCollector;
+import org.apache.paimon.format.TableStatsCollector;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 
 import java.util.ArrayList;
@@ -99,10 +99,10 @@ public class DataFileTestDataGenerator {
     }
 
     private Data createDataFile(List<KeyValue> kvs, int level, BinaryRow partition, int bucket) {
-        FieldStatsCollector keyStatsCollector =
-                new FieldStatsCollector(TestKeyValueGenerator.KEY_TYPE);
-        FieldStatsCollector valueStatsCollector =
-                new FieldStatsCollector(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
+        TableStatsCollector keyStatsCollector =
+                new TableStatsCollector(TestKeyValueGenerator.KEY_TYPE);
+        TableStatsCollector valueStatsCollector =
+                new TableStatsCollector(TestKeyValueGenerator.DEFAULT_ROW_TYPE);
         FieldStatsArraySerializer keyStatsSerializer =
                 new FieldStatsArraySerializer(TestKeyValueGenerator.KEY_TYPE);
         FieldStatsArraySerializer valueStatsSerializer =

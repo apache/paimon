@@ -20,10 +20,10 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.format.FieldStatsCollector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.TableStatsCollector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
@@ -100,7 +100,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
 
     private class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
 
-        private final FieldStatsCollector partitionStatsCollector;
+        private final TableStatsCollector partitionStatsCollector;
         private final FieldStatsArraySerializer partitionStatsSerializer;
 
         private long numAddedFiles = 0;
@@ -110,7 +110,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
             super(ManifestFile.this.fileIO, factory, path, serializer::toRow, fileCompression);
 
-            this.partitionStatsCollector = new FieldStatsCollector(partitionType);
+            this.partitionStatsCollector = new TableStatsCollector(partitionType);
             this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);
         }
 

@@ -20,10 +20,10 @@ package org.apache.paimon.stats;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.FieldStatsCollector;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.TableStatsCollector;
+import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
@@ -34,15 +34,15 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * {@link FileStatsExtractor} for test. It reads all records from the file and use {@link
- * FieldStatsCollector} to collect the stats.
+ * {@link TableStatsExtractor} for test. It reads all records from the file and use {@link
+ * TableStatsCollector} to collect the stats.
  */
-public class TestFileStatsExtractor implements FileStatsExtractor {
+public class TestTableStatsExtractor implements TableStatsExtractor {
 
     private final FileFormat format;
     private final RowType rowType;
 
-    public TestFileStatsExtractor(FileFormat format, RowType rowType) {
+    public TestTableStatsExtractor(FileFormat format, RowType rowType) {
         this.format = format;
         this.rowType = rowType;
     }
@@ -53,7 +53,7 @@ public class TestFileStatsExtractor implements FileStatsExtractor {
         FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
         List<InternalRow> records =
                 FileUtils.readListFromFile(fileIO, path, serializer, readerFactory);
-        FieldStatsCollector statsCollector = new FieldStatsCollector(rowType);
+        TableStatsCollector statsCollector = new TableStatsCollector(rowType);
         for (InternalRow record : records) {
             statsCollector.collect(record);
         }

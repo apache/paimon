@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.FileStatsExtractor;
+import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
@@ -52,14 +52,14 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.format.parquet.ParquetUtil.assertStatsClass;
 
-/** {@link FileStatsExtractor} for parquet files. */
-public class ParquetFileStatsExtractor implements FileStatsExtractor {
+/** {@link TableStatsExtractor} for parquet files. */
+public class ParquetTableStatsExtractor implements TableStatsExtractor {
 
     private final RowType rowType;
     private static final OffsetDateTime EPOCH = Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC);
     private static final LocalDate EPOCH_DAY = EPOCH.toLocalDate();
 
-    public ParquetFileStatsExtractor(RowType rowType) {
+    public ParquetTableStatsExtractor(RowType rowType) {
         this.rowType = rowType;
     }
 

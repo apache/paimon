@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.format.FileStatsExtractor;
+import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.format.orc.OrcReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -49,12 +49,12 @@ import java.sql.Date;
 import java.util.List;
 import java.util.stream.IntStream;
 
-/** {@link FileStatsExtractor} for orc files. */
-public class OrcFileStatsExtractor implements FileStatsExtractor {
+/** {@link TableStatsExtractor} for orc files. */
+public class OrcTableStatsExtractor implements TableStatsExtractor {
 
     private final RowType rowType;
 
-    public OrcFileStatsExtractor(RowType rowType) {
+    public OrcTableStatsExtractor(RowType rowType) {
         this.rowType = rowType;
     }
 

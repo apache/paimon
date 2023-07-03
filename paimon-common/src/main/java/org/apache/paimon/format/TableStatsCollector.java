@@ -25,7 +25,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 /** Collector to extract statistics of each fields from a series of records. */
-public class FieldStatsCollector {
+public class TableStatsCollector {
 
     private final Object[] minValues;
     private final Object[] maxValues;
@@ -33,7 +33,7 @@ public class FieldStatsCollector {
     private final RowDataToObjectArrayConverter converter;
     private final Serializer<Object>[] fieldSerializers;
 
-    public FieldStatsCollector(RowType rowType) {
+    public TableStatsCollector(RowType rowType) {
         int numFields = rowType.getFieldCount();
         this.minValues = new Object[numFields];
         this.maxValues = new Object[numFields];

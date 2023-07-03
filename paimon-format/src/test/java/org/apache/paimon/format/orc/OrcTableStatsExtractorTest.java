@@ -19,8 +19,8 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileStatsExtractorTestBase;
-import org.apache.paimon.format.orc.filter.OrcFileStatsExtractor;
+import org.apache.paimon.format.TableStatsExtractorTestBase;
+import org.apache.paimon.format.orc.filter.OrcTableStatsExtractor;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -43,8 +43,8 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
-/** Tests for {@link OrcFileStatsExtractor}. */
-public class OrcFileStatsExtractorTest extends FileStatsExtractorTestBase {
+/** Tests for {@link OrcTableStatsExtractor}. */
+public class OrcTableStatsExtractorTest extends TableStatsExtractorTestBase {
 
     @Override
     protected FileFormat createFormat() {

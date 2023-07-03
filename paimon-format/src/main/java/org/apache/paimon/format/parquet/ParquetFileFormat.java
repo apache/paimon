@@ -21,9 +21,9 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
-import org.apache.paimon.format.FileStatsExtractor;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -72,8 +72,8 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
-    public Optional<FileStatsExtractor> createStatsExtractor(RowType type) {
-        return Optional.of(new ParquetFileStatsExtractor(type));
+    public Optional<TableStatsExtractor> createStatsExtractor(RowType type) {
+        return Optional.of(new ParquetTableStatsExtractor(type));
     }
 
     public static Options getParquetConfiguration(Options options) {
