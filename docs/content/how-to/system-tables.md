@@ -176,3 +176,21 @@ SELECT * FROM MyTable$tags;
 2 rows in set
 */
 ```
+
+## Consumers Table
+
+You can query all consumers which contains next snapshot.
+
+```sql
+SELECT * FROM MyTable$consumers;
+
+/*
++-------------+------------------+
+| consumer_id | next_snapshot_id |
++-------------+------------------+
+|         id1 |                1 |
+|         id2 |                3 |
++-------------+------------------+
+2 rows in set
+*/
+```

@@ -19,7 +19,6 @@
 package org.apache.paimon.consumer;
 
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -30,9 +29,15 @@ import java.io.Serializable;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
+import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 
 /** Manage consumer groups. */
 public class ConsumerManager implements Serializable {
@@ -65,24 +70,8 @@ public class ConsumerManager implements Serializable {
 
     public OptionalLong minNextSnapshot() {
         try {
-            Path directory = consumerDirectory();
-            if (!fileIO.exists(directory)) {
-                return OptionalLong.empty();
-            }
-
-            FileStatus[] statuses = fileIO.listStatus(directory);
-
-            if (statuses == null) {
-                throw new RuntimeException(
-                        String.format(
-                                "The return value is null of the listStatus for the '%s' directory.",
-                                directory));
-            }
-
-            return Arrays.stream(statuses)
-                    .map(FileStatus::getPath)
-                    .filter(path -> path.getName().startsWith(CONSUMER_PREFIX))
-                    .map(path -> Consumer.fromPath(fileIO, path))
+            return listOriginalVersionedFiles(fileIO, consumerDirectory(), CONSUMER_PREFIX)
+                    .map(this::consumer)
                     .filter(Optional::isPresent)
                     .map(Optional::get)
                     .mapToLong(Consumer::nextSnapshot)
@@ -94,31 +83,39 @@ public class ConsumerManager implements Serializable {
 
     public void expire(LocalDateTime expireDateTime) {
         try {
-            Path directory = consumerDirectory();
-            if (!fileIO.exists(directory)) {
-                return;
-            }
-
-            FileStatus[] statuses = fileIO.listStatus(directory);
-
-            if (statuses == null) {
-                throw new RuntimeException(
-                        String.format(
-                                "The return value is null of the listStatus for the '%s' directory.",
-                                directory));
-            }
-
-            for (FileStatus status : statuses) {
-                if (isConsumerFile(status.getPath().getName())) {
-                    LocalDateTime modificationTime =
-                            DateTimeUtils.toLocalDateTime(status.getModificationTime());
-                    if (expireDateTime.isAfter(modificationTime)) {
-                        fileIO.deleteQuietly(status.getPath());
-                    }
-                }
-            }
+            listVersionedFileStatus(fileIO, consumerDirectory(), CONSUMER_PREFIX)
+                    .forEach(
+                            status -> {
+                                LocalDateTime modificationTime =
+                                        DateTimeUtils.toLocalDateTime(status.getModificationTime());
+                                if (expireDateTime.isAfter(modificationTime)) {
+                                    fileIO.deleteQuietly(status.getPath());
+                                }
+                            });
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    /** Get all consumer. */
+    public Map<String, Long> consumers() throws IOException {
+        Map<String, Long> consumers = new HashMap<>();
+        listOriginalVersionedFiles(fileIO, consumerDirectory(), CONSUMER_PREFIX)
+                .forEach(
+                        id -> {
+                            Optional<Consumer> consumer = this.consumer(id);
+                            consumer.ifPresent(value -> consumers.put(id, value.nextSnapshot()));
+                        });
+        return consumers;
+    }
+
+    /** List all consumer IDs. */
+    public List<String> listAllIds() {
+        try {
+            return listOriginalVersionedFiles(fileIO, consumerDirectory(), CONSUMER_PREFIX)
+                    .collect(Collectors.toList());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
@@ -128,9 +125,5 @@ public class ConsumerManager implements Serializable {
 
     private Path consumerPath(String consumerId) {
         return new Path(tablePath + "/consumer/" + CONSUMER_PREFIX + consumerId);
-    }
-
-    private boolean isConsumerFile(String file) {
-        return file.startsWith(CONSUMER_PREFIX);
     }
 }
