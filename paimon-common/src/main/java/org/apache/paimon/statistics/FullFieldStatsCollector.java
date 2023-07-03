@@ -23,7 +23,7 @@ package org.apache.paimon.statistics;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 
-/** The full stats which will report null count, min value, max value if available. */
+/** The full stats collector which will report null count, min value, max value if available. */
 public class FullFieldStatsCollector extends AbstractFieldStatsCollector {
 
     @Override

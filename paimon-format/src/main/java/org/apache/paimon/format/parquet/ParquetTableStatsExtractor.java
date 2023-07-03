@@ -67,7 +67,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
         this.stats = stats;
         Preconditions.checkArgument(
                 rowType.getFieldCount() == stats.length,
-                "The stats is not aligned to write schema.");
+                "The stats collector is not aligned to write schema.");
     }
 
     @Override

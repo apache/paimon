@@ -67,7 +67,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
         }
         Preconditions.checkArgument(
                 stats.length == writeSchema.getFieldCount(),
-                "The stats is not aligned to write schema.");
+                "The stats collector is not aligned to write schema.");
     }
 
     @Override

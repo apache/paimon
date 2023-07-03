@@ -36,7 +36,7 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TableStatsCollector}. */
-public class TableFieldStatsCollectorTestCollector {
+public class TableStatsCollectorTest {
 
     @Test
     public void testCollect() {

@@ -23,7 +23,7 @@ package org.apache.paimon.statistics;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 
-/** The none stats which report nothing. */
+/** The none stats collector which report nothing. */
 public class NoneFieldStatsCollector extends AbstractFieldStatsCollector {
 
     @Override

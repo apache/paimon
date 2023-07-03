@@ -22,7 +22,7 @@ package org.apache.paimon.statistics;
 
 import org.apache.paimon.format.FieldStats;
 
-/** Abstract base stats. */
+/** Abstract base stats collector. */
 public abstract class AbstractFieldStatsCollector implements FieldStatsCollector {
 
     protected Object minValue;

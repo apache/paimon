@@ -23,7 +23,7 @@ package org.apache.paimon.statistics;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 
-/** The counts stats, which will only report null count stats. */
+/** The counts stats collector, which will only report null count stats. */
 public class CountsFieldStatsCollector extends AbstractFieldStatsCollector {
 
     @Override

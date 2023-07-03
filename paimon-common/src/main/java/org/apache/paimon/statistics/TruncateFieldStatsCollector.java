@@ -30,8 +30,8 @@ import javax.annotation.Nullable;
 import java.util.regex.Pattern;
 
 /**
- * The truncate stats which will report null count, truncated min/max value. Currently, truncation
- * only performs on the {@link BinaryString} value.
+ * The truncate stats collector which will report null count, truncated min/max value. Currently,
+ * truncation only performs on the {@link BinaryString} value.
  */
 public class TruncateFieldStatsCollector extends AbstractFieldStatsCollector {
 
