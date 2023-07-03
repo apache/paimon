@@ -195,11 +195,6 @@ public class FlinkTableSink extends FlinkTableSinkBase
                     String.format(
                             "merge engine '%s' can not support delete, currently only %s can support delete.",
                             options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
-        } else if (table instanceof ChangelogValueCountFileStoreTable) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "table '%s' can not support delete, because there is no primary key.",
-                            table.getClass().getName()));
         } else if (table instanceof AppendOnlyFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -211,6 +206,8 @@ public class FlinkTableSink extends FlinkTableSinkBase
                             "%s can not support delete, because it is an unknown subclass of FileStoreTable.",
                             table.getClass().getName()));
         }
+
+        // ChangelogValueCountFileStoreTable is OK to be deleted
     }
 
     private boolean canPushDownDeleteFilter() {
