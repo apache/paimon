@@ -80,6 +80,22 @@ public class SparkGenericCatalogTest {
         testReadWrite("CT");
     }
 
+    @Test
+    public void testListTables() {
+        spark.sql(
+                "CREATE TABLE pt (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+
+        spark.sql("CREATE TABLE pt (a INT, b INT, c STRING) USING csv");
+
+        assertThat(
+                        spark.sql("SHOW TABLES")
+                                .select("namespace", "tableName")
+                                .collectAsList()
+                                .toString())
+                .isEqualTo("[[default,pt]]");
+    }
+
     private void testReadWrite(String table) {
         spark.sql("INSERT INTO " + table + " VALUES (1, 2, '3'), (4, 5, '6')").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM " + table).collectAsList();
