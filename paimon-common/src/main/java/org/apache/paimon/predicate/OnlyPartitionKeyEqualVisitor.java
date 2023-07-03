@@ -18,18 +18,28 @@
 
 package org.apache.paimon.predicate;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * DeletePushDownPartitionKeyVisitor visit the predicate and check if it only contains partition
- * keys and can be push down.
+ * Visit the predicate and check if it only contains partition keys and can be push down.
+ *
+ * <p>TODO: more filters if {@code BatchWriteBuilder} supports predicate.
  */
-public class DeletePushDownPartitionKeyVisitor implements FunctionVisitor<Boolean> {
+public class OnlyPartitionKeyEqualVisitor implements FunctionVisitor<Boolean> {
 
     private final List<String> partitionKeys;
 
-    public DeletePushDownPartitionKeyVisitor(List<String> partitionKeys) {
+    private final Map<String, String> partitions;
+
+    public OnlyPartitionKeyEqualVisitor(List<String> partitionKeys) {
         this.partitionKeys = partitionKeys;
+        partitions = new HashMap<>();
+    }
+
+    public Map<String, String> partitions() {
+        return partitions;
     }
 
     @Override
@@ -69,7 +79,12 @@ public class DeletePushDownPartitionKeyVisitor implements FunctionVisitor<Boolea
 
     @Override
     public Boolean visitEqual(FieldRef fieldRef, Object literal) {
-        return partitionKeys.contains(fieldRef.name());
+        boolean contains = partitionKeys.contains(fieldRef.name());
+        if (contains) {
+            partitions.put(fieldRef.name(), literal.toString());
+            return true;
+        }
+        return false;
     }
 
     @Override
