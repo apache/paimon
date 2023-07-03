@@ -23,6 +23,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.types.Row;
@@ -483,5 +484,23 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         List<Row> result = sql("SELECT tag_name, snapshot_id, schema_id, record_count FROM T$tags");
 
         assertThat(result).containsExactly(Row.of("tag1", 1L, 0L, 1L), Row.of("tag2", 2L, 0L, 2L));
+    }
+
+    @Test
+    public void testConsumersTable() throws Exception {
+        batchSql("CREATE TABLE T (a INT, b INT)");
+        batchSql("INSERT INTO T VALUES (1, 2)");
+        batchSql("INSERT INTO T VALUES (3, 4)");
+
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter("SELECT * FROM T /*+ OPTIONS('consumer-id'='my1') */"));
+
+        batchSql("INSERT INTO T VALUES (5, 6), (7, 8)");
+        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
+        iterator.close();
+
+        List<Row> result = sql("SELECT * FROM T$consumers");
+        assertThat(result).containsExactly(Row.of("my1", 3L));
     }
 }

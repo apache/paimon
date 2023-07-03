@@ -26,6 +26,7 @@ import org.apache.paimon.table.Table;
 import javax.annotation.Nullable;
 
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
+import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
@@ -51,6 +52,8 @@ public class SystemTableLoader {
                 return new FilesTable(dataTable);
             case TAGS:
                 return new TagsTable(fileIO, location);
+            case CONSUMERS:
+                return new ConsumersTable(fileIO, location);
             default:
                 return null;
         }

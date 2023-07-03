@@ -72,8 +72,31 @@ public class FileUtils {
      */
     public static Stream<Long> listVersionedFiles(FileIO fileIO, Path dir, String prefix)
             throws IOException {
+        return listOriginalVersionedFiles(fileIO, dir, prefix).map(Long::parseLong);
+    }
+
+    /**
+     * List original versioned files for the directory.
+     *
+     * @return version stream
+     */
+    public static Stream<String> listOriginalVersionedFiles(FileIO fileIO, Path dir, String prefix)
+            throws IOException {
+        return listVersionedFileStatus(fileIO, dir, prefix)
+                .map(FileStatus::getPath)
+                .map(Path::getName)
+                .map(name -> name.substring(prefix.length()));
+    }
+
+    /**
+     * List versioned file status for the directory.
+     *
+     * @return file status stream
+     */
+    public static Stream<FileStatus> listVersionedFileStatus(FileIO fileIO, Path dir, String prefix)
+            throws IOException {
         if (!fileIO.exists(dir)) {
-            return Stream.of();
+            return Stream.empty();
         }
 
         FileStatus[] statuses = fileIO.listStatus(dir);
@@ -86,10 +109,7 @@ public class FileUtils {
         }
 
         return Arrays.stream(statuses)
-                .map(FileStatus::getPath)
-                .map(Path::getName)
-                .filter(name -> name.startsWith(prefix))
-                .map(name -> Long.parseLong(name.substring(prefix.length())));
+                .filter(status -> status.getPath().getName().startsWith(prefix));
     }
 
     public static RecordReader<InternalRow> createFormatReader(

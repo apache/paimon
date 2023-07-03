@@ -20,17 +20,16 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Tag}. */
@@ -97,8 +96,12 @@ public class TagManager {
         return Snapshot.fromPath(fileIO, tagPath(tagName));
     }
 
-    public int tagCount() {
-        return listStatus().length;
+    public long tagCount() {
+        try {
+            return listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX).count();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /** Get all tagged snapshots sorted by snapshot id. */
@@ -108,39 +111,20 @@ public class TagManager {
 
     /** Get all tagged snapshots with names sorted by snapshot id. */
     public SortedMap<Snapshot, String> tags() {
-        FileStatus[] statuses = listStatus();
-        TreeMap<Snapshot, String> tags = new TreeMap<>(Comparator.comparingLong(Snapshot::id));
 
-        for (FileStatus status : statuses) {
-            Path path = status.getPath();
-            tags.put(
-                    Snapshot.fromPath(fileIO, path), path.getName().substring(TAG_PREFIX.length()));
+        TreeMap<Snapshot, String> tags = new TreeMap<>(Comparator.comparingLong(Snapshot::id));
+        try {
+            listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
+                    .forEach(
+                            status -> {
+                                Path path = status.getPath();
+                                tags.put(
+                                        Snapshot.fromPath(fileIO, path),
+                                        path.getName().substring(TAG_PREFIX.length()));
+                            });
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
         return tags;
-    }
-
-    private FileStatus[] listStatus() {
-        Path tagDirectory = tagDirectory();
-        try {
-            if (!fileIO.exists(tagDirectory)) {
-                return new FileStatus[0];
-            }
-
-            FileStatus[] statuses = fileIO.listStatus(tagDirectory);
-
-            if (statuses == null) {
-                throw new RuntimeException(
-                        String.format(
-                                "The return value is null of the listStatus for the '%s' directory.",
-                                tagDirectory));
-            }
-
-            return Arrays.stream(statuses)
-                    .filter(status -> status.getPath().getName().startsWith(TAG_PREFIX))
-                    .toArray(FileStatus[]::new);
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    String.format("Failed to list status in the '%s' directory.", tagDirectory), e);
-        }
     }
 }
