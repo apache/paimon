@@ -111,7 +111,7 @@ public class TableWriteImpl<T>
         return data;
     }
 
-    private SinkRecord toSinkRecord(InternalRow row) throws Exception {
+    private SinkRecord toSinkRecord(InternalRow row) {
         keyAndBucketExtractor.setRecord(row);
         return new SinkRecord(
                 keyAndBucketExtractor.partition(),
