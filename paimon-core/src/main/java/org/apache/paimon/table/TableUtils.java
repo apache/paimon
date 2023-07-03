@@ -39,11 +39,14 @@ public class TableUtils {
      * Delete according to filters.
      *
      * <p>NOTE: This method is only suitable for deletion of small amount of data.
+     *
+     * @return the number of deleted records
      */
-    public static void deleteWhere(Table table, List<Predicate> filters) {
+    public static long deleteWhere(Table table, List<Predicate> filters) {
         ReadBuilder readBuilder = table.newReadBuilder().withFilter(filters);
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         List<Split> splits = readBuilder.newScan().plan().splits();
+        long hit = 0;
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits);
                 BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
@@ -52,12 +55,14 @@ public class TableUtils {
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
                 if (filter.test(row)) {
+                    hit++;
                     row.setRowKind(RowKind.DELETE);
                     write.write(row);
                 }
             }
 
             commit.commit(write.prepareCommit());
+            return hit;
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

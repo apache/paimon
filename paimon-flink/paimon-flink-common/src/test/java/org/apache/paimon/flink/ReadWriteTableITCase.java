@@ -1665,6 +1665,213 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(CoreOptions.MergeEngine.class)
+    public void testDeletePushDownWithPrimaryKey(CoreOptions.MergeEngine mergeEngine)
+            throws Exception {
+        Set<CoreOptions.MergeEngine> supportUpdateEngines = new HashSet<>();
+        supportUpdateEngines.add(CoreOptions.MergeEngine.DEDUPLICATE);
+
+        // Step1: define table schema
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt String"),
+                        Arrays.asList("id", "dt"),
+                        Collections.singletonList("dt"),
+                        options);
+
+        // Step2: batch write some historical data
+        insertInto(
+                table,
+                "(1, 'US Dollar', 114, '2022-01-01')",
+                "(2, 'UNKNOWN', -1, '2022-01-01')",
+                "(3, 'Euro', 119, '2022-01-02')",
+                "(4, 'CNY', 119, '2022-01-02')",
+                "(5, 'HKD', 119, '2022-01-03')",
+                "(6, 'CAD', 119, '2022-01-03')",
+                "(7, 'INR', 119, '2022-01-03')",
+                "(8, 'MOP', 119, '2022-01-03')");
+
+        // Step3: prepare delete statement 'where pk = x'
+        String deleteStatement =
+                String.format("DELETE FROM %s WHERE id = 2 and dt = '2022-01-01'", table);
+
+        // Step4: execute delete statement and verify result
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
+                        changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"),
+                        changelogRow("+I", 4L, "CNY", 119L, "2022-01-02"),
+                        changelogRow("+I", 5L, "HKD", 119L, "2022-01-03"),
+                        changelogRow("+I", 6L, "CAD", 119L, "2022-01-03"),
+                        changelogRow("+I", 7L, "INR", 119L, "2022-01-03"),
+                        changelogRow("+I", 8L, "MOP", 119L, "2022-01-03"));
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(deleteStatement).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+
+        // Step5: prepare delete statement 'where pk = x or pk = y'
+        String deleteStatement1 =
+                String.format("DELETE FROM %s WHERE id = 3 or id = 4 and dt = '2022-01-02'", table);
+        List<Row> expectedRecords1 =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
+                        changelogRow("+I", 5L, "HKD", 119L, "2022-01-03"),
+                        changelogRow("+I", 6L, "CAD", 119L, "2022-01-03"),
+                        changelogRow("+I", 7L, "INR", 119L, "2022-01-03"),
+                        changelogRow("+I", 8L, "MOP", 119L, "2022-01-03"));
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(deleteStatement1).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords1);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement1).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+
+        // Step5: prepare delete statement 'where pk in (x, y, z)'
+        String deleteStatement2 =
+                String.format(
+                        "DELETE FROM %s WHERE id in (5, 6, 7, 8) and dt = '2022-01-03'", table);
+        List<Row> expectedRecords2 =
+                Arrays.asList(changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"));
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(deleteStatement2).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords2);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement2).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.MergeEngine.class)
+    public void testDeletePushDownWithPartitionKey(CoreOptions.MergeEngine mergeEngine)
+            throws Exception {
+        Set<CoreOptions.MergeEngine> supportUpdateEngines = new HashSet<>();
+        supportUpdateEngines.add(CoreOptions.MergeEngine.DEDUPLICATE);
+
+        // Step1: define table schema
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt String",
+                                "hh String"),
+                        Arrays.asList("id", "dt", "hh"),
+                        Arrays.asList("dt", "hh"),
+                        options);
+
+        // Step2: batch write some historical data
+        insertInto(
+                table,
+                "(1, 'US Dollar', 114, '2022-01-01', '11')",
+                "(2, 'UNKNOWN', -1, '2022-01-01', '12')",
+                "(3, 'Euro', 119, '2022-01-02', '13')",
+                "(4, 'CNY', 119, '2022-01-03', '14')",
+                "(5, 'HKD', 119, '2022-01-03', '15')",
+                "(6, 'CAD', 119, '2022-01-03', '16')",
+                "(7, 'INR', 119, '2022-01-03', '17')",
+                "(8, 'MOP', 119, '2022-01-03', '18')");
+
+        // Step3: partition key not delete push down
+        String deleteStatement =
+                String.format("DELETE FROM %s WHERE dt = '2022-01-03' AND currency = 'CNY'", table);
+
+        // Step4: execute delete statement and verify result
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01", "11"),
+                        changelogRow("+I", 2L, "UNKNOWN", -1L, "2022-01-01", "12"),
+                        changelogRow("+I", 3L, "Euro", 119L, "2022-01-02", "13"),
+                        changelogRow("+I", 5L, "HKD", 119L, "2022-01-03", "15"),
+                        changelogRow("+I", 6L, "CAD", 119L, "2022-01-03", "16"),
+                        changelogRow("+I", 7L, "INR", 119L, "2022-01-03", "17"),
+                        changelogRow("+I", 8L, "MOP", 119L, "2022-01-03", "18"));
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(deleteStatement).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+
+        // Step5: partition key not push down
+        String deleteStatement1 =
+                String.format("DELETE FROM %s WHERE dt = '2022-01-02' or hh = '15'", table);
+        List<Row> expectedRecords1 =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01", "11"),
+                        changelogRow("+I", 2L, "UNKNOWN", -1L, "2022-01-01", "12"),
+                        changelogRow("+I", 6L, "CAD", 119L, "2022-01-03", "16"),
+                        changelogRow("+I", 7L, "INR", 119L, "2022-01-03", "17"),
+                        changelogRow("+I", 8L, "MOP", 119L, "2022-01-03", "18"));
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(deleteStatement1).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords1);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement1).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+
+        // Step6: partition key delete push down
+        String deleteStatement2 =
+                String.format("DELETE FROM %s WHERE dt = '2022-01-03' and hh = '16'", table);
+
+        // Step7: execute delete statement and verify result
+        List<Row> expectedRecords2 =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01", "11"),
+                        changelogRow("+I", 2L, "UNKNOWN", -1L, "2022-01-01", "12"),
+                        changelogRow("+I", 7L, "INR", 119L, "2022-01-03", "17"),
+                        changelogRow("+I", 8L, "MOP", 119L, "2022-01-03", "18"));
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(deleteStatement2).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords2);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement2).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+
+        // Step8: partition key delete push down
+        String deleteStatement3 = String.format("DELETE FROM %s WHERE dt = '2022-01-03'", table);
+
+        // Step9: execute delete statement and verify result
+        List<Row> expectedRecords3 =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01", "11"),
+                        changelogRow("+I", 2L, "UNKNOWN", -1L, "2022-01-01", "12"));
+        if (supportUpdateEngines.contains(mergeEngine)) {
+            bEnv.executeSql(deleteStatement3).await();
+            String querySql = String.format("SELECT * FROM %s", table);
+            testBatchRead(querySql, expectedRecords3);
+        } else {
+            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement3).await())
+                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+        }
+    }
+
     // ----------------------------------------------------------------------------------------------------------------
     // Tools
     // ----------------------------------------------------------------------------------------------------------------
