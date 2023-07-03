@@ -164,7 +164,7 @@ You can query the tag history information of the table through tags table, inclu
 and some historical information of the snapshots. You can also get all tag names and time travel to a specific tag data by name.
 
 ```sql
-SELECT * FROM MyTable$snapshots;
+SELECT * FROM MyTable$tags;
 
 /*
 +----------+-------------+-----------+-------------------------+--------------+
