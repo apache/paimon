@@ -23,18 +23,19 @@ package org.apache.paimon.statistics;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 
-/** The counts stats, which will only report null count stats. */
-public class CountsStats extends AbstractStats {
+/** The none stats which report nothing. */
+public class NoneFieldStatsCollector extends AbstractFieldStatsCollector {
 
     @Override
-    public void collect(Object field, Serializer<Object> serializer) {
-        if (field == null) {
-            nullCount++;
-        }
+    public void collect(Object field, Serializer<Object> fieldSerializer) {}
+
+    @Override
+    public FieldStats result() {
+        return new FieldStats(null, null, null);
     }
 
     @Override
     public FieldStats convert(FieldStats source) {
-        return new FieldStats(null, null, source.nullCount());
+        return new FieldStats(null, null, null);
     }
 }

@@ -26,8 +26,8 @@ import org.apache.paimon.format.TableStatsCollector;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.NoneStats;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.NoneFieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -57,10 +57,11 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             RowType writeSchema,
             @Nullable TableStatsExtractor tableStatsExtractor,
             String compression,
-            Stats[] stats) {
+            FieldStatsCollector[] stats) {
         super(fileIO, factory, path, converter, compression);
         this.tableStatsExtractor = tableStatsExtractor;
-        this.isStatsCollectorDisabled = Arrays.stream(stats).allMatch(p -> p instanceof NoneStats);
+        this.isStatsCollectorDisabled =
+                Arrays.stream(stats).allMatch(p -> p instanceof NoneFieldStatsCollector);
         if (this.tableStatsExtractor == null) {
             this.tableStatsCollector = new TableStatsCollector(writeSchema, stats);
         }

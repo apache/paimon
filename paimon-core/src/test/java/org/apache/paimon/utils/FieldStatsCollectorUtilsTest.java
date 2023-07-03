@@ -22,9 +22,9 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.statistics.FullStats;
-import org.apache.paimon.statistics.Stats;
-import org.apache.paimon.statistics.TruncateStats;
+import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.FullFieldStatsCollector;
+import org.apache.paimon.statistics.TruncateFieldStatsCollector;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 
 /** Test for {@link StatsUtils}. */
-public class StatsUtilsTest {
+public class FieldStatsCollectorUtilsTest {
     @Test
     public void testFieldStats() {
         RowType type =
@@ -55,11 +55,11 @@ public class StatsUtilsTest {
                 CoreOptions.FIELD_STATS_MODE_PREFIX + ".c." + CoreOptions.FIELD_STATS_MODE_SUFFIX,
                 "full");
 
-        Stats[] stats =
+        FieldStatsCollector[] stats =
                 StatsUtils.getFieldsStatsMode(new CoreOptions(options), type.getFieldNames());
         Assertions.assertEquals(3, stats.length);
-        Assertions.assertEquals(16, ((TruncateStats) stats[0]).getLength());
-        Assertions.assertEquals(12, ((TruncateStats) stats[1]).getLength());
-        Assertions.assertTrue(stats[2] instanceof FullStats);
+        Assertions.assertEquals(16, ((TruncateFieldStatsCollector) stats[0]).getLength());
+        Assertions.assertEquals(12, ((TruncateFieldStatsCollector) stats[1]).getLength());
+        Assertions.assertTrue(stats[2] instanceof FullFieldStatsCollector);
     }
 }

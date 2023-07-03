@@ -33,7 +33,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link BinaryTableStats}. */
-public class BinaryTableStatsTest {
+public class BinaryTableFieldStatsTestCollector {
     @Test
     public void testBinaryTableStats() {
         List<Integer> minList = Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9);

@@ -19,7 +19,7 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.TableStatsExtractorTestBase;
+import org.apache.paimon.format.TableFieldStatsExtractorTestBaseCollector;
 import org.apache.paimon.format.orc.filter.OrcTableStatsExtractor;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
@@ -44,7 +44,8 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
 /** Tests for {@link OrcTableStatsExtractor}. */
-public class OrcTableStatsExtractorTest extends TableStatsExtractorTestBase {
+public class OrcTableFieldStatsExtractorTestCollector
+        extends TableFieldStatsExtractorTestBaseCollector {
 
     @Override
     protected FileFormat createFormat() {

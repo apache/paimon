@@ -20,19 +20,21 @@
 
 package org.apache.paimon.statistics;
 
+import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 
-/** Abstract base stats. */
-public abstract class AbstractStats implements Stats {
-
-    protected Object minValue;
-
-    protected Object maxValue;
-
-    protected long nullCount;
+/** The counts stats, which will only report null count stats. */
+public class CountsFieldStatsCollector extends AbstractFieldStatsCollector {
 
     @Override
-    public FieldStats result() {
-        return new FieldStats(minValue, maxValue, nullCount);
+    public void collect(Object field, Serializer<Object> serializer) {
+        if (field == null) {
+            nullCount++;
+        }
+    }
+
+    @Override
+    public FieldStats convert(FieldStats source) {
+        return new FieldStats(null, null, source.nullCount());
     }
 }

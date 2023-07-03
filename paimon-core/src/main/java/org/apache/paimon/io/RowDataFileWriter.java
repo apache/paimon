@@ -24,7 +24,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
@@ -54,7 +54,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             long schemaId,
             LongCounter seqNumCounter,
             String fileCompression,
-            Stats[] stats) {
+            FieldStatsCollector[] stats) {
         super(
                 fileIO,
                 factory,

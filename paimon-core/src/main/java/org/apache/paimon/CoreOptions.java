@@ -694,8 +694,8 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start snapshot (exclusive) and end snapshot, "
                                     + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
 
-    public static final String FIELD_STATS_MODE_SUFFIX = "stats.mode";
     public static final String FIELD_STATS_MODE_PREFIX = "field";
+    public static final String FIELD_STATS_MODE_SUFFIX = "stats.mode";
 
     public static final ConfigOption<String> STATS_MODE =
             key("metadata.stats.mode")
@@ -717,7 +717,7 @@ public class CoreOptions implements Serializable {
                                     .linebreak()
                                     .text(
                                             "Field level stats mode can be specified by "
-                                                    + FIELD_STATS_MODE_SUFFIX
+                                                    + FIELD_STATS_MODE_PREFIX
                                                     + "."
                                                     + "{field_name}."
                                                     + FIELD_STATS_MODE_SUFFIX)

@@ -23,8 +23,8 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.TableStatsCollector;
 import org.apache.paimon.io.DataFileTestDataGenerator;
-import org.apache.paimon.statistics.FullStats;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.FullFieldStatsCollector;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.utils.Preconditions;
 
@@ -86,11 +86,11 @@ public class ManifestTestDataGenerator {
                 !entries.isEmpty(), "Manifest entries are empty. Invalid test data.");
 
         TableStatsCollector collector =
-            new TableStatsCollector(
-                TestKeyValueGenerator.DEFAULT_PART_TYPE,
-                IntStream.range(0, TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFieldCount())
-                    .mapToObj(i -> new FullStats())
-                    .toArray(Stats[]::new));
+                new TableStatsCollector(
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        IntStream.range(0, TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFieldCount())
+                                .mapToObj(i -> new FullFieldStatsCollector())
+                                .toArray(FieldStatsCollector[]::new));
         FieldStatsArraySerializer serializer =
                 new FieldStatsArraySerializer(TestKeyValueGenerator.DEFAULT_PART_TYPE);
 

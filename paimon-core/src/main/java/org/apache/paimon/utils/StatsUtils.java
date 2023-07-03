@@ -22,7 +22,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
 
 import java.util.List;
 
@@ -33,10 +33,11 @@ import static org.apache.paimon.options.ConfigOptions.key;
 /** The stats utils. */
 public class StatsUtils {
 
-    public static Stats[] getFieldsStatsMode(CoreOptions options, List<String> fields) {
+    public static FieldStatsCollector[] getFieldsStatsMode(
+            CoreOptions options, List<String> fields) {
         Options cfg = options.toConfiguration();
-        Stats defaultMode = Stats.from(cfg.get(CoreOptions.STATS_MODE));
-        Stats[] modes = new Stats[fields.size()];
+        FieldStatsCollector defaultMode = FieldStatsCollector.from(cfg.get(CoreOptions.STATS_MODE));
+        FieldStatsCollector[] modes = new FieldStatsCollector[fields.size()];
         for (int i = 0; i < fields.size(); i++) {
 
             String fieldMode =
@@ -49,7 +50,7 @@ public class StatsUtils {
                                     .stringType()
                                     .noDefaultValue());
             if (fieldMode != null) {
-                modes[i] = Stats.from(fieldMode);
+                modes[i] = FieldStatsCollector.from(fieldMode);
             } else {
                 modes[i] = defaultMode;
             }

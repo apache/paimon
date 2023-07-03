@@ -20,22 +20,19 @@
 
 package org.apache.paimon.statistics;
 
-import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 
-/** The none stats which report nothing. */
-public class NoneStats extends AbstractStats {
+/** Abstract base stats. */
+public abstract class AbstractFieldStatsCollector implements FieldStatsCollector {
 
-    @Override
-    public void collect(Object field, Serializer<Object> fieldSerializer) {}
+    protected Object minValue;
+
+    protected Object maxValue;
+
+    protected long nullCount;
 
     @Override
     public FieldStats result() {
-        return new FieldStats(null, null, null);
-    }
-
-    @Override
-    public FieldStats convert(FieldStats source) {
-        return new FieldStats(null, null, null);
+        return new FieldStats(minValue, maxValue, nullCount);
     }
 }

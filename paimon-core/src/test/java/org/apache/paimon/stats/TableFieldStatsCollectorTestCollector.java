@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.TableStatsCollector;
-import org.apache.paimon.statistics.FullStats;
+import org.apache.paimon.statistics.FullFieldStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -36,18 +36,18 @@ import java.util.stream.IntStream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TableStatsCollector}. */
-public class TableStatsCollectorTest {
+public class TableFieldStatsCollectorTestCollector {
 
     @Test
     public void testCollect() {
         RowType rowType =
                 RowType.of(new IntType(), new VarCharType(10), new ArrayType(new IntType()));
         TableStatsCollector collector =
-            new TableStatsCollector(
-                rowType,
-                IntStream.range(0, rowType.getFieldCount())
-                    .mapToObj(i -> new FullStats())
-                    .toArray(FullStats[]::new));
+                new TableStatsCollector(
+                        rowType,
+                        IntStream.range(0, rowType.getFieldCount())
+                                .mapToObj(i -> new FullFieldStatsCollector())
+                                .toArray(FullFieldStatsCollector[]::new));
 
         collector.collect(
                 GenericRow.of(

@@ -32,7 +32,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
@@ -69,7 +69,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final String fileCompression;
     private boolean skipCompaction;
     private BucketMode bucketMode = BucketMode.FIXED;
-    private Stats[] stats;
+    private FieldStatsCollector[] stats;
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,

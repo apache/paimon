@@ -33,13 +33,13 @@ import java.util.regex.Pattern;
  * The truncate stats which will report null count, truncated min/max value. Currently, truncation
  * only performs on the {@link BinaryString} value.
  */
-public class TruncateStats extends AbstractStats {
+public class TruncateFieldStatsCollector extends AbstractFieldStatsCollector {
 
     public static final Pattern TRUNCATE_PATTERN = Pattern.compile("TRUNCATE\\((\\d+)\\)");
 
     private final int length;
 
-    public TruncateStats(int length) {
+    public TruncateFieldStatsCollector(int length) {
         Preconditions.checkArgument(length > 0, "Truncate length should larger than zero.");
         this.length = length;
     }

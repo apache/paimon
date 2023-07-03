@@ -24,7 +24,7 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 
 /** The full stats which will report null count, min value, max value if available. */
-public class FullStats extends AbstractStats {
+public class FullFieldStatsCollector extends AbstractFieldStatsCollector {
 
     @Override
     public void collect(Object field, Serializer<Object> fieldSerializer) {

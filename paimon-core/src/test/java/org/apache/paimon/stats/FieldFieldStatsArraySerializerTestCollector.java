@@ -35,7 +35,7 @@ import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FieldStatsArraySerializer}. */
-public class FieldStatsArraySerializerTest {
+public class FieldFieldStatsArraySerializerTestCollector {
     @Test
     public void testFromBinary() {
         TableSchema dataSchema =

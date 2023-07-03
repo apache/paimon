@@ -26,7 +26,7 @@ import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.format.orc.OrcReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
@@ -54,14 +54,14 @@ import java.util.stream.IntStream;
 public class OrcTableStatsExtractor implements TableStatsExtractor {
 
     private final RowType rowType;
-    private final Stats[] stats;
+    private final FieldStatsCollector[] stats;
 
-    public OrcTableStatsExtractor(RowType rowType, Stats[] stats) {
+    public OrcTableStatsExtractor(RowType rowType, FieldStatsCollector[] stats) {
         this.rowType = rowType;
         this.stats = stats;
         Preconditions.checkArgument(
-            rowType.getFieldCount() == stats.length,
-            "The stats is not aligned to write schema.");
+                rowType.getFieldCount() == stats.length,
+                "The stats is not aligned to write schema.");
     }
 
     @Override

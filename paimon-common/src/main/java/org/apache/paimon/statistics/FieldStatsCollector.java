@@ -25,10 +25,10 @@ import org.apache.paimon.format.FieldStats;
 
 import java.util.regex.Matcher;
 
-import static org.apache.paimon.statistics.TruncateStats.TRUNCATE_PATTERN;
+import static org.apache.paimon.statistics.TruncateFieldStatsCollector.TRUNCATE_PATTERN;
 
-/** The mode of the Stats */
-public interface Stats {
+/** The mode of the field stats. */
+public interface FieldStatsCollector {
 
     /**
      * collect stats from the field.
@@ -49,20 +49,20 @@ public interface Stats {
      */
     FieldStats convert(FieldStats source);
 
-    static Stats from(String option) {
+    static FieldStatsCollector from(String option) {
         String upper = option.toUpperCase();
         switch (upper) {
             case "NONE":
-                return new NoneStats();
+                return new NoneFieldStatsCollector();
             case "FULL":
-                return new FullStats();
+                return new FullFieldStatsCollector();
             case "COUNTS":
-                return new CountsStats();
+                return new CountsFieldStatsCollector();
             default:
                 Matcher matcher = TRUNCATE_PATTERN.matcher(upper);
                 if (matcher.matches()) {
                     String length = matcher.group(1);
-                    return new TruncateStats(Integer.parseInt(length));
+                    return new TruncateFieldStatsCollector(Integer.parseInt(length));
                 }
                 throw new IllegalArgumentException("Unexpected option: " + option);
         }

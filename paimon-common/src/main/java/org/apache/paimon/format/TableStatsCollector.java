@@ -21,7 +21,7 @@ package org.apache.paimon.format;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
@@ -29,10 +29,10 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 public class TableStatsCollector {
 
     private final RowDataToObjectArrayConverter converter;
-    private final Stats[] stats;
+    private final FieldStatsCollector[] stats;
     private final Serializer<Object>[] fieldSerializers;
 
-    public TableStatsCollector(RowType rowType, Stats[] stats) {
+    public TableStatsCollector(RowType rowType, FieldStatsCollector[] stats) {
         int numFields = rowType.getFieldCount();
         this.converter = new RowDataToObjectArrayConverter(rowType);
         this.stats = stats;
@@ -51,7 +51,7 @@ public class TableStatsCollector {
     public void collect(InternalRow row) {
         Object[] objects = converter.convert(row);
         for (int i = 0; i < row.getFieldCount(); i++) {
-            Stats collector = stats[i];
+            FieldStatsCollector collector = stats[i];
             Object obj = objects[i];
             collector.collect(obj, fieldSerializers[i]);
         }

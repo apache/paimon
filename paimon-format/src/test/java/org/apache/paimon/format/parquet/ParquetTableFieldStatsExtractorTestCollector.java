@@ -20,7 +20,7 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.TableStatsExtractorTestBase;
+import org.apache.paimon.format.TableFieldStatsExtractorTestBaseCollector;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -43,7 +43,8 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
 /** Tests for {@link ParquetTableStatsExtractor}. */
-public class ParquetTableStatsExtractorTest extends TableStatsExtractorTestBase {
+public class ParquetTableFieldStatsExtractorTestCollector
+        extends TableFieldStatsExtractorTestBaseCollector {
 
     @Override
     protected FileFormat createFormat() {

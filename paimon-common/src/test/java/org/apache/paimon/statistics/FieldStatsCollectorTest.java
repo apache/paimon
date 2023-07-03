@@ -41,8 +41,8 @@ import java.util.List;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
-/** Test for {@link Stats}. */
-public class StatsTest {
+/** Test for {@link FieldStatsCollector}. */
+public class FieldStatsCollectorTest {
 
     private Serializer<Object>[] serializers;
     private static final String s1 = StringUtils.repeat("a", 12);
@@ -66,14 +66,16 @@ public class StatsTest {
 
     @Test
     public void testParse() {
-        Assertions.assertTrue(Stats.from("none") instanceof NoneStats);
-        Assertions.assertTrue(Stats.from("Full") instanceof FullStats);
-        Assertions.assertTrue(Stats.from("CoUNts") instanceof CountsStats);
-        TruncateStats t1 = (TruncateStats) Stats.from("truncate(10)");
+        Assertions.assertTrue(FieldStatsCollector.from("none") instanceof NoneFieldStatsCollector);
+        Assertions.assertTrue(FieldStatsCollector.from("Full") instanceof FullFieldStatsCollector);
+        Assertions.assertTrue(
+                FieldStatsCollector.from("CoUNts") instanceof CountsFieldStatsCollector);
+        TruncateFieldStatsCollector t1 =
+                (TruncateFieldStatsCollector) FieldStatsCollector.from("truncate(10)");
         Assertions.assertEquals(10, t1.getLength());
-        assertThatThrownBy(() -> Stats.from("aatruncate(10)"))
+        assertThatThrownBy(() -> FieldStatsCollector.from("aatruncate(10)"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> Stats.from("truncate(10.1)"))
+        assertThatThrownBy(() -> FieldStatsCollector.from("truncate(10.1)"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -81,57 +83,77 @@ public class StatsTest {
     public void testNone() {
         List<GenericRow> rows = getRows();
         for (int i = 0; i < serializers.length; i++) {}
-        check(rows, 0, new FieldStats(null, null, null), new FieldStats(1, 4, 0L), new NoneStats());
+        check(
+                rows,
+                0,
+                new FieldStats(null, null, null),
+                new FieldStats(1, 4, 0L),
+                new NoneFieldStatsCollector());
         check(
                 rows,
                 1,
                 new FieldStats(null, null, null),
                 new FieldStats(s1, s3, 1L),
-                new NoneStats());
+                new NoneFieldStatsCollector());
     }
 
     @Test
     public void testCounts() {
         List<GenericRow> rows = getRows();
         for (int i = 0; i < serializers.length; i++) {}
-        check(rows, 0, new FieldStats(null, null, 0L), new FieldStats(1, 4, 0L), new CountsStats());
+        check(
+                rows,
+                0,
+                new FieldStats(null, null, 0L),
+                new FieldStats(1, 4, 0L),
+                new CountsFieldStatsCollector());
         check(
                 rows,
                 1,
                 new FieldStats(null, null, 1L),
                 new FieldStats(s1, s3, 1L),
-                new CountsStats());
+                new CountsFieldStatsCollector());
     }
 
     @Test
     public void testFull() {
         List<GenericRow> rows = getRows();
         for (int i = 0; i < serializers.length; i++) {}
-        check(rows, 0, new FieldStats(1, 4, 0L), new FieldStats(1, 4, 0L), new FullStats());
+        check(
+                rows,
+                0,
+                new FieldStats(1, 4, 0L),
+                new FieldStats(1, 4, 0L),
+                new FullFieldStatsCollector());
         check(
                 rows,
                 1,
                 new FieldStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
                 new FieldStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
-                new FullStats());
+                new FullFieldStatsCollector());
     }
 
     @Test
     public void testTruncate() {
         List<GenericRow> rows = getRows();
         for (int i = 0; i < serializers.length; i++) {}
-        check(rows, 0, new FieldStats(1, 4, 0L), new FieldStats(1, 4, 0L), new TruncateStats(1));
+        check(
+                rows,
+                0,
+                new FieldStats(1, 4, 0L),
+                new FieldStats(1, 4, 0L),
+                new TruncateFieldStatsCollector(1));
         check(
                 rows,
                 1,
                 new FieldStats(BinaryString.fromString(s1_t), BinaryString.fromString(s3_t), 1L),
                 new FieldStats(BinaryString.fromString(s1), BinaryString.fromString(s3), 1L),
-                new TruncateStats(2));
+                new TruncateFieldStatsCollector(2));
     }
 
     @Test
     public void testTruncateTwoChar() {
-        TruncateStats t1 = new TruncateStats(1);
+        TruncateFieldStatsCollector t1 = new TruncateFieldStatsCollector(1);
         FieldStats fieldStats =
                 new FieldStats(
                         BinaryString.fromString("\uD83E\uDD18a"),
@@ -147,12 +169,12 @@ public class StatsTest {
             int column,
             FieldStats expected,
             FieldStats formatExtracted,
-            Stats stats) {
+            FieldStatsCollector fieldStatsCollector) {
         for (GenericRow row : rows) {
-            stats.collect(row.getField(column), serializers[column]);
+            fieldStatsCollector.collect(row.getField(column), serializers[column]);
         }
-        Assertions.assertEquals(expected, stats.result());
-        Assertions.assertEquals(expected, stats.convert(formatExtracted));
+        Assertions.assertEquals(expected, fieldStatsCollector.result());
+        Assertions.assertEquals(expected, fieldStatsCollector.convert(formatExtracted));
     }
 
     private List<GenericRow> getRows() {

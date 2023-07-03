@@ -29,7 +29,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -53,7 +53,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final RowType partitionType;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
-    private final Stats[] partitionStats;
+    private final FieldStatsCollector[] partitionStats;
 
     private ManifestFile(
             FileIO fileIO,
@@ -65,7 +65,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             PathFactory pathFactory,
             long suggestedFileSize,
             @Nullable SegmentsCache<String> cache,
-            Stats[] partitionStats) {
+            FieldStatsCollector[] partitionStats) {
         super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
@@ -116,7 +116,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 FormatWriterFactory factory,
                 Path path,
                 String fileCompression,
-                Stats[] partitionStats) {
+                FieldStatsCollector[] partitionStats) {
             super(ManifestFile.this.fileIO, factory, path, serializer::toRow, fileCompression);
 
             this.partitionStatsCollector = new TableStatsCollector(partitionType, partitionStats);
@@ -166,7 +166,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
         @Nullable private final SegmentsCache<String> cache;
-        private final Stats[] partitionStats;
+        private final FieldStatsCollector[] partitionStats;
 
         public Factory(
                 FileIO fileIO,
@@ -176,7 +176,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize,
                 @Nullable SegmentsCache<String> cache,
-                Stats[] partitionStats) {
+                FieldStatsCollector[] partitionStats) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.partitionType = partitionType;

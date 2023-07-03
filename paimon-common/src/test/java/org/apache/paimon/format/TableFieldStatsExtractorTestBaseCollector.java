@@ -30,7 +30,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.CharType;
@@ -63,7 +63,7 @@ import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TableStatsExtractor}. */
-public abstract class TableStatsExtractorTestBase {
+public abstract class TableFieldStatsExtractorTestBaseCollector {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -75,8 +75,10 @@ public abstract class TableStatsExtractorTestBase {
         FileFormat format = createFormat();
         RowType rowType = rowType();
         int count = rowType().getFieldCount();
-        Stats[] stats =
-                IntStream.range(0, count).mapToObj(p -> Stats.from(mode)).toArray(Stats[]::new);
+        FieldStatsCollector[] stats =
+                IntStream.range(0, count)
+                        .mapToObj(p -> FieldStatsCollector.from(mode))
+                        .toArray(FieldStatsCollector[]::new);
 
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");

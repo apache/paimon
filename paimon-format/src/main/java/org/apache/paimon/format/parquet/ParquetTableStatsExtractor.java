@@ -25,7 +25,7 @@ import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.statistics.Stats;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
@@ -60,9 +60,9 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
     private final RowType rowType;
     private static final OffsetDateTime EPOCH = Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC);
     private static final LocalDate EPOCH_DAY = EPOCH.toLocalDate();
-    private final Stats[] stats;
+    private final FieldStatsCollector[] stats;
 
-    public ParquetTableStatsExtractor(RowType rowType, Stats[] stats) {
+    public ParquetTableStatsExtractor(RowType rowType, FieldStatsCollector[] stats) {
         this.rowType = rowType;
         this.stats = stats;
         Preconditions.checkArgument(
