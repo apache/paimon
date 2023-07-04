@@ -28,7 +28,7 @@ import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer,
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
-import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
