@@ -865,6 +865,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         String possibleCauses =
                 String.join(
                         "\n",
+                        "Don't panic!",
                         "Conflicts during commits are normal and this failure is intended to resolve the conflicts.",
                         "Conflicts are mainly caused by the following scenarios:",
                         "1. Your job is suffering from back-pressuring.",
