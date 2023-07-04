@@ -42,14 +42,6 @@ trait PaimonCommand {
       BucketMode.FIXED
   }
 
-  def isDynamicBucketTable: Boolean = {
-    bucketMode == BucketMode.DYNAMIC
-  }
-
-  def isUnawareBucketTable: Boolean = {
-    bucketMode == BucketMode.UNAWARE
-  }
-
   def deserializeCommitMessage(
       serializer: CommitMessageSerializer,
       bytes: Array[Byte]): CommitMessage = {

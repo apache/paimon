@@ -28,7 +28,7 @@ import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer,
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
-import org.apache.spark.sql.{Column, DataFrame, Row, SparkSession}
+import org.apache.spark.sql.{Column, DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
@@ -77,28 +77,35 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
     val toRow = withBucketDataEncoder.createSerializer()
     val fromRow = withBucketDataEncoder.createDeserializer()
 
-    val withAssignedBucket = if (isDynamicBucketTable) {
-      val partitioned = if (primaryKeyCols.nonEmpty) {
-        // Make sure that the records with the same bucket values is within a task.
-        withBucketCol.repartition(primaryKeyCols: _*)
-      } else {
-        withBucketCol
-      }
-      val numSparkPartitions = partitioned.rdd.getNumPartitions
-      val dynamicBucketProcessor =
-        DynamicBucketProcessor(table, rowType, bucketColIdx, numSparkPartitions, toRow, fromRow)
-      partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(withBucketDataEncoder)
-    } else {
+    def commonBucketProcessed = {
       val commonBucketProcessor = CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
       withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(withBucketDataEncoder)
     }
 
-    var df = withAssignedBucket
-      .toDF()
-    if (!isUnawareBucketTable) {
-      // unaware bucket mode, we don't shuffle while writing
-      df = df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
+    def repartition(ds: Dataset[Row]) = {
+      ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
     }
+
+    val df =
+      bucketMode match {
+        case BucketMode.DYNAMIC =>
+          val partitioned = if (primaryKeyCols.nonEmpty) {
+            // Make sure that the records with the same bucket values is within a task.
+            withBucketCol.repartition(primaryKeyCols: _*)
+          } else {
+            withBucketCol
+          }
+          val numSparkPartitions = partitioned.rdd.getNumPartitions
+          val dynamicBucketProcessor =
+            DynamicBucketProcessor(table, rowType, bucketColIdx, numSparkPartitions, toRow, fromRow)
+          repartition(
+            partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(
+              withBucketDataEncoder))
+        case BucketMode.UNAWARE =>
+          commonBucketProcessed
+        case BucketMode.FIXED =>
+          repartition(commonBucketProcessed)
+      }
 
     val commitMessages = df
       .mapPartitions {
