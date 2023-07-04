@@ -22,6 +22,7 @@ package org.apache.paimon.statistics;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.serializer.BinaryStringSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
@@ -39,6 +40,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 
 /** Test for {@link FieldStatsCollector}. */
@@ -164,6 +166,47 @@ public class FieldStatsCollectorTest {
         fieldStats = t1.convert(fieldStats);
         Assertions.assertEquals(BinaryString.fromString("\uD83E\uDD18"), fieldStats.minValue());
         Assertions.assertEquals(BinaryString.fromString("\uD83E\uDD19"), fieldStats.maxValue());
+    }
+
+    @Test
+    public void testTruncateCopied() {
+        TruncateFieldStatsCollector collector = new TruncateFieldStatsCollector(16);
+        BinaryString str = BinaryString.fromString("str");
+        collector.collect(str, (Serializer) BinaryStringSerializer.INSTANCE);
+        FieldStats stats = collector.result();
+        assertThat(stats.minValue()).isNotSameAs(str);
+        assertThat(stats.maxValue()).isNotSameAs(str);
+    }
+
+    @Test
+    public void testFullCopied() {
+        FullFieldStatsCollector collector = new FullFieldStatsCollector();
+        BinaryString str = BinaryString.fromString("str");
+        collector.collect(str, (Serializer) BinaryStringSerializer.INSTANCE);
+        FieldStats stats = collector.result();
+        assertThat(stats.minValue()).isNotSameAs(str);
+        assertThat(stats.maxValue()).isNotSameAs(str);
+    }
+
+    @Test
+    public void testTruncateFail() {
+        TruncateFieldStatsCollector collector = new TruncateFieldStatsCollector(3);
+
+        StringBuilder builder = new StringBuilder();
+        builder.appendCodePoint(Character.MAX_CODE_POINT);
+        builder.appendCodePoint(Character.MAX_CODE_POINT);
+        builder.appendCodePoint(Character.MAX_CODE_POINT);
+        builder.appendCodePoint(Character.MAX_CODE_POINT);
+        BinaryString str = BinaryString.fromString(builder.toString());
+
+        collector.collect(str, (Serializer) BinaryStringSerializer.INSTANCE);
+        FieldStats stats = collector.result();
+        assertThat(stats.minValue()).isNull();
+        assertThat(stats.maxValue()).isNull();
+
+        stats = collector.convert(new FieldStats(str, str, 0L));
+        assertThat(stats.minValue()).isNull();
+        assertThat(stats.maxValue()).isNull();
     }
 
     private void check(

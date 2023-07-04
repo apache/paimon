@@ -25,8 +25,6 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.utils.Preconditions;
 
-import javax.annotation.Nullable;
-
 import java.util.regex.Pattern;
 
 /**
@@ -38,6 +36,8 @@ public class TruncateFieldStatsCollector extends AbstractFieldStatsCollector {
     public static final Pattern TRUNCATE_PATTERN = Pattern.compile("TRUNCATE\\((\\d+)\\)");
 
     private final int length;
+
+    private boolean failed = false;
 
     public TruncateFieldStatsCollector(int length) {
         Preconditions.checkArgument(length > 0, "Truncate length should larger than zero.");
@@ -62,35 +62,49 @@ public class TruncateFieldStatsCollector extends AbstractFieldStatsCollector {
 
         Comparable<Object> c = (Comparable<Object>) field;
         if (minValue == null || c.compareTo(minValue) < 0) {
-            minValue = truncateMin(field, fieldSerializer);
+            minValue = fieldSerializer.copy(truncateMin(field));
         }
         if (maxValue == null || c.compareTo(maxValue) > 0) {
-            maxValue = truncateMax(field, fieldSerializer);
+            Object max = truncateMax(field);
+            // may fail
+            if (max != null) {
+                maxValue = fieldSerializer.copy(truncateMax(field));
+            }
         }
     }
 
     @Override
     public FieldStats convert(FieldStats source) {
-        return new FieldStats(
-                truncateMin(source.minValue(), null),
-                truncateMax(source.maxValue(), null),
-                source.nullCount());
+        Object min = truncateMin(source.minValue());
+        Object max = truncateMax(source.maxValue());
+        if (max == null) {
+            return new FieldStats(null, null, source.nullCount());
+        }
+        return new FieldStats(min, max, source.nullCount());
+    }
+
+    @Override
+    public FieldStats result() {
+        if (failed) {
+            return new FieldStats(null, null, nullCount);
+        }
+        return new FieldStats(minValue, maxValue, nullCount);
     }
 
     /** @return a truncated value less or equal than the old value. */
-    private Object truncateMin(Object field, @Nullable Serializer<Object> fieldSerializer) {
+    private Object truncateMin(Object field) {
         if (field == null) {
             return null;
         }
         if (field instanceof BinaryString) {
             return ((BinaryString) field).substring(0, length);
         } else {
-            return fieldSerializer == null ? field : fieldSerializer.copy(field);
+            return field;
         }
     }
 
     /** @return a value greater or equal than the old value. */
-    private Object truncateMax(Object field, @Nullable Serializer<Object> fieldSerializer) {
+    private Object truncateMax(Object field) {
         if (field == null) {
             return null;
         }
@@ -119,9 +133,10 @@ public class TruncateFieldStatsCollector extends AbstractFieldStatsCollector {
                     return BinaryString.fromString(truncatedStringBuilder.toString());
                 }
             }
+            failed = true;
             return null; // Cannot find a valid upper bound
         } else {
-            return fieldSerializer == null ? field : fieldSerializer.copy(field);
+            return field;
         }
     }
 }
