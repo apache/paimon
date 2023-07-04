@@ -867,10 +867,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         "\n",
                         "Conflicts during commits are normal and this failure is intended to resolve the conflicts.",
                         "Conflicts are mainly caused by the following scenarios:",
-                        "1. Multiple jobs are writing into the same partition at the same time, you can use "
-                                + "https://paimon.apache.org/docs/master/maintenance/write-performance/#dedicated-compaction-job"
-                                + " to support multiple writing.",
-                        "2. You're recovering from an old savepoint, or you're creating multiple jobs from a savepoint.",
+                        "1. Your job is suffering from back-pressuring.",
+                        "   There are too many snapshots waiting to be committed "
+                                + "and an exception occurred during the commit procedure "
+                                + "(most probably due to checkpoint timeout).",
+                        "   See https://paimon.apache.org/docs/master/maintenance/write-performance/ "
+                                + "for how to improve writing performance.",
+                        "2. Multiple jobs are writing into the same partition at the same time "
+                                + "(you'll probably see different base commit user and current commit user below).",
+                        "   You can use "
+                                + "https://paimon.apache.org/docs/master/maintenance/write-performance/#dedicated-compaction-job "
+                                + "to support multiple writing.",
+                        "3. You're recovering from an old savepoint, or you're creating multiple jobs from a savepoint.",
                         "   The job will fail continuously in this scenario to protect metadata from corruption.",
                         "   You can either recover from the latest savepoint, "
                                 + "or you can revert the table to the snapshot corresponding to the old savepoint.");
