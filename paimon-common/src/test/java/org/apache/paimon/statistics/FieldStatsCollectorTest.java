@@ -66,12 +66,14 @@ public class FieldStatsCollectorTest {
 
     @Test
     public void testParse() {
-        Assertions.assertTrue(FieldStatsCollector.from("none") instanceof NoneFieldStatsCollector);
-        Assertions.assertTrue(FieldStatsCollector.from("Full") instanceof FullFieldStatsCollector);
         Assertions.assertTrue(
-                FieldStatsCollector.from("CoUNts") instanceof CountsFieldStatsCollector);
+                FieldStatsCollector.from("none").create() instanceof NoneFieldStatsCollector);
+        Assertions.assertTrue(
+                FieldStatsCollector.from("Full").create() instanceof FullFieldStatsCollector);
+        Assertions.assertTrue(
+                FieldStatsCollector.from("CoUNts").create() instanceof CountsFieldStatsCollector);
         TruncateFieldStatsCollector t1 =
-                (TruncateFieldStatsCollector) FieldStatsCollector.from("truncate(10)");
+                (TruncateFieldStatsCollector) FieldStatsCollector.from("truncate(10)").create();
         Assertions.assertEquals(10, t1.getLength());
         assertThatThrownBy(() -> FieldStatsCollector.from("aatruncate(10)"))
                 .isInstanceOf(IllegalArgumentException.class);
