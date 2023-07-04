@@ -78,27 +78,6 @@ public class SparkGenericCatalogTest {
     public void testCsvTable() {
         spark.sql("CREATE TABLE CT (a INT, b INT, c STRING) USING csv");
         testReadWrite("CT");
-        spark.sql("DROP TABLE CT");
-    }
-
-    @Test
-    public void testListTables() {
-        spark.sql(
-                "CREATE TABLE pt1 (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
-                        + " ('file.format'='avro')");
-
-        spark.sql(
-                "CREATE TABLE pt2 (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
-                        + " ('file.format'='avro')");
-
-        spark.sql("CREATE TABLE pt1 (a INT, b INT, c STRING) USING csv");
-
-        assertThat(
-                        spark.sql("SHOW TABLES")
-                                .select("namespace", "tableName")
-                                .collectAsList()
-                                .toString())
-                .isEqualTo("[[default,pt1], [default,pt2]]");
     }
 
     private void testReadWrite(String table) {

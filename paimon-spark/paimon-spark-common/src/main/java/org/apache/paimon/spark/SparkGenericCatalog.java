@@ -33,6 +33,7 @@ import org.apache.spark.sql.catalyst.analysis.NoSuchNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchTableException;
 import org.apache.spark.sql.catalyst.analysis.NonEmptyNamespaceException;
 import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
+import org.apache.spark.sql.catalyst.catalog.InMemoryCatalog;
 import org.apache.spark.sql.connector.catalog.CatalogExtension;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
 import org.apache.spark.sql.connector.catalog.Identifier;
@@ -45,11 +46,11 @@ import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
@@ -64,6 +65,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  */
 public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         implements CatalogExtension {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SparkGenericCatalog.class);
 
     private static final String[] DEFAULT_NAMESPACE = new String[] {"default"};
 
@@ -118,12 +121,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
     @Override
     public Identifier[] listTables(String[] namespace) throws NoSuchNamespaceException {
         // delegate to the session catalog because all tables share the same namespace
-        // note: distinct for InMemoryCatalog specifically
-        return Stream.concat(
-                        Arrays.stream(getSessionCatalog().listTables(namespace)),
-                        Arrays.stream(paimonCatalog.listTables(namespace)))
-                .distinct()
-                .toArray(Identifier[]::new);
+        return getSessionCatalog().listTables(namespace);
     }
 
     @Override
@@ -222,6 +220,10 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
                             uri);
                 }
             }
+        }
+        if (SparkSession.active().sharedState().externalCatalog().unwrapped()
+                instanceof InMemoryCatalog) {
+            LOG.warn("InMemoryCatalog here may cause bad effect.");
         }
 
         this.catalogName = name;
