@@ -78,7 +78,7 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
     val toRow = withBucketDataEncoder.createSerializer()
     val fromRow = withBucketDataEncoder.createDeserializer()
 
-    def repartition(ds: Dataset[Row]) = {
+    def repartitionByBucket(ds: Dataset[Row]) = {
       ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
     }
 
@@ -94,7 +94,7 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
           val numSparkPartitions = partitioned.rdd.getNumPartitions
           val dynamicBucketProcessor =
             DynamicBucketProcessor(table, rowType, bucketColIdx, numSparkPartitions, toRow, fromRow)
-          repartition(
+          repartitionByBucket(
             partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(
               withBucketDataEncoder))
         case BucketMode.UNAWARE =>
@@ -105,7 +105,7 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
         case BucketMode.FIXED =>
           val commonBucketProcessor =
             CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
-          repartition(
+          repartitionByBucket(
             withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(
               withBucketDataEncoder))
       }
