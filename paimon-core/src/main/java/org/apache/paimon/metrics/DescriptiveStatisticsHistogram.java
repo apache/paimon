@@ -23,8 +23,8 @@ import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
 import java.io.Serializable;
 
 /**
- * The {@link DescriptiveStatisticsHistogram} use a DescriptiveStatistics {@link
- * DescriptiveStatistics} as a Paimon {@link Histogram}.
+ * The {@link DescriptiveStatisticsHistogram} use a {@link DescriptiveStatistics} as a Paimon {@link
+ * Histogram}.
  */
 public class DescriptiveStatisticsHistogram implements Histogram, Serializable {
     private static final long serialVersionUID = 1L;
