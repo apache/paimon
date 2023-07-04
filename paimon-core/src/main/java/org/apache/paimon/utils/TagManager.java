@@ -26,7 +26,6 @@ import org.apache.paimon.operation.TagDeletion;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.SortedMap;
@@ -149,7 +148,6 @@ public class TagManager {
 
     /** Get all tagged snapshots with names sorted by snapshot id. */
     public SortedMap<Snapshot, String> tags() {
-
         TreeMap<Snapshot, String> tags = new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
             listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
@@ -164,31 +162,6 @@ public class TagManager {
             throw new RuntimeException(e);
         }
         return tags;
-    }
-
-    private FileStatus[] listStatus() {
-        Path tagDirectory = tagDirectory();
-        try {
-            if (!fileIO.exists(tagDirectory)) {
-                return new FileStatus[0];
-            }
-
-            FileStatus[] statuses = fileIO.listStatus(tagDirectory);
-
-            if (statuses == null) {
-                throw new RuntimeException(
-                        String.format(
-                                "The return value is null of the listStatus for the '%s' directory.",
-                                tagDirectory));
-            }
-
-            return Arrays.stream(statuses)
-                    .filter(status -> status.getPath().getName().startsWith(TAG_PREFIX))
-                    .toArray(FileStatus[]::new);
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    String.format("Failed to list status in the '%s' directory.", tagDirectory), e);
-        }
     }
 
     private int findIndex(Snapshot taggedSnapshot, List<Snapshot> taggedSnapshots) {
