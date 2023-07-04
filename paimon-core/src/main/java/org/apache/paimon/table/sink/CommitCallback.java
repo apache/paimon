@@ -38,10 +38,4 @@ import java.util.List;
 public interface CommitCallback extends AutoCloseable {
 
     void call(List<ManifestCommittable> committables);
-
-    /** Factory to create {@link CommitCallback}. */
-    interface Factory extends Serializable {
-
-        CommitCallback create(FileStoreTable table);
-    }
 }
