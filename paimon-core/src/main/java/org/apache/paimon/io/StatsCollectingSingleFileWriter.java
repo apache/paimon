@@ -57,16 +57,16 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             RowType writeSchema,
             @Nullable TableStatsExtractor tableStatsExtractor,
             String compression,
-            FieldStatsCollector[] stats) {
+            FieldStatsCollector[] statsCollectors) {
         super(fileIO, factory, path, converter, compression);
         this.tableStatsExtractor = tableStatsExtractor;
         this.isStatsCollectorDisabled =
-                Arrays.stream(stats).allMatch(p -> p instanceof NoneFieldStatsCollector);
+                Arrays.stream(statsCollectors).allMatch(p -> p instanceof NoneFieldStatsCollector);
         if (this.tableStatsExtractor == null) {
-            this.tableStatsCollector = new TableStatsCollector(writeSchema, stats);
+            this.tableStatsCollector = new TableStatsCollector(writeSchema, statsCollectors);
         }
         Preconditions.checkArgument(
-                stats.length == writeSchema.getFieldCount(),
+                statsCollectors.length == writeSchema.getFieldCount(),
                 "The stats collector is not aligned to write schema.");
     }
 

@@ -74,8 +74,8 @@ public class ParquetFileFormat extends FileFormat {
 
     @Override
     public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector[] stats) {
-        return Optional.of(new ParquetTableStatsExtractor(type, stats));
+            RowType type, FieldStatsCollector[] statsCollectors) {
+        return Optional.of(new ParquetTableStatsExtractor(type, statsCollectors));
     }
 
     public static Options getParquetConfiguration(Options options) {

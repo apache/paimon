@@ -69,7 +69,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final String fileCompression;
     private boolean skipCompaction;
     private BucketMode bucketMode = BucketMode.FIXED;
-    private FieldStatsCollector[] stats;
+    private FieldStatsCollector[] statsCollectors;
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
@@ -95,7 +95,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         this.skipCompaction = options.writeOnly();
         this.assertDisorder = options.toConfiguration().get(APPEND_ONLY_ASSERT_DISORDER);
         this.fileCompression = options.fileCompression();
-        this.stats = StatsUtils.getFieldsStatsMode(options, rowType.getFieldNames());
+        this.statsCollectors = StatsUtils.getFieldsStatsMode(options, rowType.getFieldNames());
     }
 
     @Override
@@ -133,7 +133,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 factory,
                 restoreIncrement,
                 fileCompression,
-                stats);
+                statsCollectors);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -152,7 +152,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                             pathFactory.createDataFilePathFactory(partition, bucket),
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
-                            stats);
+                            statsCollectors);
             rewriter.write(
                     new RecordReaderIterator<>(
                             read.createReader(

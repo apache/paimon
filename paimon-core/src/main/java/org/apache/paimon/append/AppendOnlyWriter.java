@@ -63,9 +63,9 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
+    private final FieldStatsCollector[] statsCollectors;
 
     private RowDataRollingFileWriter writer;
-    private FieldStatsCollector[] stats;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -79,7 +79,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
             String fileCompression,
-            FieldStatsCollector[] stats) {
+            FieldStatsCollector[] statsCollectors) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -93,6 +93,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.fileCompression = fileCompression;
+        this.statsCollectors = statsCollectors;
 
         this.writer = createRollingRowWriter();
 
@@ -101,7 +102,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
-        this.stats = stats;
     }
 
     @Override
@@ -178,7 +178,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
                 pathFactory,
                 seqNumCounter,
                 fileCompression,
-                stats);
+                statsCollectors);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

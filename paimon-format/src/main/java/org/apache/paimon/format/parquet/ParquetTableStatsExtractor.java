@@ -46,7 +46,6 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.Instant;
-import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
@@ -57,16 +56,16 @@ import static org.apache.paimon.format.parquet.ParquetUtil.assertStatsClass;
 /** {@link TableStatsExtractor} for parquet files. */
 public class ParquetTableStatsExtractor implements TableStatsExtractor {
 
-    private final RowType rowType;
     private static final OffsetDateTime EPOCH = Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC);
-    private static final LocalDate EPOCH_DAY = EPOCH.toLocalDate();
-    private final FieldStatsCollector[] stats;
 
-    public ParquetTableStatsExtractor(RowType rowType, FieldStatsCollector[] stats) {
+    private final RowType rowType;
+    private final FieldStatsCollector[] statsCollectors;
+
+    public ParquetTableStatsExtractor(RowType rowType, FieldStatsCollector[] statsCollectors) {
         this.rowType = rowType;
-        this.stats = stats;
+        this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
-                rowType.getFieldCount() == stats.length,
+                rowType.getFieldCount() == statsCollectors.length,
                 "The stats collector is not aligned to write schema.");
     }
 
@@ -89,7 +88,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
         }
         long nullCount = stats.getNumNulls();
         if (!stats.hasNonNullValue()) {
-            return this.stats[idx].convert(new FieldStats(null, null, nullCount));
+            return this.statsCollectors[idx].convert(new FieldStats(null, null, nullCount));
         }
 
         FieldStats fieldStats;
@@ -171,7 +170,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
             default:
                 fieldStats = new FieldStats(null, null, nullCount);
         }
-        return this.stats[idx].convert(fieldStats);
+        return this.statsCollectors[idx].convert(fieldStats);
     }
 
     private FieldStats toTimestampStats(Statistics<?> stats, int precision) {

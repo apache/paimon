@@ -77,7 +77,7 @@ public abstract class FileFormat {
     }
 
     public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector[] stats) {
+            RowType type, FieldStatsCollector[] statsCollectors) {
         return Optional.empty();
     }
 

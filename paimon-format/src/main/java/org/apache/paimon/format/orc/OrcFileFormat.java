@@ -88,8 +88,8 @@ public class OrcFileFormat extends FileFormat {
 
     @Override
     public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector[] stats) {
-        return Optional.of(new OrcTableStatsExtractor(type, stats));
+            RowType type, FieldStatsCollector[] statsCollectors) {
+        return Optional.of(new OrcTableStatsExtractor(type, statsCollectors));
     }
 
     @Override

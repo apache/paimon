@@ -54,13 +54,13 @@ import java.util.stream.IntStream;
 public class OrcTableStatsExtractor implements TableStatsExtractor {
 
     private final RowType rowType;
-    private final FieldStatsCollector[] stats;
+    private final FieldStatsCollector[] statsCollectors;
 
-    public OrcTableStatsExtractor(RowType rowType, FieldStatsCollector[] stats) {
+    public OrcTableStatsExtractor(RowType rowType, FieldStatsCollector[] statsCollectors) {
         this.rowType = rowType;
-        this.stats = stats;
+        this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
-                rowType.getFieldCount() == stats.length,
+                rowType.getFieldCount() == statsCollectors.length,
                 "The stats collector is not aligned to write schema.");
     }
 
@@ -91,7 +91,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
         long nullCount = rowCount - stats.getNumberOfValues();
         if (nullCount == rowCount) {
             // all nulls
-            return this.stats[idx].convert(new FieldStats(null, null, nullCount));
+            return this.statsCollectors[idx].convert(new FieldStats(null, null, nullCount));
         }
         Preconditions.checkState(
                 (nullCount > 0) == stats.hasNull(),
@@ -214,7 +214,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
             default:
                 fieldStats = new FieldStats(null, null, nullCount);
         }
-        return this.stats[idx].convert(fieldStats);
+        return this.statsCollectors[idx].convert(fieldStats);
     }
 
     private void assertStatsClass(
