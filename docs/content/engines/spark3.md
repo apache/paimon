@@ -205,6 +205,50 @@ dataset.createOrReplaceTempView("my_table")
 spark.sql("SELECT * FROM my_table").show()
 ```
 
+## Time travel
+
+### SQL
+
+Spark 3.3 and later supports time travel in SQL queries using `TIMESTAMP AS OF` or `VERSION AS OF` clauses.
+
+
+```sql 
+-- read the snapshot with id 1L (use snapshot id as version)
+SELECT * FROM t VERSION AS OF 1;
+
+-- read the snapshot from specified timestamp 
+SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
+
+-- read the snapshot from specified timestamp in unix seconds
+SELECT * FROM t TIMESTAMP AS OF 1678883047;
+
+-- read tag 'my-tag'
+SELECT * FROM t VERSION AS OF 'my-tag';
+```
+
+### DataFrame
+
+To select a specific table snapshot or the snapshot at some time in the DataFrame API, Paimon supports:
+
+* `scan.snapshot-id` selects a specific table snapshot
+* `scan.timestamp-millis` selects the current snapshot at a timestamp, in milliseconds
+
+```scala
+// read the snapshot from specified timestamp in unix seconds
+spark.read
+    .option("scan.timestamp-millis", "1678883047000")
+    .format("paimon")
+    .load("path/to/table")
+```
+
+```scala
+// read the snapshot with id 1L (use snapshot id as version)
+spark.read
+    .option("scan.snapshot-id", 1)
+    .format("paimon")
+    .load("path/to/table")
+```
+
 ## Spark Type Conversion
 
 This section lists all supported type conversion between Spark and Paimon.
