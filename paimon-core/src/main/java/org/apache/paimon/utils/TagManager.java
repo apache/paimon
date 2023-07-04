@@ -111,7 +111,8 @@ public class TagManager {
         tagDeletion.cleanDataDirectories();
 
         // delete manifests
-        tagDeletion.cleanUnusedManifests(taggedSnapshot, skippedSnapshots);
+        tagDeletion.cleanUnusedManifests(
+                taggedSnapshot, tagDeletion.manifestSkippingSet(skippedSnapshots));
     }
 
     /** Check if a tag exists. */

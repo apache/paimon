@@ -94,9 +94,9 @@ public abstract class FileDeletionBase {
      * index manifests and manifest lists.
      *
      * @param snapshot {@link Snapshot} that will be cleaned
-     * @param skippingSnapshots manifests that still used by these snapshots will be skipped
+     * @param skippingSet manifests that should not be deleted
      */
-    public abstract void cleanUnusedManifests(Snapshot snapshot, List<Snapshot> skippingSnapshots);
+    public abstract void cleanUnusedManifests(Snapshot snapshot, Set<String> skippingSet);
 
     /** Try to delete data directories that may be empty after data file deletion. */
     public void cleanDataDirectories() {
@@ -142,9 +142,7 @@ public abstract class FileDeletionBase {
     }
 
     protected void cleanUnusedManifests(
-            Snapshot snapshot, List<Snapshot> skippingSnapshots, boolean deleteChangelog) {
-        Set<String> skippingSet = manifestSkippingSet(skippingSnapshots);
-
+            Snapshot snapshot, Set<String> skippingSet, boolean deleteChangelog) {
         // clean base and delta manifests
         List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
         toExpireManifests.addAll(tryReadManifestList(snapshot.baseManifestList()));
@@ -205,11 +203,15 @@ public abstract class FileDeletionBase {
         }
     }
 
+    public Iterable<ManifestEntry> tryReadManifestEntries(String manifestListName) {
+        return readManifestEntries(tryReadManifestList(manifestListName));
+    }
+
     /**
      * Try to read base and delta manifest lists at one time. If failed to read either one, the
      * return will be empty to avoid error merging result.
      */
-    public Iterable<ManifestEntry> tryReadDataManifestEntries(Snapshot snapshot) {
+    protected Iterable<ManifestEntry> tryReadDataManifestEntries(Snapshot snapshot) {
         List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
 
         try {
@@ -281,18 +283,23 @@ public abstract class FileDeletionBase {
     }
 
     /** Changelogs were not checked. Let the subclass determine whether to delete them. */
-    private Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
+    public Set<String> manifestSkippingSet(Snapshot skippingSnapshot) {
+        return manifestSkippingSet(Collections.singletonList(skippingSnapshot));
+    }
+
+    public Set<String> manifestSkippingSet(List<Snapshot> skippingSnapshots) {
         Set<String> skippingSet = new HashSet<>();
-        for (Snapshot snapshot : skippingSnapshots) {
+
+        for (Snapshot skippingSnapshot : skippingSnapshots) {
             // data manifests
-            skippingSet.add(snapshot.baseManifestList());
-            skippingSet.add(snapshot.deltaManifestList());
-            snapshot.dataManifests(manifestList).stream()
+            skippingSet.add(skippingSnapshot.baseManifestList());
+            skippingSet.add(skippingSnapshot.deltaManifestList());
+            skippingSnapshot.dataManifests(manifestList).stream()
                     .map(ManifestFileMeta::fileName)
                     .forEach(skippingSet::add);
 
             // index manifests
-            String indexManifest = snapshot.indexManifest();
+            String indexManifest = skippingSnapshot.indexManifest();
             if (indexManifest != null) {
                 skippingSet.add(indexManifest);
                 indexFileHandler.readManifest(indexManifest).stream()

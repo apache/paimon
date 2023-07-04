@@ -57,8 +57,8 @@ public class SnapshotDeletion extends FileDeletionBase {
     }
 
     @Override
-    public void cleanUnusedManifests(Snapshot snapshot, List<Snapshot> skippingSnapshots) {
-        cleanUnusedManifests(snapshot, skippingSnapshots, true);
+    public void cleanUnusedManifests(Snapshot snapshot, Set<String> skippingSet) {
+        cleanUnusedManifests(snapshot, skippingSet, true);
     }
 
     @VisibleForTesting
@@ -108,7 +108,11 @@ public class SnapshotDeletion extends FileDeletionBase {
      * @param manifestListName name of manifest list
      */
     public void deleteAddedDataFiles(String manifestListName) {
-        for (ManifestEntry entry : tryReadManifestEntries(manifestListName)) {
+        deleteAddedDataFiles(tryReadManifestEntries(manifestListName));
+    }
+
+    public void deleteAddedDataFiles(Iterable<ManifestEntry> manifestEntries) {
+        for (ManifestEntry entry : manifestEntries) {
             if (entry.kind() == FileKind.ADD) {
                 fileIO.deleteQuietly(
                         new Path(
@@ -117,10 +121,6 @@ public class SnapshotDeletion extends FileDeletionBase {
                 recordDeletionBuckets(entry);
             }
         }
-    }
-
-    private Iterable<ManifestEntry> tryReadManifestEntries(String manifestListName) {
-        return readManifestEntries(tryReadManifestList(manifestListName));
     }
 
     /** Used to record which tag is cached in tagged snapshots list. */

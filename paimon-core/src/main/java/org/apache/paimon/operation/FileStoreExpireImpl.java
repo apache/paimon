@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.concurrent.Callable;
 
 /**
@@ -182,13 +183,14 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 TagManager.findOverlappedSnapshots(
                         taggedSnapshots, beginInclusiveId, endExclusiveId);
         skippingSnapshots.add(snapshotManager.snapshot(endExclusiveId));
+        Set<String> skippingSet = snapshotDeletion.manifestSkippingSet(skippingSnapshots);
         for (long id = beginInclusiveId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete manifests in snapshot #" + id);
             }
 
             Snapshot snapshot = snapshotManager.snapshot(id);
-            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSnapshots);
+            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
 
             // delete snapshot last
             snapshotManager.fileIO().deleteQuietly(snapshotManager.snapshotPath(id));

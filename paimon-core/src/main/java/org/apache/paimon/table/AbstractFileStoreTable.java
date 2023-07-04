@@ -23,11 +23,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.operation.SnapshotDeletion;
-import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -51,18 +48,14 @@ import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
 public abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -285,7 +278,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 "Rollback snapshot '%s' doesn't exist.",
                 snapshotId);
 
-        cleanLargerThan(snapshotManager.snapshot(snapshotId));
+        rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
     @Override
@@ -311,7 +304,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
-        cleanLargerThan(taggedSnapshot);
+        rollbackHelper().cleanLargerThan(taggedSnapshot);
 
         try {
             // it is possible that the earliest snapshot is later than the rollback tag because of
@@ -330,117 +323,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         }
     }
 
-    /**
-     * Clean snapshots and tags whose id is larger than given snapshot's in the reverse direction.
-     *
-     * <p>Snapshots are cleaned first because it is easier to collect their deletion skipping set.
-     */
-    private void cleanLargerThan(Snapshot snapshot) {
-        // -------------------------------- prepare --------------------------------
-
-        SnapshotManager snapshotManager = snapshotManager();
-        TagManager tagManager = tagManager();
-
-        long snapshotId = snapshot.id();
-        List<Snapshot> toBeCleaned = new ArrayList<>();
-        List<Snapshot> skippedSnapshots = new ArrayList<>();
-
-        long earliest =
-                checkNotNull(
-                        snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
-        long latest =
-                checkNotNull(snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
-
-        // ---------------------------- clean snapshots ----------------------------
-
-        // delete snapshot files first, cannot be read now
-        // it is possible that some snapshots have been expired
-        long to = Math.max(earliest, snapshotId + 1);
-        for (long i = latest; i >= to; i--) {
-            toBeCleaned.add(snapshotManager.snapshot(i));
-            fileIO().deleteQuietly(snapshotManager.snapshotPath(i));
-        }
-
-        SnapshotDeletion snapshotDeletion = store().newSnapshotDeletion();
-
-        // delete data files
-        // don't concern about tag data files because file deletion methods won't throw exception
-        // when deleting non-existing data files
-        for (Snapshot s : toBeCleaned) {
-            snapshotDeletion.deleteAddedDataFiles(s.deltaManifestList());
-            snapshotDeletion.deleteAddedDataFiles(s.changelogManifestList());
-        }
-
-        // delete directories
-        snapshotDeletion.cleanDataDirectories();
-
-        // delete manifest files
-        skippedSnapshots.add(snapshot);
-        // NOTE: must skip tag manifests because tag deletion will read them
-        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            Snapshot tag = taggedSnapshots.get(i);
-            if (tag.id() <= snapshotId) {
-                break;
-            }
-            skippedSnapshots.add(tag);
-        }
-        for (Snapshot s : toBeCleaned) {
-            snapshotDeletion.cleanUnusedManifests(s, skippedSnapshots);
-        }
-
-        // ------------------------------- clean tags -------------------------------
-
-        SortedMap<Snapshot, String> tags = tagManager.tags();
-
-        if (!tags.isEmpty()) {
-            // delete tag files and collect skipping set
-            skippedSnapshots.clear();
-            toBeCleaned.clear();
-            for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-                Snapshot tag = taggedSnapshots.get(i);
-                if (tag.id() <= snapshotId) {
-                    skippedSnapshots.add(tag);
-                    if (tag.id() < snapshotId) {
-                        skippedSnapshots.add(snapshot);
-                    }
-                    break;
-                }
-                toBeCleaned.add(tag);
-                fileIO.deleteQuietly(tagManager().tagPath(tags.get(tag)));
-            }
-            if (skippedSnapshots.isEmpty()) {
-                skippedSnapshots.add(snapshot);
-            }
-
-            // delete data files
-            TagDeletion tagDeletion = store().newTagDeletion();
-            java.util.function.Predicate<ManifestEntry> dataFileSkipper =
-                    tagDeletion.dataFileSkipper(skippedSnapshots);
-            for (Snapshot s : toBeCleaned) {
-                tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
-            }
-
-            // delete directories
-            tagDeletion.cleanDataDirectories();
-
-            // delete manifest files
-            for (Snapshot s : toBeCleaned) {
-                tagDeletion.cleanUnusedManifests(s, skippedSnapshots);
-            }
-        }
-
-        // ------------------------------- finish -------------------------------
-
-        // modify the latest hint
-        try {
-            snapshotManager.commitLatestHint(snapshotId);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
     private TagManager tagManager() {
         return new TagManager(fileIO, path);
+    }
+
+    private RollbackHelper rollbackHelper() {
+        return new RollbackHelper(
+                snapshotManager(),
+                tagManager(),
+                fileIO,
+                store().newSnapshotDeletion(),
+                store().newTagDeletion());
     }
 }

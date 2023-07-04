@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,8 +49,17 @@ public class TagDeletion extends FileDeletionBase {
 
     @Override
     public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ManifestEntry> skipper) {
-        Iterable<ManifestEntry> entries = tryReadDataManifestEntries(taggedSnapshot);
+        cleanUnusedDataFiles(tryReadDataManifestEntries(taggedSnapshot), skipper);
+    }
 
+    @Override
+    public void cleanUnusedManifests(Snapshot taggedSnapshot, Set<String> skippingSet) {
+        // doesn't clean changelog files because they are handled by SnapshotDeletion
+        cleanUnusedManifests(taggedSnapshot, skippingSet, false);
+    }
+
+    public void cleanUnusedDataFiles(
+            Iterable<ManifestEntry> entries, Predicate<ManifestEntry> skipper) {
         for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
             if (!skipper.test(entry)) {
                 Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
@@ -63,10 +73,8 @@ public class TagDeletion extends FileDeletionBase {
         }
     }
 
-    @Override
-    public void cleanUnusedManifests(Snapshot taggedSnapshot, List<Snapshot> skippedSnapshots) {
-        // doesn't clean changelog files because they are handled by SnapshotDeletion
-        cleanUnusedManifests(taggedSnapshot, skippedSnapshots, false);
+    public Predicate<ManifestEntry> dataFileSkipper(Snapshot fromSnapshot) {
+        return dataFileSkipper(Collections.singletonList(fromSnapshot));
     }
 
     public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> fromSnapshots) {
