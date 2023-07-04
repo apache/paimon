@@ -26,8 +26,8 @@ import org.apache.paimon.statistics.FieldStatsCollector;
 
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.FIELD_STATS_MODE_PREFIX;
-import static org.apache.paimon.CoreOptions.FIELD_STATS_MODE_SUFFIX;
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
+import static org.apache.paimon.CoreOptions.STATS_MODE_SUFFIX;
 import static org.apache.paimon.options.ConfigOptions.key;
 
 /** The stats utils. */
@@ -44,9 +44,7 @@ public class StatsUtils {
                     cfg.get(
                             key(String.format(
                                             "%s.%s.%s",
-                                            FIELD_STATS_MODE_PREFIX,
-                                            fields.get(i),
-                                            FIELD_STATS_MODE_SUFFIX))
+                                            FIELDS_PREFIX, fields.get(i), STATS_MODE_SUFFIX))
                                     .stringType()
                                     .noDefaultValue());
             if (fieldMode != null) {

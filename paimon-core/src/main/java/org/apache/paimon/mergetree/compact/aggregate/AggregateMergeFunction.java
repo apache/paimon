@@ -32,6 +32,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -42,7 +43,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  */
 public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
-    public static final String FIELDS = "fields";
     public static final String AGG_FUNCTION = "aggregate-function";
     public static final String IGNORE_RETRACT = "ignore-retract";
 
@@ -141,12 +141,12 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
                 String strAggFunc =
                         conf.get(
-                                key(FIELDS + "." + fieldName + "." + AGG_FUNCTION)
+                                key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
                                         .stringType()
                                         .noDefaultValue());
                 boolean ignoreRetract =
                         conf.get(
-                                key(FIELDS + "." + fieldName + "." + IGNORE_RETRACT)
+                                key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
                                         .booleanType()
                                         .defaultValue(false));
                 fieldAggregators[i] =

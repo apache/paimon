@@ -49,11 +49,8 @@ public class FieldStatsCollectorUtilsTest {
 
         Options options = new Options();
         options.set(
-                CoreOptions.FIELD_STATS_MODE_PREFIX + ".b." + CoreOptions.FIELD_STATS_MODE_SUFFIX,
-                "truncate(12)");
-        options.set(
-                CoreOptions.FIELD_STATS_MODE_PREFIX + ".c." + CoreOptions.FIELD_STATS_MODE_SUFFIX,
-                "full");
+                CoreOptions.FIELDS_PREFIX + ".b." + CoreOptions.STATS_MODE_SUFFIX, "truncate(12)");
+        options.set(CoreOptions.FIELDS_PREFIX + ".c." + CoreOptions.STATS_MODE_SUFFIX, "full");
 
         FieldStatsCollector[] stats =
                 StatsUtils.getFieldsStatsMode(new CoreOptions(options), type.getFieldNames());

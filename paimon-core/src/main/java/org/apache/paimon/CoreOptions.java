@@ -52,6 +52,8 @@ import static org.apache.paimon.options.description.TextElement.text;
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
 
+    public static final String FIELDS_PREFIX = "fields";
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
@@ -694,11 +696,10 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start snapshot (exclusive) and end snapshot, "
                                     + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
 
-    public static final String FIELD_STATS_MODE_PREFIX = "field";
-    public static final String FIELD_STATS_MODE_SUFFIX = "stats.mode";
+    public static final String STATS_MODE_SUFFIX = "stats-mode";
 
     public static final ConfigOption<String> STATS_MODE =
-            key("metadata.stats.mode")
+            key("metadata." + STATS_MODE_SUFFIX)
                     .stringType()
                     .defaultValue("truncate(16)")
                     .withDescription(
@@ -719,10 +720,10 @@ public class CoreOptions implements Serializable {
                                     .list(
                                             text(
                                                     "Field level stats mode can be specified by "
-                                                            + FIELD_STATS_MODE_PREFIX
+                                                            + FIELDS_PREFIX
                                                             + "."
                                                             + "{field_name}."
-                                                            + FIELD_STATS_MODE_SUFFIX))
+                                                            + STATS_MODE_SUFFIX))
                                     .build());
 
     private final Options options;

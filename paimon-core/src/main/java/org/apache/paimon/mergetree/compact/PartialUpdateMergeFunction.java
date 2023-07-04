@@ -41,6 +41,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
 /**
@@ -49,7 +50,6 @@ import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
  */
 public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
-    public static final String FIELDS = "fields";
     public static final String SEQUENCE_GROUP = "sequence-group";
 
     private final InternalRow.FieldGetter[] getters;
@@ -167,10 +167,11 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
                 String k = entry.getKey();
                 String v = entry.getValue();
-                if (k.startsWith(FIELDS) && k.endsWith(SEQUENCE_GROUP)) {
+                if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
                     String sequenceFieldName =
                             k.substring(
-                                    FIELDS.length() + 1, k.length() - SEQUENCE_GROUP.length() - 1);
+                                    FIELDS_PREFIX.length() + 1,
+                                    k.length() - SEQUENCE_GROUP.length() - 1);
                     SequenceGenerator sequenceGen =
                             new SequenceGenerator(sequenceFieldName, rowType);
                     Arrays.stream(v.split(","))
