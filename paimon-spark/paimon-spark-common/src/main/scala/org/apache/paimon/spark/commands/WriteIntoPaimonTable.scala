@@ -23,6 +23,7 @@ import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
+import org.apache.paimon.spark.commands.WriteIntoPaimonTable.UnawareBucketProcessor
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
@@ -77,11 +78,6 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
     val toRow = withBucketDataEncoder.createSerializer()
     val fromRow = withBucketDataEncoder.createDeserializer()
 
-    def commonBucketProcessed = {
-      val commonBucketProcessor = CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
-      withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(withBucketDataEncoder)
-    }
-
     def repartition(ds: Dataset[Row]) = {
       ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
     }
@@ -102,9 +98,14 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
             partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(
               withBucketDataEncoder))
         case BucketMode.UNAWARE =>
-          commonBucketProcessed
+          val unawareBucketProcessor = UnawareBucketProcessor(bucketColIdx, toRow, fromRow)
+          withBucketCol.mapPartitions(unawareBucketProcessor.processPartition)(withBucketDataEncoder)
         case BucketMode.FIXED =>
-          repartition(commonBucketProcessed)
+          val commonBucketProcessor =
+            CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
+          repartition(
+            withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(
+              withBucketDataEncoder))
       }
 
     val commitMessages = df
@@ -236,6 +237,26 @@ object WriteIntoPaimonTable {
           val bucket = index.assign(hash, buckFilter)
           val sparkInternalRow = toRow(row)
           sparkInternalRow.setInt(bucketColIndex, bucket)
+          fromRow(sparkInternalRow)
+        }
+      }
+    }
+  }
+
+  case class UnawareBucketProcessor(
+      bucketColIndex: Int,
+      toRow: ExpressionEncoder.Serializer[Row],
+      fromRow: ExpressionEncoder.Deserializer[Row])
+    extends BucketProcessor {
+
+    def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
+      new Iterator[Row] {
+        override def hasNext: Boolean = rowIterator.hasNext
+
+        override def next(): Row = {
+          val row = rowIterator.next
+          val sparkInternalRow = toRow(row)
+          sparkInternalRow.setInt(bucketColIndex, 0)
           fromRow(sparkInternalRow)
         }
       }

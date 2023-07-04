@@ -158,6 +158,29 @@ public class SparkWriteITCase {
     }
 
     @Test
+    public void testReadWriteUnawareBucketTable() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (a) TBLPROPERTIES"
+                        + " ('write-mode'='append-only', 'bucket'='-1')");
+
+        spark.sql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
+        spark.sql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
+        spark.sql("INSERT INTO T VALUES (2, 1, '1'), (2, 2, '2')");
+        spark.sql("INSERT INTO T VALUES (2, 1, '1'), (2, 2, '2')");
+        spark.sql("INSERT INTO T VALUES (3, 1, '1'), (3, 2, '2')");
+        spark.sql("INSERT INTO T VALUES (3, 1, '1'), (3, 2, '2')");
+
+        List<Row> rows = spark.sql("SELECT count(1) FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[12]]");
+
+        rows = spark.sql("SELECT * FROM T WHERE b = 2 AND a = 1").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,2,2], [1,2,2]]");
+
+        rows = spark.sql("SELECT max(bucket) FROM `T$FILES`").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[0]]");
+    }
+
+    @Test
     public void testNonnull() {
         try {
             spark.sql("CREATE TABLE S AS SELECT 1 as a, 2 as b, 'yann' as c");
