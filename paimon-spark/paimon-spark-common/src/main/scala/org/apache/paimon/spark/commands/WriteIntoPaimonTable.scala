@@ -23,7 +23,6 @@ import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.spark.commands.WriteIntoPaimonTable.UnawareBucketProcessor
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
