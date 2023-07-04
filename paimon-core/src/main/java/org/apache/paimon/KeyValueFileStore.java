@@ -35,11 +35,16 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.ValueEqualiserSupplier;
 
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.predicate.PredicateBuilder.and;
@@ -127,11 +132,28 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueEqualiserSupplier,
                 mfFactory,
                 pathFactory(),
+                format2PathFactory(),
                 snapshotManager(),
                 newScan(true).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 options,
                 keyValueFieldsExtractor);
+    }
+
+    private Map<String, FileStorePathFactory> format2PathFactory() {
+        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
+        Set<String> formats = new HashSet<>(options.fileFormatPerLevel().values());
+        formats.add(options.fileFormat().getFormatIdentifier());
+        formats.forEach(
+                format ->
+                        pathFactoryMap.put(
+                                format,
+                                new FileStorePathFactory(
+                                        options.path(),
+                                        partitionType,
+                                        options.partitionDefaultName(),
+                                        format)));
+        return pathFactoryMap;
     }
 
     private KeyValueFileStoreScan newScan(boolean forWrite) {

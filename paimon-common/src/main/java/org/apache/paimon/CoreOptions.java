@@ -116,6 +116,17 @@ public class CoreOptions implements Serializable {
                                     + "could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be "
                                     + "UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.");
 
+    public static final ConfigOption<Map<String, String>> FILE_FORMAT_PER_LEVEL =
+            key("file.format.per.level")
+                    .mapType()
+                    .defaultValue(new HashMap<>())
+                    .withDescription(
+                            "Define different file format for different level, you can add the conf like this:"
+                                    + " 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, "
+                                    + "the default format which set by `"
+                                    + FILE_FORMAT.key()
+                                    + "` will be used.");
+
     public static final ConfigOption<String> FILE_COMPRESSION =
             key("file.compression")
                     .stringType()
@@ -837,6 +848,12 @@ public class CoreOptions implements Serializable {
     public Map<Integer, String> fileCompressionPerLevel() {
         Map<String, String> levelCompressions = options.get(FILE_COMPRESSION_PER_LEVEL);
         return levelCompressions.entrySet().stream()
+                .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
+    }
+
+    public Map<Integer, String> fileFormatPerLevel() {
+        Map<String, String> levelFormats = options.get(FILE_FORMAT_PER_LEVEL);
+        return levelFormats.entrySet().stream()
                 .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
     }
 

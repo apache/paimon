@@ -228,15 +228,24 @@ public class LookupLevelsTest {
 
     private KeyValueFileWriterFactory createWriterFactory() {
         Path path = new Path(tempDir.toUri().toString());
+        String identifier = "avro";
+        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
+        pathFactoryMap.put(identifier, new FileStorePathFactory(path));
         return KeyValueFileWriterFactory.builder(
                         FileIOFinder.find(path),
                         0,
                         keyType,
                         rowType,
-                        new FlushingFileFormat("avro"),
-                        new FileStorePathFactory(path),
+                        new FlushingFileFormat(identifier),
+                        pathFactoryMap,
                         TARGET_FILE_SIZE.defaultValue().getBytes())
-                .build(BinaryRow.EMPTY_ROW, 0, null, null, new CoreOptions(new Options()));
+                .build(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        null,
+                        new HashMap<>(),
+                        new CoreOptions(new Options()));
     }
 
     private KeyValueFileReaderFactory createReaderFactory() {

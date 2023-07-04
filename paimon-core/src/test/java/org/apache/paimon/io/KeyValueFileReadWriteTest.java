@@ -49,8 +49,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
@@ -244,6 +246,17 @@ public class KeyValueFileReadWriteTest {
         FileIO fileIO = FileIOFinder.find(path);
         Options options = new Options();
         options.set(CoreOptions.METADATA_STATS_MODE, "FULL");
+
+        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
+        pathFactoryMap.put(format, pathFactory);
+        pathFactoryMap.put(
+                CoreOptions.FILE_FORMAT.defaultValue().toString(),
+                new FileStorePathFactory(
+                        path,
+                        RowType.of(),
+                        CoreOptions.PARTITION_DEFAULT_NAME.defaultValue(),
+                        CoreOptions.FILE_FORMAT.defaultValue().toString()));
+
         return KeyValueFileWriterFactory.builder(
                         fileIO,
                         0,
@@ -253,9 +266,15 @@ public class KeyValueFileReadWriteTest {
                         // if the written file size is really larger than suggested, so we use a
                         // special format which flushes for every added element
                         new FlushingFileFormat(format),
-                        pathFactory,
+                        pathFactoryMap,
                         suggestedFileSize)
-                .build(BinaryRow.EMPTY_ROW, 0, null, null, new CoreOptions(options));
+                .build(
+                        BinaryRow.EMPTY_ROW,
+                        0,
+                        null,
+                        null,
+                        new HashMap<>(),
+                        new CoreOptions(options));
     }
 
     private KeyValueFileReaderFactory createReaderFactory(

@@ -153,6 +153,12 @@ under the License.
             <td>Specify the message format of data files, currently orc, parquet and avro are supported.<br /><br />Possible values:<ul><li>"orc": ORC file format.</li><li>"parquet": Parquet file format.</li><li>"avro": Avro file format.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>file.format.per.level</h5></td>
+            <td style="word-wrap: break-word;"></td>
+            <td>Map</td>
+            <td>Define different file format for different level, you can add the conf like this: 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, the default format which set by `file.format` will be used.</td>
+        </tr>
+        <tr>
             <td><h5>full-compaction.delta-commits</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>

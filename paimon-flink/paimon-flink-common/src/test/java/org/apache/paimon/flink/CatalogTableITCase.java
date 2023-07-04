@@ -344,6 +344,24 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testFileFormatPerLevel() {
+        sql(
+                "CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) "
+                        + "WITH ('num-sorted-run.compaction-trigger'='2',"
+                        + "'file.format.per.level' = '0:avro,3:parquet',"
+                        + " 'num-levels' = '4')");
+        sql("INSERT INTO T1 SELECT 1,'AAA'");
+        sql("INSERT INTO T1 SELECT 2,'BBB'");
+        sql("INSERT INTO T1 SELECT 3,'CCC'");
+        List<Row> rows = sql("SELECT * FROM T1");
+        assertThat(rows)
+                .containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"));
+
+        rows = sql("SELECT level,file_format FROM T1$files");
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(3, "parquet"), Row.of(0, "avro"));
+    }
+
+    @Test
     public void testFilesTable() throws Exception {
         sql(
                 "CREATE TABLE T_VALUE_COUNT (a INT, p INT, b BIGINT, c STRING) "
