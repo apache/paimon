@@ -25,6 +25,7 @@ import org.apache.flink.api.connector.source.SourceSplit;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Record the plan scanned by {@link AlignedSourceReader}, which is used to distribute splits to
@@ -67,6 +68,26 @@ public class AlignedSourceSplit implements SourceSplit {
 
     public boolean isPlaceHolder() {
         return placeHolder;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        AlignedSourceSplit that = (AlignedSourceSplit) o;
+        return nextSnapshotId == that.nextSnapshotId
+                && placeHolder == that.placeHolder
+                && Objects.equals(splits, that.splits)
+                && Objects.equals(watermark, that.watermark);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(splits, nextSnapshotId, watermark, placeHolder);
     }
 
     @Override

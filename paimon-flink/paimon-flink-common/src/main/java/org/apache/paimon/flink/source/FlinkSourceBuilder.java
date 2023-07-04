@@ -205,6 +205,8 @@ public class FlinkSourceBuilder {
                 if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGNED_MODE)
                         != CheckpointAlignMode.UNALIGNED) {
                     return buildAlignedContinuousFileSource();
+                } else if (conf.contains(CoreOptions.CONSUMER_ID)) {
+                    return buildContinuousStreamOperator();
                 } else {
                     return buildContinuousFileSource();
                 }

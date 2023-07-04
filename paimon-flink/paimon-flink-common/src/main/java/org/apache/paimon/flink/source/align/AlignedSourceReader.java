@@ -42,14 +42,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.concurrent.BlockingDeque;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 import static org.apache.flink.runtime.io.AvailabilityProvider.AVAILABLE;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CheckpointAlignMode;
@@ -74,7 +70,7 @@ public class AlignedSourceReader
 
     private final ReadBuilder readBuilder;
 
-    private final BlockingDeque<AlignedSourceSplit> pendingSplits;
+    private final FutureCompletingBlockingDeque<AlignedSourceSplit> pendingSplits;
 
     private final TreeSet<Long> pendingCheckpoints;
 
@@ -96,8 +92,6 @@ public class AlignedSourceReader
 
     private CompletableFuture<Void> availabilityFuture;
 
-    private Lock lock;
-
     private transient StreamTableScan scan;
 
     public AlignedSourceReader(
@@ -105,26 +99,38 @@ public class AlignedSourceReader
             long scanInterval,
             boolean emitSnapshotWatermark,
             CheckpointAlignMode alignMode) {
-        this.readBuilder = readBuilder;
-        this.pendingSplits = new LinkedBlockingDeque<>();
-        this.pendingCheckpoints = new TreeSet<>();
-        this.availabilityFuture = (CompletableFuture<Void>) AVAILABLE;
-        this.nextSnapshotPerCheckpoint = new TreeMap<>();
-        this.scanInterval = scanInterval;
-        this.emitSnapshotWatermark = emitSnapshotWatermark;
-        this.alignMode = alignMode;
-        this.executors =
+        this(
+                readBuilder,
+                scanInterval,
+                emitSnapshotWatermark,
+                alignMode,
                 Executors.newScheduledThreadPool(
                         1,
                         r ->
                                 new Thread(
                                         r,
                                         "Aligned source scan for "
-                                                + Thread.currentThread().getName()));
+                                                + Thread.currentThread().getName())));
+    }
+
+    public AlignedSourceReader(
+            ReadBuilder readBuilder,
+            long scanInterval,
+            boolean emitSnapshotWatermark,
+            CheckpointAlignMode alignMode,
+            ScheduledExecutorService executors) {
+        this.readBuilder = readBuilder;
+        this.pendingSplits = new FutureCompletingBlockingDeque<>();
+        this.pendingCheckpoints = new TreeSet<>();
+        this.availabilityFuture = (CompletableFuture<Void>) AVAILABLE;
+        this.nextSnapshotPerCheckpoint = new TreeMap<>();
+        this.scanInterval = scanInterval;
+        this.emitSnapshotWatermark = emitSnapshotWatermark;
+        this.alignMode = alignMode;
+        this.executors = executors;
         this.snapshotIdByNextCheckpoint = null;
         this.blocking = false;
         this.endOfScan = false;
-        this.lock = new ReentrantLock();
     }
 
     @Override
@@ -166,17 +172,20 @@ public class AlignedSourceReader
 
             if (alignMode == CheckpointAlignMode.STRICTLY) {
                 blocking = true;
+                switchToUnavailable();
             }
-        } else if (availabilityFuture == AVAILABLE) {
-            switchToUnavailable();
         }
 
         // checkpoint might has not been triggered
         if (!blocking && endOfScan && pendingSplits.isEmpty()) {
             return InputStatus.END_OF_INPUT;
+        } else if (alignMode == CheckpointAlignMode.LOOSELY
+                && !pendingSplits.isEmpty()
+                && pendingCheckpoints.isEmpty()) {
+            return InputStatus.MORE_AVAILABLE;
+        } else {
+            return InputStatus.NOTHING_AVAILABLE;
         }
-
-        return InputStatus.NOTHING_AVAILABLE;
     }
 
     @Override
@@ -189,18 +198,18 @@ public class AlignedSourceReader
                     new AlignedSourceSplit(
                             Collections.emptyList(), snapshotIdByNextCheckpoint, null, true));
         } else {
-            return new ArrayList<>(pendingSplits);
+            return new ArrayList<>(pendingSplits.remainingElements());
         }
     }
 
     @Override
     public CompletableFuture<Void> isAvailable() {
-        return availabilityFuture;
+        return blocking ? availabilityFuture : pendingSplits.getAvailabilityFuture();
     }
 
     @Override
     public void addSplits(List<AlignedSourceSplit> splits) {
-        pendingSplits.addAll(splits);
+        pendingSplits.putAll(splits);
     }
 
     @Override
@@ -229,7 +238,6 @@ public class AlignedSourceReader
             LOG.info("Received checkpoint event {}", sourceEvent);
             long checkpointId = ((CheckpointEvent) sourceEvent).getCheckpointId();
             pendingCheckpoints.add(checkpointId);
-            switchToAvailable();
         }
     }
 
@@ -243,7 +251,7 @@ public class AlignedSourceReader
                     nextSnapshotPerCheckpoint.firstKey() == checkpointId,
                     "Checkpoint should be completed in order.");
         }
-        long nextSnapshotId = nextSnapshotPerCheckpoint.get(checkpointId);
+        Long nextSnapshotId = nextSnapshotPerCheckpoint.get(checkpointId);
         scan.notifyCheckpointComplete(nextSnapshotId);
         nextSnapshotPerCheckpoint.headMap(checkpointId, true).clear();
     }
@@ -279,10 +287,9 @@ public class AlignedSourceReader
             try {
                 TableScan.Plan plan = scan.plan();
                 if (!(plan instanceof SnapshotNotExistPlan)) {
-                    pendingSplits.add(
+                    pendingSplits.put(
                             new AlignedSourceSplit(
                                     plan.splits(), scan.checkpoint(), scan.watermark(), false));
-                    switchToAvailable();
                 }
             } catch (EndOfScanException e) {
                 LOG.info("Catching EndOfScanException, the stream is finished.");
@@ -294,29 +301,19 @@ public class AlignedSourceReader
     }
 
     private void switchToUnavailable() {
-        lock.lock();
-        try {
-            final CompletableFuture<Void> current = availabilityFuture;
-            if (current == AvailabilityProvider.AVAILABLE) {
-                LOG.debug("source temporarily switched to unavailable.");
-                availabilityFuture = new CompletableFuture<>();
-            }
-        } finally {
-            lock.unlock();
+        final CompletableFuture<Void> current = availabilityFuture;
+        if (current == AvailabilityProvider.AVAILABLE) {
+            LOG.debug("source temporarily switched to unavailable.");
+            availabilityFuture = new CompletableFuture<>();
         }
     }
 
     private void switchToAvailable() {
-        lock.lock();
-        try {
-            final CompletableFuture<Void> current = availabilityFuture;
-            if (current != AvailabilityProvider.AVAILABLE) {
-                LOG.debug("source switched to available.");
-                availabilityFuture = (CompletableFuture<Void>) AVAILABLE;
-                current.complete(null);
-            }
-        } finally {
-            lock.unlock();
+        final CompletableFuture<Void> current = availabilityFuture;
+        if (current != AvailabilityProvider.AVAILABLE) {
+            LOG.debug("source switched to available.");
+            availabilityFuture = (CompletableFuture<Void>) AVAILABLE;
+            current.complete(null);
         }
     }
 }
