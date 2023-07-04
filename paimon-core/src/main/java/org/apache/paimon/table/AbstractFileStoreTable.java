@@ -392,43 +392,42 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // ------------------------------- clean tags -------------------------------
 
         SortedMap<Snapshot, String> tags = tagManager.tags();
-        if (tags.isEmpty()) {
-            return;
-        }
 
-        // delete tag files and collect skipping set
-        skippedSnapshots.clear();
-        toBeCleaned.clear();
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            Snapshot tag = taggedSnapshots.get(i);
-            if (tag.id() <= snapshotId) {
-                skippedSnapshots.add(tag);
-                if (tag.id() < snapshotId) {
-                    skippedSnapshots.add(snapshot);
+        if (!tags.isEmpty()) {
+            // delete tag files and collect skipping set
+            skippedSnapshots.clear();
+            toBeCleaned.clear();
+            for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
+                Snapshot tag = taggedSnapshots.get(i);
+                if (tag.id() <= snapshotId) {
+                    skippedSnapshots.add(tag);
+                    if (tag.id() < snapshotId) {
+                        skippedSnapshots.add(snapshot);
+                    }
+                    break;
                 }
-                break;
+                toBeCleaned.add(tag);
+                fileIO.deleteQuietly(tagManager().tagPath(tags.get(tag)));
             }
-            toBeCleaned.add(tag);
-            fileIO.deleteQuietly(tagManager().tagPath(tags.get(tag)));
-        }
-        if (skippedSnapshots.isEmpty()) {
-            skippedSnapshots.add(snapshot);
-        }
+            if (skippedSnapshots.isEmpty()) {
+                skippedSnapshots.add(snapshot);
+            }
 
-        // delete data files
-        TagDeletion tagDeletion = store().newTagDeletion();
-        java.util.function.Predicate<ManifestEntry> dataFileSkipper =
-                tagDeletion.dataFileSkipper(skippedSnapshots);
-        for (Snapshot s : toBeCleaned) {
-            tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
-        }
+            // delete data files
+            TagDeletion tagDeletion = store().newTagDeletion();
+            java.util.function.Predicate<ManifestEntry> dataFileSkipper =
+                    tagDeletion.dataFileSkipper(skippedSnapshots);
+            for (Snapshot s : toBeCleaned) {
+                tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
+            }
 
-        // delete directories
-        tagDeletion.cleanDataDirectories();
+            // delete directories
+            tagDeletion.cleanDataDirectories();
 
-        // delete manifest files
-        for (Snapshot s : toBeCleaned) {
-            tagDeletion.cleanUnusedManifests(s, skippedSnapshots);
+            // delete manifest files
+            for (Snapshot s : toBeCleaned) {
+                tagDeletion.cleanUnusedManifests(s, skippedSnapshots);
+            }
         }
 
         // ------------------------------- finish -------------------------------
