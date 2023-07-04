@@ -23,7 +23,7 @@ import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.table.{FileStoreTable, Table, BucketMode}
+import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
@@ -100,23 +100,25 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
       df = df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
     }
 
-    val commitMessages = df.mapPartitions {
-      iter =>
-        val write = writeBuilder.newWrite()
-        write.withIOManager(createIOManager)
-        try {
-          iter.foreach {
-            row =>
-              val bucket = row.getInt(bucketColIdx)
-              val bucketColDropped = originFromRow(toRow(row))
-              write.write(new DynamicBucketRow(new SparkRow(rowType, bucketColDropped), bucket))
+    val commitMessages = df
+      .mapPartitions {
+        iter =>
+          val write = writeBuilder.newWrite()
+          write.withIOManager(createIOManager)
+          try {
+            iter.foreach {
+              row =>
+                val bucket = row.getInt(bucketColIdx)
+                val bucketColDropped = originFromRow(toRow(row))
+                write.write(new DynamicBucketRow(new SparkRow(rowType, bucketColDropped), bucket))
+            }
+            val serializer = new CommitMessageSerializer
+            write.prepareCommit().asScala.map(serializer.serialize).toIterator
+          } finally {
+            write.close()
           }
-          val serializer = new CommitMessageSerializer
-          write.prepareCommit().asScala.map(serializer.serialize).toIterator
-        } finally {
-          write.close()
-        }
-    }.collect()
+      }
+      .collect()
       .map(deserializeCommitMessage(serializer, _))
 
     try {
