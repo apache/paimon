@@ -194,3 +194,19 @@ SELECT * FROM MyTable$consumers;
 2 rows in set
 */
 ```
+
+## Manifests Table
+
+You can query all manifest files contained in the latest snapshot of the current table.
+
+```sql
+SELECT * FROM MyTable$manifests;
+
+/*
++--------------------------------+-------------+------------------+-------------------+---------------+
+|                      file_name |   file_size |  num_added_files | num_deleted_files |     schema_id |
++--------------------------------+-------------+------------------+-------------------+---------------+
+| manifest-f4dcab43-ef6b-4713... |        1648 |                1 |                 0 |             0 |
++--------------------------------+-------------+------------------+-------------------+---------------+
+*/
+```
