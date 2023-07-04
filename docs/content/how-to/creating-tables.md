@@ -235,6 +235,19 @@ The following three types of fields may be defined as partition fields in the wa
   if you declare the primary key containing partition field, you can achieve the unique effect.
 - CDC op_ts: It cannot be defined as a partition field, unable to know previous record timestamp.
 
+### Specify the statistics collector mode
+
+Paimon will automatically collect the statistics of the data file for speeding up the query process. There are four modes supported:
+
+- `full`: collect the full metrics: `null_count, min, max`
+- `truncate(length)`: length can be any positive number, the default mode is `truncate(16)`, which means collect the null count, min/max value with truncated length of 16.
+  This is mainly to avoid too big column which will enlarge the manifest file.
+- `counts`: only collect the null count.
+- `none`: disable the metadata stats collection.
+
+The statistics collector mode can also be configured at the field level by setting [field.{field_name}.stats.mode]({{< ref "maintenance/configurations#coreoptions" >}}).
+
+
 ## Create Table As
 
 Table can be created and populated by the results of a query, for example, we have a sql like this: `CREATE TABLE table_b AS SELECT id, name FORM table_a`,

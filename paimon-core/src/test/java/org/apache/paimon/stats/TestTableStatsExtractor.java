@@ -26,9 +26,11 @@ import org.apache.paimon.format.TableStatsCollector;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.util.List;
@@ -41,10 +43,16 @@ public class TestTableStatsExtractor implements TableStatsExtractor {
 
     private final FileFormat format;
     private final RowType rowType;
+    private final FieldStatsCollector[] stats;
 
-    public TestTableStatsExtractor(FileFormat format, RowType rowType) {
+    public TestTableStatsExtractor(
+            FileFormat format, RowType rowType, FieldStatsCollector[] stats) {
         this.format = format;
         this.rowType = rowType;
+        this.stats = stats;
+        Preconditions.checkArgument(
+                rowType.getFieldCount() == stats.length,
+                "The stats collector is not aligned to write schema.");
     }
 
     @Override
@@ -53,7 +61,8 @@ public class TestTableStatsExtractor implements TableStatsExtractor {
         FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
         List<InternalRow> records =
                 FileUtils.readListFromFile(fileIO, path, serializer, readerFactory);
-        TableStatsCollector statsCollector = new TableStatsCollector(rowType);
+
+        TableStatsCollector statsCollector = new TableStatsCollector(rowType, stats);
         for (InternalRow record : records) {
             statsCollector.collect(record);
         }

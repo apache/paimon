@@ -27,6 +27,7 @@ import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
 
@@ -72,8 +73,9 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
-    public Optional<TableStatsExtractor> createStatsExtractor(RowType type) {
-        return Optional.of(new ParquetTableStatsExtractor(type));
+    public Optional<TableStatsExtractor> createStatsExtractor(
+            RowType type, FieldStatsCollector[] stats) {
+        return Optional.of(new ParquetTableStatsExtractor(type, stats));
     }
 
     public static Options getParquetConfiguration(Options options) {

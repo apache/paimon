@@ -31,6 +31,7 @@ import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.StatsTestUtils;
@@ -255,7 +256,7 @@ public class KeyValueFileReadWriteTest {
                         new FlushingFileFormat(format),
                         pathFactory,
                         suggestedFileSize)
-                .build(BinaryRow.EMPTY_ROW, 0, null, null);
+                .build(BinaryRow.EMPTY_ROW, 0, null, null, new CoreOptions(new Options()));
     }
 
     private KeyValueFileReaderFactory createReaderFactory(

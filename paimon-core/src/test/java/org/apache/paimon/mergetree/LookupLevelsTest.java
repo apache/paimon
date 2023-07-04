@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
@@ -32,6 +33,7 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -234,7 +236,7 @@ public class LookupLevelsTest {
                         new FlushingFileFormat("avro"),
                         new FileStorePathFactory(path),
                         TARGET_FILE_SIZE.defaultValue().getBytes())
-                .build(BinaryRow.EMPTY_ROW, 0, null, null);
+                .build(BinaryRow.EMPTY_ROW, 0, null, null, new CoreOptions(new Options()));
     }
 
     private KeyValueFileReaderFactory createReaderFactory() {

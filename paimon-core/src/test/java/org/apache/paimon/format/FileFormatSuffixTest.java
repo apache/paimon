@@ -35,11 +35,13 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.StatsUtils;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.HashMap;
 import java.util.LinkedList;
 
 /** test file format suffix. */
@@ -74,7 +76,9 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         false,
                         dataFilePathFactory,
                         null,
-                        CoreOptions.FILE_COMPRESSION.defaultValue());
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        StatsUtils.getFieldsStatsMode(
+                                new CoreOptions(new HashMap<>()), SCHEMA.getFieldNames()));
         appendOnlyWriter.write(
                 GenericRow.of(1, BinaryString.fromString("aaa"), BinaryString.fromString("1")));
         CommitIncrement increment = appendOnlyWriter.prepareCommit(true);

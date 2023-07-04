@@ -21,24 +21,21 @@ package org.apache.paimon.format;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 /** Collector to extract statistics of each fields from a series of records. */
 public class TableStatsCollector {
 
-    private final Object[] minValues;
-    private final Object[] maxValues;
-    private final long[] nullCounts;
     private final RowDataToObjectArrayConverter converter;
+    private final FieldStatsCollector[] stats;
     private final Serializer<Object>[] fieldSerializers;
 
-    public TableStatsCollector(RowType rowType) {
+    public TableStatsCollector(RowType rowType, FieldStatsCollector[] stats) {
         int numFields = rowType.getFieldCount();
-        this.minValues = new Object[numFields];
-        this.maxValues = new Object[numFields];
-        this.nullCounts = new long[numFields];
         this.converter = new RowDataToObjectArrayConverter(rowType);
+        this.stats = stats;
         this.fieldSerializers = new Serializer[numFields];
         for (int i = 0; i < numFields; i++) {
             fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
@@ -54,30 +51,16 @@ public class TableStatsCollector {
     public void collect(InternalRow row) {
         Object[] objects = converter.convert(row);
         for (int i = 0; i < row.getFieldCount(); i++) {
+            FieldStatsCollector collector = stats[i];
             Object obj = objects[i];
-            if (obj == null) {
-                nullCounts[i]++;
-                continue;
-            }
-
-            // TODO use comparator for not comparable types and extract this logic to a util class
-            if (!(obj instanceof Comparable)) {
-                continue;
-            }
-            Comparable<Object> c = (Comparable<Object>) obj;
-            if (minValues[i] == null || c.compareTo(minValues[i]) < 0) {
-                minValues[i] = fieldSerializers[i].copy(c);
-            }
-            if (maxValues[i] == null || c.compareTo(maxValues[i]) > 0) {
-                maxValues[i] = fieldSerializers[i].copy(c);
-            }
+            collector.collect(obj, fieldSerializers[i]);
         }
     }
 
     public FieldStats[] extract() {
-        FieldStats[] stats = new FieldStats[nullCounts.length];
+        FieldStats[] stats = new FieldStats[this.stats.length];
         for (int i = 0; i < stats.length; i++) {
-            stats[i] = new FieldStats(minValues[i], maxValues[i], nullCounts[i]);
+            stats[i] = this.stats[i].result();
         }
         return stats;
     }

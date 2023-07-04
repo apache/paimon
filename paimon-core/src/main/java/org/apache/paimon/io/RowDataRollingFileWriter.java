@@ -22,6 +22,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 
@@ -36,7 +37,8 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             RowType writeSchema,
             DataFilePathFactory pathFactory,
             LongCounter seqNumCounter,
-            String fileCompression) {
+            String fileCompression,
+            FieldStatsCollector[] stats) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -44,10 +46,11 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileFormat.createWriterFactory(writeSchema),
                                 pathFactory.newPath(),
                                 writeSchema,
-                                fileFormat.createStatsExtractor(writeSchema).orElse(null),
+                                fileFormat.createStatsExtractor(writeSchema, stats).orElse(null),
                                 schemaId,
                                 seqNumCounter,
-                                fileCompression),
+                                fileCompression,
+                                stats),
                 targetFileSize);
     }
 }

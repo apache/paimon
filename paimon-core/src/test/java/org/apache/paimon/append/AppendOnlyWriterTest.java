@@ -40,12 +40,14 @@ import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.StatsUtils;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
@@ -317,7 +319,10 @@ public class AppendOnlyWriterTest {
                         forceCompact,
                         pathFactory,
                         null,
-                        CoreOptions.FILE_COMPRESSION.defaultValue());
+                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        StatsUtils.getFieldsStatsMode(
+                                new CoreOptions(new HashMap<>()),
+                                AppendOnlyWriterTest.SCHEMA.getFieldNames()));
         return Pair.of(writer, compactManager.allFiles());
     }
 

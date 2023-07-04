@@ -20,6 +20,7 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.TestTableStatsExtractor;
 import org.apache.paimon.types.RowType;
 
@@ -55,7 +56,8 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
     }
 
     @Override
-    public Optional<TableStatsExtractor> createStatsExtractor(RowType type) {
-        return Optional.of(new TestTableStatsExtractor(this, type));
+    public Optional<TableStatsExtractor> createStatsExtractor(
+            RowType type, FieldStatsCollector[] stats) {
+        return Optional.of(new TestTableStatsExtractor(this, type, stats));
     }
 }

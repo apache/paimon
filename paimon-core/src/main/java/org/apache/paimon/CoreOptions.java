@@ -694,6 +694,37 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start snapshot (exclusive) and end snapshot, "
                                     + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
 
+    public static final String FIELD_STATS_MODE_PREFIX = "field";
+    public static final String FIELD_STATS_MODE_SUFFIX = "stats.mode";
+
+    public static final ConfigOption<String> STATS_MODE =
+            key("metadata.stats.mode")
+                    .stringType()
+                    .defaultValue("truncate(16)")
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The mode of metadata stats collection. none, counts, truncate(16), full is available.")
+                                    .linebreak()
+                                    .list(
+                                            text(
+                                                    "\"none\": means disable the metadata stats collection."))
+                                    .list(text("\"counts\" means only collect the null count."))
+                                    .list(
+                                            text(
+                                                    "\"full\": means collect the null count, min/max value."))
+                                    .list(
+                                            text(
+                                                    "\"truncate(16)\": means collect the null count, min/max value with truncated length of 16."))
+                                    .list(
+                                            text(
+                                                    "Field level stats mode can be specified by "
+                                                            + FIELD_STATS_MODE_PREFIX
+                                                            + "."
+                                                            + "{field_name}."
+                                                            + FIELD_STATS_MODE_SUFFIX))
+                                    .build());
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
