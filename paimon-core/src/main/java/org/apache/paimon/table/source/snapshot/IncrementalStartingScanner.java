@@ -46,8 +46,10 @@ public class IncrementalStartingScanner implements StartingScanner {
 
     @Override
     public Result scan(SnapshotManager manager, SnapshotReader reader) {
-        start = (start < manager.earliestSnapshotId()) ? manager.earliestSnapshotId() - 1 : start;
-        end = (end > manager.latestSnapshotId()) ? manager.latestSnapshotId() : end;
+        long earliestSnapshotId = manager.earliestSnapshotId();
+        long latestSnapshotId = manager.latestSnapshotId();
+        start = (start < earliestSnapshotId) ? earliestSnapshotId - 1 : start;
+        end = (end > latestSnapshotId) ? latestSnapshotId : end;
 
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new HashMap<>();
         for (long i = start + 1; i < end + 1; i++) {
