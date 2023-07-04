@@ -19,9 +19,7 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.table.FileStoreTable;
 
-import java.io.Serializable;
 import java.util.List;
 
 /**
