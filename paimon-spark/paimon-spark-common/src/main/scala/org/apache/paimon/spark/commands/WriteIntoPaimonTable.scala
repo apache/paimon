@@ -99,7 +99,9 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
               withBucketDataEncoder))
         case BucketMode.UNAWARE =>
           val unawareBucketProcessor = UnawareBucketProcessor(bucketColIdx, toRow, fromRow)
-          withBucketCol.mapPartitions(unawareBucketProcessor.processPartition)(withBucketDataEncoder)
+          withBucketCol
+            .mapPartitions(unawareBucketProcessor.processPartition)(withBucketDataEncoder)
+            .toDF()
         case BucketMode.FIXED =>
           val commonBucketProcessor =
             CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)

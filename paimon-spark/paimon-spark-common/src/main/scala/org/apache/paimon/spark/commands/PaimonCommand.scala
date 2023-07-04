@@ -35,7 +35,7 @@ trait PaimonCommand {
 
   def getTable: Table
 
-  val bucketMode: BucketMode = getTable match {
+  lazy val bucketMode: BucketMode = getTable match {
     case fileStoreTable: FileStoreTable =>
       fileStoreTable.bucketMode
     case _ =>
