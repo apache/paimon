@@ -105,6 +105,7 @@ public abstract class MergeTreeTestBase {
     private KeyValueFileWriterFactory compactWriterFactory;
     private MergeTreeWriter writer;
     private SortEngine sortEngine;
+    private String identifier = "avro";
 
     @BeforeEach
     public void beforeEach() throws IOException {
@@ -113,7 +114,7 @@ public abstract class MergeTreeTestBase {
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         sortEngine = getSortEngine();
         recreateMergeTree(1024 * 1024);
-        Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory(identifier).toPath("ignore").getParent();
         LocalFileIO.create().mkdirs(bucketDir);
     }
 
@@ -142,7 +143,7 @@ public abstract class MergeTreeTestBase {
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
         RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
 
-        FileFormat flushingAvro = new FlushingFileFormat("avro");
+        FileFormat flushingAvro = new FlushingFileFormat(identifier);
         KeyValueFileReaderFactory.Builder readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
                         LocalFileIO.create(),
@@ -173,6 +174,9 @@ public abstract class MergeTreeTestBase {
                         });
         readerFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
         compactReaderFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
+
+        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
+        pathFactoryMap.put(identifier, pathFactory);
         KeyValueFileWriterFactory.Builder writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         LocalFileIO.create(),
@@ -180,7 +184,7 @@ public abstract class MergeTreeTestBase {
                         keyType,
                         valueType,
                         flushingAvro,
-                        pathFactory,
+                        pathFactoryMap,
                         options.targetFileSize());
         writerFactory =
                 writerFactoryBuilder.build(
@@ -188,6 +192,7 @@ public abstract class MergeTreeTestBase {
                         0,
                         options.fileCompressionPerLevel(),
                         options.fileCompression(),
+                        options.fileFormatPerLevel(),
                         options);
         compactWriterFactory =
                 writerFactoryBuilder.build(
@@ -195,6 +200,7 @@ public abstract class MergeTreeTestBase {
                         0,
                         options.fileCompressionPerLevel(),
                         options.fileCompression(),
+                        options.fileFormatPerLevel(),
                         options);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
@@ -406,7 +412,7 @@ public abstract class MergeTreeTestBase {
 
         writer.close();
 
-        Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory(identifier).toPath("ignore").getParent();
         Set<String> files =
                 Arrays.stream(LocalFileIO.create().listStatus(bucketDir))
                         .map(FileStatus::getPath)
@@ -502,7 +508,7 @@ public abstract class MergeTreeTestBase {
             assertThat(remove).isTrue();
             // See MergeTreeWriter.updateCompactResult
             if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
-                compactWriterFactory.deleteFile(file.fileName());
+                compactWriterFactory.deleteFile(file.fileName(), file.level());
             }
         }
         compactedFiles.addAll(increment.compactIncrement().compactAfter());
