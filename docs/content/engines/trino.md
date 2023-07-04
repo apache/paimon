@@ -95,6 +95,18 @@ Then, copy `paimon-trino-*.jar and flink-shaded-hadoop-*-uber-*.jar` to plugin/p
 
 > NOTE: For JDK 17, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
 
+## Tmp Dir
+
+Paimon will unzip some jars to the tmp directory for codegen. By default, Trino will use `'/tmp'` as the temporary
+directory, but `'/tmp'` may be periodically deleted.
+
+You can configure this environment variable when Trino starts: 
+```shell
+-Djava.io.tmpdir=/path/to/other/tmpdir
+```
+
+Let Paimon use a secure temporary directory.
+
 ## Configure Paimon Catalog
 
 Catalogs are registered by creating a catalog properties file in the etc/catalog directory. For example, create etc/catalog/paimon.properties with the following contents to mount the paimon connector as the paimon catalog:
