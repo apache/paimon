@@ -27,7 +27,6 @@ import org.apache.paimon.operation.TagDeletion;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.SortedMap;
@@ -165,65 +164,6 @@ public class TagManager {
             throw new RuntimeException(e);
         }
         return tags;
-    }
-
-    /** Rollback to tag. */
-    public void rollbackTo(String tagName, Snapshot latestSnapshot, TagDeletion tagDeletion) {
-        SortedMap<Snapshot, String> tags = tags();
-        List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
-        Snapshot rollback = taggedSnapshot(tagName);
-        int index = taggedSnapshots.indexOf(rollback);
-        if (index + 1 < taggedSnapshots.size()) {
-            rollbackInternal(tags, index + 1, latestSnapshot, tagDeletion);
-        }
-    }
-
-    /** Delete tags backwards whose id is larger than given tag's. */
-    public void rollbackLargerThan(Snapshot latestSnapshot, TagDeletion tagDeletion) {
-        SortedMap<Snapshot, String> tags = tags();
-        if (tags.isEmpty()) {
-            return;
-        }
-
-        List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            if (taggedSnapshots.get(i).id() <= latestSnapshot.id()) {
-                if (i + 1 < taggedSnapshots.size()) {
-                    rollbackInternal(tags, i + 1, latestSnapshot, tagDeletion);
-                }
-                return;
-            }
-        }
-        rollbackInternal(tags, 0, latestSnapshot, tagDeletion);
-    }
-
-    private void rollbackInternal(
-            SortedMap<Snapshot, String> tags,
-            int toIndex,
-            Snapshot latestSnapshot,
-            TagDeletion tagDeletion) {
-        checkArgument(toIndex >= 0 && toIndex < tags.size());
-        List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
-
-        // delete tag files
-        for (int i = tags.size() - 1; i >= toIndex; i--) {
-            Snapshot snapshot = taggedSnapshots.get(i);
-            fileIO.deleteQuietly(tagPath(tags.get(snapshot)));
-        }
-
-        // if old snapshots has been expired, rollback-snapshot cannot delete files used by tag
-        // so here have to delete them
-        List<Snapshot> skippedSnapshots = Collections.singletonList(latestSnapshot);
-        Predicate<ManifestEntry> dataFileSkipper = tagDeletion.dataFileSkipper(skippedSnapshots);
-        for (int i = taggedSnapshots.size() - 1; i >= toIndex; i--) {
-            tagDeletion.cleanUnusedDataFiles(taggedSnapshots.get(i), dataFileSkipper);
-        }
-
-        tagDeletion.cleanDataDirectories();
-
-        for (int i = taggedSnapshots.size() - 1; i >= toIndex; i--) {
-            tagDeletion.cleanUnusedManifests(taggedSnapshots.get(i), skippedSnapshots);
-        }
     }
 
     private FileStatus[] listStatus() {

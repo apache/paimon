@@ -22,16 +22,13 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.SnapshotDeletion;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
@@ -334,57 +331,5 @@ public class SnapshotManager implements Serializable {
         Path hintFile = new Path(snapshotDir, fileName);
         fileIO.delete(hintFile, false);
         fileIO.writeFileUtf8(hintFile, String.valueOf(snapshotId));
-    }
-
-    public void rollbackTo(
-            SnapshotDeletion deletion, long snapshotId, List<Snapshot> taggedSnapshots)
-            throws IOException {
-        if (!snapshotExists(snapshotId)) {
-            throw new IllegalArgumentException("Rollback snapshot not exist: " + snapshotId);
-        }
-
-        Long latest = findLatest();
-        if (latest == null) {
-            return;
-        }
-
-        // first modify hint
-        commitLatestHint(snapshotId);
-
-        // delete snapshots first, cannot be read now.
-        List<Snapshot> snapshots = new ArrayList<>();
-        for (long i = latest; i > snapshotId; i--) {
-            // if rollback to a snapshot based by tag, some snapshots may have been expired
-            if (snapshotExists(i)) {
-                snapshots.add(snapshot(i));
-                fileIO().deleteQuietly(snapshotPath(i));
-            }
-        }
-
-        // delete data files
-        for (Snapshot snapshot : snapshots) {
-            // delete data files
-            deletion.deleteAddedDataFiles(snapshot.deltaManifestList());
-            deletion.deleteAddedDataFiles(snapshot.changelogManifestList());
-        }
-
-        // delete directories
-        deletion.cleanDataDirectories();
-
-        // delete manifest files
-        List<Snapshot> skippedSnapshots = new ArrayList<>();
-        skippedSnapshots.add(snapshot(snapshotId));
-        // tags' manifests should be cleaned by tag deletion
-        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
-            Snapshot tag = taggedSnapshots.get(i);
-            if (tag.id() <= snapshotId) {
-                break;
-            }
-            skippedSnapshots.add(tag);
-        }
-
-        for (Snapshot snapshot : snapshots) {
-            deletion.cleanUnusedManifests(snapshot, skippedSnapshots);
-        }
     }
 }

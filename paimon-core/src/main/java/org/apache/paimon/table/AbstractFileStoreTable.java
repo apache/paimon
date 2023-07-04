@@ -23,8 +23,11 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -48,14 +51,18 @@ import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
 public abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -272,10 +279,13 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void rollbackTo(long snapshotId) {
-        rollbackToSnapshotInternal(snapshotId);
+        SnapshotManager snapshotManager = snapshotManager();
+        checkArgument(
+                snapshotManager.snapshotExists(snapshotId),
+                "Rollback snapshot '%s' doesn't exist.",
+                snapshotId);
 
-        tagManager()
-                .rollbackLargerThan(snapshotManager().latestSnapshot(), store().newTagDeletion());
+        cleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
     @Override
@@ -298,34 +308,134 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void rollbackTo(String tagName) {
         TagManager tagManager = tagManager();
-        SnapshotManager snapshotManager = snapshotManager();
-        checkArgument(tagManager.tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
+        checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
 
-        // try to write snapshot file to snapshot directory first
-        long taggedSnapshotId = tagManager.taggedSnapshot(tagName).id();
+        Snapshot taggedSnapshot = tagManager.taggedSnapshot(tagName);
+        cleanLargerThan(taggedSnapshot);
+
         try {
-            if (!snapshotManager.snapshotExists(taggedSnapshotId)) {
+            // it is possible that the earliest snapshot is later than the rollback tag because of
+            // snapshot expiration, in this case the `cleanLargerThan` method will delete all
+            // snapshots, so we should write the tag file to snapshot directory and modify the
+            // earliest hint
+            SnapshotManager snapshotManager = snapshotManager();
+            if (!snapshotManager.snapshotExists(taggedSnapshot.id())) {
                 fileIO.writeFileUtf8(
-                        snapshotManager().snapshotPath(taggedSnapshotId),
+                        snapshotManager().snapshotPath(taggedSnapshot.id()),
                         fileIO.readFileUtf8(tagManager.tagPath(tagName)));
+                snapshotManager.commitEarliestHint(taggedSnapshot.id());
             }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to write snapshot file, stopping rollback.", e);
+            throw new UncheckedIOException(e);
         }
-
-        // rollback snapshot first
-        rollbackToSnapshotInternal(taggedSnapshotId);
-
-        tagManager.rollbackTo(tagName, snapshotManager.latestSnapshot(), store().newTagDeletion());
     }
 
-    private void rollbackToSnapshotInternal(long snapshotId) {
+    /**
+     * Clean snapshots and tags whose id is larger than given snapshot's in the reverse direction.
+     *
+     * <p>Snapshots are cleaned first because it is easier to collect their deletion skipping set.
+     */
+    private void cleanLargerThan(Snapshot snapshot) {
+        // -------------------------------- prepare --------------------------------
+
+        SnapshotManager snapshotManager = snapshotManager();
+        TagManager tagManager = tagManager();
+
+        long snapshotId = snapshot.id();
+        List<Snapshot> toBeCleaned = new ArrayList<>();
+        List<Snapshot> skippedSnapshots = new ArrayList<>();
+
+        long earliest =
+                checkNotNull(
+                        snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
+        long latest =
+                checkNotNull(snapshotManager.latestSnapshotId(), "Cannot find latest snapshot.");
+
+        // ---------------------------- clean snapshots ----------------------------
+
+        // delete snapshot files first, cannot be read now
+        // it is possible that some snapshots have been expired
+        long to = Math.max(earliest, snapshotId + 1);
+        for (long i = latest; i >= to; i--) {
+            toBeCleaned.add(snapshotManager.snapshot(i));
+            fileIO().deleteQuietly(snapshotManager.snapshotPath(i));
+        }
+
+        SnapshotDeletion snapshotDeletion = store().newSnapshotDeletion();
+
+        // delete data files
+        // don't concern about tag data files because file deletion methods won't throw exception
+        // when deleting non-existing data files
+        for (Snapshot s : toBeCleaned) {
+            snapshotDeletion.deleteAddedDataFiles(s.deltaManifestList());
+            snapshotDeletion.deleteAddedDataFiles(s.changelogManifestList());
+        }
+
+        // delete directories
+        snapshotDeletion.cleanDataDirectories();
+
+        // delete manifest files
+        skippedSnapshots.add(snapshot);
+        // NOTE: must skip tag manifests because tag deletion will read them
+        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
+        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
+            Snapshot tag = taggedSnapshots.get(i);
+            if (tag.id() <= snapshotId) {
+                break;
+            }
+            skippedSnapshots.add(tag);
+        }
+        for (Snapshot s : toBeCleaned) {
+            snapshotDeletion.cleanUnusedManifests(s, skippedSnapshots);
+        }
+
+        // ------------------------------- clean tags -------------------------------
+
+        SortedMap<Snapshot, String> tags = tagManager.tags();
+        if (tags.isEmpty()) {
+            return;
+        }
+
+        // delete tag files and collect skipping set
+        skippedSnapshots.clear();
+        toBeCleaned.clear();
+        for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
+            Snapshot tag = taggedSnapshots.get(i);
+            if (tag.id() <= snapshotId) {
+                skippedSnapshots.add(tag);
+                if (tag.id() < snapshotId) {
+                    skippedSnapshots.add(snapshot);
+                }
+                break;
+            }
+            toBeCleaned.add(tag);
+            fileIO.deleteQuietly(tagManager().tagPath(tags.get(tag)));
+        }
+        if (skippedSnapshots.isEmpty()) {
+            skippedSnapshots.add(snapshot);
+        }
+
+        // delete data files
+        TagDeletion tagDeletion = store().newTagDeletion();
+        java.util.function.Predicate<ManifestEntry> dataFileSkipper =
+                tagDeletion.dataFileSkipper(skippedSnapshots);
+        for (Snapshot s : toBeCleaned) {
+            tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
+        }
+
+        // delete directories
+        tagDeletion.cleanDataDirectories();
+
+        // delete manifest files
+        for (Snapshot s : toBeCleaned) {
+            tagDeletion.cleanUnusedManifests(s, skippedSnapshots);
+        }
+
+        // ------------------------------- finish -------------------------------
+
+        // modify the latest hint
         try {
-            snapshotManager()
-                    .rollbackTo(
-                            store().newSnapshotDeletion(),
-                            snapshotId,
-                            tagManager().taggedSnapshots());
+            snapshotManager.commitLatestHint(snapshotId);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

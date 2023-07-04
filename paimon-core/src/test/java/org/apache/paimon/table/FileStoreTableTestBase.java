@@ -655,20 +655,16 @@ public abstract class FileStoreTableTestBase {
         write.close();
     }
 
+    // All tags are after the rollback snapshot
     @Test
-    public void testRollbackToSnapshot() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
+    public void testRollbackToSnapshotCase0() throws Exception {
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        FileStoreTable table = prepareRollbackTable(commitTimes);
 
-        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 2;
-        for (int i = 0; i < commitTimes; i++) {
-            write.write(rowData(i, 10 * i, 100L * i));
-            commit.commit(i, write.prepareCommit(false, i));
-        }
-        write.close();
+        table.createTag("test1", commitTimes);
+        table.createTag("test2", commitTimes - 1);
+        table.createTag("test3", commitTimes - 2);
 
-        table.createTag("test", commitTimes);
         table.rollbackTo(1);
         ReadBuilder readBuilder = table.newReadBuilder();
         List<String> result =
@@ -699,28 +695,107 @@ public abstract class FileStoreTableTestBase {
         // table-path/tag
     }
 
+    // One tag is at the rollback snapshot and others are after it
     @Test
-    public void testRollbackToTag() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
-
+    public void testRollbackToSnapshotCase1() throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
-        for (int i = 0; i < commitTimes; i++) {
-            write.write(rowData(i, 10 * i, 100L * i));
-            commit.commit(i, write.prepareCommit(false, i));
-        }
-        write.close();
+        FileStoreTable table = prepareRollbackTable(commitTimes);
+
+        table.createTag("test1", commitTimes);
+        table.createTag("test2", commitTimes - 1);
+        table.createTag("test3", 1);
+
+        table.rollbackTo(1);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
+        // read tag test3
+        table = table.copy(Collections.singletonMap(CoreOptions.SCAN_TAG_NAME.key(), "test3"));
+        readBuilder = table.newReadBuilder();
+        result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
+        List<java.nio.file.Path> files =
+                Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
+        assertThat(files.size()).isEqualTo(16);
+        // case 0 plus 1:
+        // table-path/tag/tag-test3
+    }
+
+    // One tag is before the rollback snapshot and others are after it
+    @Test
+    public void testRollbackToSnapshotCase2() throws Exception {
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        FileStoreTable table = prepareRollbackTable(commitTimes);
+
+        table.createTag("test1", commitTimes);
+        table.createTag("test2", commitTimes - 1);
+        table.createTag("test3", 1);
+
+        table.rollbackTo(2);
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<String> result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
+                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+
+        // read tag test3
+        table = table.copy(Collections.singletonMap(CoreOptions.SCAN_TAG_NAME.key(), "test3"));
+        readBuilder = table.newReadBuilder();
+        result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
+        List<java.nio.file.Path> files =
+                Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
+        assertThat(files.size()).isEqualTo(23);
+        // case 0 plus 7:
+        // table-path/manifest/manifest-list-2
+        // table-path/manifest/manifest-list-3
+        // table-path/manifest/manifest-1
+        // table-path/snapshot/snapshot-2
+        // table-path/pt=1
+        // table-path/pt=1/bucket-0
+        // table-path/pt=1/bucket-0/data-0.orc
+    }
+
+    @ParameterizedTest(name = "expire snapshots")
+    @ValueSource(booleans = {true, false})
+    public void testRollbackToTag(boolean expire) throws Exception {
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        FileStoreTable table = prepareRollbackTable(commitTimes);
 
         table.createTag("test1", 1);
-        table.createTag("test2", commitTimes - 3);
+        table.createTag("test2", commitTimes - 1);
         table.createTag("test3", commitTimes);
 
-        // expire snapshots
-        Options options = new Options();
-        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 3);
-        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
-        table.copy(options.toMap()).store().newExpire().expire();
+        if (expire) {
+            // expire snapshots
+            Options options = new Options();
+            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 3);
+            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
+            table.copy(options.toMap()).store().newExpire().expire();
+        }
 
         table.rollbackTo("test1");
         ReadBuilder readBuilder = table.newReadBuilder();
@@ -732,25 +807,36 @@ public abstract class FileStoreTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
+        // read tag test1
+        table = table.copy(Collections.singletonMap(CoreOptions.SCAN_TAG_NAME.key(), "test1"));
+        readBuilder = table.newReadBuilder();
+        result =
+                getResult(
+                        readBuilder.newRead(),
+                        readBuilder.newScan().plan().splits(),
+                        BATCH_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
         List<java.nio.file.Path> files =
                 Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(16);
-        // table-path
-        // table-path/snapshot
-        // table-path/snapshot/LATEST
-        // table-path/snapshot/EARLIEST
-        // table-path/snapshot/snapshot-1
-        // table-path/pt=0
-        // table-path/pt=0/bucket-0
-        // table-path/pt=0/bucket-0/data-0.orc
-        // table-path/manifest
-        // table-path/manifest/manifest-list-1
-        // table-path/manifest/manifest-0
-        // table-path/manifest/manifest-list-0
-        // table-path/schema
-        // table-path/schema/schema-0
-        // table-path/tag
+        // rollback snapshot case 0 plus 1:
         // table-path/tag/tag-test1
+    }
+
+    private FileStoreTable prepareRollbackTable(int commitTimes) throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        for (int i = 0; i < commitTimes; i++) {
+            write.write(rowData(i, 10 * i, 100L * i));
+            commit.commit(i, write.prepareCommit(false, i));
+        }
+        write.close();
+
+        return table;
     }
 
     @Test
