@@ -42,6 +42,12 @@ import java.util.function.Predicate;
 /** Delete snapshot files. */
 public class SnapshotDeletion extends FileDeletionBase {
 
+    /** Used to record which tag is cached in tagged snapshots list. */
+    private int cachedTagIndex = -1;
+
+    /** Used to cache data files used by current tag. */
+    private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles = new HashMap<>();
+
     public SnapshotDeletion(
             FileIO fileIO,
             FileStorePathFactory pathFactory,
@@ -122,12 +128,6 @@ public class SnapshotDeletion extends FileDeletionBase {
             }
         }
     }
-
-    /** Used to record which tag is cached in tagged snapshots list. */
-    private int cachedTagIndex = -1;
-
-    /** Used to cache data files used by current tag. */
-    private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles = new HashMap<>();
 
     public Predicate<ManifestEntry> dataFileSkipper(
             List<Snapshot> taggedSnapshots, long expiringSnapshotId) {

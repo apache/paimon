@@ -86,7 +86,6 @@ public class TagManager {
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = taggedSnapshot(tagName);
-        List<Snapshot> taggedSnapshots = taggedSnapshots();
         fileIO.deleteQuietly(tagPath(tagName));
 
         // skip file deletion if snapshot exists
@@ -94,16 +93,23 @@ public class TagManager {
             return;
         }
 
-        // collect skipping sets from the earliest snapshot and neighbor tags
+        // collect skipping sets from the left neighbor tag and the nearest right neighbor (either
+        // the earliest snapshot or right neighbor tag)
+        List<Snapshot> taggedSnapshots = taggedSnapshots();
         List<Snapshot> skippedSnapshots = new ArrayList<>();
-        skippedSnapshots.add(snapshotManager.earliestSnapshot());
+
         int index = findIndex(taggedSnapshot, taggedSnapshots);
+        // the left neighbor tag
         if (index - 1 >= 0) {
             skippedSnapshots.add(taggedSnapshots.get(index - 1));
         }
+        // the nearest right neighbor
+        Snapshot right = snapshotManager.earliestSnapshot();
         if (index + 1 < taggedSnapshots.size()) {
-            skippedSnapshots.add(taggedSnapshots.get(index + 1));
+            Snapshot rightTag = taggedSnapshots.get(index + 1);
+            right = right.id() < rightTag.id() ? right : rightTag;
         }
+        skippedSnapshots.add(right);
 
         // delete data files and empty directories
         Predicate<ManifestEntry> dataFileSkipper = tagDeletion.dataFileSkipper(skippedSnapshots);
