@@ -31,7 +31,6 @@ import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffset;
 import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffsetBuilder;
-import com.ververica.cdc.connectors.mysql.table.JdbcUrlUtils;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
@@ -200,6 +199,11 @@ class MySqlActionUtils {
         mySqlConfig
                 .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE)
                 .ifPresent(sourceBuilder::splitSize);
+        //Whether to close idle readers at the end of the snapshot phase. The flink version is required to be greater than or equal to 1.14
+        // when 'execution.checkpointing.checkpoints-after-tasks-finish.enabled' is set to true.
+        mySqlConfig
+                .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_CLOSE_IDLE_READER_ENABLED)
+                .ifPresent(sourceBuilder::closeIdleReaders);
         mySqlConfig
                 .getOptional(MySqlSourceOptions.CONNECT_TIMEOUT)
                 .ifPresent(sourceBuilder::connectTimeout);
@@ -250,8 +254,8 @@ class MySqlActionUtils {
         for (Map.Entry<String, String> entry : mySqlConfig.toMap().entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
-            if (key.startsWith(JdbcUrlUtils.PROPERTIES_PREFIX)) {
-                jdbcProperties.put(key.substring(JdbcUrlUtils.PROPERTIES_PREFIX.length()), value);
+            if (key.startsWith(JdbcConstant.PROPERTIES_PREFIX)) {
+                jdbcProperties.put(key.substring(JdbcConstant.PROPERTIES_PREFIX.length()), value);
             } else if (key.startsWith(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX)) {
                 debeziumProperties.put(
                         key.substring(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX.length()), value);
