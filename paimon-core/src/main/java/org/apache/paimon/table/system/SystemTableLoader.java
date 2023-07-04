@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
 import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
+import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
@@ -40,6 +41,8 @@ public class SystemTableLoader {
     public static Table load(String type, FileIO fileIO, FileStoreTable dataTable) {
         Path location = dataTable.location();
         switch (type.toLowerCase()) {
+            case MANIFESTS:
+                return new ManifestsTable(fileIO, location, dataTable);
             case SNAPSHOTS:
                 return new SnapshotsTable(fileIO, location);
             case OPTIONS:

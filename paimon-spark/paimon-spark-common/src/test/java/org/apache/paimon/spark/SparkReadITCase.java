@@ -113,6 +113,30 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testManifestsTable() {
+        List<Row> rows =
+                spark.table("`t1$manifests`")
+                        .select("schema_id", "file_name", "file_size")
+                        .collectAsList();
+        Long schemaId = rows.get(0).getLong(0);
+        String fileName = rows.get(0).getString(1);
+        Long fileSize = rows.get(0).getLong(2);
+
+        assertThat(schemaId).isEqualTo(0L);
+        assertThat(fileName).startsWith("manifest");
+        assertThat(fileSize).isGreaterThan(0L);
+    }
+
+    @Test
+    public void testManifestsTableWithRecordCount() {
+        List<Row> rows =
+                spark.table("`t1$manifests`")
+                        .select("num_added_files", "num_deleted_files")
+                        .collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[1,0]]");
+    }
+
+    @Test
     public void testCatalogFilterPushDown() {
         innerTestSimpleTypeFilterPushDown(spark.table("t1"));
 

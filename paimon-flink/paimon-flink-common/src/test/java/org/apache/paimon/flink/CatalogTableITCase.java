@@ -99,6 +99,32 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testManifestsTable() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("INSERT INTO T VALUES (1, 2)");
+
+        List<Row> result = sql("SELECT schema_id, file_name, file_size FROM T$manifests");
+
+        result.forEach(
+                row -> {
+                    assertThat((long) row.getField(0)).isEqualTo(0L);
+                    assertThat(StringUtils.startsWith((String) row.getField(1), "manifest"))
+                            .isTrue();
+                    assertThat((long) row.getField(2)).isGreaterThan(0L);
+                });
+    }
+
+    @Test
+    public void testManifestsTableWithFileCount() {
+        sql("CREATE TABLE T (a INT, b INT)");
+        sql("INSERT INTO T VALUES (1, 2)");
+        sql("INSERT INTO T VALUES (3, 4)");
+
+        List<Row> result = sql("SELECT num_added_files, num_deleted_files FROM T$manifests");
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1L, 0L), Row.of(1L, 0L));
+    }
+
+    @Test
     public void testSchemasTable() throws Exception {
         sql(
                 "CREATE TABLE T(a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
