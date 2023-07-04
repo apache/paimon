@@ -28,8 +28,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FieldStatsCollectorUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.StatsUtils;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
@@ -111,7 +111,7 @@ public class ManifestFileTest {
                         pathFactory,
                         suggestedFileSize,
                         null,
-                        StatsUtils.getFieldsStatsMode(
+                        FieldStatsCollectorUtils.getFieldsStatsMode(
                                 new CoreOptions(new HashMap<>()),
                                 DEFAULT_PART_TYPE.getFieldNames()))
                 .create();

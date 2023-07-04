@@ -31,7 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.StatsUtils;
+import org.apache.paimon.utils.FieldStatsCollectorUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,7 +88,7 @@ public class KeyValueDataFileWriter
                 KeyValue.schema(keyType, valueType),
                 tableStatsExtractor,
                 compression,
-                StatsUtils.getFieldsStatsMode(
+                FieldStatsCollectorUtils.getFieldsStatsMode(
                         options, KeyValue.schema(keyType, valueType).getFieldNames()));
 
         this.keyType = keyType;

@@ -29,8 +29,8 @@ import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FieldStatsCollectorUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.StatsUtils;
 
 import javax.annotation.Nullable;
 
@@ -187,7 +187,7 @@ public class KeyValueFileWriterFactory {
                     fileFormat
                             .createStatsExtractor(
                                     recordType,
-                                    StatsUtils.getFieldsStatsMode(
+                                    FieldStatsCollectorUtils.getFieldsStatsMode(
                                             options, recordType.getFieldNames()))
                             .orElse(null),
                     pathFactory.createDataFilePathFactory(partition, bucket),

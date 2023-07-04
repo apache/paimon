@@ -31,15 +31,13 @@ import static org.apache.paimon.CoreOptions.STATS_MODE_SUFFIX;
 import static org.apache.paimon.options.ConfigOptions.key;
 
 /** The stats utils. */
-public class StatsUtils {
+public class FieldStatsCollectorUtils {
 
     public static FieldStatsCollector[] getFieldsStatsMode(
             CoreOptions options, List<String> fields) {
         Options cfg = options.toConfiguration();
-        FieldStatsCollector defaultMode = FieldStatsCollector.from(cfg.get(CoreOptions.STATS_MODE));
         FieldStatsCollector[] modes = new FieldStatsCollector[fields.size()];
         for (int i = 0; i < fields.size(); i++) {
-
             String fieldMode =
                     cfg.get(
                             key(String.format(
@@ -50,7 +48,7 @@ public class StatsUtils {
             if (fieldMode != null) {
                 modes[i] = FieldStatsCollector.from(fieldMode);
             } else {
-                modes[i] = defaultMode;
+                modes[i] = FieldStatsCollector.from(cfg.get(CoreOptions.STATS_MODE));
             }
         }
         return modes;

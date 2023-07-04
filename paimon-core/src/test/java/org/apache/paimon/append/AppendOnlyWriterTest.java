@@ -38,9 +38,9 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.FieldStatsCollectorUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
-import org.apache.paimon.utils.StatsUtils;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -320,7 +320,7 @@ public class AppendOnlyWriterTest {
                         pathFactory,
                         null,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        StatsUtils.getFieldsStatsMode(
+                        FieldStatsCollectorUtils.getFieldsStatsMode(
                                 new CoreOptions(new HashMap<>()),
                                 AppendOnlyWriterTest.SCHEMA.getFieldNames()));
         return Pair.of(writer, compactManager.allFiles());

@@ -30,8 +30,8 @@ import org.apache.paimon.statistics.FullFieldStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FieldStatsCollectorUtils;
 import org.apache.paimon.utils.LongCounter;
-import org.apache.paimon.utils.StatsUtils;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.junit.jupiter.api.io.TempDir;
@@ -92,7 +92,7 @@ public class RollingFileWriterTest {
                                         0L,
                                         new LongCounter(0),
                                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                                        StatsUtils.getFieldsStatsMode(
+                                        FieldStatsCollectorUtils.getFieldsStatsMode(
                                                 new CoreOptions(new HashMap<>()),
                                                 SCHEMA.getFieldNames())),
                         TARGET_FILE_SIZE);

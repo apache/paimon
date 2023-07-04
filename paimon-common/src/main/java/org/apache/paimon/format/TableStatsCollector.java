@@ -25,17 +25,24 @@ import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Collector to extract statistics of each fields from a series of records. */
 public class TableStatsCollector {
 
     private final RowDataToObjectArrayConverter converter;
-    private final FieldStatsCollector[] stats;
+    private final FieldStatsCollector[] statsCollectors;
     private final Serializer<Object>[] fieldSerializers;
 
-    public TableStatsCollector(RowType rowType, FieldStatsCollector[] stats) {
+    public TableStatsCollector(RowType rowType, FieldStatsCollector[] statsCollectors) {
         int numFields = rowType.getFieldCount();
+        checkArgument(
+                numFields == statsCollectors.length,
+                "numFields %s should equal to stats length %s.",
+                numFields,
+                statsCollectors.length);
         this.converter = new RowDataToObjectArrayConverter(rowType);
-        this.stats = stats;
+        this.statsCollectors = statsCollectors;
         this.fieldSerializers = new Serializer[numFields];
         for (int i = 0; i < numFields; i++) {
             fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
@@ -51,16 +58,16 @@ public class TableStatsCollector {
     public void collect(InternalRow row) {
         Object[] objects = converter.convert(row);
         for (int i = 0; i < row.getFieldCount(); i++) {
-            FieldStatsCollector collector = stats[i];
+            FieldStatsCollector collector = statsCollectors[i];
             Object obj = objects[i];
             collector.collect(obj, fieldSerializers[i]);
         }
     }
 
     public FieldStats[] extract() {
-        FieldStats[] stats = new FieldStats[this.stats.length];
+        FieldStats[] stats = new FieldStats[this.statsCollectors.length];
         for (int i = 0; i < stats.length; i++) {
-            stats[i] = this.stats[i].result();
+            stats[i] = this.statsCollectors[i].result();
         }
         return stats;
     }
