@@ -34,15 +34,15 @@ public class TableStatsCollector {
     private final FieldStatsCollector[] statsCollectors;
     private final Serializer<Object>[] fieldSerializers;
 
-    public TableStatsCollector(RowType rowType, FieldStatsCollector[] statsCollectors) {
+    public TableStatsCollector(RowType rowType, FieldStatsCollector.Factory[] collectorFactory) {
         int numFields = rowType.getFieldCount();
         checkArgument(
-                numFields == statsCollectors.length,
+                numFields == collectorFactory.length,
                 "numFields %s should equal to stats length %s.",
                 numFields,
-                statsCollectors.length);
+                collectorFactory.length);
+        this.statsCollectors = FieldStatsCollector.create(collectorFactory);
         this.converter = new RowDataToObjectArrayConverter(rowType);
-        this.statsCollectors = statsCollectors;
         this.fieldSerializers = new Serializer[numFields];
         for (int i = 0; i < numFields; i++) {
             fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));

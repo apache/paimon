@@ -54,7 +54,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             long schemaId,
             LongCounter seqNumCounter,
             String fileCompression,
-            FieldStatsCollector[] stats) {
+            FieldStatsCollector.Factory[] statsCollectors) {
         super(
                 fileIO,
                 factory,
@@ -63,7 +63,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 writeSchema,
                 tableStatsExtractor,
                 fileCompression,
-                stats);
+                statsCollectors);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);

@@ -89,8 +89,11 @@ public class ManifestTestDataGenerator {
                 new TableStatsCollector(
                         TestKeyValueGenerator.DEFAULT_PART_TYPE,
                         IntStream.range(0, TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldCount())
-                                .mapToObj(i -> new FullFieldStatsCollector())
-                                .toArray(FieldStatsCollector[]::new));
+                                .mapToObj(
+                                        i ->
+                                                (FieldStatsCollector.Factory)
+                                                        FullFieldStatsCollector::new)
+                                .toArray(FieldStatsCollector.Factory[]::new));
         FieldStatsArraySerializer serializer =
                 new FieldStatsArraySerializer(TestKeyValueGenerator.DEFAULT_PART_TYPE);
 

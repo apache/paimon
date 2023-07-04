@@ -54,9 +54,9 @@ import java.util.stream.IntStream;
 public class OrcTableStatsExtractor implements TableStatsExtractor {
 
     private final RowType rowType;
-    private final FieldStatsCollector[] statsCollectors;
+    private final FieldStatsCollector.Factory[] statsCollectors;
 
-    public OrcTableStatsExtractor(RowType rowType, FieldStatsCollector[] statsCollectors) {
+    public OrcTableStatsExtractor(RowType rowType, FieldStatsCollector.Factory[] statsCollectors) {
         this.rowType = rowType;
         this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
@@ -74,24 +74,27 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
             List<String> columnNames = schema.getFieldNames();
             List<TypeDescription> columnTypes = schema.getChildren();
 
+            FieldStatsCollector[] collectors = FieldStatsCollector.create(statsCollectors);
+
             return IntStream.range(0, rowType.getFieldCount())
                     .mapToObj(
                             i -> {
                                 DataField field = rowType.getFields().get(i);
                                 int fieldIdx = columnNames.indexOf(field.name());
                                 int colId = columnTypes.get(fieldIdx).getId();
-                                return toFieldStats(field, columnStatistics[colId], rowCount, i);
+                                return toFieldStats(
+                                        field, columnStatistics[colId], rowCount, collectors[i]);
                             })
                     .toArray(FieldStats[]::new);
         }
     }
 
     private FieldStats toFieldStats(
-            DataField field, ColumnStatistics stats, long rowCount, int idx) {
+            DataField field, ColumnStatistics stats, long rowCount, FieldStatsCollector collector) {
         long nullCount = rowCount - stats.getNumberOfValues();
         if (nullCount == rowCount) {
             // all nulls
-            return this.statsCollectors[idx].convert(new FieldStats(null, null, nullCount));
+            return collector.convert(new FieldStats(null, null, nullCount));
         }
         Preconditions.checkState(
                 (nullCount > 0) == stats.hasNull(),
@@ -214,7 +217,7 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
             default:
                 fieldStats = new FieldStats(null, null, nullCount);
         }
-        return this.statsCollectors[idx].convert(fieldStats);
+        return collector.convert(fieldStats);
     }
 
     private void assertStatsClass(

@@ -35,7 +35,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CommitIncrement;
-import org.apache.paimon.utils.FieldStatsCollectorUtils;
+import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -77,7 +77,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         dataFilePathFactory,
                         null,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                        FieldStatsCollectorUtils.getFieldsStatsMode(
+                        StatsCollectorFactories.createStatsFactories(
                                 new CoreOptions(new HashMap<>()), SCHEMA.getFieldNames()));
         appendOnlyWriter.write(
                 GenericRow.of(1, BinaryString.fromString("aaa"), BinaryString.fromString("1")));

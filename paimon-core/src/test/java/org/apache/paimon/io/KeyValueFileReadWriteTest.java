@@ -55,6 +55,8 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 
+import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
+import static org.apache.paimon.TestKeyValueGenerator.KEY_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.createTestSchemaManager;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -97,12 +99,7 @@ public class KeyValueFileReadWriteTest {
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
 
-        checkRollingFiles(
-                TestKeyValueGenerator.KEY_TYPE,
-                TestKeyValueGenerator.DEFAULT_ROW_TYPE,
-                data.meta,
-                actualMetas,
-                writer.targetFileSize());
+        checkRollingFiles(data.meta, actualMetas, writer.targetFileSize());
 
         KeyValueFileReaderFactory readerFactory =
                 createReaderFactory(tempDir.toString(), format, null, null);
@@ -245,18 +242,20 @@ public class KeyValueFileReadWriteTest {
                         format);
         int suggestedFileSize = ThreadLocalRandom.current().nextInt(8192) + 1024;
         FileIO fileIO = FileIOFinder.find(path);
+        Options options = new Options();
+        options.set(CoreOptions.METADATA_STATS_MODE, "FULL");
         return KeyValueFileWriterFactory.builder(
                         fileIO,
                         0,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        KEY_TYPE,
+                        DEFAULT_ROW_TYPE,
                         // normal format will buffer changes in memory and we can't determine
                         // if the written file size is really larger than suggested, so we use a
                         // special format which flushes for every added element
                         new FlushingFileFormat(format),
                         pathFactory,
                         suggestedFileSize)
-                .build(BinaryRow.EMPTY_ROW, 0, null, null, new CoreOptions(new Options()));
+                .build(BinaryRow.EMPTY_ROW, 0, null, null, new CoreOptions(options));
     }
 
     private KeyValueFileReaderFactory createReaderFactory(
@@ -269,8 +268,8 @@ public class KeyValueFileReadWriteTest {
                         fileIO,
                         createTestSchemaManager(path),
                         0,
-                        TestKeyValueGenerator.KEY_TYPE,
-                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        KEY_TYPE,
+                        DEFAULT_ROW_TYPE,
                         ignore -> new FlushingFileFormat(format),
                         pathFactory,
                         new TestKeyValueGenerator.TestKeyValueFieldsExtractor());
@@ -321,13 +320,10 @@ public class KeyValueFileReadWriteTest {
     }
 
     private void checkRollingFiles(
-            RowType keyType,
-            RowType valueType,
-            DataFileMeta expected,
-            List<DataFileMeta> actual,
-            long suggestedFileSize) {
-        FieldStatsArraySerializer keyStatsConverter = new FieldStatsArraySerializer(keyType);
-        FieldStatsArraySerializer valueStatsConverter = new FieldStatsArraySerializer(valueType);
+            DataFileMeta expected, List<DataFileMeta> actual, long suggestedFileSize) {
+        FieldStatsArraySerializer keyStatsConverter = new FieldStatsArraySerializer(KEY_TYPE);
+        FieldStatsArraySerializer valueStatsConverter =
+                new FieldStatsArraySerializer(DEFAULT_ROW_TYPE);
 
         // all but last file should be no smaller than suggestedFileSize
         for (int i = 0; i + 1 < actual.size(); i++) {
@@ -345,14 +341,14 @@ public class KeyValueFileReadWriteTest {
         assertThat(actual.get(actual.size() - 1).maxKey()).isEqualTo(expected.maxKey());
 
         // check stats
-        for (int i = 0; i < keyType.getFieldCount(); i++) {
+        for (int i = 0; i < KEY_TYPE.getFieldCount(); i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
                     keyStatsConverter.fromBinary(expected.keyStats())[i],
                     actual,
                     m -> keyStatsConverter.fromBinary(m.keyStats())[idx]);
         }
-        for (int i = 0; i < valueType.getFieldCount(); i++) {
+        for (int i = 0; i < DEFAULT_ROW_TYPE.getFieldCount(); i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
                     valueStatsConverter.fromBinary(expected.valueStats())[i],

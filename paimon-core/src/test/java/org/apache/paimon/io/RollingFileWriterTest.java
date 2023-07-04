@@ -25,13 +25,11 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.statistics.FullFieldStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FieldStatsCollectorUtils;
 import org.apache.paimon.utils.LongCounter;
+import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.junit.jupiter.api.io.TempDir;
@@ -41,7 +39,6 @@ import org.junit.jupiter.params.provider.EnumSource;
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.FileFormatType;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -82,17 +79,14 @@ public class RollingFileWriterTest {
                                         fileFormat
                                                 .createStatsExtractor(
                                                         SCHEMA,
-                                                        IntStream.range(0, SCHEMA.getFieldCount())
-                                                                .mapToObj(
-                                                                        i ->
-                                                                                new FullFieldStatsCollector())
-                                                                .toArray(
-                                                                        FieldStatsCollector[]::new))
+                                                        StatsCollectorFactories
+                                                                .createFullStatsFactories(
+                                                                        SCHEMA.getFieldCount()))
                                                 .orElse(null),
                                         0L,
                                         new LongCounter(0),
                                         CoreOptions.FILE_COMPRESSION.defaultValue(),
-                                        FieldStatsCollectorUtils.getFieldsStatsMode(
+                                        StatsCollectorFactories.createStatsFactories(
                                                 new CoreOptions(new HashMap<>()),
                                                 SCHEMA.getFieldNames())),
                         TARGET_FILE_SIZE);

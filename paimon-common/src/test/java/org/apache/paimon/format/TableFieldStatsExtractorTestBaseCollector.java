@@ -75,10 +75,10 @@ public abstract class TableFieldStatsExtractorTestBaseCollector {
         FileFormat format = createFormat();
         RowType rowType = rowType();
         int count = rowType().getFieldCount();
-        FieldStatsCollector[] stats =
+        FieldStatsCollector.Factory[] stats =
                 IntStream.range(0, count)
                         .mapToObj(p -> FieldStatsCollector.from(mode))
-                        .toArray(FieldStatsCollector[]::new);
+                        .toArray(FieldStatsCollector.Factory[]::new);
 
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");

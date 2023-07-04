@@ -35,10 +35,10 @@ import org.apache.paimon.operation.TagFileKeeper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FieldStatsCollectorUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StatsCollectorFactories;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
@@ -106,7 +106,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
                 forWrite ? writeManifestCache : null,
-                FieldStatsCollectorUtils.getFieldsStatsMode(
+                StatsCollectorFactories.createStatsFactories(
                         options, partitionType.getFieldNames()));
     }
 

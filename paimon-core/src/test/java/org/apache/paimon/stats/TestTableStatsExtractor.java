@@ -43,10 +43,10 @@ public class TestTableStatsExtractor implements TableStatsExtractor {
 
     private final FileFormat format;
     private final RowType rowType;
-    private final FieldStatsCollector[] stats;
+    private final FieldStatsCollector.Factory[] stats;
 
     public TestTableStatsExtractor(
-            FileFormat format, RowType rowType, FieldStatsCollector[] stats) {
+            FileFormat format, RowType rowType, FieldStatsCollector.Factory[] stats) {
         this.format = format;
         this.rowType = rowType;
         this.stats = stats;

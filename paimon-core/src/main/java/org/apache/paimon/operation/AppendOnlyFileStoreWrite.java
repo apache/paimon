@@ -37,11 +37,11 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
-import org.apache.paimon.utils.FieldStatsCollectorUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
@@ -67,9 +67,10 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final boolean commitForceCompact;
     private final boolean assertDisorder;
     private final String fileCompression;
+    private final FieldStatsCollector.Factory[] statsCollectors;
+
     private boolean skipCompaction;
     private BucketMode bucketMode = BucketMode.FIXED;
-    private FieldStatsCollector[] statsCollectors;
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
@@ -96,7 +97,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         this.assertDisorder = options.toConfiguration().get(APPEND_ONLY_ASSERT_DISORDER);
         this.fileCompression = options.fileCompression();
         this.statsCollectors =
-                FieldStatsCollectorUtils.getFieldsStatsMode(options, rowType.getFieldNames());
+                StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
     }
 
     @Override

@@ -88,7 +88,7 @@ public class OrcFileFormat extends FileFormat {
 
     @Override
     public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector[] statsCollectors) {
+            RowType type, FieldStatsCollector.Factory[] statsCollectors) {
         return Optional.of(new OrcTableStatsExtractor(type, statsCollectors));
     }
 

@@ -106,14 +106,20 @@ public class DataFileTestDataGenerator {
                 new TableStatsCollector(
                         TestKeyValueGenerator.KEY_TYPE,
                         IntStream.range(0, TestKeyValueGenerator.KEY_TYPE.getFieldCount())
-                                .mapToObj(i -> new FullFieldStatsCollector())
-                                .toArray(FieldStatsCollector[]::new));
+                                .mapToObj(
+                                        i ->
+                                                (FieldStatsCollector.Factory)
+                                                        FullFieldStatsCollector::new)
+                                .toArray(FieldStatsCollector.Factory[]::new));
         TableStatsCollector valueStatsCollector =
                 new TableStatsCollector(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         IntStream.range(0, TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFieldCount())
-                                .mapToObj(i -> new FullFieldStatsCollector())
-                                .toArray(FieldStatsCollector[]::new));
+                                .mapToObj(
+                                        i ->
+                                                (FieldStatsCollector.Factory)
+                                                        FullFieldStatsCollector::new)
+                                .toArray(FieldStatsCollector.Factory[]::new));
         FieldStatsArraySerializer keyStatsSerializer =
                 new FieldStatsArraySerializer(TestKeyValueGenerator.KEY_TYPE);
         FieldStatsArraySerializer valueStatsSerializer =

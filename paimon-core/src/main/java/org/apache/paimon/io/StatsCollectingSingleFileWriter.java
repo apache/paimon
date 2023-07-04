@@ -27,14 +27,12 @@ import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.statistics.NoneFieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.function.Function;
 
 /**
@@ -47,7 +45,6 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     @Nullable private final TableStatsExtractor tableStatsExtractor;
     @Nullable private TableStatsCollector tableStatsCollector = null;
-    private final boolean isStatsCollectorDisabled;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
@@ -57,11 +54,9 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             RowType writeSchema,
             @Nullable TableStatsExtractor tableStatsExtractor,
             String compression,
-            FieldStatsCollector[] statsCollectors) {
+            FieldStatsCollector.Factory[] statsCollectors) {
         super(fileIO, factory, path, converter, compression);
         this.tableStatsExtractor = tableStatsExtractor;
-        this.isStatsCollectorDisabled =
-                Arrays.stream(statsCollectors).allMatch(p -> p instanceof NoneFieldStatsCollector);
         if (this.tableStatsExtractor == null) {
             this.tableStatsCollector = new TableStatsCollector(writeSchema, statsCollectors);
         }
@@ -73,7 +68,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     @Override
     public void write(T record) throws IOException {
         InternalRow rowData = writeImpl(record);
-        if (tableStatsCollector != null && !isStatsCollectorDisabled) {
+        if (tableStatsCollector != null) {
             tableStatsCollector.collect(rowData);
         }
     }

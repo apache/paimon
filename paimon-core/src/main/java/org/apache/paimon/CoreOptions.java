@@ -698,7 +698,7 @@ public class CoreOptions implements Serializable {
 
     public static final String STATS_MODE_SUFFIX = "stats-mode";
 
-    public static final ConfigOption<String> STATS_MODE =
+    public static final ConfigOption<String> METADATA_STATS_MODE =
             key("metadata." + STATS_MODE_SUFFIX)
                     .stringType()
                     .defaultValue("truncate(16)")

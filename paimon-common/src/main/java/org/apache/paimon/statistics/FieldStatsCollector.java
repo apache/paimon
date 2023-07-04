@@ -49,20 +49,33 @@ public interface FieldStatsCollector {
      */
     FieldStats convert(FieldStats source);
 
-    static FieldStatsCollector from(String option) {
+    /** Factory to create {@link FieldStatsCollector}. */
+    interface Factory {
+        FieldStatsCollector create();
+    }
+
+    static FieldStatsCollector[] create(FieldStatsCollector.Factory[] factories) {
+        FieldStatsCollector[] collectors = new FieldStatsCollector[factories.length];
+        for (int i = 0; i < factories.length; i++) {
+            collectors[i] = factories[i].create();
+        }
+        return collectors;
+    }
+
+    static Factory from(String option) {
         String upper = option.toUpperCase();
         switch (upper) {
             case "NONE":
-                return new NoneFieldStatsCollector();
+                return NoneFieldStatsCollector::new;
             case "FULL":
-                return new FullFieldStatsCollector();
+                return FullFieldStatsCollector::new;
             case "COUNTS":
-                return new CountsFieldStatsCollector();
+                return CountsFieldStatsCollector::new;
             default:
                 Matcher matcher = TRUNCATE_PATTERN.matcher(upper);
                 if (matcher.matches()) {
                     String length = matcher.group(1);
-                    return new TruncateFieldStatsCollector(Integer.parseInt(length));
+                    return () -> new TruncateFieldStatsCollector(Integer.parseInt(length));
                 }
                 throw new IllegalArgumentException("Unexpected option: " + option);
         }

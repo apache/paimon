@@ -38,7 +38,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             DataFilePathFactory pathFactory,
             LongCounter seqNumCounter,
             String fileCompression,
-            FieldStatsCollector[] stats) {
+            FieldStatsCollector.Factory[] statsCollectors) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -46,11 +46,13 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileFormat.createWriterFactory(writeSchema),
                                 pathFactory.newPath(),
                                 writeSchema,
-                                fileFormat.createStatsExtractor(writeSchema, stats).orElse(null),
+                                fileFormat
+                                        .createStatsExtractor(writeSchema, statsCollectors)
+                                        .orElse(null),
                                 schemaId,
                                 seqNumCounter,
                                 fileCompression,
-                                stats),
+                                statsCollectors),
                 targetFileSize);
     }
 }

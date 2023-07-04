@@ -23,6 +23,7 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.TableStatsCollector;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.statistics.FullFieldStatsCollector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.IntType;
@@ -46,8 +47,11 @@ public class TableStatsCollectorTest {
                 new TableStatsCollector(
                         rowType,
                         IntStream.range(0, rowType.getFieldCount())
-                                .mapToObj(i -> new FullFieldStatsCollector())
-                                .toArray(FullFieldStatsCollector[]::new));
+                                .mapToObj(
+                                        i ->
+                                                (FieldStatsCollector.Factory)
+                                                        FullFieldStatsCollector::new)
+                                .toArray(FieldStatsCollector.Factory[]::new));
 
         collector.collect(
                 GenericRow.of(

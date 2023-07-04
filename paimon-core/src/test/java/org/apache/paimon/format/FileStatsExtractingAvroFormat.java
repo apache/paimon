@@ -57,7 +57,7 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
 
     @Override
     public Optional<TableStatsExtractor> createStatsExtractor(
-            RowType type, FieldStatsCollector[] stats) {
+            RowType type, FieldStatsCollector.Factory[] stats) {
         return Optional.of(new TestTableStatsExtractor(this, type, stats));
     }
 }

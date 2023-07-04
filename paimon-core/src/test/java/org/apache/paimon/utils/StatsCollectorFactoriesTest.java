@@ -36,8 +36,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
-/** Test for {@link FieldStatsCollectorUtils}. */
-public class FieldStatsCollectorUtilsTest {
+/** Test for {@link StatsCollectorFactories}. */
+public class StatsCollectorFactoriesTest {
     @Test
     public void testFieldStats() {
         RowType type =
@@ -52,9 +52,10 @@ public class FieldStatsCollectorUtilsTest {
                 CoreOptions.FIELDS_PREFIX + ".b." + CoreOptions.STATS_MODE_SUFFIX, "truncate(12)");
         options.set(CoreOptions.FIELDS_PREFIX + ".c." + CoreOptions.STATS_MODE_SUFFIX, "full");
 
-        FieldStatsCollector[] stats =
-                FieldStatsCollectorUtils.getFieldsStatsMode(
+        FieldStatsCollector.Factory[] statsFactories =
+                StatsCollectorFactories.createStatsFactories(
                         new CoreOptions(options), type.getFieldNames());
+        FieldStatsCollector[] stats = FieldStatsCollector.create(statsFactories);
         Assertions.assertEquals(3, stats.length);
         Assertions.assertEquals(16, ((TruncateFieldStatsCollector) stats[0]).getLength());
         Assertions.assertEquals(12, ((TruncateFieldStatsCollector) stats[1]).getLength());

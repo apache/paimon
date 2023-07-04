@@ -63,7 +63,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
-    private final FieldStatsCollector[] statsCollectors;
+    private final FieldStatsCollector.Factory[] statsCollectors;
 
     private RowDataRollingFileWriter writer;
 
@@ -79,7 +79,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
             String fileCompression,
-            FieldStatsCollector[] statsCollectors) {
+            FieldStatsCollector.Factory[] statsCollectors) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;

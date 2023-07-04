@@ -45,9 +45,6 @@ import org.apache.parquet.schema.PrimitiveType;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.stream.IntStream;
 
@@ -56,12 +53,11 @@ import static org.apache.paimon.format.parquet.ParquetUtil.assertStatsClass;
 /** {@link TableStatsExtractor} for parquet files. */
 public class ParquetTableStatsExtractor implements TableStatsExtractor {
 
-    private static final OffsetDateTime EPOCH = Instant.ofEpochSecond(0).atOffset(ZoneOffset.UTC);
-
     private final RowType rowType;
-    private final FieldStatsCollector[] statsCollectors;
+    private final FieldStatsCollector.Factory[] statsCollectors;
 
-    public ParquetTableStatsExtractor(RowType rowType, FieldStatsCollector[] statsCollectors) {
+    public ParquetTableStatsExtractor(
+            RowType rowType, FieldStatsCollector.Factory[] statsCollectors) {
         this.rowType = rowType;
         this.statsCollectors = statsCollectors;
         Preconditions.checkArgument(
@@ -72,23 +68,24 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
     @Override
     public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
         Map<String, Statistics<?>> stats = ParquetUtil.extractColumnStats(fileIO, path);
-
+        FieldStatsCollector[] collectors = FieldStatsCollector.create(statsCollectors);
         return IntStream.range(0, rowType.getFieldCount())
                 .mapToObj(
                         i -> {
                             DataField field = rowType.getFields().get(i);
-                            return toFieldStats(field, stats.get(field.name()), i);
+                            return toFieldStats(field, stats.get(field.name()), collectors[i]);
                         })
                 .toArray(FieldStats[]::new);
     }
 
-    private FieldStats toFieldStats(DataField field, Statistics<?> stats, int idx) {
+    private FieldStats toFieldStats(
+            DataField field, Statistics<?> stats, FieldStatsCollector collector) {
         if (stats == null) {
             return new FieldStats(null, null, null);
         }
         long nullCount = stats.getNumNulls();
         if (!stats.hasNonNullValue()) {
-            return this.statsCollectors[idx].convert(new FieldStats(null, null, nullCount));
+            return collector.convert(new FieldStats(null, null, nullCount));
         }
 
         FieldStats fieldStats;
@@ -170,7 +167,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
             default:
                 fieldStats = new FieldStats(null, null, nullCount);
         }
-        return this.statsCollectors[idx].convert(fieldStats);
+        return collector.convert(fieldStats);
     }
 
     private FieldStats toTimestampStats(Statistics<?> stats, int precision) {
