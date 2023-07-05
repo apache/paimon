@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
+import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
@@ -61,24 +62,25 @@ public class ParquetFileFormatTest {
 
     @Test
     public void testDefaultCompressionCodecName() {
+        // no parquet.compression and no file.compression
         Options conf = new Options();
-        assertThat(getCompressionCodec(conf)).isEqualTo(CompressionCodec.SNAPPY.name());
+        RowDataParquetBuilder builder =
+                new RowDataParquetBuilder(
+                        new RowType(new ArrayList<>()), getParquetConfiguration(conf));
+        assertThat(builder.getCompression(null)).isEqualTo(CompressionCodec.SNAPPY.name());
     }
 
     @Test
-    public void testSpecifiedCompressionCodecName() {
-        String lz4 = CompressionCodec.LZ4.name();
+    public void testFileCompressionHigherPreference() {
         Options conf = new Options();
+        String lz4 = CompressionCodec.LZ4.name();
         conf.setString(ParquetOutputFormat.COMPRESSION, lz4);
-        assertThat(getCompressionCodec(conf)).isEqualTo(lz4);
-    }
-
-    private String getCompressionCodec(Options conf) {
-        Options formatOptions = conf.removePrefix(IDENTIFIER + ".");
-        ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(formatOptions, 1024));
-        return getParquetConfiguration(parquet.formatOptions())
-                .getString(ParquetOutputFormat.COMPRESSION, null);
+        RowDataParquetBuilder builder =
+                new RowDataParquetBuilder(
+                        new RowType(new ArrayList<>()),
+                        getParquetConfiguration(conf.removePrefix(IDENTIFIER + ".")));
+        assertThat(builder.getCompression(null)).isEqualTo(lz4);
+        assertThat(builder.getCompression("SNAPPY")).isEqualTo(CompressionCodec.SNAPPY.name());
     }
 
     @Test

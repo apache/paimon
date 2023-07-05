@@ -297,8 +297,10 @@ public class ParquetReadWriteTest {
         conf.setInteger("parquet.block.size", rowGroupSize);
         ParquetWriterFactory factory =
                 new ParquetWriterFactory(new RowDataParquetBuilder(ROW_TYPE, conf));
+        String[] candidates = new String[] {"snappy", "zstd", "gzip"};
+        String compress = candidates[new Random().nextInt(3)];
         FormatWriter writer =
-                factory.create(new LocalFileIO().newOutputStream(path, false), "SNAPPY");
+                factory.create(new LocalFileIO().newOutputStream(path, false), compress);
         for (InternalRow row : rows) {
             writer.addElement(row);
         }
