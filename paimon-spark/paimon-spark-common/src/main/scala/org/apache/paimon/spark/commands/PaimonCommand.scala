@@ -35,9 +35,11 @@ trait PaimonCommand {
 
   def getTable: Table
 
-  def isDynamicBucketTable: Boolean = {
-    getTable.isInstanceOf[FileStoreTable] &&
-    getTable.asInstanceOf[FileStoreTable].bucketMode == BucketMode.DYNAMIC
+  lazy val bucketMode: BucketMode = getTable match {
+    case fileStoreTable: FileStoreTable =>
+      fileStoreTable.bucketMode
+    case _ =>
+      BucketMode.FIXED
   }
 
   def deserializeCommitMessage(

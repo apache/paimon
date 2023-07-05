@@ -23,12 +23,12 @@ import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode}
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.table.{FileStoreTable, Table}
+import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
-import org.apache.spark.sql.{DataFrame, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
@@ -77,45 +77,58 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
     val toRow = withBucketDataEncoder.createSerializer()
     val fromRow = withBucketDataEncoder.createDeserializer()
 
-    val withAssignedBucket = if (isDynamicBucketTable) {
-      val partitioned = if (primaryKeyCols.nonEmpty) {
-        // Make sure that the records with the same bucket values is within a task.
-        withBucketCol.repartition(primaryKeyCols: _*)
-      } else {
-        withBucketCol
-      }
-      val numSparkPartitions = partitioned.rdd.getNumPartitions
-      val dynamicBucketProcessor =
-        DynamicBucketProcessor(table, rowType, bucketColIdx, numSparkPartitions, toRow, fromRow)
-      partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(withBucketDataEncoder)
-    } else {
-      val commonBucketProcessor = CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
-      withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(withBucketDataEncoder)
+    def repartitionByBucket(ds: Dataset[Row]) = {
+      ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
     }
 
-    val commitMessages =
-      withAssignedBucket
-        .toDF()
-        .repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
-        .mapPartitions {
-          iter =>
-            val write = writeBuilder.newWrite()
-            write.withIOManager(createIOManager)
-            try {
-              iter.foreach {
-                row =>
-                  val bucket = row.getInt(bucketColIdx)
-                  val bucketColDropped = originFromRow(toRow(row))
-                  write.write(new DynamicBucketRow(new SparkRow(rowType, bucketColDropped), bucket))
-              }
-              val serializer = new CommitMessageSerializer
-              write.prepareCommit().asScala.map(serializer.serialize).toIterator
-            } finally {
-              write.close()
+    val df =
+      bucketMode match {
+        case BucketMode.DYNAMIC =>
+          val partitioned = if (primaryKeyCols.nonEmpty) {
+            // Make sure that the records with the same bucket values is within a task.
+            withBucketCol.repartition(primaryKeyCols: _*)
+          } else {
+            withBucketCol
+          }
+          val numSparkPartitions = partitioned.rdd.getNumPartitions
+          val dynamicBucketProcessor =
+            DynamicBucketProcessor(table, rowType, bucketColIdx, numSparkPartitions, toRow, fromRow)
+          repartitionByBucket(
+            partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(
+              withBucketDataEncoder))
+        case BucketMode.UNAWARE =>
+          val unawareBucketProcessor = UnawareBucketProcessor(bucketColIdx, toRow, fromRow)
+          withBucketCol
+            .mapPartitions(unawareBucketProcessor.processPartition)(withBucketDataEncoder)
+            .toDF()
+        case BucketMode.FIXED =>
+          val commonBucketProcessor =
+            CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
+          repartitionByBucket(
+            withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(
+              withBucketDataEncoder))
+      }
+
+    val commitMessages = df
+      .mapPartitions {
+        iter =>
+          val write = writeBuilder.newWrite()
+          write.withIOManager(createIOManager)
+          try {
+            iter.foreach {
+              row =>
+                val bucket = row.getInt(bucketColIdx)
+                val bucketColDropped = originFromRow(toRow(row))
+                write.write(new DynamicBucketRow(new SparkRow(rowType, bucketColDropped), bucket))
             }
-        }
-        .collect()
-        .map(deserializeCommitMessage(serializer, _))
+            val serializer = new CommitMessageSerializer
+            write.prepareCommit().asScala.map(serializer.serialize).toIterator
+          } finally {
+            write.close()
+          }
+      }
+      .collect()
+      .map(deserializeCommitMessage(serializer, _))
 
     try {
       val tableCommit = if (overwritePartition == null) {
@@ -225,6 +238,26 @@ object WriteIntoPaimonTable {
           val bucket = index.assign(hash, buckFilter)
           val sparkInternalRow = toRow(row)
           sparkInternalRow.setInt(bucketColIndex, bucket)
+          fromRow(sparkInternalRow)
+        }
+      }
+    }
+  }
+
+  case class UnawareBucketProcessor(
+      bucketColIndex: Int,
+      toRow: ExpressionEncoder.Serializer[Row],
+      fromRow: ExpressionEncoder.Deserializer[Row])
+    extends BucketProcessor {
+
+    def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
+      new Iterator[Row] {
+        override def hasNext: Boolean = rowIterator.hasNext
+
+        override def next(): Row = {
+          val row = rowIterator.next
+          val sparkInternalRow = toRow(row)
+          sparkInternalRow.setInt(bucketColIndex, 0)
           fromRow(sparkInternalRow)
         }
       }
