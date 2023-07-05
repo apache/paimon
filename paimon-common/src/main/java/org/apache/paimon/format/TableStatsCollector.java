@@ -22,8 +22,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.statistics.FieldStatsCollector;
+import org.apache.paimon.statistics.NoneFieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import java.util.Arrays;
 
 import static org.apache.paimon.statistics.FieldStatsCollector.createFullStatsFactories;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -34,6 +37,7 @@ public class TableStatsCollector {
     private final RowDataToObjectArrayConverter converter;
     private final FieldStatsCollector[] statsCollectors;
     private final Serializer<Object>[] fieldSerializers;
+    private final boolean isDisabled;
 
     public TableStatsCollector(RowType rowType) {
         this(rowType, createFullStatsFactories(rowType.getFieldCount()));
@@ -52,6 +56,12 @@ public class TableStatsCollector {
         for (int i = 0; i < numFields; i++) {
             fieldSerializers[i] = InternalSerializers.create(rowType.getTypeAt(i));
         }
+        this.isDisabled =
+                Arrays.stream(statsCollectors).allMatch(p -> p instanceof NoneFieldStatsCollector);
+    }
+
+    public boolean isDisabled() {
+        return isDisabled;
     }
 
     /**

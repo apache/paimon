@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format.avro;
 
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -36,16 +35,11 @@ import org.apache.paimon.utils.Projection;
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
 import org.apache.avro.file.DataFileWriter;
-import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericDatumWriter;
-import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.io.DatumWriter;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.function.Function;
 
 import static org.apache.avro.file.DataFileConstants.SNAPPY_CODEC;
 
@@ -70,17 +64,12 @@ public class AvroFileFormat extends FileFormat {
     @Override
     public FormatReaderFactory createReaderFactory(
             RowType type, int[][] projection, @Nullable List<Predicate> filters) {
-        // avro is a file format that keeps schemas in file headers,
-        // if the schema given to the reader is not equal to the schema in header,
-        // reader will automatically map the fields and give back records with our desired
-        // schema
-        DataType producedType = Projection.of(projection).project(type);
-        return new AvroGenericRecordBulkFormat((RowType) producedType.copy(false));
+        return new AvroBulkFormat(type, Projection.of(projection).toTopLevelIndexes());
     }
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        return new RowDataAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
+        return new RowAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
     }
 
     @Override
@@ -91,48 +80,18 @@ public class AvroFileFormat extends FileFormat {
         }
     }
 
-    private static class AvroGenericRecordBulkFormat extends AbstractAvroBulkFormat<GenericRecord> {
+    /** A {@link FormatWriterFactory} to write {@link InternalRow}. */
+    private static class RowAvroWriterFactory implements FormatWriterFactory {
 
-        private static final long serialVersionUID = 1L;
+        private final AvroWriterFactory<InternalRow> factory;
 
-        private final RowType producedRowType;
-
-        public AvroGenericRecordBulkFormat(RowType producedRowType) {
-            super(AvroSchemaConverter.convertToSchema(producedRowType));
-            this.producedRowType = producedRowType;
-        }
-
-        @Override
-        protected GenericRecord createReusedAvroRecord() {
-            return new GenericData.Record(readerSchema);
-        }
-
-        @Override
-        protected Function<GenericRecord, InternalRow> createConverter() {
-            AvroToRowDataConverters.AvroToRowDataConverter converter =
-                    AvroToRowDataConverters.createRowConverter(producedRowType);
-            return record -> record == null ? null : (GenericRow) converter.convert(record);
-        }
-    }
-
-    /**
-     * A {@link FormatWriterFactory} to convert {@link InternalRow} to {@link GenericRecord} and
-     * wrap {@link AvroWriterFactory}.
-     */
-    private static class RowDataAvroWriterFactory implements FormatWriterFactory {
-
-        private final AvroWriterFactory<GenericRecord> factory;
-        private final RowType rowType;
-
-        private RowDataAvroWriterFactory(RowType rowType, String codec) {
-            this.rowType = rowType;
+        private RowAvroWriterFactory(RowType rowType, String codec) {
             this.factory =
                     new AvroWriterFactory<>(
                             out -> {
                                 Schema schema = AvroSchemaConverter.convertToSchema(rowType);
-                                DatumWriter<GenericRecord> datumWriter =
-                                        new GenericDatumWriter<>(schema);
-                                DataFileWriter<GenericRecord> dataFileWriter =
+                                AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
+                                DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);
 
                                 if (codec != null) {
@@ -146,16 +105,12 @@ public class AvroFileFormat extends FileFormat {
         @Override
         public FormatWriter create(PositionOutputStream out, String compression)
                 throws IOException {
-            AvroBulkWriter<GenericRecord> writer = factory.create(out);
-            RowDataToAvroConverters.RowDataToAvroConverter converter =
-                    RowDataToAvroConverters.createConverter(rowType);
-            Schema schema = AvroSchemaConverter.convertToSchema(rowType);
+            AvroBulkWriter<InternalRow> writer = factory.create(out);
             return new FormatWriter() {
 
                 @Override
                 public void addElement(InternalRow element) throws IOException {
-                    GenericRecord record = (GenericRecord) converter.convert(schema, element);
-                    writer.addElement(record);
+                    writer.addElement(element);
                 }
 
                 @Override

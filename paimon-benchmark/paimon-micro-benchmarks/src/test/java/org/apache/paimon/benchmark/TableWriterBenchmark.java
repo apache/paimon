@@ -43,7 +43,22 @@ public class TableWriterBenchmark extends TableBenchmark {
          * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
          * avro:            Best/Avg Time(ms)    Row Rate(M/s)      Per Row(ns)   Relative
          * ---------------------------------------------------------------------------------
-         * avro_write        10139 / 13044              0.0          33797.3       1.0X
+         * avro_write        5847 / 7296              0.1          19489.5       1.0X
+         */
+    }
+
+    @Test
+    public void testAvroWithoutStats() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        options.set(CoreOptions.METADATA_STATS_MODE, "none");
+        innerTest("avro", options);
+        /*
+         * Java HotSpot(TM) 64-Bit Server VM 1.8.0_301-b09 on Mac OS X 10.16
+         * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
+         * avro:            Best/Avg Time(ms)    Row Rate(M/s)      Per Row(ns)   Relative
+         * ---------------------------------------------------------------------------------
+         * avro_write        4701 / 5780              0.1          15669.6       1.0X
          */
     }
 
