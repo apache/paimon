@@ -28,6 +28,8 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.OutputFile;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
@@ -45,15 +47,8 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
     public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
             throws IOException {
 
-        String compressName = CompressionCodecName.SNAPPY.name();
-        if (null != compression) {
-            compressName = compression;
-        }
-
         return new ParquetRowDataBuilder(out, rowType)
-                .withCompressionCodec(
-                        CompressionCodecName.fromConf(
-                                conf.getString(ParquetOutputFormat.COMPRESSION, compressName)))
+                .withCompressionCodec(CompressionCodecName.fromConf(getCompression(compression)))
                 .withRowGroupSize(
                         conf.getLong(
                                 ParquetOutputFormat.BLOCK_SIZE, ParquetWriter.DEFAULT_BLOCK_SIZE))
@@ -79,5 +74,17 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                                         ParquetOutputFormat.WRITER_VERSION,
                                         ParquetProperties.DEFAULT_WRITER_VERSION.toString())))
                 .build();
+    }
+
+    public String getCompression(@Nullable String compression) {
+        String compressName;
+        if (null != compression) {
+            compressName = compression;
+        } else {
+            compressName =
+                    conf.getString(
+                            ParquetOutputFormat.COMPRESSION, CompressionCodecName.SNAPPY.name());
+        }
+        return compressName;
     }
 }
