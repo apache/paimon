@@ -29,14 +29,12 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.StatsCollectorFactories;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -110,10 +108,7 @@ public class ManifestFileTest {
                         avro,
                         pathFactory,
                         suggestedFileSize,
-                        null,
-                        StatsCollectorFactories.createStatsFactories(
-                                new CoreOptions(new HashMap<>()),
-                                DEFAULT_PART_TYPE.getFieldNames()))
+                        null)
                 .create();
     }
 

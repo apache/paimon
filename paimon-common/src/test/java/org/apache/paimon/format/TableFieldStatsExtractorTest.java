@@ -63,7 +63,7 @@ import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link TableStatsExtractor}. */
-public abstract class TableFieldStatsExtractorTestBaseCollector {
+public abstract class TableFieldStatsExtractorTest {
 
     @TempDir java.nio.file.Path tempDir;
 

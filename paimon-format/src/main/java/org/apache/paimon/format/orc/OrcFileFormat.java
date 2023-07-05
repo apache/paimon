@@ -87,6 +87,11 @@ public class OrcFileFormat extends FileFormat {
     }
 
     @Override
+    public String preferStatsMode() {
+        return "truncate(16)";
+    }
+
+    @Override
     public Optional<TableStatsExtractor> createStatsExtractor(
             RowType type, FieldStatsCollector.Factory[] statsCollectors) {
         return Optional.of(new OrcTableStatsExtractor(type, statsCollectors));

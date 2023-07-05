@@ -52,6 +52,11 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
+    public String preferStatsMode() {
+        return "truncate(16)";
+    }
+
+    @Override
     public FormatReaderFactory createReaderFactory(
             RowType type, int[][] projection, List<Predicate> filters) {
         return new ParquetReaderFactory(

@@ -25,6 +25,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -79,7 +80,7 @@ public class RollingFileWriterTest {
                                         fileFormat
                                                 .createStatsExtractor(
                                                         SCHEMA,
-                                                        StatsCollectorFactories
+                                                        FieldStatsCollector
                                                                 .createFullStatsFactories(
                                                                         SCHEMA.getFieldCount()))
                                                 .orElse(null),
