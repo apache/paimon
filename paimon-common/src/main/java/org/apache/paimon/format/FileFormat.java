@@ -64,11 +64,6 @@ public abstract class FileFormat {
     /** Validate data field type supported or not. */
     public abstract void validateDataFields(RowType rowType);
 
-    /** Prefer stats mode for this format, as default value. */
-    public String preferStatsMode() {
-        return "NONE";
-    }
-
     public FormatReaderFactory createReaderFactory(RowType rowType) {
         int[][] projection = new int[rowType.getFieldCount()][];
         for (int i = 0; i < projection.length; i++) {
