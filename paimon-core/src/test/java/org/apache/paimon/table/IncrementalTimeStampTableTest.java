@@ -97,8 +97,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                         table,
                         Pair.of(
                                 INCREMENTAL_BETWEEN_TIMESTAMP,
-                                String.format(
-                                        "%s,%s", timestampEarliest - 1, timestampEarliest)));
+                                String.format("%s,%s", timestampEarliest - 1, timestampEarliest)));
         assertThat(result1).isEmpty();
 
         List<InternalRow> result2 =
@@ -182,8 +181,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                         table,
                         Pair.of(
                                 INCREMENTAL_BETWEEN_TIMESTAMP,
-                                String.format(
-                                        "%s,%s", timestampEarliest - 1, timestampEarliest)));
+                                String.format("%s,%s", timestampEarliest - 1, timestampEarliest)));
         assertThat(result1).isEmpty();
 
         List<InternalRow> result2 =
@@ -208,8 +206,7 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                         table,
                         Pair.of(
                                 INCREMENTAL_BETWEEN_TIMESTAMP,
-                                String.format(
-                                        "%s,%s", timestampSnapshot2, timestampSnapshot4)));
+                                String.format("%s,%s", timestampSnapshot2, timestampSnapshot4)));
         assertThat(result3)
                 .containsExactlyInAnyOrder(
                         GenericRow.of(1, 1, 3),

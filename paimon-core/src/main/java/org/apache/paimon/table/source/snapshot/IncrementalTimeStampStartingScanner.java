@@ -41,7 +41,8 @@ public class IncrementalTimeStampStartingScanner implements StartingScanner {
             return new NoSnapshot();
         }
         Snapshot startSnapshot = manager.earlierOrEqualTimeMills(startTimestamp);
-        Long startSnapshotId = (startSnapshot == null) ? earliestSnapshot.id() - 1 : startSnapshot.id();
+        Long startSnapshotId =
+                (startSnapshot == null) ? earliestSnapshot.id() - 1 : startSnapshot.id();
         Snapshot endSnapshot = manager.earlierOrEqualTimeMills(endTimestamp);
         Long endSnapshotId = (endSnapshot == null) ? latestSnapshot.id() : endSnapshot.id();
         IncrementalStartingScanner incrementalStartingScanner =
