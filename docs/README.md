@@ -21,6 +21,10 @@ From this directory:
 	```sh
 	hugo -b "" serve
 	```
+  * Perform the above two steps together
+	```sh
+	./build_docs.sh
+  	```
 
 The site can be viewed at http://localhost:1313/
 

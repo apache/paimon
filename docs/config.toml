@@ -77,3 +77,14 @@ pygmentsUseClasses = true
 [markup]
 [markup.goldmark.renderer]
   unsafe = true
+
+[languages]
+  [languages.en]
+  languageName = 'English'
+  contentDir = 'content'
+  weight = 1
+
+[languages.zh]
+  languageName = '中文版'
+  contentDir = 'content.zh'
+  weight = 2
