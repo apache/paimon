@@ -26,19 +26,16 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.IteratorResultIterator;
+import org.apache.paimon.utils.Pool;
 
 import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.SeekableInput;
 import org.apache.avro.io.DatumReader;
-import org.apache.paimon.utils.Pool;
-
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Iterator;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 /** Provides a {@link FormatReaderFactory} for Avro records. */
 public class AvroBulkFormat implements FormatReaderFactory {
