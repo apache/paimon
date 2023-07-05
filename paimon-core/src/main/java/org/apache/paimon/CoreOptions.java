@@ -30,7 +30,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
@@ -726,6 +728,23 @@ public class CoreOptions implements Serializable {
                                                             + STATS_MODE_SUFFIX))
                                     .build());
 
+    public static final ConfigOption<String> COMMIT_CALLBACKS =
+            key("commit.callbacks")
+                    .stringType()
+                    .defaultValue("")
+                    .withDescription(
+                            "A list of commit callback classes to be called after a successful commit. "
+                                    + "Class names are connected with comma "
+                                    + "(example: com.test.CallbackA,com.sample.CallbackB).");
+
+    public static final ConfigOption<String> COMMIT_CALLBACK_PARAM =
+            key("commit.callback.#.param")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Parameter string for the constructor of class #. "
+                                    + "Callback class should parse the parameter by itself.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1052,6 +1071,45 @@ public class CoreOptions implements Serializable {
 
     public Duration consumerExpireTime() {
         return options.get(CONSUMER_EXPIRATION_TIME);
+    }
+
+    public List<CommitCallback> commitCallbacks() {
+        List<CommitCallback> result = new ArrayList<>();
+        for (String className : options.get(COMMIT_CALLBACKS).split(",")) {
+            className = className.trim();
+            if (className.length() == 0) {
+                continue;
+            }
+
+            Class<?> clazz;
+            try {
+                clazz =
+                        Class.forName(
+                                className, true, Thread.currentThread().getContextClassLoader());
+            } catch (ClassNotFoundException e) {
+                throw new RuntimeException(e);
+            }
+            Preconditions.checkArgument(
+                    CommitCallback.class.isAssignableFrom(clazz),
+                    "Class " + clazz + " must implement " + CommitCallback.class);
+            String param = options.get(COMMIT_CALLBACK_PARAM.key().replace("#", className));
+
+            try {
+                if (param == null) {
+                    result.add((CommitCallback) clazz.newInstance());
+                } else {
+                    result.add(
+                            (CommitCallback) clazz.getConstructor(String.class).newInstance(param));
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Failed to initialize commit callback "
+                                + className
+                                + (param == null ? "" : " with param " + param),
+                        e);
+            }
+        }
+        return result;
     }
 
     /** Specifies the merge engine for table with primary key. */
