@@ -86,12 +86,16 @@ public class TagManager {
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
         Snapshot taggedSnapshot = taggedSnapshot(tagName);
-        List<Snapshot> taggedSnapshots = taggedSnapshots();
-        fileIO.deleteQuietly(tagPath(tagName));
+        List<Snapshot> taggedSnapshots;
 
         // skip file deletion if snapshot exists
         if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
+            fileIO.deleteQuietly(tagPath(tagName));
             return;
+        } else {
+            // FileIO discovers tags by tag file, so we should read all tags before we delete tag
+            taggedSnapshots = taggedSnapshots();
+            fileIO.deleteQuietly(tagPath(tagName));
         }
 
         // collect skipping sets from the left neighbor tag and the nearest right neighbor (either

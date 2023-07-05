@@ -779,21 +779,21 @@ public abstract class FileStoreTableTestBase {
         // table-path/pt=1/bucket-0/data-0.orc
     }
 
-    @ParameterizedTest(name = "expire snapshots")
+    @ParameterizedTest(name = "expire snapshots = {0}")
     @ValueSource(booleans = {true, false})
     public void testRollbackToTag(boolean expire) throws Exception {
         int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
         FileStoreTable table = prepareRollbackTable(commitTimes);
 
         table.createTag("test1", 1);
-        table.createTag("test2", commitTimes - 1);
-        table.createTag("test3", commitTimes);
+        table.createTag("test2", commitTimes - 3);
+        table.createTag("test3", commitTimes - 1);
 
         if (expire) {
             // expire snapshots
             Options options = new Options();
-            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 3);
-            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
+            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 5);
+            options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 5);
             table.copy(options.toMap()).store().newExpire().expire();
         }
 

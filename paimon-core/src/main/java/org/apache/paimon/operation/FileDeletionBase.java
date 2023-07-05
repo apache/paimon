@@ -207,26 +207,10 @@ public abstract class FileDeletionBase {
         return readManifestEntries(tryReadManifestList(manifestListName));
     }
 
-    /**
-     * Try to read base and delta manifest lists at one time. If failed to read either one, the
-     * return will be empty to avoid error merging result.
-     */
+    /** Try to read base and delta manifest lists at one time. */
     protected Iterable<ManifestEntry> tryReadDataManifestEntries(Snapshot snapshot) {
-        List<ManifestFileMeta> manifestFileMetas = new ArrayList<>();
-
-        try {
-            manifestFileMetas.addAll(manifestList.read(snapshot.baseManifestList()));
-        } catch (Exception e) {
-            LOG.warn("Failed to read manifest list file " + snapshot.baseManifestList(), e);
-            return Collections.emptyList();
-        }
-
-        try {
-            manifestFileMetas.addAll(manifestList.read(snapshot.deltaManifestList()));
-        } catch (Exception e) {
-            LOG.warn("Failed to read manifest list file " + snapshot.deltaManifestList(), e);
-            return Collections.emptyList();
-        }
+        List<ManifestFileMeta> manifestFileMetas = tryReadManifestList(snapshot.baseManifestList());
+        manifestFileMetas.addAll(tryReadManifestList(snapshot.deltaManifestList()));
 
         return readManifestEntries(manifestFileMetas);
     }

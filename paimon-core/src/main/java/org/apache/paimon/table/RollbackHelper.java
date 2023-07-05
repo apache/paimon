@@ -21,7 +21,6 @@ package org.apache.paimon.table;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.operation.FileDeletionBase;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.utils.SnapshotManager;
@@ -30,9 +29,8 @@ import org.apache.paimon.utils.TagManager;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.function.Predicate;
@@ -48,11 +46,6 @@ public class RollbackHelper {
     private final SnapshotDeletion snapshotDeletion;
     private final TagDeletion tagDeletion;
 
-    private final SortedMap<Snapshot, String> tags;
-    private final Map<Snapshot, List<ManifestEntry>> tagManifestEntries;
-
-    private Set<String> manifestsSkippingSet;
-
     public RollbackHelper(
             SnapshotManager snapshotManager,
             TagManager tagManager,
@@ -64,31 +57,36 @@ public class RollbackHelper {
         this.fileIO = fileIO;
         this.snapshotDeletion = snapshotDeletion;
         this.tagDeletion = tagDeletion;
-
-        this.tags = tagManager.tags();
-        this.tagManifestEntries = new HashMap<>();
     }
 
-    /**
-     * Clean snapshots and tags whose id is larger than given snapshot's in the reverse direction.
-     */
-    public void cleanLargerThan(Snapshot snapshot) {
-        // snapshots are cleaned first because it will collect tag manifest entries
-        cleanSnapshotsLargerThan(snapshot);
-        cleanTagsLargerThan(snapshot);
+    /** Clean snapshots and tags whose id is larger than given snapshot's. */
+    public void cleanLargerThan(Snapshot retainedSnapshot) {
+        // clean data files
+        List<Snapshot> cleanedSnapshots = cleanSnapshotsDataFiles(retainedSnapshot);
+        List<Snapshot> cleanedTags = cleanTagsDataFiles(retainedSnapshot);
+
+        // clean manifests
+        // this can be used for snapshots and tags manifests cleaning both
+        Set<String> manifestsSkippingSet = snapshotDeletion.manifestSkippingSet(retainedSnapshot);
+
+        for (Snapshot snapshot : cleanedSnapshots) {
+            snapshotDeletion.cleanUnusedManifests(snapshot, manifestsSkippingSet);
+        }
+
+        cleanedTags.removeAll(cleanedSnapshots);
+        for (Snapshot snapshot : cleanedTags) {
+            tagDeletion.cleanUnusedManifests(snapshot, manifestsSkippingSet);
+        }
 
         // modify the latest hint
         try {
-            snapshotManager.commitLatestHint(snapshot.id());
+            snapshotManager.commitLatestHint(retainedSnapshot.id());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    private void cleanSnapshotsLargerThan(Snapshot snapshot) {
-        long snapshotId = snapshot.id();
-        List<Snapshot> toBeCleaned = new ArrayList<>();
-
+    private List<Snapshot> cleanSnapshotsDataFiles(Snapshot retainedSnapshot) {
         long earliest =
                 checkNotNull(
                         snapshotManager.earliestSnapshotId(), "Cannot find earliest snapshot.");
@@ -97,62 +95,40 @@ public class RollbackHelper {
 
         // delete snapshot files first, cannot be read now
         // it is possible that some snapshots have been expired
-        long to = Math.max(earliest, snapshotId + 1);
+        List<Snapshot> toBeCleaned = new ArrayList<>();
+        long to = Math.max(earliest, retainedSnapshot.id() + 1);
         for (long i = latest; i >= to; i--) {
             toBeCleaned.add(snapshotManager.snapshot(i));
             fileIO.deleteQuietly(snapshotManager.snapshotPath(i));
         }
 
-        // delete data files
-        for (Snapshot s : toBeCleaned) {
-            cleanSnapshotDataFiles(s);
+        // delete data files of snapshots
+        // don't worry about tag data files because file deletion methods won't throw exception
+        // when deleting non-existing data files
+        for (Snapshot snapshot : toBeCleaned) {
+            snapshotDeletion.deleteAddedDataFiles(snapshot.deltaManifestList());
+            snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
         }
 
         // delete directories
         snapshotDeletion.cleanDataDirectories();
 
-        // delete manifest files
-        cleanManifests(snapshot, toBeCleaned, snapshotDeletion);
+        return toBeCleaned;
     }
 
-    // don't concern about tag data files because file deletion methods won't throw exception
-    // when deleting non-existing data files
-    private void cleanSnapshotDataFiles(Snapshot snapshot) {
-        List<ManifestEntry> delta = new ArrayList<>();
-        snapshotDeletion
-                .tryReadManifestEntries(snapshot.deltaManifestList())
-                .iterator()
-                .forEachRemaining(delta::add);
-        if (tags.containsKey(snapshot)) {
-            // store tag data manifest entries to avoid redundant reading when cleaning tag
-            List<ManifestEntry> base = new ArrayList<>();
-            snapshotDeletion
-                    .tryReadManifestEntries(snapshot.baseManifestList())
-                    .iterator()
-                    .forEachRemaining(base::add);
-
-            List<ManifestEntry> data = new ArrayList<>(base);
-            data.addAll(delta);
-            tagManifestEntries.put(snapshot, data);
-        }
-
-        snapshotDeletion.deleteAddedDataFiles(delta);
-        snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
-    }
-
-    private void cleanTagsLargerThan(Snapshot snapshot) {
+    private List<Snapshot> cleanTagsDataFiles(Snapshot retainedSnapshot) {
+        SortedMap<Snapshot, String> tags = tagManager.tags();
         if (tags.isEmpty()) {
-            return;
+            return Collections.emptyList();
         }
 
-        long snapshotId = snapshot.id();
         List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
         List<Snapshot> toBeCleaned = new ArrayList<>();
 
         // delete tag files
         for (int i = taggedSnapshots.size() - 1; i >= 0; i--) {
             Snapshot tag = taggedSnapshots.get(i);
-            if (tag.id() <= snapshotId) {
+            if (tag.id() <= retainedSnapshot.id()) {
                 break;
             }
             toBeCleaned.add(tag);
@@ -160,32 +136,14 @@ public class RollbackHelper {
         }
 
         // delete data files
-        Predicate<ManifestEntry> dataFileSkipper = tagDeletion.dataFileSkipper(snapshot);
+        Predicate<ManifestEntry> dataFileSkipper = tagDeletion.dataFileSkipper(retainedSnapshot);
         for (Snapshot s : toBeCleaned) {
-            // try to find entries in cache first
-            List<ManifestEntry> entries = tagManifestEntries.get(s);
-            if (entries != null) {
-                tagDeletion.cleanUnusedDataFiles(entries, dataFileSkipper);
-            } else {
-                tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
-            }
+            tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
         }
 
         // delete directories
         tagDeletion.cleanDataDirectories();
 
-        // delete manifest files
-        cleanManifests(snapshot, toBeCleaned, tagDeletion);
-    }
-
-    private void cleanManifests(
-            Snapshot snapshot, List<Snapshot> toBeCleaned, FileDeletionBase deletion) {
-        if (manifestsSkippingSet == null) {
-            manifestsSkippingSet = deletion.manifestSkippingSet(snapshot);
-        }
-
-        for (Snapshot s : toBeCleaned) {
-            deletion.cleanUnusedManifests(s, manifestsSkippingSet);
-        }
+        return toBeCleaned;
     }
 }
