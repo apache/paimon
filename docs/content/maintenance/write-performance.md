@@ -135,6 +135,26 @@ One can easily see that too many sorted runs will result in poor query performan
 
 Compaction will become less frequent when `num-sorted-run.compaction-trigger` becomes larger, thus improving writing performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the table. This is a trade-off between writing and query performance.
 
+## File Format
+
+If you want to achieve ultimate compaction performance, you can consider using row storage file format AVRO.
+- The advantage is that you can achieve high write throughput and compaction performance.
+- The disadvantage is that your analysis queries will be slow, and the biggest problem with row storage is that it
+  does not have the query projection. For example, if the table have 100 columns but only query a few columns, the
+  IO of row storage cannot be ignored. Additionally, compression efficiency will decrease and storage costs will
+  increase.
+
+This a tradeoff.
+
+Enable row storage through the following options:
+```shell
+file.format = avro
+metadata.stats-mode = none
+```
+
+The collection of statistical information for row storage is a bit expensive, so I suggest turning off statistical
+information as well.
+
 ## Write Initialize
 
 In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
