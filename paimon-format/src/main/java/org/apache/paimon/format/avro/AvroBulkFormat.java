@@ -30,6 +30,8 @@ import org.apache.paimon.utils.IteratorResultIterator;
 import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.SeekableInput;
 import org.apache.avro.io.DatumReader;
+import org.apache.paimon.utils.Pool;
+
 
 import javax.annotation.Nullable;
 
@@ -62,14 +64,15 @@ public class AvroBulkFormat implements FormatReaderFactory {
         private final DataFileReader<InternalRow> reader;
 
         private final long end;
-        private final Lock lock;
+        private final Pool<Object> pool;
 
         private AvroReader(FileIO fileIO, Path path) throws IOException {
             this.fileIO = fileIO;
             this.reader = createReaderFromPath(path);
             this.reader.sync(0);
             this.end = fileIO.getFileSize(path);
-            this.lock = new ReentrantLock();
+            this.pool = new Pool<>(1);
+            this.pool.add(new Object());
         }
 
         private DataFileReader<InternalRow> createReaderFromPath(Path path) throws IOException {
@@ -88,8 +91,9 @@ public class AvroBulkFormat implements FormatReaderFactory {
         @Nullable
         @Override
         public RecordIterator<InternalRow> readBatch() throws IOException {
+            Object ticket;
             try {
-                lock.lockInterruptibly();
+                ticket = pool.pollEntry();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException(
@@ -97,12 +101,12 @@ public class AvroBulkFormat implements FormatReaderFactory {
             }
 
             if (!readNextBlock()) {
-                lock.unlock();
+                pool.recycler().recycle(ticket);
                 return null;
             }
 
             Iterator<InternalRow> iterator = new AvroBlockIterator(reader.getBlockCount(), reader);
-            return new IteratorResultIterator<>(iterator, lock::unlock);
+            return new IteratorResultIterator<>(iterator, () -> pool.recycler().recycle(ticket));
         }
 
         private boolean readNextBlock() throws IOException {
