@@ -52,7 +52,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
     private PositionOutputStream out;
 
     private long recordCount;
-    private long length;
     protected boolean closed;
 
     public SingleFileWriter(
@@ -79,7 +78,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
         }
 
         this.recordCount = 0;
-        this.length = 0;
         this.closed = false;
     }
 
@@ -147,7 +145,6 @@ public abstract class SingleFileWriter<T, R> implements FileWriter<T, R> {
             writer.finish();
 
             out.flush();
-            length = out.getPos();
             out.close();
         } catch (IOException e) {
             LOG.warn("Exception occurs when closing file " + path + ". Cleaning up.", e);
