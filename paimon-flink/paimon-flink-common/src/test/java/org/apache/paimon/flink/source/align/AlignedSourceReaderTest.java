@@ -352,8 +352,20 @@ public class AlignedSourceReaderTest {
             CheckpointAlignMode alignMode,
             ScheduledExecutorService executors,
             List<AlignedSourceSplit> restoredSplits) {
-        AlignedSourceReader reader =
-                new AlignedSourceReader(table.newReadBuilder(), 10, true, alignMode, executors);
+        AlignedSourceReader reader;
+        switch (alignMode) {
+            case STRICTLY:
+                reader =
+                        new StrictlyAlignedSourceReader(
+                                table.newReadBuilder(), 10, true, executors);
+                break;
+            case LOOSELY:
+                reader =
+                        new LooselyAlignedSourceReader(table.newReadBuilder(), 10, true, executors);
+                break;
+            default:
+                throw new UnsupportedOperationException("Unsupported align mode");
+        }
         reader.addSplits(restoredSplits);
         reader.start();
         return reader;

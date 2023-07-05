@@ -90,10 +90,18 @@ public class AlignedContinuousFileSource implements Source<Split, AlignedSourceS
     public SourceReader<Split, AlignedSourceSplit> createReader(SourceReaderContext readerContext)
             throws Exception {
         Options conf = Options.fromMap(options);
-        return new AlignedSourceReader(
-                readBuilder,
-                conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
-                emitSnapshotWatermark,
-                conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGNED_MODE));
+        long scanInterval = conf.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis();
+        FlinkConnectorOptions.CheckpointAlignMode alignMode =
+                conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGNED_MODE);
+        switch (alignMode) {
+            case STRICTLY:
+                return new StrictlyAlignedSourceReader(
+                        readBuilder, scanInterval, emitSnapshotWatermark);
+            case LOOSELY:
+                return new LooselyAlignedSourceReader(
+                        readBuilder, scanInterval, emitSnapshotWatermark);
+            default:
+                throw new UnsupportedOperationException("Unsupported alignment mode.");
+        }
     }
 }

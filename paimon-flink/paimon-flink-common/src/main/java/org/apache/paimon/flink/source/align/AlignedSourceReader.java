@@ -31,7 +31,6 @@ import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.core.io.InputStatus;
 import org.apache.flink.runtime.io.AvailabilityProvider;
-import org.apache.flink.util.FlinkRuntimeException;
 import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +42,6 @@ import java.util.Optional;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
@@ -62,7 +60,8 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.CheckpointAlignMode;
  *   <li>LOOSELY: several paimon snapshots are processed within a checkpoint interval.
  * </ol>
  */
-public class AlignedSourceReader
+@SuppressWarnings("unchecked")
+public abstract class AlignedSourceReader
         implements ExternallyInducedSourceReader<Split, AlignedSourceSplit> {
 
     private static final Logger LOG = LoggerFactory.getLogger(AlignedSourceReader.class);
@@ -82,8 +81,6 @@ public class AlignedSourceReader
 
     private final ScheduledExecutorService executors;
 
-    private final CheckpointAlignMode alignMode;
-
     private Long snapshotIdByNextCheckpoint;
 
     private boolean blocking;
@@ -98,26 +95,6 @@ public class AlignedSourceReader
             ReadBuilder readBuilder,
             long scanInterval,
             boolean emitSnapshotWatermark,
-            CheckpointAlignMode alignMode) {
-        this(
-                readBuilder,
-                scanInterval,
-                emitSnapshotWatermark,
-                alignMode,
-                Executors.newScheduledThreadPool(
-                        1,
-                        r ->
-                                new Thread(
-                                        r,
-                                        "Aligned source scan for "
-                                                + Thread.currentThread().getName())));
-    }
-
-    public AlignedSourceReader(
-            ReadBuilder readBuilder,
-            long scanInterval,
-            boolean emitSnapshotWatermark,
-            CheckpointAlignMode alignMode,
             ScheduledExecutorService executors) {
         this.readBuilder = readBuilder;
         this.pendingSplits = new FutureCompletingBlockingDeque<>();
@@ -126,7 +103,6 @@ public class AlignedSourceReader
         this.nextSnapshotPerCheckpoint = new TreeMap<>();
         this.scanInterval = scanInterval;
         this.emitSnapshotWatermark = emitSnapshotWatermark;
-        this.alignMode = alignMode;
         this.executors = executors;
         this.snapshotIdByNextCheckpoint = null;
         this.blocking = false;
@@ -156,8 +132,8 @@ public class AlignedSourceReader
 
     @Override
     public InputStatus pollNext(ReaderOutput<Split> readerOutput) throws Exception {
-        if (!blocking && !pendingSplits.isEmpty()) {
-            AlignedSourceSplit alignedSourceSplit = pendingSplits.poll();
+        AlignedSourceSplit alignedSourceSplit;
+        if (!blocking && (alignedSourceSplit = pendingSplits.poll()) != null) {
             snapshotIdByNextCheckpoint = alignedSourceSplit.getNextSnapshotId();
             for (Split split : alignedSourceSplit.getSplits()) {
                 readerOutput.collect(split);
@@ -169,19 +145,16 @@ public class AlignedSourceReader
                     readerOutput.emitWatermark(new Watermark(watermark));
                 }
             }
-
-            if (alignMode == CheckpointAlignMode.STRICTLY) {
-                blocking = true;
-                switchToUnavailable();
-            }
+            blocking = blockingAfterSendSnapshot(!pendingCheckpoints.isEmpty());
         }
 
+        if (blocking) {
+            switchToUnavailable();
+        }
         // checkpoint might has not been triggered
         if (!blocking && endOfScan && pendingSplits.isEmpty()) {
             return InputStatus.END_OF_INPUT;
-        } else if (alignMode == CheckpointAlignMode.LOOSELY
-                && !pendingSplits.isEmpty()
-                && pendingCheckpoints.isEmpty()) {
+        } else if (!blocking && !pendingSplits.isEmpty() && pendingCheckpoints.isEmpty()) {
             return InputStatus.MORE_AVAILABLE;
         } else {
             return InputStatus.NOTHING_AVAILABLE;
@@ -204,7 +177,8 @@ public class AlignedSourceReader
 
     @Override
     public CompletableFuture<Void> isAvailable() {
-        return blocking ? availabilityFuture : pendingSplits.getAvailabilityFuture();
+        return (CompletableFuture<Void>)
+                AvailabilityProvider.and(availabilityFuture, pendingSplits.getAvailabilityFuture());
     }
 
     @Override
@@ -220,10 +194,10 @@ public class AlignedSourceReader
     @Override
     public Optional<Long> shouldTriggerCheckpoint() {
         LOG.debug(
-                "Ask if checkpoint can be triggered. blocking {}, pending checkpoints {}",
+                "Ask if checkpoint can be triggered. waiting for checkpoint {}, pending checkpoints {}",
                 blocking,
                 pendingCheckpoints);
-        if (blocking || alignMode == CheckpointAlignMode.LOOSELY) {
+        if (shouldTriggerCheckpoint(blocking)) {
             Long checkpoint = pendingCheckpoints.pollFirst();
             if (checkpoint != null) {
                 return Optional.of(checkpoint);
@@ -238,18 +212,14 @@ public class AlignedSourceReader
             LOG.info("Received checkpoint event {}", sourceEvent);
             long checkpointId = ((CheckpointEvent) sourceEvent).getCheckpointId();
             pendingCheckpoints.add(checkpointId);
+            switchToAvailable();
         }
     }
 
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
-        if (alignMode == CheckpointAlignMode.STRICTLY) {
-            // There is no guarantee that checkpoints will be completed in order.
-            // Some checkpoints triggered later may be completed first, which will
-            // cause the previous checkpoints to be aborted.
-            Preconditions.checkArgument(
-                    nextSnapshotPerCheckpoint.firstKey() == checkpointId,
-                    "Checkpoint should be completed in order.");
+        if (nextSnapshotPerCheckpoint.firstKey() != checkpointId) {
+            handleCheckpointCompletedOutOfOrder(checkpointId);
         }
         Long nextSnapshotId = nextSnapshotPerCheckpoint.get(checkpointId);
         scan.notifyCheckpointComplete(nextSnapshotId);
@@ -258,13 +228,9 @@ public class AlignedSourceReader
 
     @Override
     public void notifyCheckpointAborted(long checkpointId) throws Exception {
-        if (alignMode == CheckpointAlignMode.STRICTLY
-                && !pendingCheckpoints.contains(checkpointId)) {
+        if (!pendingCheckpoints.contains(checkpointId)) {
             // checkpoint has been triggered from source
-            throw new FlinkRuntimeException(
-                    String.format(
-                            "The alignment mode of strictly requires that the checkpoint %s must be successful.",
-                            checkpointId));
+            handleCheckpointAborted(checkpointId);
         } else {
             // checkpoint may not been triggered from source
             pendingCheckpoints.remove(checkpointId);
@@ -278,12 +244,24 @@ public class AlignedSourceReader
         }
     }
 
+    /** After sending a snapshot, decide whether to block or not. */
+    protected abstract boolean blockingAfterSendSnapshot(boolean hasPendingCheckpoint);
+
+    /** Decide whether a checkpoint should be triggered. */
+    protected abstract boolean shouldTriggerCheckpoint(boolean blocking);
+
+    /** Handle the case where checkpoints are completed out of order. */
+    protected abstract void handleCheckpointCompletedOutOfOrder(long checkpointId);
+
+    /** Handle the case where the checkpoint is aborted. */
+    protected abstract void handleCheckpointAborted(long checkpointId);
+
     private void scanNextSnapshot() {
         LOG.debug(
                 "SnapshotId by next checkpoint is {}, pending splits {}",
                 snapshotIdByNextCheckpoint,
                 pendingSplits);
-        if (pendingSplits.size() < MAX_PENDING_PLANS) {
+        if (pendingSplits.size() < MAX_PENDING_PLANS && !endOfScan) {
             try {
                 TableScan.Plan plan = scan.plan();
                 if (!(plan instanceof SnapshotNotExistPlan)) {
@@ -315,5 +293,6 @@ public class AlignedSourceReader
             availabilityFuture = (CompletableFuture<Void>) AVAILABLE;
             current.complete(null);
         }
+        pendingSplits.notifyAvailable();
     }
 }

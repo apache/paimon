@@ -1,4 +1,3 @@
-package org.apache.paimon.flink.source.align;
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -16,6 +15,8 @@ package org.apache.paimon.flink.source.align;
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+package org.apache.paimon.flink.source.align;
 
 import org.apache.flink.runtime.io.AvailabilityProvider;
 
@@ -172,6 +173,23 @@ public class FutureCompletingBlockingDeque<T> {
      */
     public CompletableFuture<Void> getAvailabilityFuture() {
         return currentFuture;
+    }
+
+    /**
+     * Makes sure the availability future is complete, if it is not complete already. All futures
+     * returned by previous calls to {@link #getAvailabilityFuture()} are guaranteed to be
+     * completed.
+     *
+     * <p>All future calls to the method will return a completed future, until the point that the
+     * availability is reset via calls to {@link #poll()} that leave the queue empty.
+     */
+    public void notifyAvailable() {
+        lock.lock();
+        try {
+            moveToAvailable();
+        } finally {
+            lock.unlock();
+        }
     }
 
     /** Internal utility to make sure that the current future futures are complete (until reset). */
