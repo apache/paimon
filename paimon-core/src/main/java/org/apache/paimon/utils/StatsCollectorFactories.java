@@ -23,9 +23,7 @@ package org.apache.paimon.utils;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.statistics.FullFieldStatsCollector;
 
-import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
@@ -54,11 +52,5 @@ public class StatsCollectorFactories {
             }
         }
         return modes;
-    }
-
-    public static FieldStatsCollector.Factory[] createFullStatsFactories(int numFields) {
-        FieldStatsCollector.Factory[] factories = new FieldStatsCollector.Factory[numFields];
-        Arrays.fill(factories, (FieldStatsCollector.Factory) FullFieldStatsCollector::new);
-        return factories;
     }
 }

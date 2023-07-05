@@ -23,6 +23,7 @@ package org.apache.paimon.statistics;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 
+import java.util.Arrays;
 import java.util.regex.Matcher;
 
 import static org.apache.paimon.statistics.TruncateFieldStatsCollector.TRUNCATE_PATTERN;
@@ -79,5 +80,11 @@ public interface FieldStatsCollector {
                 }
                 throw new IllegalArgumentException("Unexpected option: " + option);
         }
+    }
+
+    static FieldStatsCollector.Factory[] createFullStatsFactories(int numFields) {
+        FieldStatsCollector.Factory[] factories = new FieldStatsCollector.Factory[numFields];
+        Arrays.fill(factories, (FieldStatsCollector.Factory) FullFieldStatsCollector::new);
+        return factories;
     }
 }

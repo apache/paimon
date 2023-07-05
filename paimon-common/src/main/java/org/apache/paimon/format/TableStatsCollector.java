@@ -25,6 +25,7 @@ import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
+import static org.apache.paimon.statistics.FieldStatsCollector.createFullStatsFactories;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Collector to extract statistics of each fields from a series of records. */
@@ -33,6 +34,10 @@ public class TableStatsCollector {
     private final RowDataToObjectArrayConverter converter;
     private final FieldStatsCollector[] statsCollectors;
     private final Serializer<Object>[] fieldSerializers;
+
+    public TableStatsCollector(RowType rowType) {
+        this(rowType, createFullStatsFactories(rowType.getFieldCount()));
+    }
 
     public TableStatsCollector(RowType rowType, FieldStatsCollector.Factory[] collectorFactory) {
         int numFields = rowType.getFieldCount();

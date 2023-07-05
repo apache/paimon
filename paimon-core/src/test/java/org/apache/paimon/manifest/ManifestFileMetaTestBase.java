@@ -32,12 +32,10 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.StatsCollectorFactories;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -136,10 +134,7 @@ public abstract class ManifestFileMetaTestBase {
                                 "default",
                                 CoreOptions.FILE_FORMAT.defaultValue().toString()),
                         Long.MAX_VALUE,
-                        null,
-                        StatsCollectorFactories.createStatsFactories(
-                                new CoreOptions(new HashMap<>()),
-                                getPartitionType().getFieldNames()))
+                        null)
                 .create();
     }
 

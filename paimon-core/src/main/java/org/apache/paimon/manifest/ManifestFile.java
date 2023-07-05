@@ -29,7 +29,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.SingleFileWriter;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -53,7 +52,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final RowType partitionType;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
-    private final FieldStatsCollector.Factory[] partitionStats;
 
     private ManifestFile(
             FileIO fileIO,
@@ -64,14 +62,12 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FormatWriterFactory writerFactory,
             PathFactory pathFactory,
             long suggestedFileSize,
-            @Nullable SegmentsCache<String> cache,
-            FieldStatsCollector.Factory[] partitionStats) {
+            @Nullable SegmentsCache<String> cache) {
         super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
-        this.partitionStats = partitionStats;
     }
 
     @VisibleForTesting
@@ -91,8 +87,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                                 new ManifestEntryWriter(
                                         writerFactory,
                                         pathFactory.newPath(),
-                                        CoreOptions.FILE_COMPRESSION.defaultValue(),
-                                        partitionStats),
+                                        CoreOptions.FILE_COMPRESSION.defaultValue()),
                         suggestedFileSize);
         try {
             writer.write(entries);
@@ -112,14 +107,10 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private long numDeletedFiles = 0;
         private long schemaId = Long.MIN_VALUE;
 
-        ManifestEntryWriter(
-                FormatWriterFactory factory,
-                Path path,
-                String fileCompression,
-                FieldStatsCollector.Factory[] partitionStats) {
+        ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
             super(ManifestFile.this.fileIO, factory, path, serializer::toRow, fileCompression);
 
-            this.partitionStatsCollector = new TableStatsCollector(partitionType, partitionStats);
+            this.partitionStatsCollector = new TableStatsCollector(partitionType);
             this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);
         }
 
@@ -166,7 +157,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
         @Nullable private final SegmentsCache<String> cache;
-        private final FieldStatsCollector.Factory[] partitionStats;
 
         public Factory(
                 FileIO fileIO,
@@ -175,8 +165,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize,
-                @Nullable SegmentsCache<String> cache,
-                FieldStatsCollector.Factory[] partitionStats) {
+                @Nullable SegmentsCache<String> cache) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.partitionType = partitionType;
@@ -184,7 +173,6 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
             this.cache = cache;
-            this.partitionStats = partitionStats;
         }
 
         public ManifestFile create() {
@@ -198,8 +186,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileFormat.createWriterFactory(entryType),
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
-                    cache,
-                    partitionStats);
+                    cache);
         }
     }
 }
