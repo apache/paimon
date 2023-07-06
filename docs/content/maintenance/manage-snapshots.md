@@ -71,6 +71,132 @@ Snapshot expiration is controlled by the following table properties.
     </tbody>
 </table>
 
+When the number of snapshots is less than `snapshot.num-retained.min`, no snapshots will be expired(even the condition `snapshot.time-retained` meet), after which `snapshot.num-retained.max` and `snapshot.time-retained` will be used to control the snapshot expiration until the remaining snapshot meets the condition.
+
+The following example show more details(`snapshot.num-retained.min` is 2, `snapshot.time-retained` is 1h, `snapshot.num-retained.max` is 5):
+
+> snapshot item is described using tuple (snapshotId, corresponding time)
+
+<table>
+<thead>
+    <tr>
+      <th class="text-left" style="width: 30%">New Snapshots</th>
+      <th class="text-left" style="width: 40%">All snapshots after expiration check</th>
+      <th class="text-left" style="width: 30%">explanation</th>
+    </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>
+         (snapshots-1, 2023-07-06 10:00)
+        </td>
+        <td>
+         (snapshots-1, 2023-07-06 10:00)
+        </td>
+        <td>
+          No snapshot expired
+        </td>
+      </tr>
+      <tr>
+        <td>
+         (snapshots-2, 2023-07-06 10:20)
+        </td>
+        <td>
+         (snapshots-1, 2023-07-06 10:00) <br>
+         (snapshots-2, 2023-07-06 10:20)
+        </td>
+        <td>
+          No snapshot expired
+        </td>
+      </tr>
+      <tr>
+        <td>
+          (snapshots-3, 2023-07-06 10:40)
+        </td>
+        <td>
+           (snapshots-1, 2023-07-06 10:00) <br>
+           (snapshots-2, 2023-07-06 10:20) <br>
+           (snapshots-3, 2023-07-06 10:40)
+        </td>
+        <td>
+           No snapshot expired
+        </td>
+      </tr>
+      <tr>
+        <td>
+          (snapshots-4, 2023-07-06 11:00)
+        </td>
+        <td>
+          (snapshots-1, 2023-07-06 10:00) <br>
+          (snapshots-2, 2023-07-06 10:20) <br>
+          (snapshots-3, 2023-07-06 10:40) <br>
+          (snapshots-4, 2023-07-06 11:00) <br>
+        </td>
+        <td>
+           No snapshot expired
+        </td>
+      </tr>
+      <tr>
+        <td>
+          (snapshots-5, 2023-07-06 11:20)
+        </td>
+        <td>
+          (snapshots-2, 2023-07-06 10:20) <br>
+          (snapshots-3, 2023-07-06 10:40) <br>
+          (snapshots-4, 2023-07-06 11:00) <br>
+          (snapshots-5, 2023-07-06 11:20)
+        </td>
+        <td>
+           snapshot-1 was expired because the condition `snapshot.time-retained` is not met
+        </td>
+      </tr>
+      <tr>
+        <td>
+          (snapshots-6, 2023-07-06 11:30)
+        </td>
+        <td>
+        (snapshots-3, 2023-07-06 10:40) <br>
+        (snapshots-4, 2023-07-06 11:00) <br>
+        (snapshots-5, 2023-07-06 11:20) <br>
+        (snapshots-6, 2023-07-06 11:30)
+        </td>
+        <td>
+        snapshot-2 was expired because the condition `snapshot.time-retained` is not met
+        </td>
+      </tr>
+      <tr>
+        <td>
+          (snapshots-7, 2023-07-06 11:35)
+        </td>
+        <td>
+        (snapshots-3, 2023-07-06 10:40) <br>
+        (snapshots-4, 2023-07-06 11:00) <br>
+        (snapshots-5, 2023-07-06 11:20) <br>
+        (snapshots-6, 2023-07-06 11:30) <br>
+        (snapshots-7, 2023-07-06 11:35)
+        </td>
+        <td>
+        No snapshot expired
+        </td>
+      </tr>
+      <tr>
+        <td>
+          (snapshots-8, 2023-07-06 11:36)
+        </td>
+        <td>
+        (snapshots-4, 2023-07-06 11:00) <br>
+        (snapshots-5, 2023-07-06 11:20) <br>
+        (snapshots-6, 2023-07-06 11:30) <br>
+        (snapshots-7, 2023-07-06 11:35) <br>
+        (snapshots-8, 2023-07-06 11:36)
+        </td>
+        <td>
+         snapshot-3 was expired because the condition `snapshot.num-retained.max` is not met
+        </td>
+      </tr>
+    </tbody>
+</table>
+
 Please note that too short retain time or too small retain number may result in:
 
 - Batch queries cannot find the file. For example, the table is relatively large and
