@@ -697,6 +697,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Read incremental changes between start snapshot (exclusive) and end snapshot, "
                                     + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
+    public static final ConfigOption<String> INCREMENTAL_BETWEEN_TIMESTAMP =
+            key("incremental-between-timestamp")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Read incremental changes between start timestamp (exclusive) and end timestamp, "
+                                    + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
 
     public static final String STATS_MODE_SUFFIX = "stats-mode";
 
@@ -965,7 +972,8 @@ public class CoreOptions implements Serializable {
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
                     || options.getOptional(SCAN_TAG_NAME).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
-            } else if (options.getOptional(INCREMENTAL_BETWEEN).isPresent()) {
+            } else if (options.getOptional(INCREMENTAL_BETWEEN).isPresent()
+                    || options.getOptional(INCREMENTAL_BETWEEN_TIMESTAMP).isPresent()) {
                 return StartupMode.INCREMENTAL;
             } else {
                 return StartupMode.LATEST_FULL;
@@ -996,14 +1004,17 @@ public class CoreOptions implements Serializable {
     public Pair<String, String> incrementalBetween() {
         String str = options.get(INCREMENTAL_BETWEEN);
         if (str == null) {
-            return null;
+            str = options.get(INCREMENTAL_BETWEEN_TIMESTAMP);
+            if (str == null) {
+                return null;
+            }
         }
 
         String[] split = str.split(",");
         if (split.length != 2) {
             throw new IllegalArgumentException(
-                    "The incremental-between must specific start snapshot (exclusive) and end snapshot,"
-                            + " for example, '5,10' means changes between snapshot 5 and snapshot 10. But is: "
+                    "The incremental-between or incremental-between-timestamp  must specific start(exclusive) and end snapshot or timestamp,"
+                            + " for example, 'incremental-between'='5,10' means changes between snapshot 5 and snapshot 10. But is: "
                             + str);
         }
         return Pair.of(split[0], split[1]);
@@ -1192,7 +1203,8 @@ public class CoreOptions implements Serializable {
                         + "produces a snapshot specified by \"scan.snapshot-id\" but does not read new changes."),
 
         INCREMENTAL(
-                "incremental", "Read incremental changes between start snapshot and end snapshot.");
+                "incremental",
+                "Read incremental changes between start and end snapshot or timestamp.");
 
         private final String value;
         private final String description;
@@ -1449,7 +1461,9 @@ public class CoreOptions implements Serializable {
             options.set(SCAN_MODE, StartupMode.FROM_SNAPSHOT);
         }
 
-        if (options.contains(INCREMENTAL_BETWEEN) && !options.contains(SCAN_MODE)) {
+        if ((options.contains(INCREMENTAL_BETWEEN_TIMESTAMP)
+                        || options.contains(INCREMENTAL_BETWEEN))
+                && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.INCREMENTAL);
         }
     }

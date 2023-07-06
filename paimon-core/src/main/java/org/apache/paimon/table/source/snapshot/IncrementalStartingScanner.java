@@ -33,11 +33,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** {@link StartingScanner} for incremental changes. */
+/** {@link StartingScanner} for incremental changes by snapshot. */
 public class IncrementalStartingScanner implements StartingScanner {
 
-    private final long start;
-    private final long end;
+    private long start;
+    private long end;
 
     public IncrementalStartingScanner(long start, long end) {
         this.start = start;
@@ -46,6 +46,11 @@ public class IncrementalStartingScanner implements StartingScanner {
 
     @Override
     public Result scan(SnapshotManager manager, SnapshotReader reader) {
+        long earliestSnapshotId = manager.earliestSnapshotId();
+        long latestSnapshotId = manager.latestSnapshotId();
+        start = (start < earliestSnapshotId) ? earliestSnapshotId - 1 : start;
+        end = (end > latestSnapshotId) ? latestSnapshotId : end;
+
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new HashMap<>();
         for (long i = start + 1; i < end + 1; i++) {
             List<DataSplit> splits = readDeltaSplits(reader, manager.snapshot(i));

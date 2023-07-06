@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.IncrementalStartingScanner;
+import org.apache.paimon.table.source.snapshot.IncrementalTimeStampStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
@@ -134,10 +135,16 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                         : new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
             case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
-                Pair<String, String> incremental = options.incrementalBetween();
-                return new IncrementalStartingScanner(
-                        Long.parseLong(incremental.getLeft()),
-                        Long.parseLong(incremental.getRight()));
+                Pair<String, String> incrementalBetween = options.incrementalBetween();
+                if (options.toMap().get(CoreOptions.INCREMENTAL_BETWEEN.key()) != null) {
+                    return new IncrementalStartingScanner(
+                            Long.parseLong(incrementalBetween.getLeft()),
+                            Long.parseLong(incrementalBetween.getRight()));
+                } else {
+                    return new IncrementalTimeStampStartingScanner(
+                            Long.parseLong(incrementalBetween.getLeft()),
+                            Long.parseLong(incrementalBetween.getRight()));
+                }
             default:
                 throw new UnsupportedOperationException(
                         "Unknown startup mode " + startupMode.name());
