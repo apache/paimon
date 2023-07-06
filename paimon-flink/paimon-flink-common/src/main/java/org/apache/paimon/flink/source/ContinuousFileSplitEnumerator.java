@@ -138,8 +138,7 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public PendingSplitsCheckpoint snapshotState(long checkpointId) {
-        List<FileStoreSourceSplit> splits = new ArrayList<>();
-        splits.addAll(splitAssigner.remainingSplits());
+        List<FileStoreSourceSplit> splits = new ArrayList<>(splitAssigner.remainingSplits());
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(splits, nextSnapshotId);
 
@@ -172,7 +171,11 @@ public class ContinuousFileSplitEnumerator
         assignSplits();
     }
 
-    private void assignSplits() {
+    /**
+     * Method should be synchronized because {@link #handleSplitRequest} and {@link
+     * #processDiscoveredSplits} have thread conflicts.
+     */
+    private synchronized void assignSplits() {
         Map<Integer, List<FileStoreSourceSplit>> assignment = createAssignment();
         if (finished) {
             Iterator<Integer> iterator = readersAwaitingSplit.iterator();
