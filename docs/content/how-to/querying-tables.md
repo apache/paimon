@@ -53,13 +53,27 @@ SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
 
 {{< tab "Spark3" >}}
 
-#### DataFrame
+Requires Spark 3.3+.
 
-To select a specific table snapshot or the snapshot at some time in the DataFrame API, Paimon supports:
+you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
 
-* `scan.snapshot-id` selects a specific table snapshot
-* `scan.timestamp-millis` selects the current snapshot at a timestamp, in milliseconds
-* `scan.tag-name` selects a specific table snapshot by tag name
+```sql
+-- read the snapshot with id 1L (use snapshot id as version)
+SELECT * FROM t VERSION AS OF 1;
+
+-- read the snapshot from specified timestamp 
+SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
+
+-- read the snapshot from specified timestamp in unix seconds
+SELECT * FROM t TIMESTAMP AS OF 1678883047;
+
+-- read tag 'my-tag'
+SELECT * FROM t VERSION AS OF 'my-tag';
+```
+
+{{< /tab >}}
+
+{{< tab "Spark3-DF" >}}
 
 ```scala
 // read the snapshot from specified timestamp in unix seconds
@@ -80,28 +94,9 @@ spark.read
 ```scala
 // read tag 'my-tag'
 spark.read
-    .option(CoreOptions.SCAN_TAG_NAME.key(), "my-tag")
+    .option("scan.tag-name", "my-tag")
     .format("paimon")
     .load("path/to/table")
-```
-
-#### SQL
-Requires Spark 3.3+.
-
-you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
-
-```sql
--- read the snapshot with id 1L (use snapshot id as version)
-SELECT * FROM t VERSION AS OF 1;
-
--- read the snapshot from specified timestamp 
-SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
-
--- read the snapshot from specified timestamp in unix seconds
-SELECT * FROM t TIMESTAMP AS OF 1678883047;
-
--- read tag 'my-tag'
-SELECT * FROM t VERSION AS OF 'my-tag';
 ```
 
 {{< /tab >}}
