@@ -45,6 +45,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext.SplitAssignmentState;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Unit tests for the {@link ContinuousFileSplitEnumerator}. */
 public class ContinuousFileSplitEnumeratorTest {
@@ -459,6 +460,39 @@ public class ContinuousFileSplitEnumeratorTest {
         assignments = context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(1);
         assertThat(toDataSplits(assignments.get(1).getAssignedSplits()).size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testRemoveReadersAwaitSuccessful() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(2);
+        context.registerReader(0, "test-host");
+        context.registerReader(1, "test-host");
+
+        Queue<TableScan.Plan> results = new LinkedBlockingQueue<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.UNAWARE)
+                        .build();
+        enumerator.start();
+        enumerator.handleSplitRequest(1, "test-host");
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
+        }
+        results.add(new DataFilePlan(splits));
+
+        context.registeredReaders().remove(1);
+        // assign to task 0
+        assertThatCode(() -> enumerator.handleSplitRequest(0, "test-host"))
+                .doesNotThrowAnyException();
     }
 
     private static List<DataSplit> toDataSplits(List<FileStoreSourceSplit> splits) {
