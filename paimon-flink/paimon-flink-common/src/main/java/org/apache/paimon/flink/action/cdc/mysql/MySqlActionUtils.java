@@ -58,6 +58,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 class MySqlActionUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
+
+    public static final String JDBC_PROPERTIES_PREFIX = "jdbc.properties.";
+
     public static final ConfigOption<Boolean> SCAN_NEWLY_ADDED_TABLE_ENABLED =
             ConfigOptions.key("scan.newly-added-table.enabled")
                     .booleanType()
@@ -199,7 +202,8 @@ class MySqlActionUtils {
         mySqlConfig
                 .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE)
                 .ifPresent(sourceBuilder::splitSize);
-        //Whether to close idle readers at the end of the snapshot phase. The flink version is required to be greater than or equal to 1.14
+        // Whether to close idle readers at the end of the snapshot phase. The flink version is
+        // required to be greater than or equal to 1.14
         // when 'execution.checkpointing.checkpoints-after-tasks-finish.enabled' is set to true.
         mySqlConfig
                 .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_CLOSE_IDLE_READER_ENABLED)
@@ -254,8 +258,8 @@ class MySqlActionUtils {
         for (Map.Entry<String, String> entry : mySqlConfig.toMap().entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
-            if (key.startsWith(JdbcConstant.PROPERTIES_PREFIX)) {
-                jdbcProperties.put(key.substring(JdbcConstant.PROPERTIES_PREFIX.length()), value);
+            if (key.startsWith(JDBC_PROPERTIES_PREFIX)) {
+                jdbcProperties.put(key.substring(JDBC_PROPERTIES_PREFIX.length()), value);
             } else if (key.startsWith(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX)) {
                 debeziumProperties.put(
                         key.substring(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX.length()), value);
