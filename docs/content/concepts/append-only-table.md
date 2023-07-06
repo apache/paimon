@@ -38,6 +38,11 @@ You can also define bucket number for Append-only table, see [Bucket]({{< ref "c
 It is recommended that you set the `bucket-key` field. Otherwise, the data will be hashed according to the whole row,
 and the performance will be poor.
 
+After version 0.5, we raised a configuration 'bucket' = '-1' to make bucket unaware. While setting this, we put all
+data in one directory (we mark it as 'bucket-0' for compatibility). We will not shuffle while writing and parallelism
+config will be able to work independently. When you mark bucket unaware, stream read will not guarantee order anymore.
+If you need a batch offline table and has no special demands of order, we recommend you to use unaware-bucket mode.
+
 ## Compaction
 
 By default, the sink node will automatically perform compaction to control the number of files. The following options
