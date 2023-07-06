@@ -193,19 +193,18 @@ public class ContinuousFileSplitEnumerator
 
     private Map<Integer, List<FileStoreSourceSplit>> createAssignment() {
         Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
-        readersAwaitingSplit.forEach(
-                task -> {
-                    // if the reader that requested another split has failed in the meantime, remove
-                    // it from the list of waiting readers
-                    if (!context.registeredReaders().containsKey(task)) {
-                        readersAwaitingSplit.remove(task);
-                        return;
-                    }
-                    List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
-                    if (splits.size() > 0) {
-                        assignment.put(task, splits);
-                    }
-                });
+        Iterator<Integer> readersAwait = readersAwaitingSplit.iterator();
+        while (readersAwait.hasNext()) {
+            Integer task = readersAwait.next();
+            if (!context.registeredReaders().containsKey(task)) {
+                readersAwait.remove();
+                continue;
+            }
+            List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
+            if (splits.size() > 0) {
+                assignment.put(task, splits);
+            }
+        }
         return assignment;
     }
 
