@@ -35,7 +35,6 @@ Paimon currently supports Flink 1.17, 1.16, 1.15 and 1.14. We recommend the late
 Download the jar file with corresponding version.
 
 > Currently, paimon provides two types jar: one of which(the bundled jar) is used for read/write data, and the other(action jar) for operations such as manually compaction,
-currently action jar supports `compaction`, `drop-partition`, `delete`, `merge-into`, `rollback-to`, `create-tag`, `delete-tag`, `mysql-sync-table`, `mysql-sync-database`, `kafka-sync-table`, `kafka-sync-database`.
 {{< stable >}}
 
 | Version    | Type | Jar                                                                                                                                                                     |
