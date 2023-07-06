@@ -301,7 +301,6 @@ under the License.
 
                                     <!-- compress -->
                                     <include>com.github.luben:zstd-jni</include>
-                                    <include>org.xerial.snappy:snappy-java</include>
                                 </includes>
                             </artifactSet>
                             <filters>

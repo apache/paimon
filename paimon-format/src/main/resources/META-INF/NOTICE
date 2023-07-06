@@ -26,6 +26,7 @@ This project bundles the following dependencies under the Apache Software Licens
 - org.apache.parquet:parquet-format-structures:1.12.3
 - org.apache.parquet:parquet-jackson:1.12.3
 - commons-pool:commons-pool:1.6
+- com.github.luben:zstd-jni:1.15.0-1
 
 This project bundles the following dependencies under the BSD license.
 You find it under licenses/LICENSE.protobuf.
