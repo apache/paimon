@@ -135,6 +135,31 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testTravelToTag() throws Exception {
+        // snapshot 2
+        writeTable(
+                "t1",
+                GenericRow.of(7, 2L, BinaryString.fromString("7")),
+                GenericRow.of(8, 4L, BinaryString.fromString("8")));
+
+        getTable("t1").createTag("tag1", 1);
+
+        // read tag 'tag1'
+        Dataset<Row> dataset =
+                spark.read()
+                        .format("paimon")
+                        .option(CoreOptions.SCAN_TAG_NAME.key(), "tag1")
+                        .load(tablePath1.toString());
+        List<Row> results = dataset.collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1,2,1], [5,6,3]]");
+
+        // read latest
+        dataset = spark.read().format("paimon").load(tablePath1.toString());
+        results = dataset.collectAsList();
+        assertThat(results.toString()).isEqualTo("[[1,2,1], [5,6,3], [7,2,7], [8,4,8]]");
+    }
+
+    @Test
     public void testIllegalVersion() {
         assertThatThrownBy(
                         () ->
