@@ -118,10 +118,12 @@ public class HashBucketAssigner {
                         LOG.debug(
                                 "Removing index for partition {}. "
                                         + "Index's last accessed identifier is {}, "
-                                        + "while latest committed identifier is {}",
+                                        + "while latest committed identifier is {}, "
+                                        + "current commit identifier is {}.",
                                 partition,
                                 index.lastAccessedCommitIdentifier,
-                                latestCommittedIdentifier);
+                                latestCommittedIdentifier,
+                                commitIdentifier);
                     }
                     iterator.remove();
                 }

@@ -199,11 +199,13 @@ public abstract class AbstractFileStoreWrite<T>
                             LOG.debug(
                                     "Closing writer for partition {}, bucket {}. "
                                             + "Writer's last modified identifier is {}, "
-                                            + "while latest committed identifier is {}",
+                                            + "while latest committed identifier is {}, "
+                                            + "current commit identifier is {}.",
                                     partition,
                                     bucket,
                                     writerContainer.lastModifiedCommitIdentifier,
-                                    latestCommittedIdentifier);
+                                    latestCommittedIdentifier,
+                                    commitIdentifier);
                         }
                         writerContainer.writer.close();
                         bucketIter.remove();
