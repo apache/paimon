@@ -32,21 +32,21 @@ import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
 import static org.apache.paimon.flink.action.Action.getTablePath;
 import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 
-/** Rollback to specific snapshot action for Flink. */
+/** Rollback to specific version action for Flink. */
 public class RollbackToAction extends TableActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(RollbackToAction.class);
 
-    private final long snapshotId;
+    private final String version;
 
     public RollbackToAction(
             String warehouse,
             String databaseName,
             String tableName,
-            long snapshotId,
+            String version,
             Map<String, String> catalogConfig) {
         super(warehouse, databaseName, tableName, catalogConfig);
-        this.snapshotId = snapshotId;
+        this.version = version;
     }
 
     public static Optional<Action> create(String[] args) {
@@ -61,41 +61,44 @@ public class RollbackToAction extends TableActionBase {
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        checkRequiredArgument(params, "snapshot");
-        String snapshot = params.get("snapshot");
+        checkRequiredArgument(params, "version");
+        String version = params.get("version");
 
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 
         RollbackToAction action =
                 new RollbackToAction(
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        Long.parseLong(snapshot),
-                        catalogConfig);
+                        tablePath.f0, tablePath.f1, tablePath.f2, version, catalogConfig);
 
         return Optional.of(action);
     }
 
     private static void printHelp() {
-        System.out.println("Action \"rollback-to\" roll back a table to a specific snapshot ID.");
+        System.out.println(
+                "Action \"rollback-to\" roll back a table to a specific snapshot ID or tag.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
                 "  rollback-to --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --snapshot <snapshot_spec>");
+                        + "--table <table-name> --version <version-string>");
+        System.out.println(
+                "  'version-string can be a long value representing a snapshot ID or a tag name.'");
         System.out.println();
     }
 
     @Override
     public void run() throws Exception {
-        LOG.debug("Run rollback-to action with snapshot id '{}'.", snapshotId);
+        LOG.debug("Run rollback-to action with snapshot id '{}'.", version);
 
         if (!(table instanceof DataTable)) {
             throw new IllegalArgumentException("Unknown table: " + identifier);
         }
 
-        table.rollbackTo(snapshotId);
+        if (version.chars().allMatch(Character::isDigit)) {
+            table.rollbackTo(Long.parseLong(version));
+        } else {
+            table.rollbackTo(version);
+        }
     }
 }

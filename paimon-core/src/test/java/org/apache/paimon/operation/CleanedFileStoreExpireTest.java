@@ -36,7 +36,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -89,8 +88,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 
         // expire
-        expire.snapshotDeletion()
-                .doDeleteExpiredDataFiles(Arrays.asList(add, delete), new HashMap<>(), f -> false);
+        expire.snapshotDeletion().doCleanUnusedDataFile(Arrays.asList(add, delete), f -> false);
 
         // check
         assertThat(fileIO.exists(myDataFile)).isFalse();

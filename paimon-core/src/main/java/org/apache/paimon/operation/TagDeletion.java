@@ -23,165 +23,65 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
 
-import javax.annotation.Nullable;
-
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 
-import static org.apache.paimon.operation.DeletionUtils.addMergedDataFiles;
-import static org.apache.paimon.operation.DeletionUtils.collectManifestSkippingSet;
-import static org.apache.paimon.operation.DeletionUtils.containsDataFile;
-import static org.apache.paimon.operation.DeletionUtils.readEntries;
-import static org.apache.paimon.operation.DeletionUtils.tryDeleteDirectories;
-
-/**
- * Delete tag files. This class doesn't check changelog files because they are handled by {@link
- * SnapshotDeletion}.
- */
-public class TagDeletion {
-
-    private final FileIO fileIO;
-    private final FileStorePathFactory pathFactory;
-    private final ManifestList manifestList;
-    private final ManifestFile manifestFile;
-    private final IndexFileHandler indexFileHandler;
-    @Nullable private final Integer scanManifestParallelism;
-
-    private final SnapshotManager snapshotManager;
-    private final List<Snapshot> taggedSnapshots;
-
-    private final Map<BinaryRow, Map<Integer, Set<String>>> skippedDataFiles;
-    private final Set<String> skippedManifests;
+/** Delete tag files. */
+public class TagDeletion extends FileDeletionBase {
 
     public TagDeletion(
             FileIO fileIO,
-            Path tablePath,
             FileStorePathFactory pathFactory,
-            ManifestList manifestList,
             ManifestFile manifestFile,
-            IndexFileHandler indexFileHandler,
-            @Nullable Integer scanManifestParallelism) {
-        this.fileIO = fileIO;
-        this.pathFactory = pathFactory;
-        this.manifestList = manifestList;
-        this.manifestFile = manifestFile;
-        this.indexFileHandler = indexFileHandler;
-        this.scanManifestParallelism = scanManifestParallelism;
-
-        this.snapshotManager = new SnapshotManager(fileIO, tablePath);
-        this.taggedSnapshots = new TagManager(fileIO, tablePath).taggedSnapshots();
-
-        this.skippedDataFiles = new HashMap<>();
-        this.skippedManifests = new HashSet<>();
+            ManifestList manifestList,
+            IndexFileHandler indexFileHandler) {
+        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler);
     }
 
-    /** Delete unused data files, manifest files and empty data file directories of tag. */
-    public void delete(Snapshot taggedSnapshot) {
-        if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
-            return;
-        }
-
-        // collect from the earliest snapshot
-        Snapshot earliest = snapshotManager.snapshot(snapshotManager.earliestSnapshotId());
-        collectSkip(earliest);
-
-        // collect from the neighbor tags
-        int index = findIndex(taggedSnapshot);
-        if (index - 1 >= 0) {
-            collectSkip(taggedSnapshots.get(index - 1));
-        }
-        if (index + 1 < taggedSnapshots.size()) {
-            collectSkip(taggedSnapshots.get(index + 1));
-        }
-
-        // delete data files and empty directories
-        deleteDataFiles(taggedSnapshot);
-        // delete manifests
-        deleteManifestFiles(taggedSnapshot);
+    @Override
+    public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ManifestEntry> skipper) {
+        cleanUnusedDataFiles(tryReadDataManifestEntries(taggedSnapshot), skipper);
     }
 
-    private void collectSkip(Snapshot snapshot) {
-        addMergedDataFiles(
-                skippedDataFiles, snapshot, manifestList, manifestFile, scanManifestParallelism);
-        skippedManifests.addAll(
-                collectManifestSkippingSet(snapshot, manifestList, indexFileHandler));
+    @Override
+    public void cleanUnusedManifests(Snapshot taggedSnapshot, Set<String> skippingSet) {
+        // doesn't clean changelog files because they are handled by SnapshotDeletion
+        cleanUnusedManifests(taggedSnapshot, skippingSet, false);
     }
 
-    private void deleteDataFiles(Snapshot taggedSnapshot) {
-        // delete data files
-        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
-        Iterable<ManifestEntry> entries =
-                readEntries(
-                        taggedSnapshot.dataManifests(manifestList),
-                        manifestFile,
-                        scanManifestParallelism);
+    public void cleanUnusedDataFiles(
+            Iterable<ManifestEntry> entries, Predicate<ManifestEntry> skipper) {
         for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
-            if (!containsDataFile(skippedDataFiles, entry)) {
+            if (!skipper.test(entry)) {
                 Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
                 fileIO.deleteQuietly(new Path(bucketPath, entry.file().fileName()));
                 for (String file : entry.file().extraFiles()) {
                     fileIO.deleteQuietly(new Path(bucketPath, file));
                 }
 
-                deletionBuckets
-                        .computeIfAbsent(entry.partition(), p -> new HashSet<>())
-                        .add(entry.bucket());
-            }
-        }
-
-        // delete empty data file directories
-        tryDeleteDirectories(deletionBuckets, pathFactory, fileIO);
-    }
-
-    private void deleteManifestFiles(Snapshot taggedSnapshot) {
-        for (ManifestFileMeta manifest : taggedSnapshot.dataManifests(manifestList)) {
-            String fileName = manifest.fileName();
-            if (!skippedManifests.contains(fileName)) {
-                manifestFile.delete(fileName);
-            }
-        }
-
-        // delete manifest lists
-        manifestList.delete(taggedSnapshot.baseManifestList());
-        manifestList.delete(taggedSnapshot.deltaManifestList());
-
-        // delete index files
-        String indexManifest = taggedSnapshot.indexManifest();
-        // check exists, it may have been deleted by other snapshots
-        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            for (IndexManifestEntry entry : indexFileHandler.readManifest(indexManifest)) {
-                if (!skippedManifests.contains(entry.indexFile().fileName())) {
-                    indexFileHandler.deleteIndexFile(entry);
-                }
-            }
-
-            if (!skippedManifests.contains(indexManifest)) {
-                indexFileHandler.deleteManifest(indexManifest);
+                recordDeletionBuckets(entry);
             }
         }
     }
 
-    private int findIndex(Snapshot taggedSnapshot) {
-        for (int i = 0; i < taggedSnapshots.size(); i++) {
-            if (taggedSnapshot.id() == taggedSnapshots.get(i).id()) {
-                return i;
-            }
+    public Predicate<ManifestEntry> dataFileSkipper(Snapshot fromSnapshot) {
+        return dataFileSkipper(Collections.singletonList(fromSnapshot));
+    }
+
+    public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> fromSnapshots) {
+        Map<BinaryRow, Map<Integer, Set<String>>> skipped = new HashMap<>();
+        for (Snapshot snapshot : fromSnapshots) {
+            addMergedDataFiles(skipped, snapshot);
         }
-        throw new RuntimeException(
-                String.format(
-                        "Didn't find tag with snapshot id '%s'.This is unexpected.",
-                        taggedSnapshot.id()));
+        return entry -> containsDataFile(skipped, entry);
     }
 }

@@ -20,23 +20,16 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.SnapshotDeletion;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
@@ -105,6 +98,11 @@ public class SnapshotManager implements Serializable {
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest snapshot id", e);
         }
+    }
+
+    public @Nullable Snapshot earliestSnapshot() {
+        Long snapshotId = earliestSnapshotId();
+        return snapshotId == null ? null : snapshot(snapshotId);
     }
 
     public @Nullable Long earliestSnapshotId() {
@@ -333,43 +331,5 @@ public class SnapshotManager implements Serializable {
         Path hintFile = new Path(snapshotDir, fileName);
         fileIO.delete(hintFile, false);
         fileIO.writeFileUtf8(hintFile, String.valueOf(snapshotId));
-    }
-
-    public void rollbackTo(SnapshotDeletion deletion, long snapshotId) throws IOException {
-        if (!snapshotExists(snapshotId)) {
-            throw new IllegalArgumentException("Rollback snapshot not exist: " + snapshotId);
-        }
-
-        Long latest = findLatest();
-        if (latest == null) {
-            return;
-        }
-
-        // first modify hint
-        commitLatestHint(snapshotId);
-
-        // delete snapshots first, cannot be read now.
-        List<Snapshot> snapshots = new ArrayList<>();
-        for (long i = latest; i > snapshotId; i--) {
-            snapshots.add(snapshot(i));
-            fileIO().deleteQuietly(snapshotPath(i));
-        }
-
-        // delete data files
-        Map<BinaryRow, Set<Integer>> deletionBuckets = new HashMap<>();
-        for (Snapshot snapshot : snapshots) {
-            // delete data files
-            deletion.deleteAddedDataFiles(snapshot.deltaManifestList(), deletionBuckets);
-            deletion.deleteAddedDataFiles(snapshot.changelogManifestList(), deletionBuckets);
-        }
-
-        // delete directories
-        deletion.tryDeleteDirectories(deletionBuckets);
-
-        // delete manifest files.
-        Set<String> manifestSkipped = deletion.collectManifestSkippingSet(snapshot(snapshotId));
-        for (Snapshot snapshot : snapshots) {
-            deletion.deleteManifestFiles(manifestSkipped, snapshot);
-        }
     }
 }

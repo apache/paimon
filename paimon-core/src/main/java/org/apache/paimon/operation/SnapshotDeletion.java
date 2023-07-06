@@ -25,42 +25,28 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
-import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.paimon.utils.TagManager;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 
 /** Delete snapshot files. */
-public class SnapshotDeletion {
+public class SnapshotDeletion extends FileDeletionBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SnapshotDeletion.class);
+    /** Used to record which tag is cached in tagged snapshots list. */
+    private int cachedTagIndex = -1;
 
-    private final FileIO fileIO;
-    private final FileStorePathFactory pathFactory;
-    private final ManifestFile manifestFile;
-    private final ManifestList manifestList;
-    private final IndexFileHandler indexFileHandler;
+    /** Used to cache data files used by current tag. */
+    private final Map<BinaryRow, Map<Integer, Set<String>>> cachedTagDataFiles = new HashMap<>();
 
     public SnapshotDeletion(
             FileIO fileIO,
@@ -68,134 +54,22 @@ public class SnapshotDeletion {
             ManifestFile manifestFile,
             ManifestList manifestList,
             IndexFileHandler indexFileHandler) {
-        this.fileIO = fileIO;
-        this.pathFactory = pathFactory;
-        this.manifestFile = manifestFile;
-        this.manifestList = manifestList;
-        this.indexFileHandler = indexFileHandler;
+        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler);
     }
 
-    // ================================= PUBLIC =================================================
-
-    /**
-     * Delete expired file in the manifest list files. Delete files marked as "DELETE" in manifests.
-     *
-     * @param manifestListName name of manifest list
-     * @param deletionBuckets partition-buckets of which some data files have been deleted
-     * @param dataFileSkipper if the test result of a data file is true, the data file will be
-     *     skipped when deleting
-     */
-    public void deleteExpiredDataFiles(
-            String manifestListName,
-            Map<BinaryRow, Set<Integer>> deletionBuckets,
-            Predicate<ManifestEntry> dataFileSkipper) {
-        doDeleteExpiredDataFiles(
-                getManifestEntriesFromManifestList(manifestListName),
-                deletionBuckets,
-                dataFileSkipper);
+    @Override
+    public void cleanUnusedDataFiles(Snapshot snapshot, Predicate<ManifestEntry> skipper) {
+        doCleanUnusedDataFile(tryReadManifestEntries(snapshot.deltaManifestList()), skipper);
     }
 
-    /**
-     * Delete added file in the manifest list files. Added files marked as "ADD" in manifests.
-     *
-     * @param manifestListName name of manifest list
-     * @param deletionBuckets partition-buckets of which some data files have been deleted
-     */
-    public void deleteAddedDataFiles(
-            String manifestListName, Map<BinaryRow, Set<Integer>> deletionBuckets) {
-        for (ManifestEntry entry : getManifestEntriesFromManifestList(manifestListName)) {
-            if (entry.kind() == FileKind.ADD) {
-                fileIO.deleteQuietly(
-                        new Path(
-                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
-                                entry.file().fileName()));
-                deletionBuckets
-                        .computeIfAbsent(entry.partition(), p -> new HashSet<>())
-                        .add(entry.bucket());
-            }
-        }
-    }
-
-    /**
-     * Try to delete directories collected from {@link #deleteExpiredDataFiles} and {@link
-     * #deleteAddedDataFiles}.
-     */
-    public void tryDeleteDirectories(Map<BinaryRow, Set<Integer>> deletionBuckets) {
-        DeletionUtils.tryDeleteDirectories(deletionBuckets, pathFactory, fileIO);
-    }
-
-    /**
-     * Delete metadata of a snapshot, delete {@link ManifestList} file and {@link ManifestFileMeta}
-     * file.
-     *
-     * @param skipped manifest file deletion skipping set, deleted manifest file will be added to
-     *     this set too. NOTE: changelog manifests won't be checked.
-     */
-    public void deleteManifestFiles(Set<String> skipped, Snapshot snapshot) {
-        // cannot call `snapshot.dataManifests` directly, it is possible that a job is
-        // killed during expiration, so some manifest files may have been deleted
-        List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
-        toExpireManifests.addAll(tryReadManifestList(snapshot.baseManifestList()));
-        toExpireManifests.addAll(tryReadManifestList(snapshot.deltaManifestList()));
-
-        // delete manifest
-        for (ManifestFileMeta manifest : toExpireManifests) {
-            String fileName = manifest.fileName();
-            if (!skipped.contains(fileName)) {
-                manifestFile.delete(fileName);
-                skipped.add(fileName);
-            }
-        }
-        if (snapshot.changelogManifestList() != null) {
-            for (ManifestFileMeta manifest :
-                    tryReadManifestList(snapshot.changelogManifestList())) {
-                manifestFile.delete(manifest.fileName());
-            }
-        }
-
-        // delete manifest lists
-        if (!skipped.contains(snapshot.baseManifestList())) {
-            manifestList.delete(snapshot.baseManifestList());
-        }
-        if (!skipped.contains(snapshot.deltaManifestList())) {
-            manifestList.delete(snapshot.deltaManifestList());
-        }
-        if (snapshot.changelogManifestList() != null) {
-            manifestList.delete(snapshot.changelogManifestList());
-        }
-
-        // delete index files
-        String indexManifest = snapshot.indexManifest();
-        // check exists, it may have been deleted by other snapshots
-        if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            for (IndexManifestEntry entry : indexFileHandler.readManifest(indexManifest)) {
-                if (!skipped.contains(entry.indexFile().fileName())) {
-                    indexFileHandler.deleteIndexFile(entry);
-                }
-            }
-
-            if (!skipped.contains(indexManifest)) {
-                indexFileHandler.deleteManifest(indexManifest);
-            }
-        }
-    }
-
-    // ================================= PRIVATE =================================================
-
-    private List<ManifestFileMeta> tryReadManifestList(String manifestListName) {
-        try {
-            return manifestList.read(manifestListName);
-        } catch (Exception e) {
-            LOG.warn("Failed to read manifest list file " + manifestListName, e);
-            return Collections.emptyList();
-        }
+    @Override
+    public void cleanUnusedManifests(Snapshot snapshot, Set<String> skippingSet) {
+        cleanUnusedManifests(snapshot, skippingSet, true);
     }
 
     @VisibleForTesting
-    void doDeleteExpiredDataFiles(
-            Iterable<ManifestEntry> dataFileLog,
-            Map<BinaryRow, Set<Integer>> deletionBuckets,
-            Predicate<ManifestEntry> dataFileSkipper) {
+    void doCleanUnusedDataFile(
+            Iterable<ManifestEntry> dataFileLog, Predicate<ManifestEntry> skipper) {
         // we cannot delete a data file directly when we meet a DELETE entry, because that
         // file might be upgraded
         // data file path -> (original manifest entry, extra file paths)
@@ -224,46 +98,47 @@ public class SnapshotDeletion {
                 (path, pair) -> {
                     ManifestEntry entry = pair.getLeft();
                     // check whether we should skip the data file
-                    if (!dataFileSkipper.test(entry)) {
+                    if (!skipper.test(entry)) {
                         // delete data files
                         fileIO.deleteQuietly(path);
                         pair.getRight().forEach(fileIO::deleteQuietly);
-                        // record changed buckets
-                        deletionBuckets
-                                .computeIfAbsent(entry.partition(), p -> new HashSet<>())
-                                .add(entry.bucket());
+
+                        recordDeletionBuckets(entry);
                     }
                 });
     }
 
-    private Iterable<ManifestEntry> getManifestEntriesFromManifestList(String manifestListName) {
-        Queue<String> files =
-                tryReadManifestList(manifestListName).stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toCollection(LinkedList::new));
-        return Iterables.concat(
-                (Iterable<Iterable<ManifestEntry>>)
-                        () ->
-                                new Iterator<Iterable<ManifestEntry>>() {
-                                    @Override
-                                    public boolean hasNext() {
-                                        return files.size() > 0;
-                                    }
-
-                                    @Override
-                                    public Iterable<ManifestEntry> next() {
-                                        String file = files.poll();
-                                        try {
-                                            return manifestFile.read(file);
-                                        } catch (Exception e) {
-                                            LOG.warn("Failed to read manifest file " + file, e);
-                                            return Collections.emptyList();
-                                        }
-                                    }
-                                });
+    /**
+     * Delete added file in the manifest list files. Added files marked as "ADD" in manifests.
+     *
+     * @param manifestListName name of manifest list
+     */
+    public void deleteAddedDataFiles(String manifestListName) {
+        deleteAddedDataFiles(tryReadManifestEntries(manifestListName));
     }
 
-    public Set<String> collectManifestSkippingSet(Snapshot snapshot) {
-        return DeletionUtils.collectManifestSkippingSet(snapshot, manifestList, indexFileHandler);
+    public void deleteAddedDataFiles(Iterable<ManifestEntry> manifestEntries) {
+        for (ManifestEntry entry : manifestEntries) {
+            if (entry.kind() == FileKind.ADD) {
+                fileIO.deleteQuietly(
+                        new Path(
+                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                entry.file().fileName()));
+                recordDeletionBuckets(entry);
+            }
+        }
+    }
+
+    public Predicate<ManifestEntry> dataFileSkipper(
+            List<Snapshot> taggedSnapshots, long expiringSnapshotId) {
+        int index = TagManager.findPreviousTag(taggedSnapshots, expiringSnapshotId);
+        // refresh tag data files
+        if (index >= 0 && cachedTagIndex != index) {
+            cachedTagIndex = index;
+            cachedTagDataFiles.clear();
+            addMergedDataFiles(cachedTagDataFiles, taggedSnapshots.get(index));
+        }
+
+        return entry -> index >= 0 && containsDataFile(cachedTagDataFiles, entry);
     }
 }

@@ -40,7 +40,6 @@ import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ScanKind;
-import org.apache.paimon.operation.TagFileKeeper;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -138,11 +137,7 @@ public class TestFileStore extends KeyValueFileStore {
                 millisRetained,
                 snapshotManager(),
                 newSnapshotDeletion(),
-                new TagFileKeeper(
-                        manifestListFactory().create(),
-                        manifestFileFactory().create(),
-                        new TagManager(fileIO, options.path()),
-                        options.scanManifestParallelism()));
+                new TagManager(fileIO, options.path()));
     }
 
     public List<Snapshot> commitData(

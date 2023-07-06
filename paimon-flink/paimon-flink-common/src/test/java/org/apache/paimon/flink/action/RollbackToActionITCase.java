@@ -49,7 +49,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void test() throws Exception {
+    public void rollbackToSnapshotTest() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
                         ROW_TYPE,
@@ -67,11 +67,42 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Flink")));
 
         RollbackToAction action =
-                new RollbackToAction(warehouse, database, tableName, 2, Collections.emptyMap());
+                new RollbackToAction(warehouse, database, tableName, "2", Collections.emptyMap());
         action.run();
 
         testBatchRead(
                 "SELECT * FROM `" + tableName + "`",
                 Arrays.asList(Row.of(1L, "Hi"), Row.of(2L, "Hello")));
+    }
+
+    @Test
+    public void rollbackToTagTest() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        ROW_TYPE,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyMap());
+        snapshotManager = table.snapshotManager();
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Apache")));
+        writeData(rowData(2L, BinaryString.fromString("Paimon")));
+
+        table.createTag("tag1", 1);
+        table.createTag("tag2", 2);
+        table.createTag("tag3", 3);
+
+        RollbackToAction action =
+                new RollbackToAction(
+                        warehouse, database, tableName, "tag2", Collections.emptyMap());
+        action.run();
+
+        testBatchRead(
+                "SELECT * FROM `" + tableName + "`",
+                Arrays.asList(Row.of(1L, "Hi"), Row.of(2L, "Apache")));
     }
 }
