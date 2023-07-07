@@ -44,13 +44,13 @@ In paimon, there are two bucket mode in append-only table, aware of bucket or no
         <tr>
             <td><h5>aware</h5></td>
             <td>By setting 'bucket' field, you can define bucket number for Append-only table, see <a href="../basic-concepts#Bucket">Bucket</a>.
-                It is recommended that you set the `bucket-key` field. Otherwise, the data will be hashed according to the whole row,
+                It is recommended that you set the 'bucket-key' field. Otherwise, the data will be hashed according to the whole row,
                 and the performance will be poor.</td>
         </tr>
         <tr>
             <td><h5>unaware</h5></td>
             <td><p>After version 0.5, we raised a configuration 'bucket' = '-1' to mark bucket unaware. While setting this, we put all
-                   data in one directory (we mark it as `bucket-0` for compatibility). </p><p>We will not shuffle while writing and parallelism
+                   data in one directory (we mark it as 'bucket-0' for compatibility). </p><p>We will not shuffle while writing and parallelism
                    config will be able to work independently. When you mark bucket unaware, stream read will not guarantee order anymore.
                    If you need a batch offline table and has no special demands on order, we recommend you to use unaware-bucket mode.</p></td>
         </tr>
