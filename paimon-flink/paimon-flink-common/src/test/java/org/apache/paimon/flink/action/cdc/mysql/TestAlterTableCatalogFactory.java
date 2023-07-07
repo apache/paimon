@@ -45,7 +45,8 @@ public class TestAlterTableCatalogFactory implements CatalogFactory {
             @Override
             public void alterTable(
                     Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-                    throws TableNotExistException {
+                    throws TableNotExistException, ColumnAlreadyExistException,
+                            ColumnNotExistException {
                 List<SchemaChange> newChanges = new ArrayList<>(changes);
                 newChanges.add(SchemaChange.setOption("alter-table-test", "true"));
                 super.alterTable(identifier, newChanges, ignoreIfNotExists);

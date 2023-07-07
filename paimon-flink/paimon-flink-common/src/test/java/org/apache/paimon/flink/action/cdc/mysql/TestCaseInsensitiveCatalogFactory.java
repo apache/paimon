@@ -71,7 +71,8 @@ public class TestCaseInsensitiveCatalogFactory implements CatalogFactory {
             @Override
             public void alterTable(
                     Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-                    throws TableNotExistException {
+                    throws TableNotExistException, ColumnAlreadyExistException,
+                            ColumnNotExistException {
                 for (SchemaChange change : changes) {
                     if (change instanceof SchemaChange.AddColumn) {
                         checkCaseInsensitive(((SchemaChange.AddColumn) change).fieldName());

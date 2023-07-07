@@ -189,15 +189,13 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException {
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
         if (!tableExists(getDataTableLocation(identifier))) {
             throw new TableNotExistException(identifier);
         }
-        uncheck(
-                () ->
-                        new SchemaManager(fileIO, getDataTableLocation(identifier))
-                                .commitChanges(changes));
+
+        new SchemaManager(fileIO, getDataTableLocation(identifier)).commitChanges(changes);
     }
 
     private static <T> T uncheck(Callable<T> callable) {

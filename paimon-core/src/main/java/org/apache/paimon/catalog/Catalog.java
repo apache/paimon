@@ -182,10 +182,10 @@ public interface Catalog extends AutoCloseable {
      * @throws TableNotExistException if the table does not exist
      */
     void alterTable(Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException;
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
     default void alterTable(Identifier identifier, SchemaChange change, boolean ignoreIfNotExists)
-            throws TableNotExistException {
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
     }
 
