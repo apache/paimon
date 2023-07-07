@@ -19,7 +19,11 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogUtils;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -55,6 +59,9 @@ import java.util.concurrent.ThreadLocalRandom;
 /** IT cases for {@link CdcSinkBuilder}. */
 public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
 
+    private static final String DATABASE_NAME = "test";
+    private static final String TABLE_NAME = "test_tbl";
+
     @TempDir java.nio.file.Path tempDir;
 
     @Test
@@ -79,16 +86,26 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         boolean enableFailure = random.nextBoolean();
 
         TestTable testTable =
-                new TestTable("test_tbl", numEvents, numSchemaChanges, numPartitions, numKeys);
+                new TestTable(TABLE_NAME, numEvents, numSchemaChanges, numPartitions, numKeys);
 
         Path tablePath;
         FileIO fileIO;
         String failingName = UUID.randomUUID().toString();
         if (enableFailure) {
-            tablePath = new Path(FailingFileIO.getFailingPath(failingName, tempDir.toString()));
+            tablePath =
+                    new Path(
+                            FailingFileIO.getFailingPath(
+                                    failingName,
+                                    CatalogUtils.stringifyPath(
+                                            tempDir.toString(), DATABASE_NAME, TABLE_NAME)));
             fileIO = new FailingFileIO();
         } else {
-            tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+            tablePath =
+                    new Path(
+                            TraceableFileIO.SCHEME
+                                    + "://"
+                                    + CatalogUtils.stringifyPath(
+                                            tempDir.toString(), DATABASE_NAME, TABLE_NAME));
             fileIO = LocalFileIO.create();
         }
 
@@ -113,11 +130,19 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         TestCdcSourceFunction sourceFunction = new TestCdcSourceFunction(testTable.events());
         DataStreamSource<TestCdcEvent> source = env.addSource(sourceFunction);
         source.setParallelism(2);
+
+        Options catalogOptions = new Options();
+        catalogOptions.set("warehouse", tempDir.toString());
+        Catalog.Loader catalogLoader =
+                () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+
         new CdcSinkBuilder<TestCdcEvent>()
                 .withInput(source)
                 .withParserFactory(TestCdcEventParser::new)
                 .withTable(table)
                 .withParallelism(3)
+                .withIdentifier(Identifier.create(DATABASE_NAME, TABLE_NAME))
+                .withCatalogLoader(catalogLoader)
                 .build();
 
         // enable failure when running jobs if needed
