@@ -30,7 +30,10 @@ import org.apache.paimon.schema.SchemaChange;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Factory to create a mock case-insensitive catalog for test. */
+/**
+ * Factory to create a mock catalog for catalog loader test. If catalog loader works, the
+ * 'alterTable' method will leave a special option.
+ */
 public class TestAlterTableCatalogFactory implements CatalogFactory {
 
     @Override
