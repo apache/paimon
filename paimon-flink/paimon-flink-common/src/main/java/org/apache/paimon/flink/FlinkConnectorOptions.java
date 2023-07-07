@@ -202,6 +202,14 @@ public class FlinkConnectorOptions {
                             "Weight of writer buffer in managed memory, Flink will compute the memory size "
                                     + "for writer according to the weight, the actual memory used depends on the running environment.");
 
+    public static final ConfigOption<Boolean> SCAN_PUSH_DOWN =
+            ConfigOptions.key("scan.push-down")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "If true, flink will push down projection, filters, limit to the source. "
+                                    + "The cost is that it is difficult to reuse the source in a job.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

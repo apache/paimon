@@ -51,6 +51,12 @@ under the License.
             <td>Define a custom parallelism for the scan source. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration. If user enable the scan.infer-parallelism, the planner will derive the parallelism by inferred parallelism.</td>
         </tr>
         <tr>
+            <td><h5>scan.push-down</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>If true, flink will push down projection, filters, limit to the source. The cost is that it is difficult to reuse the source in a job.</td>
+        </tr>
+        <tr>
             <td><h5>scan.split-enumerator.batch-size</h5></td>
             <td style="word-wrap: break-word;">10</td>
             <td>Integer</td>

@@ -25,11 +25,15 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.table.connector.ChangelogMode;
-import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.connector.source.LookupTableSource;
+import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
+import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
 import org.apache.flink.table.connector.source.SourceProvider;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.plan.stats.TableStats;
 
 import javax.annotation.Nullable;
 
@@ -82,7 +86,7 @@ public class SystemTableSource extends FlinkTableSource {
     }
 
     @Override
-    public DynamicTableSource copy() {
+    public SystemTableSource copy() {
         return new SystemTableSource(
                 table,
                 isStreamingMode,
@@ -96,5 +100,21 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public String asSummaryString() {
         return "Paimon-SystemTable-Source";
+    }
+
+    @Override
+    public void pushWatermark(WatermarkStrategy<RowData> watermarkStrategy) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public LookupTableSource.LookupRuntimeProvider getLookupRuntimeProvider(
+            LookupTableSource.LookupContext context) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public TableStats reportStatistics() {
+        throw new UnsupportedOperationException();
     }
 }
