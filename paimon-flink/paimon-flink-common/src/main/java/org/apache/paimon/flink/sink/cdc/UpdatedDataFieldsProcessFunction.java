@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -29,6 +30,7 @@ import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
@@ -55,8 +57,21 @@ public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataF
 
     private final SchemaManager schemaManager;
 
-    public UpdatedDataFieldsProcessFunction(SchemaManager schemaManager) {
+    private final Catalog.Loader catalogLoader;
+    private final Identifier identifier;
+
+    private Catalog catalog;
+
+    public UpdatedDataFieldsProcessFunction(
+            SchemaManager schemaManager, Identifier identifier, Catalog.Loader catalogLoader) {
         this.schemaManager = schemaManager;
+        this.identifier = identifier;
+        this.catalogLoader = catalogLoader;
+    }
+
+    @Override
+    public void open(Configuration parameters) {
+        this.catalog = catalogLoader.load();
     }
 
     @Override
@@ -107,17 +122,22 @@ public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataF
     private void applySchemaChange(SchemaChange schemaChange) throws Exception {
         if (schemaChange instanceof SchemaChange.AddColumn) {
             try {
-                schemaManager.commitChanges(schemaChange);
-            } catch (Catalog.ColumnAlreadyExistException e) {
-                // This is normal. For example when a table is split into multiple database tables,
-                // all these tables will be added the same column. However schemaManager can't
-                // handle duplicated column adds, so we just catch the exception and log it.
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug(
-                            "Failed to perform SchemaChange.AddColumn {}, "
-                                    + "possibly due to duplicated column name",
-                            schemaChange,
-                            e);
+                catalog.alterTable(identifier, schemaChange, false);
+            } catch (Exception e) {
+                if (e.getCause() instanceof Catalog.ColumnAlreadyExistException) {
+                    // This is normal. For example when a table is split into multiple database
+                    // tables,
+                    // all these tables will be added the same column. However schemaManager can't
+                    // handle duplicated column adds, so we just catch the exception and log it.
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Failed to perform SchemaChange.AddColumn {}, "
+                                        + "possibly due to duplicated column name",
+                                schemaChange,
+                                e);
+                    }
+                } else {
+                    throw e;
                 }
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnType) {
@@ -140,7 +160,7 @@ public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataF
             DataType newType = updateColumnType.newDataType();
             switch (canConvert(oldType, newType)) {
                 case CONVERT:
-                    schemaManager.commitChanges(schemaChange);
+                    catalog.alterTable(identifier, schemaChange, false);
                     break;
                 case EXCEPTION:
                     throw new UnsupportedOperationException(
@@ -149,7 +169,7 @@ public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataF
                                     updateColumnType.fieldName(), oldType, newType));
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnComment) {
-            schemaManager.commitChanges(schemaChange);
+            catalog.alterTable(identifier, schemaChange, false);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported schema change class "

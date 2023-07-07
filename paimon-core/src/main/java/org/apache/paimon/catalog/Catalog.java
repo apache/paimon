@@ -24,6 +24,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
@@ -182,6 +183,11 @@ public interface Catalog extends AutoCloseable {
      */
     void alterTable(Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException;
+
+    default void alterTable(Identifier identifier, SchemaChange change, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);
+    }
 
     /** Return a boolean that indicates whether this catalog is case-sensitive. */
     default boolean caseSensitive() {

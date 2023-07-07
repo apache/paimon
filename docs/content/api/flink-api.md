@@ -159,6 +159,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.cdc.RichCdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcSinkBuilder;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataTypes;
@@ -186,12 +187,23 @@ public class WriteCdcToTable {
                                 .field("dt", DataTypes.TIMESTAMP(), "2023-06-12 20:21:12")
                                 .build());
 
-        new RichCdcSinkBuilder().withInput(dataStream).withTable(createTableIfNotExists()).build();
+        Identifier identifier = Identifier.create("my_db", "T");
+        Options catalogOptions = new Options();
+        catalogOptions.set("warehouse", "/path/to/warehouse");
+        Catalog.Loader catalogLoader = 
+                () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+        
+        new RichCdcSinkBuilder()
+                .withInput(dataStream)
+                .withTable(createTableIfNotExists(identifier))
+                .withIdentifier(identifier)
+                .withCatalogLoader(catalogLoader)
+                .build();
 
         env.execute();
     }
 
-    private static Table createTableIfNotExists() throws Exception {
+    private static Table createTableIfNotExists(Identifier identifier) throws Exception {
         CatalogContext context = CatalogContext.create(new Path("..."));
         Catalog catalog = CatalogFactory.createCatalog(context);
 
@@ -200,7 +212,6 @@ public class WriteCdcToTable {
         schemaBuilder.column("order_id", DataTypes.BIGINT());
         schemaBuilder.column("price", DataTypes.DOUBLE());
         Schema schema = schemaBuilder.build();
-        Identifier identifier = Identifier.create("my_db", "T");
         try {
             catalog.createTable(identifier, schema, false);
         } catch (Catalog.TableAlreadyExistException e) {

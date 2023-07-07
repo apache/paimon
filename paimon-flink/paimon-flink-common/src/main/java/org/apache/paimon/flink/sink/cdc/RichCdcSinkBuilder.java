@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.annotation.Experimental;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -32,6 +34,8 @@ public class RichCdcSinkBuilder {
 
     private DataStream<RichCdcRecord> input = null;
     private Table table = null;
+    private Identifier identifier = null;
+    private Catalog.Loader catalogLoader = null;
 
     @Nullable private Integer parallelism;
 
@@ -50,12 +54,24 @@ public class RichCdcSinkBuilder {
         return this;
     }
 
+    public RichCdcSinkBuilder withIdentifier(Identifier identifier) {
+        this.identifier = identifier;
+        return this;
+    }
+
+    public RichCdcSinkBuilder withCatalogLoader(Catalog.Loader catalogLoader) {
+        this.catalogLoader = catalogLoader;
+        return this;
+    }
+
     public DataStreamSink<?> build() {
         CdcSinkBuilder<RichCdcRecord> builder = new CdcSinkBuilder<>();
         return builder.withTable(table)
                 .withInput(input)
                 .withParserFactory(new RichCdcParserFactory())
                 .withParallelism(parallelism)
+                .withIdentifier(identifier)
+                .withCatalogLoader(catalogLoader)
                 .build();
     }
 }

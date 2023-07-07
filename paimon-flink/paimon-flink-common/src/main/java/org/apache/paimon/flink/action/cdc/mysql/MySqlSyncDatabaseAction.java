@@ -20,15 +20,12 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
-import org.apache.paimon.options.CatalogOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -114,7 +111,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     @Nullable private final Pattern excludingPattern;
     private final Map<String, String> tableConfig;
     private final String includingTables;
-    private final Options catalogOptions;
     private final MySqlDatabaseSyncMode mode;
 
     public MySqlSyncDatabaseAction(
@@ -159,8 +155,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         this.includingTables = includingTables == null ? ".*" : includingTables;
         this.includingPattern = Pattern.compile(this.includingTables);
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
-        this.catalogOptions = Options.fromMap(catalogConfig);
-        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
         this.tableConfig = tableConfig;
         this.mode = mode;
     }
@@ -249,8 +243,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
         String database = this.database;
         MySqlDatabaseSyncMode mode = this.mode;
-        // To make the sync database workflow serializable
-        Options catalogOptions = this.catalogOptions;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
@@ -258,10 +250,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
                         .withDatabase(database)
-                        .withCatalogLoader(
-                                () -> {
-                                    return FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
-                                })
+                        .withCatalogLoader(catalogLoader())
                         .withTables(fileStoreTables)
                         .withMode(mode);
 

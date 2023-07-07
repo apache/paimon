@@ -98,7 +98,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
 
         for (SchemaChange schemaChange :
                 extractSchemaChanges(schemaManager, updatedDataFields.f1)) {
-            applySchemaChange(schemaManager, schemaChange);
+            applySchemaChange(schemaManager, schemaChange, tableId);
         }
     }
 
@@ -139,21 +139,27 @@ public class MultiTableUpdatedDataFieldsProcessFunction
         return result;
     }
 
-    private void applySchemaChange(SchemaManager schemaManager, SchemaChange schemaChange)
+    private void applySchemaChange(
+            SchemaManager schemaManager, SchemaChange schemaChange, Identifier identifier)
             throws Exception {
         if (schemaChange instanceof SchemaChange.AddColumn) {
             try {
-                schemaManager.commitChanges(schemaChange);
-            } catch (Catalog.ColumnAlreadyExistException e) {
-                // This is normal. For example when a table is split into multiple database tables,
-                // all these tables will be added the same column. However schemaManager can't
-                // handle duplicated column adds, so we just catch the exception and log it.
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug(
-                            "Failed to perform SchemaChange.AddColumn {}, "
-                                    + "possibly due to duplicated column name",
-                            schemaChange,
-                            e);
+                catalog.alterTable(identifier, schemaChange, false);
+            } catch (Exception e) {
+                if (e.getCause() instanceof Catalog.ColumnAlreadyExistException) {
+                    // This is normal. For example when a table is split into multiple database
+                    // tables,
+                    // all these tables will be added the same column. However schemaManager can't
+                    // handle duplicated column adds, so we just catch the exception and log it.
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug(
+                                "Failed to perform SchemaChange.AddColumn {}, "
+                                        + "possibly due to duplicated column name",
+                                schemaChange,
+                                e);
+                    }
+                } else {
+                    throw e;
                 }
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnType) {
@@ -176,7 +182,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
             DataType newType = updateColumnType.newDataType();
             switch (canConvert(oldType, newType)) {
                 case CONVERT:
-                    schemaManager.commitChanges(schemaChange);
+                    catalog.alterTable(identifier, schemaChange, false);
                     break;
                 case EXCEPTION:
                     throw new UnsupportedOperationException(
@@ -185,7 +191,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
                                     updateColumnType.fieldName(), oldType, newType));
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnComment) {
-            schemaManager.commitChanges(schemaChange);
+            catalog.alterTable(identifier, schemaChange, false);
         } else {
             throw new UnsupportedOperationException(
                     "Unsupported schema change class "

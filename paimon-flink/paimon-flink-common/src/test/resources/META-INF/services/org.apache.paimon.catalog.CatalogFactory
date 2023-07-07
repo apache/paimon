@@ -14,3 +14,4 @@
 # limitations under the License.
 
 org.apache.paimon.flink.action.cdc.mysql.TestCaseInsensitiveCatalogFactory
+org.apache.paimon.flink.action.cdc.mysql.TestAlterTableCatalogFactory

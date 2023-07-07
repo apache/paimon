@@ -35,15 +35,16 @@ import java.util.UUID;
 /** Abstract base of {@link Action} for table. */
 public abstract class ActionBase implements Action {
 
+    private final Options catalogOptions;
+
     protected final Catalog catalog;
-
     protected final FlinkCatalog flinkCatalog;
-
     protected final String catalogName = "paimon-" + UUID.randomUUID();
 
     public ActionBase(String warehouse, Map<String, String> catalogConfig) {
-        Options catalogOptions = Options.fromMap(catalogConfig);
+        catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
+
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog);
     }
@@ -52,5 +53,11 @@ public abstract class ActionBase implements Action {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultName);
         env.execute(name);
+    }
+
+    protected Catalog.Loader catalogLoader() {
+        // to make the action workflow serializable
+        Options catalogOptions = this.catalogOptions;
+        return () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
     }
 }
