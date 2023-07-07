@@ -34,6 +34,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -332,11 +333,12 @@ public class SchemaEvolutionTest {
                                 schemaManager.commitChanges(
                                         Collections.singletonList(
                                                 SchemaChange.renameColumn("f0", "_VALUE_KIND"))))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        String.format(
-                                "Field name[%s] in schema cannot be exist in %s",
-                                "_VALUE_KIND", SYSTEM_FIELD_NAMES));
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                RuntimeException.class,
+                                String.format(
+                                        "Field name[%s] in schema cannot be exist in %s",
+                                        "_VALUE_KIND", SYSTEM_FIELD_NAMES)));
     }
 
     private List<String> readRecords(FileStoreTable table, Predicate filter) throws IOException {
