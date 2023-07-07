@@ -187,7 +187,9 @@ public class KafkaSyncTableAction extends ActionBase {
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "Kafka Source"))
                         .withParserFactory(parserFactory)
-                        .withTable(table);
+                        .withTable(table)
+                        .withIdentifier(identifier)
+                        .withCatalogLoader(catalogLoader());
         String sinkParallelism = paimonConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

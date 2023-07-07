@@ -111,7 +111,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         Preconditions.checkNotNull(parserFactory);
         Preconditions.checkNotNull(database);
         Preconditions.checkNotNull(catalogLoader);
-        Preconditions.checkNotNull(mode);
 
         if (mode == UNIFIED) {
             buildUnifiedCdcSink();
