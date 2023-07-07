@@ -32,16 +32,31 @@ You can only insert a complete record into the table. No delete or update is sup
 This type of table is suitable for use cases that do not require updates (such as log data synchronization).
 
 ## Bucketing
+In paimon, there are two bucket mode in append-only table, aware of bucket or not:
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 5%">BucketMode</th>
+            <th class="text-left" style="width: 25%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>aware</h5></td>
+            <td>By setting 'bucket' field, you can define bucket number for Append-only table, see <a href="../basic-concepts#Bucket">Bucket</a>.
+                It is recommended that you set the `bucket-key` field. Otherwise, the data will be hashed according to the whole row,
+                and the performance will be poor.</td>
+        </tr>
+        <tr>
+            <td><h5>unaware</h5></td>
+            <td><p>After version 0.5, we raised a configuration 'bucket' = '-1' to mark bucket unaware. While setting this, we put all
+                   data in one directory (we mark it as `bucket-0` for compatibility). </p><p>We will not shuffle while writing and parallelism
+                   config will be able to work independently. When you mark bucket unaware, stream read will not guarantee order anymore.
+                   If you need a batch offline table and has no special demands on order, we recommend you to use unaware-bucket mode.</p></td>
+        </tr>
+    </tbody>
+</table>
 
-You can also define bucket number for Append-only table, see [Bucket]({{< ref "concepts/basic-concepts#bucket" >}}).
-
-It is recommended that you set the `bucket-key` field. Otherwise, the data will be hashed according to the whole row,
-and the performance will be poor.
-
-After version 0.5, we raised a configuration `'bucket' = '-1'` to make bucket unaware. While setting this, we put all
-data in one directory (we mark it as `bucket-0` for compatibility). We will not shuffle while writing and parallelism
-config will be able to work independently. When you mark bucket unaware, stream read will not guarantee order anymore.
-If you need a batch offline table and has no special demands on order, we recommend you to use unaware-bucket mode.
 
 ## Compaction
 
