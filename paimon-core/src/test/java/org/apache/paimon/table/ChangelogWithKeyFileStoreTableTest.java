@@ -889,6 +889,14 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 10, 100L));
         commit.commit(0, write.prepareCommit(true, 0));
 
+        ReadBuilder readBuilder = table.newReadBuilder();
+        assertThat(
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                BATCH_ROW_TO_STRING))
+                .containsExactly("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+
         write.write(rowData(1, 10, 200L));
         commit.commit(1, write.prepareCommit(true, 1));
 
@@ -901,7 +909,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.close();
 
-        ReadBuilder readBuilder = table.newReadBuilder();
         assertThat(
                         getResult(
                                 readBuilder.newRead(),

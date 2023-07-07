@@ -19,7 +19,6 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
@@ -113,11 +112,7 @@ public class SnapshotManager implements Serializable {
         }
     }
 
-    public @Nullable Long latestCompactedSnapshotId() {
-        return pickFromLatest(s -> s.commitKind() == CommitKind.COMPACT);
-    }
-
-    public @Nullable Long pickFromLatest(Predicate<Snapshot> predicate) {
+    public @Nullable Long pickOrLatest(Predicate<Snapshot> predicate) {
         Long latestId = latestSnapshotId();
         Long earliestId = earliestSnapshotId();
         if (latestId == null || earliestId == null) {
@@ -133,7 +128,7 @@ public class SnapshotManager implements Serializable {
             }
         }
 
-        return null;
+        return latestId;
     }
 
     /**

@@ -40,7 +40,7 @@ public class FullCompactedStartingScanner extends CompactedStartingScanner {
     @Override
     @Nullable
     protected Long pick(SnapshotManager snapshotManager) {
-        return snapshotManager.pickFromLatest(this::picked);
+        return snapshotManager.pickOrLatest(this::picked);
     }
 
     private boolean picked(Snapshot snapshot) {
