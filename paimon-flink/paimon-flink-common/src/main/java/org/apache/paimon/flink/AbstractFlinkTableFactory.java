@@ -27,6 +27,9 @@ import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
+import org.apache.paimon.flink.source.table.PushedRichTableSource;
+import org.apache.paimon.flink.source.table.PushedTableSource;
+import org.apache.paimon.flink.source.table.RichTableSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -60,6 +63,7 @@ import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT;
 import static org.apache.paimon.CoreOptions.StartupMode.FROM_SNAPSHOT_FULL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PUSH_DOWN;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreTableFactory.discoverLogStoreFactory;
 
@@ -74,14 +78,20 @@ public abstract class AbstractFlinkTableFactory
                 context.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
         if (origin instanceof SystemCatalogTable) {
-            return new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode);
+            return new PushedTableSource(
+                    new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode));
         } else {
-            return new DataTableSource(
-                    context.getObjectIdentifier(),
-                    buildPaimonTable(context),
-                    isStreamingMode,
-                    context,
-                    createOptionalLogStoreFactory(context).orElse(null));
+            Table table = buildPaimonTable(context);
+            DataTableSource source =
+                    new DataTableSource(
+                            context.getObjectIdentifier(),
+                            table,
+                            isStreamingMode,
+                            context,
+                            createOptionalLogStoreFactory(context).orElse(null));
+            return new Options(table.options()).get(SCAN_PUSH_DOWN)
+                    ? new PushedRichTableSource(source)
+                    : new RichTableSource(source);
         }
     }
 

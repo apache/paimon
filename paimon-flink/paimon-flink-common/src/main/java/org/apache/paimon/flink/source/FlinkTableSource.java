@@ -24,11 +24,16 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.Table;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.table.connector.ChangelogMode;
+import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
+import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
 import org.apache.flink.table.connector.source.ScanTableSource;
-import org.apache.flink.table.connector.source.abilities.SupportsFilterPushDown;
-import org.apache.flink.table.connector.source.abilities.SupportsLimitPushDown;
-import org.apache.flink.table.connector.source.abilities.SupportsProjectionPushDown;
+import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
+import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.plan.stats.TableStats;
 import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
@@ -37,11 +42,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** A Flink {@link ScanTableSource} for paimon. */
-public abstract class FlinkTableSource
-        implements ScanTableSource,
-                SupportsFilterPushDown,
-                SupportsProjectionPushDown,
-                SupportsLimitPushDown {
+public abstract class FlinkTableSource {
 
     protected final Table table;
 
@@ -64,29 +65,34 @@ public abstract class FlinkTableSource
         this.limit = limit;
     }
 
-    @Override
-    public Result applyFilters(List<ResolvedExpression> filters) {
+    public void pushFilters(List<ResolvedExpression> filters) {
         List<Predicate> converted = new ArrayList<>();
         RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
         for (ResolvedExpression filter : filters) {
             PredicateConverter.convert(rowType, filter).ifPresent(converted::add);
         }
         predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
-        return Result.of(filters, filters);
     }
 
-    @Override
-    public boolean supportsNestedProjection() {
-        return false;
-    }
-
-    @Override
-    public void applyProjection(int[][] projectedFields) {
+    public void pushProjection(int[][] projectedFields) {
         this.projectFields = projectedFields;
     }
 
-    @Override
-    public void applyLimit(long limit) {
+    public void pushLimit(long limit) {
         this.limit = limit;
     }
+
+    public abstract ChangelogMode getChangelogMode();
+
+    public abstract ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext);
+
+    public abstract void pushWatermark(WatermarkStrategy<RowData> watermarkStrategy);
+
+    public abstract LookupRuntimeProvider getLookupRuntimeProvider(LookupContext context);
+
+    public abstract TableStats reportStatistics();
+
+    public abstract FlinkTableSource copy();
+
+    public abstract String asSummaryString();
 }

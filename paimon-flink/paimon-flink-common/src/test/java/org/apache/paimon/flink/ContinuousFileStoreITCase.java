@@ -25,6 +25,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
+import org.apache.flink.table.api.StatementSet;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
 import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
@@ -71,6 +72,24 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)" + options,
                 "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
                         + options);
+    }
+
+    @TestTemplate
+    public void testSourceReuse() {
+        sEnv.executeSql("CREATE TEMPORARY TABLE print1 (a STRING) WITH ('connector'='print')");
+        sEnv.executeSql("CREATE TEMPORARY TABLE print2 (b STRING) WITH ('connector'='print')");
+
+        StatementSet statementSet = sEnv.createStatementSet();
+        statementSet.addInsertSql(
+                "INSERT INTO print1 SELECT a FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */");
+        statementSet.addInsertSql(
+                "INSERT INTO print2 SELECT b FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */");
+        assertThat(statementSet.compilePlan().explain()).contains("Reused");
+
+        statementSet = sEnv.createStatementSet();
+        statementSet.addInsertSql("INSERT INTO print1 SELECT a FROM T1");
+        statementSet.addInsertSql("INSERT INTO print2 SELECT b FROM T1");
+        assertThat(statementSet.compilePlan().explain()).doesNotContain("Reused");
     }
 
     @TestTemplate
