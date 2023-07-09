@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -79,7 +80,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.emptyMap(),
+                        Collections.singletonMap(
+                                CatalogOptions.METASTORE.key(), "test-alter-table"),
                         tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
@@ -245,6 +247,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
                         "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110, 46, 108, 111, 110, 103], 9.00000000009]");
         waitForResult(expected, table, rowType, primaryKeys);
+
+        // test that catalog loader works
+        assertThat(getFileStoreTable().options()).containsEntry("alter-table-test", "true");
     }
 
     @Test

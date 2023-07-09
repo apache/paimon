@@ -229,7 +229,9 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "Kafka Source"))
                         .withParserFactory(parserFactory)
-                        .withTables(fileStoreTables);
+                        .withTables(fileStoreTables)
+                        .withCatalogLoader(catalogLoader())
+                        .withDatabase(database);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

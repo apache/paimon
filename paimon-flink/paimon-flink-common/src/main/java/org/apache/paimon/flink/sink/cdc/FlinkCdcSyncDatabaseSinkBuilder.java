@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
@@ -90,9 +91,26 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withDatabase(String database) {
+        this.database = database;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withCatalogLoader(Catalog.Loader catalogLoader) {
+        this.catalogLoader = catalogLoader;
+        return this;
+    }
+
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(MySqlDatabaseSyncMode mode) {
+        this.mode = mode;
+        return this;
+    }
+
     public void build() {
         Preconditions.checkNotNull(input);
         Preconditions.checkNotNull(parserFactory);
+        Preconditions.checkNotNull(database);
+        Preconditions.checkNotNull(catalogLoader);
 
         if (mode == UNIFIED) {
             buildUnifiedCdcSink();
@@ -145,6 +163,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     }
 
     private void buildStaticCdcSink() {
+        Preconditions.checkNotNull(tables);
+
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(new CdcMultiTableParsingProcessFunction<>(parserFactory))
@@ -158,7 +178,9 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                                             .createUpdatedDataFieldsOutputTag(table.name()))
                             .process(
                                     new UpdatedDataFieldsProcessFunction(
-                                            new SchemaManager(table.fileIO(), table.location())));
+                                            new SchemaManager(table.fileIO(), table.location()),
+                                            Identifier.create(database, table.name()),
+                                            catalogLoader));
             schemaChangeProcessFunction.getTransformation().setParallelism(1);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
@@ -182,20 +204,5 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                             "Unsupported bucket mode: " + bucketMode);
             }
         }
-    }
-
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withDatabase(String database) {
-        this.database = database;
-        return this;
-    }
-
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withCatalogLoader(Catalog.Loader catalogLoader) {
-        this.catalogLoader = catalogLoader;
-        return this;
-    }
-
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(MySqlDatabaseSyncMode mode) {
-        this.mode = mode;
-        return this;
     }
 }

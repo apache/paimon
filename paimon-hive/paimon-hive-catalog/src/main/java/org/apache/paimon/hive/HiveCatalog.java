@@ -343,7 +343,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void alterTable(
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
-            throws TableNotExistException {
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
         if (!paimonTableExists(identifier)) {
             if (ignoreIfNotExists) {
@@ -354,23 +354,19 @@ public class HiveCatalog extends AbstractCatalog {
         }
 
         checkFieldNamesUpperCaseInSchemaChange(changes);
-        try {
-            final SchemaManager schemaManager = schemaManager(identifier);
-            // first commit changes to underlying files
-            TableSchema schema = schemaManager.commitChanges(changes);
 
-            try {
-                // sync to hive hms
-                Table table =
-                        client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
-                updateHmsTable(table, identifier, schema);
-                client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
-            } catch (TException te) {
-                schemaManager.deleteSchema(schema.id());
-                throw te;
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+        final SchemaManager schemaManager = schemaManager(identifier);
+        // first commit changes to underlying files
+        TableSchema schema = schemaManager.commitChanges(changes);
+
+        try {
+            // sync to hive hms
+            Table table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
+            updateHmsTable(table, identifier, schema);
+            client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
+        } catch (TException te) {
+            schemaManager.deleteSchema(schema.id());
+            throw new RuntimeException(te);
         }
     }
 

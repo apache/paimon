@@ -19,8 +19,10 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -146,6 +148,12 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         TestCdcSourceFunction sourceFunction = new TestCdcSourceFunction(events);
         DataStreamSource<TestCdcEvent> source = env.addSource(sourceFunction);
         source.setParallelism(2);
+
+        Options catalogOptions = new Options();
+        catalogOptions.set("warehouse", tempDir.toString());
+        Catalog.Loader catalogLoader =
+                () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+
         new FlinkCdcSyncDatabaseSinkBuilder<TestCdcEvent>()
                 .withInput(source)
                 .withParserFactory(TestCdcEventParser::new)
@@ -153,6 +161,8 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                 // because we have at most 3 tables and 8 slots in AbstractTestBase
                 // each table can only get 2 slots
                 .withParallelism(2)
+                .withDatabase(DATABASE_NAME)
+                .withCatalogLoader(catalogLoader)
                 .build();
 
         // enable failure when running jobs if needed

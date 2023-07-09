@@ -559,6 +559,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         assertTableNotExists(notExistedTables);
     }
 
+    @Test
     @Timeout(60)
     public void testIgnoreCase() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
@@ -671,7 +672,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             boolean testSchemaChange,
             String databaseName)
             throws Exception {
-        JobClient client = buildSyncDatabaseActionWithNewlyAddedTables(databaseName);
+        JobClient client =
+                buildSyncDatabaseActionWithNewlyAddedTables(databaseName, testSchemaChange);
         waitJobRunning(client);
 
         try (Connection conn =
@@ -759,7 +761,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                             .join();
             assertThat(savepoint).isNotBlank();
 
-            client = buildSyncDatabaseActionWithNewlyAddedTables(savepoint, databaseName);
+            client =
+                    buildSyncDatabaseActionWithNewlyAddedTables(
+                            savepoint, databaseName, testSchemaChange);
             waitJobRunning(client);
         }
 
@@ -832,6 +836,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                             },
                             new String[] {"k", "v1", "v2"});
             waitForResult(expectedRecords, newTable, rowType, newTablePrimaryKeys);
+
+            // test that catalog loader works
+            assertThat(getFileStoreTable(tableName).options())
+                    .containsEntry("alter-table-test", "true");
         }
     }
 
@@ -877,13 +885,13 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         "CREATE TABLE %s (k INT, v1 VARCHAR(10), PRIMARY KEY (k))", newTableName));
     }
 
-    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(String databaseName)
-            throws Exception {
-        return buildSyncDatabaseActionWithNewlyAddedTables(null, databaseName);
+    private JobClient buildSyncDatabaseActionWithNewlyAddedTables(
+            String databaseName, boolean testSchemaChange) throws Exception {
+        return buildSyncDatabaseActionWithNewlyAddedTables(null, databaseName, testSchemaChange);
     }
 
     private JobClient buildSyncDatabaseActionWithNewlyAddedTables(
-            String savepointPath, String databaseName) throws Exception {
+            String savepointPath, String databaseName, boolean testSchemaChange) throws Exception {
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", databaseName);
@@ -897,6 +905,13 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
         tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(2) + 2));
+
+        Map<String, String> catalogConfig =
+                testSchemaChange
+                        ? Collections.singletonMap(
+                                CatalogOptions.METASTORE.key(), "test-alter-table")
+                        : Collections.emptyMap();
+
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
                         mySqlConfig,
@@ -907,7 +922,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         null,
                         "t.+",
                         null,
-                        Collections.emptyMap(),
+                        catalogConfig,
                         tableConfig,
                         UNIFIED);
         action.build(env);

@@ -513,7 +513,7 @@ public abstract class SchemaEvolutionTableTestBase {
         }
 
         @Override
-        public TableSchema commitChanges(List<SchemaChange> changes) throws Exception {
+        public TableSchema commitChanges(List<SchemaChange> changes) {
             throw new UnsupportedOperationException();
         }
 
