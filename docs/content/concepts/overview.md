@@ -54,7 +54,7 @@ For streaming engines like Apache Flink, there are typically three types of conn
 - Message queue, such as Apache Kafka, it is used in both source and 
   intermediate stages in this pipeline, to guarantee the latency stay
   within seconds.
-- OLAP system, such as Clickhouse, it receives processed data in
+- OLAP system, such as ClickHouse, it receives processed data in
   streaming fashion and serving user’s ad-hoc queries. 
 - Batch storage, such as Apache Hive, it supports various operations
   of the traditional batch processing, including `INSERT OVERWRITE`.
