@@ -184,6 +184,17 @@ public interface Catalog extends AutoCloseable {
     void alterTable(Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
+    /**
+     * Modify an existing table from a {@link SchemaChange}.
+     *
+     * <p>NOTE: System tables can not be altered.
+     *
+     * @param identifier path of the table to be modified
+     * @param change the schema change
+     * @param ignoreIfNotExists flag to specify behavior when the table does not exist: if set to
+     *     false, throw an exception, if set to true, do nothing.
+     * @throws TableNotExistException if the table does not exist
+     */
     default void alterTable(Identifier identifier, SchemaChange change, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         alterTable(identifier, Collections.singletonList(change), ignoreIfNotExists);

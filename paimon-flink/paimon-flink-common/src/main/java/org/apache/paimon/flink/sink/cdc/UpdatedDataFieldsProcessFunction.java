@@ -83,6 +83,14 @@ public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataF
         }
     }
 
+    @Override
+    public void close() throws Exception {
+        if (catalog != null) {
+            catalog.close();
+            catalog = null;
+        }
+    }
+
     private List<SchemaChange> extractSchemaChanges(List<DataField> updatedDataFields) {
         RowType oldRowType = schemaManager.latest().get().logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();

@@ -102,6 +102,14 @@ public class MultiTableUpdatedDataFieldsProcessFunction
         }
     }
 
+    @Override
+    public void close() throws Exception {
+        if (catalog != null) {
+            catalog.close();
+            catalog = null;
+        }
+    }
+
     private List<SchemaChange> extractSchemaChanges(
             SchemaManager schemaManager, List<DataField> updatedDataFields) {
         RowType oldRowType = schemaManager.latest().get().logicalRowType();

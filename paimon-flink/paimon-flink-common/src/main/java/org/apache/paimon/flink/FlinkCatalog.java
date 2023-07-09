@@ -384,10 +384,10 @@ public class FlinkCatalog extends AbstractCatalog {
 
         try {
             catalog.alterTable(toIdentifier(tablePath), changes, ignoreIfNotExists);
-        } catch (Catalog.TableNotExistException
-                | Catalog.ColumnAlreadyExistException
-                | Catalog.ColumnNotExistException e) {
+        } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
+        } catch (Catalog.ColumnAlreadyExistException | Catalog.ColumnNotExistException e) {
+            throw new CatalogException(e);
         }
     }
 
