@@ -155,6 +155,17 @@ metadata.stats-mode = none
 The collection of statistical information for row storage is a bit expensive, so I suggest turning off statistical
 information as well.
 
+## Stability
+
+If there are too few buckets, or too few resources, full-compaction may cause checkpoint to timeout, Flink's default
+checkpoint timeout is 10 minutes.
+
+If you expect stability even in this case, you can turn up the checkpoint timeout, for example:
+
+```shell
+execution.checkpointing.timeout = 60 min
+```
+
 ## Write Initialize
 
 In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
