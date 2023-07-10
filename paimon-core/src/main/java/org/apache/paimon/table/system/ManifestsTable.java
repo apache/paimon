@@ -142,7 +142,7 @@ public class ManifestsTable implements ReadonlyTable {
 
         @Override
         public long rowCount() {
-            return StatsManifestsGetter.manifestFileMetas(fileIO, location, dataTable).size();
+            return allManifests(fileIO, location, dataTable).size();
         }
 
         @Override
@@ -194,8 +194,7 @@ public class ManifestsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((ManifestsSplit) split).location;
-            List<ManifestFileMeta> manifestFileMetas =
-                    StatsManifestsGetter.manifestFileMetas(fileIO, location, dataTable);
+            List<ManifestFileMeta> manifestFileMetas = allManifests(fileIO, location, dataTable);
 
             Iterator<InternalRow> rows =
                     Iterators.transform(manifestFileMetas.iterator(), this::toRow);
@@ -217,21 +216,17 @@ public class ManifestsTable implements ReadonlyTable {
         }
     }
 
-    private static class StatsManifestsGetter {
-
-        public static List<ManifestFileMeta> manifestFileMetas(
-                FileIO fileIO, Path location, Table dataTable) {
-            Snapshot snapshot = new SnapshotManager(fileIO, location).latestSnapshot();
-            if (snapshot == null) {
-                return Collections.emptyList();
-            }
-            FileStorePathFactory fileStorePathFactory = new FileStorePathFactory(location);
-            CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
-            FileFormat fileFormat = coreOptions.manifestFormat();
-            ManifestList manifestList =
-                    new ManifestList.Factory(fileIO, fileFormat, fileStorePathFactory, null)
-                            .create();
-            return snapshot.allManifests(manifestList);
+    private static List<ManifestFileMeta> allManifests(
+            FileIO fileIO, Path location, Table dataTable) {
+        Snapshot snapshot = new SnapshotManager(fileIO, location).latestSnapshot();
+        if (snapshot == null) {
+            return Collections.emptyList();
         }
+        FileStorePathFactory fileStorePathFactory = new FileStorePathFactory(location);
+        CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
+        FileFormat fileFormat = coreOptions.manifestFormat();
+        ManifestList manifestList =
+                new ManifestList.Factory(fileIO, fileFormat, fileStorePathFactory, null).create();
+        return snapshot.allManifests(manifestList);
     }
 }
