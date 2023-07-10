@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action;
 
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.Action.Factory.printHelp;
+import static org.apache.paimon.flink.action.ActionFactory.printDefaultHelp;
 
 /**
  * Table maintenance actions for Flink.
@@ -36,11 +36,11 @@ public class FlinkActions {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
-            printHelp();
+            printDefaultHelp();
             System.exit(1);
         }
 
-        Optional<Action> action = Action.Factory.create(args);
+        Optional<Action> action = ActionFactory.createAction(args);
 
         if (action.isPresent()) {
             action.get().run();

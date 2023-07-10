@@ -83,6 +83,16 @@ public class FactoryUtil {
         return (T) matchingFactories.get(0);
     }
 
+    public static <T extends Factory> List<String> discoverIdentifiers(
+            ClassLoader classLoader, Class<T> factoryClass) {
+        final List<Factory> factories = discoverFactories(classLoader);
+
+        return factories.stream()
+                .filter(f -> factoryClass.isAssignableFrom(f.getClass()))
+                .map(Factory::identifier)
+                .collect(Collectors.toList());
+    }
+
     private static List<Factory> discoverFactories(ClassLoader classLoader) {
         final Iterator<Factory> serviceLoaderIterator =
                 ServiceLoader.load(Factory.class, classLoader).iterator();

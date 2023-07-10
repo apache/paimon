@@ -19,22 +19,16 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.CatalogUtils;
-import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncDatabaseAction;
-import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncTableAction;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseAction;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /** Abstract class for Flink actions. */
 public interface Action {
@@ -119,77 +113,5 @@ public interface Action {
     static void checkRequiredArgument(MultipleParameterTool params, String key) {
         Preconditions.checkArgument(
                 params.has(key), "Argument '%s' is required. Run '<action> --help' for help.", key);
-    }
-
-    /** Factory to create {@link Action}. */
-    class Factory {
-
-        // supported actions
-        private static final String COMPACT = "compact";
-        private static final String DROP_PARTITION = "drop-partition";
-        private static final String DELETE = "delete";
-        private static final String MERGE_INTO = "merge-into";
-        private static final String ROLLBACK_TO = "rollback-to";
-        private static final String CREATE_TAG = "create-tag";
-        private static final String DELETE_TAG = "delete-tag";
-        // cdc actions
-        private static final String MYSQL_SYNC_TABLE = "mysql-sync-table";
-        private static final String MYSQL_SYNC_DATABASE = "mysql-sync-database";
-
-        private static final String KAFKA_SYNC_TABLE = "kafka-sync-table";
-        private static final String KAFKA_SYNC_DATABASE = "kafka-sync-database";
-
-        public static Optional<Action> create(String[] args) {
-            String action = args[0].toLowerCase();
-            String[] actionArgs = Arrays.copyOfRange(args, 1, args.length);
-
-            switch (action) {
-                case COMPACT:
-                    return CompactAction.create(actionArgs);
-                case DROP_PARTITION:
-                    return DropPartitionAction.create(actionArgs);
-                case DELETE:
-                    return DeleteAction.create(actionArgs);
-                case MERGE_INTO:
-                    return MergeIntoAction.create(actionArgs);
-                case ROLLBACK_TO:
-                    return RollbackToAction.create(actionArgs);
-                case CREATE_TAG:
-                    return CreateTagAction.create(actionArgs);
-                case DELETE_TAG:
-                    return DeleteTagAction.create(actionArgs);
-                case MYSQL_SYNC_TABLE:
-                    return MySqlSyncTableAction.create(actionArgs);
-                case MYSQL_SYNC_DATABASE:
-                    return MySqlSyncDatabaseAction.create(actionArgs);
-                case KAFKA_SYNC_TABLE:
-                    return KafkaSyncTableAction.create(actionArgs);
-                case KAFKA_SYNC_DATABASE:
-                    return KafkaSyncDatabaseAction.create(actionArgs);
-                default:
-                    printHelp();
-                    throw new UnsupportedOperationException("Unknown action \"" + action + "\".");
-            }
-        }
-
-        public static void printHelp() {
-            System.out.println("Usage: <action> [OPTIONS]");
-            System.out.println();
-
-            System.out.println("Available actions:");
-            System.out.println("  " + COMPACT);
-            System.out.println("  " + DROP_PARTITION);
-            System.out.println("  " + DELETE);
-            System.out.println("  " + MERGE_INTO);
-            System.out.println("  " + ROLLBACK_TO);
-            System.out.println("  " + CREATE_TAG);
-            System.out.println("  " + DELETE_TAG);
-            System.out.println("  " + MYSQL_SYNC_TABLE);
-            System.out.println("  " + MYSQL_SYNC_DATABASE);
-            System.out.println("  " + KAFKA_SYNC_TABLE);
-            System.out.println("  " + KAFKA_SYNC_DATABASE);
-
-            System.out.println("For detailed options of each action, run <action> --help");
-        }
     }
 }

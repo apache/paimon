@@ -23,25 +23,12 @@ import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
-
-import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
-import static org.apache.paimon.flink.action.Action.getPartitions;
-import static org.apache.paimon.flink.action.Action.getTablePath;
-import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 
 /** Table drop partition action for Flink. */
 public class DropPartitionAction extends TableActionBase {
-
-    private static final Logger LOG = LoggerFactory.getLogger(DropPartitionAction.class);
 
     private final List<Map<String, String>> partitions;
     private final FileStoreCommit commit;
@@ -64,52 +51,6 @@ public class DropPartitionAction extends TableActionBase {
 
         AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
         this.commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
-    }
-
-    public static Optional<Action> create(String[] args) {
-        LOG.info("Drop partition job args: {}", String.join(" ", args));
-
-        MultipleParameterTool params = MultipleParameterTool.fromArgs(args);
-
-        if (params.has("help")) {
-            printHelp();
-            return Optional.empty();
-        }
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        checkRequiredArgument(params, "partition");
-        List<Map<String, String>> partitions = getPartitions(params);
-
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-
-        return Optional.of(
-                new DropPartitionAction(
-                        tablePath.f0, tablePath.f1, tablePath.f2, partitions, catalogConfig));
-    }
-
-    private static void printHelp() {
-        System.out.println(
-                "Action \"drop-partition\" drops data of specified partitions for a table.");
-        System.out.println();
-
-        System.out.println("Syntax:");
-        System.out.println(
-                "  drop-partition --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --partition <partition-name> [--partition <partition-name> ...]");
-        System.out.println(
-                "  drop-partition --path <table-path> --partition <partition-name> [--partition <partition-name> ...]");
-        System.out.println();
-
-        System.out.println("Partition name syntax:");
-        System.out.println("  key1=value1,key2=value2,...");
-        System.out.println();
-
-        System.out.println("Examples:");
-        System.out.println(
-                "  drop-partition --warehouse hdfs:///path/to/warehouse --database test_db --table test_table --partition dt=20221126,hh=08");
-        System.out.println(
-                "  drop-partition --path hdfs:///path/to/warehouse/test_db.db/test_table --partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
     }
 
     @Override
