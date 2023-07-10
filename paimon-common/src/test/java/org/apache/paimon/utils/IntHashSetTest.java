@@ -40,10 +40,18 @@ public class IntHashSetTest {
             values.add(0);
             values.add(-1);
             values.add(1);
+            values.add(Integer.MAX_VALUE);
         }
 
         IntHashSet set = new IntHashSet();
-        values.forEach(set::add);
+        for (Integer i : values) {
+            boolean add = set.add(i);
+            assertThat(add).isTrue();
+        }
+        for (Integer i : values) {
+            boolean add = set.add(i);
+            assertThat(add).isFalse();
+        }
 
         int[] expected = values.stream().mapToInt(Integer::intValue).sorted().toArray();
         assertThat(set.toInts()).containsExactlyInAnyOrder(expected);

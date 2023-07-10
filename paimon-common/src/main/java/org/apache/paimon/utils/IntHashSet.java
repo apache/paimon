@@ -35,8 +35,8 @@ public class IntHashSet {
         this.set = new IntOpenHashSet(expected);
     }
 
-    public void add(int value) {
-        set.add(value);
+    public boolean add(int value) {
+        return set.add(value);
     }
 
     public int size() {
