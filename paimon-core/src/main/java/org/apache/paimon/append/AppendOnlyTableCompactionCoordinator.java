@@ -116,7 +116,7 @@ public class AppendOnlyTableCompactionCoordinator {
             splits.forEach(
                     split -> {
                         DataSplit dataSplit = (DataSplit) split;
-                        notifyNewFiles(dataSplit.partition(), dataSplit.files());
+                        notifyNewFiles(dataSplit.partition(), dataSplit.dataFiles());
                     });
             // batch mode, we don't do continuous scanning
             if (!streamingMode) {

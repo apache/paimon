@@ -37,51 +37,16 @@ import java.util.Objects;
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 2L;
+    private static final long serialVersionUID = 3L;
 
-    private long snapshotId;
+    private long snapshotId = 0;
     private BinaryRow partition;
     private int bucket;
-    private List<DataFileMeta> files;
-    private boolean isIncremental;
+    private List<DataFileMeta> beforeFiles;
+    private List<DataFileMeta> dataFiles;
+    private boolean isStreaming = false;
 
-    // when reverseRowKind is true, the RowKind of records from this split should be reversed to
-    // DELETE
-    private boolean reverseRowKind;
-
-    public DataSplit(
-            long snapshotId,
-            BinaryRow partition,
-            int bucket,
-            List<DataFileMeta> files,
-            boolean isIncremental) {
-        init(snapshotId, partition, bucket, files, isIncremental, false);
-    }
-
-    public DataSplit(
-            long snapshotId,
-            BinaryRow partition,
-            int bucket,
-            List<DataFileMeta> files,
-            boolean isIncremental,
-            boolean reverseRowKind) {
-        init(snapshotId, partition, bucket, files, isIncremental, reverseRowKind);
-    }
-
-    private void init(
-            long snapshotId,
-            BinaryRow partition,
-            int bucket,
-            List<DataFileMeta> files,
-            boolean isIncremental,
-            boolean reverseRowKind) {
-        this.snapshotId = snapshotId;
-        this.partition = partition;
-        this.bucket = bucket;
-        this.files = files;
-        this.isIncremental = isIncremental;
-        this.reverseRowKind = reverseRowKind;
-    }
+    public DataSplit() {}
 
     public long snapshotId() {
         return snapshotId;
@@ -95,22 +60,22 @@ public class DataSplit implements Split {
         return bucket;
     }
 
-    public List<DataFileMeta> files() {
-        return files;
+    public List<DataFileMeta> beforeFiles() {
+        return beforeFiles;
     }
 
-    public boolean isIncremental() {
-        return isIncremental;
+    public List<DataFileMeta> dataFiles() {
+        return dataFiles;
     }
 
-    public boolean reverseRowKind() {
-        return reverseRowKind;
+    public boolean isStreaming() {
+        return isStreaming;
     }
 
     @Override
     public long rowCount() {
         long rowCount = 0;
-        for (DataFileMeta file : files) {
+        for (DataFileMeta file : dataFiles) {
             rowCount += file.rowCount();
         }
         return rowCount;
@@ -127,14 +92,14 @@ public class DataSplit implements Split {
         DataSplit split = (DataSplit) o;
         return bucket == split.bucket
                 && Objects.equals(partition, split.partition)
-                && Objects.equals(files, split.files)
-                && isIncremental == split.isIncremental
-                && reverseRowKind == split.reverseRowKind;
+                && Objects.equals(beforeFiles, split.beforeFiles)
+                && Objects.equals(dataFiles, split.dataFiles)
+                && isStreaming == split.isStreaming;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, files, isIncremental, reverseRowKind);
+        return Objects.hash(partition, bucket, beforeFiles, dataFiles, isStreaming);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -143,39 +108,99 @@ public class DataSplit implements Split {
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
         DataSplit split = DataSplit.deserialize(new DataInputViewStreamWrapper(in));
-        init(
-                split.snapshotId,
-                split.partition,
-                split.bucket,
-                split.files,
-                split.isIncremental,
-                split.reverseRowKind);
+        this.snapshotId = split.snapshotId;
+        this.partition = split.partition;
+        this.bucket = split.bucket;
+        this.beforeFiles = split.beforeFiles;
+        this.dataFiles = split.dataFiles;
+        this.isStreaming = split.isStreaming;
     }
 
     public void serialize(DataOutputView out) throws IOException {
         out.writeLong(snapshotId);
         SerializationUtils.serializeBinaryRow(partition, out);
         out.writeInt(bucket);
-        out.writeInt(files.size());
+
         DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
-        for (DataFileMeta file : files) {
+        out.writeInt(beforeFiles.size());
+        for (DataFileMeta file : beforeFiles) {
             dataFileSer.serialize(file, out);
         }
-        out.writeBoolean(isIncremental);
-        out.writeBoolean(reverseRowKind);
+
+        out.writeInt(dataFiles.size());
+        for (DataFileMeta file : dataFiles) {
+            dataFileSer.serialize(file, out);
+        }
+
+        out.writeBoolean(isStreaming);
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
         long snapshotId = in.readLong();
         BinaryRow partition = SerializationUtils.deserializeBinaryRow(in);
         int bucket = in.readInt();
-        int fileNumber = in.readInt();
-        List<DataFileMeta> files = new ArrayList<>(fileNumber);
+
         DataFileMetaSerializer dataFileSer = new DataFileMetaSerializer();
-        for (int i = 0; i < fileNumber; i++) {
-            files.add(dataFileSer.deserialize(in));
+        int beforeNumber = in.readInt();
+        List<DataFileMeta> beforeFiles = new ArrayList<>(beforeNumber);
+        for (int i = 0; i < beforeNumber; i++) {
+            beforeFiles.add(dataFileSer.deserialize(in));
         }
-        return new DataSplit(
-                snapshotId, partition, bucket, files, in.readBoolean(), in.readBoolean());
+
+        int fileNumber = in.readInt();
+        List<DataFileMeta> dataFiles = new ArrayList<>(fileNumber);
+        for (int i = 0; i < fileNumber; i++) {
+            dataFiles.add(dataFileSer.deserialize(in));
+        }
+
+        boolean isStreaming = in.readBoolean();
+
+        return builder().withSnapshot(snapshotId).withPartition(partition).withBucket(bucket).withBeforeFiles(beforeFiles).withDataFiles(dataFiles).isStreaming(isStreaming).build();
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /**
+     * Builder for {@link DataSplit}.
+     */
+    public static class Builder {
+
+        private final DataSplit split = new DataSplit();
+
+        public Builder withSnapshot(long snapshot) {
+            this.split.snapshotId = snapshot;
+            return this;
+        }
+
+        public Builder withPartition(BinaryRow partition) {
+            this.split.partition = partition;
+            return this;
+        }
+
+        public Builder withBucket(int bucket) {
+            this.split.bucket = bucket;
+            return this;
+        }
+
+        public Builder withBeforeFiles(List<DataFileMeta> beforeFiles) {
+            this.split.beforeFiles = beforeFiles;
+            return this;
+        }
+
+        public Builder withDataFiles(List<DataFileMeta> dataFiles) {
+            this.split.dataFiles = dataFiles;
+            return this;
+        }
+
+        public Builder isStreaming(boolean isStreaming) {
+            this.split.isStreaming = isStreaming;
+            return this;
+        }
+
+        public DataSplit build() {
+            return split;
+        }
     }
 }

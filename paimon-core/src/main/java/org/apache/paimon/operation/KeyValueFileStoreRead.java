@@ -185,13 +185,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private RecordReader<KeyValue> createReaderWithoutOuterProjection(DataSplit split)
             throws IOException {
-        if (split.isIncremental()) {
+        if (split.isStreaming()) {
             KeyValueFileReaderFactory readerFactory =
                     readerFactoryBuilder.build(
                             split.partition(), split.bucket(), true, filtersForOverlappedSection);
             // Return the raw file contents without merging
             List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
-            for (DataFileMeta file : split.files()) {
+            for (DataFileMeta file : split.dataFiles()) {
                 suppliers.add(
                         () -> {
                             // We need to check extraFiles to be compatible with Paimon 0.2.
@@ -222,7 +222,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
                     new ReducerMergeFunctionWrapper(mfFactory.create(pushdownProjection));
             for (List<SortedRun> section :
-                    new IntervalPartition(split.files(), keyComparator).partition()) {
+                    new IntervalPartition(split.dataFiles(), keyComparator).partition()) {
                 sectionReaders.add(
                         () ->
                                 MergeTreeReaders.readerForSection(

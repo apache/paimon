@@ -51,18 +51,14 @@ public class PaimonInputSplitTest {
         }
 
         BinaryRow wantedPartition = generated.get(0).partition;
+        DataSplit dataSplit = DataSplit.builder().withSnapshot(ThreadLocalRandom.current().nextLong(100)).withPartition(wantedPartition).withBucket(0).withDataFiles(generated.stream()
+                .filter(d -> d.partition.equals(wantedPartition))
+                .map(d -> d.meta)
+                .collect(Collectors.toList())).build();
         PaimonInputSplit split =
                 new PaimonInputSplit(
                         tempDir.toString(),
-                        new DataSplit(
-                                ThreadLocalRandom.current().nextLong(100),
-                                wantedPartition,
-                                0,
-                                generated.stream()
-                                        .filter(d -> d.partition.equals(wantedPartition))
-                                        .map(d -> d.meta)
-                                        .collect(Collectors.toList()),
-                                false));
+                        dataSplit);
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream output = new DataOutputStream(baos);

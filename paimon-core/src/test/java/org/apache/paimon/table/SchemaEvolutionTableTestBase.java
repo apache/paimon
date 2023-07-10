@@ -429,7 +429,7 @@ public abstract class SchemaEvolutionTableTestBase {
     }
 
     protected static List<DataFileMeta> toDataFileMetas(List<DataSplit> splits) {
-        return splits.stream().flatMap(s -> s.files().stream()).collect(Collectors.toList());
+        return splits.stream().flatMap(s -> s.dataFiles().stream()).collect(Collectors.toList());
     }
 
     protected static void checkFilterRowCount(

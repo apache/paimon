@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataFileTestDataGenerator;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 
+import org.apache.paimon.manifest.ManifestEntry;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -30,6 +31,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -44,13 +46,7 @@ public class SplitTest {
         for (int i = 0; i < ThreadLocalRandom.current().nextInt(10); i++) {
             files.add(gen.next().meta);
         }
-        DataSplit split =
-                new DataSplit(
-                        ThreadLocalRandom.current().nextLong(100),
-                        data.partition,
-                        data.bucket,
-                        files,
-                        false);
+        DataSplit split = DataSplit.builder().withSnapshot(ThreadLocalRandom.current().nextLong(100)).withPartition( data.partition).withBucket( data.bucket).withDataFiles(files).build();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         split.serialize(new DataOutputViewStreamWrapper(out));

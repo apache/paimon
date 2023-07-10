@@ -57,7 +57,7 @@ public class IncrementalStartingScanner implements StartingScanner {
             for (DataSplit split : splits) {
                 grouped.computeIfAbsent(
                                 Pair.of(split.partition(), split.bucket()), k -> new ArrayList<>())
-                        .addAll(split.files());
+                        .addAll(split.dataFiles());
             }
         }
 
@@ -67,7 +67,7 @@ public class IncrementalStartingScanner implements StartingScanner {
             int bucket = entry.getKey().getRight();
             for (List<DataFileMeta> files :
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
-                result.add(new DataSplit(end, partition, bucket, files, false));
+                result.add(DataSplit.builder().withSnapshot(end).withPartition(partition).withBucket(bucket).withDataFiles(files).build());
             }
         }
 

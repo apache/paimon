@@ -522,7 +522,7 @@ public abstract class FileStoreTableTestBase {
 
         List<DataFileMeta> files =
                 table.newSnapshotReader().read().dataSplits().stream()
-                        .flatMap(split -> split.files().stream())
+                        .flatMap(split -> split.dataFiles().stream())
                         .collect(Collectors.toList());
         for (DataFileMeta file : files) {
             assertThat(file.level()).isEqualTo(0);
