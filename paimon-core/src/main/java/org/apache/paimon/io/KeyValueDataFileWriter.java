@@ -112,7 +112,7 @@ public class KeyValueDataFileWriter
         updateMaxSeqNumber(kv);
 
         if (LOG.isDebugEnabled()) {
-            LOG.debug("Write key value " + kv.toString(keyType, valueType));
+            LOG.debug("Write to Path " + path + " key value " + kv.toString(keyType, valueType));
         }
     }
 
