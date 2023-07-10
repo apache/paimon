@@ -76,8 +76,10 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
         if (!(key instanceof BinaryRow)) {
             throw new IllegalArgumentException("Unsupported key type: " + key.getClass());
         }
-        hashcode.add(key.hashCode());
-        modified = true;
+        boolean changed = hashcode.add(key.hashCode());
+        if (changed) {
+            modified = true;
+        }
     }
 
     @Override

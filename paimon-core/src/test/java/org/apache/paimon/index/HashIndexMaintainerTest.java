@@ -123,4 +123,19 @@ public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
 
         write.close();
     }
+
+    @Test
+    public void testNotCreateNewFile() throws Exception {
+        // commit two partitions
+        write.write(createRow(1, 1, 1, 1));
+        write.write(createRow(2, 2, 2, 2));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // same record
+        write.write(createRow(1, 1, 1, 1));
+        List<CommitMessage> commitMessages = write.prepareCommit(true, 1);
+        assertThat(readIndex(commitMessages)).isEmpty();
+
+        write.close();
+    }
 }
