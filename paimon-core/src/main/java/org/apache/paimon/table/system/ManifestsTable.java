@@ -142,7 +142,7 @@ public class ManifestsTable implements ReadonlyTable {
 
         @Override
         public long rowCount() {
-            return new StatsManifestsGetter(fileIO, location, dataTable).manifestFileMetas().size();
+            return StatsManifestsGetter.manifestFileMetas(fileIO, location, dataTable).size();
         }
 
         @Override
@@ -195,7 +195,7 @@ public class ManifestsTable implements ReadonlyTable {
             }
             Path location = ((ManifestsSplit) split).location;
             List<ManifestFileMeta> manifestFileMetas =
-                    new StatsManifestsGetter(fileIO, location, dataTable).manifestFileMetas();
+                    StatsManifestsGetter.manifestFileMetas(fileIO, location, dataTable);
 
             Iterator<InternalRow> rows =
                     Iterators.transform(manifestFileMetas.iterator(), this::toRow);
@@ -218,23 +218,12 @@ public class ManifestsTable implements ReadonlyTable {
     }
 
     private static class StatsManifestsGetter {
-        private final FileIO fileIO;
-        private final Table dataTable;
-        private final Path location;
 
-        private List<ManifestFileMeta> manifestFileMetas;
-
-        private StatsManifestsGetter(FileIO fileIO, Path location, Table dataTable) {
-            this.fileIO = fileIO;
-            this.location = location;
-            this.dataTable = dataTable;
-        }
-
-        private void initialize() {
+        public static List<ManifestFileMeta> manifestFileMetas(
+                FileIO fileIO, Path location, Table dataTable) {
             Snapshot snapshot = new SnapshotManager(fileIO, location).latestSnapshot();
             if (snapshot == null) {
-                manifestFileMetas = Collections.emptyList();
-                return;
+                return Collections.emptyList();
             }
             FileStorePathFactory fileStorePathFactory = new FileStorePathFactory(location);
             CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
@@ -242,14 +231,7 @@ public class ManifestsTable implements ReadonlyTable {
             ManifestList manifestList =
                     new ManifestList.Factory(fileIO, fileFormat, fileStorePathFactory, null)
                             .create();
-            manifestFileMetas = snapshot.allManifests(manifestList);
-        }
-
-        private List<ManifestFileMeta> manifestFileMetas() {
-            if (manifestFileMetas == null || manifestFileMetas.size() == 0) {
-                initialize();
-            }
-            return manifestFileMetas;
+            return snapshot.allManifests(manifestList);
         }
     }
 }
