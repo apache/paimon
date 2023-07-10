@@ -110,13 +110,16 @@ public class DataSplit implements Split {
     }
 
     private void readObject(ObjectInputStream in) throws IOException, ClassNotFoundException {
-        DataSplit split = DataSplit.deserialize(new DataInputViewStreamWrapper(in));
-        this.snapshotId = split.snapshotId;
-        this.partition = split.partition;
-        this.bucket = split.bucket;
-        this.beforeFiles = split.beforeFiles;
-        this.dataFiles = split.dataFiles;
-        this.isStreaming = split.isStreaming;
+        assign(deserialize(new DataInputViewStreamWrapper(in)));
+    }
+
+    private void assign(DataSplit other) {
+        this.snapshotId = other.snapshotId;
+        this.partition = other.partition;
+        this.bucket = other.bucket;
+        this.beforeFiles = other.beforeFiles;
+        this.dataFiles = other.dataFiles;
+        this.isStreaming = other.isStreaming;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -211,6 +214,9 @@ public class DataSplit implements Split {
             checkArgument(split.partition != null);
             checkArgument(split.bucket != -1);
             checkArgument(split.dataFiles != null);
+
+            DataSplit split = new DataSplit();
+            split.assign(this.split);
             return split;
         }
     }
