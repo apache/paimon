@@ -79,6 +79,22 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
                 .hasMessageContaining("This is a bug, record assign id");
     }
 
+    @Test
+    public void testPartitionCopy() {
+        HashBucketAssigner assigner = createAssigner(1, 0);
+
+        BinaryRow partition = row(1);
+        assertThat(assigner.assign(partition, 0)).isEqualTo(0);
+        assertThat(assigner.assign(partition, 1)).isEqualTo(0);
+
+        partition.setInt(0, 2);
+        assertThat(assigner.assign(partition, 5)).isEqualTo(0);
+        assertThat(assigner.assign(partition, 6)).isEqualTo(0);
+
+        assertThat(assigner.currentPartitions()).contains(row(1));
+        assertThat(assigner.currentPartitions()).contains(row(2));
+    }
+
     private CommitMessage createCommitMessage(BinaryRow partition, int bucket, IndexFileMeta file) {
         return new CommitMessageImpl(
                 partition,

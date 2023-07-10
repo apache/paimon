@@ -72,7 +72,12 @@ public class HashBucketAssigner {
                 recordAssignId,
                 assignId);
 
-        PartitionIndex index = partitionIndex.computeIfAbsent(partition, this::loadIndex);
+        PartitionIndex index = this.partitionIndex.get(partition);
+        if (index == null) {
+            partition = partition.copy();
+            index = loadIndex(partition);
+            this.partitionIndex.put(partition, index);
+        }
         return index.assign(hash, (bucket) -> computeAssignId(bucket) == assignId);
     }
 
