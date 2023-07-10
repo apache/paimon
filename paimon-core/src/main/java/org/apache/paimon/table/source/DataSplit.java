@@ -34,17 +34,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
     private static final long serialVersionUID = 3L;
 
     private long snapshotId = 0;
-    private BinaryRow partition;
-    private int bucket;
-    private List<DataFileMeta> beforeFiles;
-    private List<DataFileMeta> dataFiles;
     private boolean isStreaming = false;
+    private List<DataFileMeta> beforeFiles = new ArrayList<>();
+
+    private BinaryRow partition;
+    private int bucket = -1;
+    private List<DataFileMeta> dataFiles;
 
     public DataSplit() {}
 
@@ -155,16 +158,21 @@ public class DataSplit implements Split {
 
         boolean isStreaming = in.readBoolean();
 
-        return builder().withSnapshot(snapshotId).withPartition(partition).withBucket(bucket).withBeforeFiles(beforeFiles).withDataFiles(dataFiles).isStreaming(isStreaming).build();
+        return builder()
+                .withSnapshot(snapshotId)
+                .withPartition(partition)
+                .withBucket(bucket)
+                .withBeforeFiles(beforeFiles)
+                .withDataFiles(dataFiles)
+                .isStreaming(isStreaming)
+                .build();
     }
 
     public static Builder builder() {
         return new Builder();
     }
 
-    /**
-     * Builder for {@link DataSplit}.
-     */
+    /** Builder for {@link DataSplit}. */
     public static class Builder {
 
         private final DataSplit split = new DataSplit();
@@ -200,6 +208,9 @@ public class DataSplit implements Split {
         }
 
         public DataSplit build() {
+            checkArgument(split.partition != null);
+            checkArgument(split.bucket != -1);
+            checkArgument(split.dataFiles != null);
             return split;
         }
     }

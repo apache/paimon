@@ -158,7 +158,11 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             rewriter.write(
                     new RecordReaderIterator<>(
                             read.createReader(
-                                    DataSplit.builder().withPartition(partition).withBucket(bucket).withDataFiles(toCompact).build())));
+                                    DataSplit.builder()
+                                            .withPartition(partition)
+                                            .withBucket(bucket)
+                                            .withDataFiles(toCompact)
+                                            .build())));
             rewriter.close();
             return rewriter.result();
         };

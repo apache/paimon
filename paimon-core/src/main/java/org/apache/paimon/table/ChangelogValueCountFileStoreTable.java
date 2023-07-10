@@ -32,7 +32,6 @@ import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -107,8 +106,6 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
     /**
      * Currently, the streaming read of overwrite is implemented by reversing the {@link RowKind} of
      * overwrote records to {@link RowKind#DELETE}, so only tables that have primary key support it.
-     *
-     * @see ReverseReader
      */
     @Override
     public boolean supportStreamingReadOverwrite() {

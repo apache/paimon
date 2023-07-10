@@ -506,13 +506,25 @@ public class ContinuousFileSplitEnumeratorTest {
             int snapshotId, int bucket, List<DataFileMeta> files) {
         return new FileStoreSourceSplit(
                 UUID.randomUUID().toString(),
-                DataSplit.builder().withSnapshot(snapshotId).withPartition(row(1)).withBucket(bucket).withDataFiles(files).isStreaming(true).build(),
+                DataSplit.builder()
+                        .withSnapshot(snapshotId)
+                        .withPartition(row(1))
+                        .withBucket(bucket)
+                        .withDataFiles(files)
+                        .isStreaming(true)
+                        .build(),
                 0);
     }
 
     private static DataSplit createDataSplit(
             long snapshotId, int bucket, List<DataFileMeta> files) {
-        return                 DataSplit.builder().withSnapshot(snapshotId).withPartition(row(1)).withBucket(bucket).withDataFiles(files).isStreaming(true).build();
+        return DataSplit.builder()
+                .withSnapshot(snapshotId)
+                .withPartition(row(1))
+                .withBucket(bucket)
+                .withDataFiles(files)
+                .isStreaming(true)
+                .build();
     }
 
     private static class Builder {

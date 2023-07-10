@@ -30,7 +30,6 @@ import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
-import org.apache.paimon.operation.ReverseReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -94,8 +93,6 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     /**
      * Currently, the streaming read of overwrite is implemented by reversing the {@link RowKind} of
      * overwrote records to {@link RowKind#DELETE}, so only tables that have primary key support it.
-     *
-     * @see ReverseReader
      */
     @Override
     public boolean supportStreamingReadOverwrite() {

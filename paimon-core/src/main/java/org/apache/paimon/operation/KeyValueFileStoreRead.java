@@ -32,6 +32,7 @@ import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory.AdjustedProjection;
@@ -51,6 +52,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -189,22 +191,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             KeyValueFileReaderFactory readerFactory =
                     readerFactoryBuilder.build(
                             split.partition(), split.bucket(), true, filtersForOverlappedSection);
-            // Return the raw file contents without merging
-            List<ConcatRecordReader.ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
-            for (DataFileMeta file : split.dataFiles()) {
-                suppliers.add(
-                        () -> {
-                            // We need to check extraFiles to be compatible with Paimon 0.2.
-                            // See comments on DataFileMeta#extraFiles.
-                            String fileName = changelogFile(file).orElse(file.fileName());
-                            return readerFactory.createRecordReader(
-                                    file.schemaId(), fileName, file.level());
-                        });
-            }
-            RecordReader<KeyValue> concatRecordReader = ConcatRecordReader.create(suppliers);
-            return split.reverseRowKind()
-                    ? new ReverseReader(concatRecordReader)
-                    : concatRecordReader;
+            ReaderSupplier<KeyValue> beforeSupplier =
+                    () -> new ReverseReader(streamingConcat(split.beforeFiles(), readerFactory));
+            ReaderSupplier<KeyValue> dataSupplier =
+                    () -> streamingConcat(split.dataFiles(), readerFactory);
+            return split.beforeFiles().isEmpty()
+                    ? dataSupplier.get()
+                    : ConcatRecordReader.create(Arrays.asList(beforeSupplier, dataSupplier));
         } else {
             // Sections are read by SortMergeReader, which sorts and merges records by keys.
             // So we cannot project keys or else the sorting will be incorrect.
@@ -218,7 +211,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                             false,
                             filtersForNonOverlappedSection);
 
-            List<ConcatRecordReader.ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
+            List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
             MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
                     new ReducerMergeFunctionWrapper(mfFactory.create(pushdownProjection));
             for (List<SortedRun> section :
@@ -243,6 +236,22 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             // Project results from SortMergeReader using ProjectKeyRecordReader.
             return keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);
         }
+    }
+
+    private RecordReader<KeyValue> streamingConcat(
+            List<DataFileMeta> files, KeyValueFileReaderFactory readerFactory) throws IOException {
+        List<ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
+        for (DataFileMeta file : files) {
+            suppliers.add(
+                    () -> {
+                        // We need to check extraFiles to be compatible with Paimon 0.2.
+                        // See comments on DataFileMeta#extraFiles.
+                        String fileName = changelogFile(file).orElse(file.fileName());
+                        return readerFactory.createRecordReader(
+                                file.schemaId(), fileName, file.level());
+                    });
+        }
+        return ConcatRecordReader.create(suppliers);
     }
 
     private Optional<String> changelogFile(DataFileMeta fileMeta) {

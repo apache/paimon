@@ -373,7 +373,13 @@ public class TestFileStore extends KeyValueFileStore {
                     entryWithPartition.getValue().entrySet()) {
                 RecordReaderIterator<KeyValue> iterator =
                         new RecordReaderIterator<>(
-                                read.createReader(DataSplit.builder().withPartition(entryWithPartition.getKey()).withBucket(entryWithBucket.getKey()).withDataFiles(entryWithBucket.getValue()).isStreaming(isStreaming).build()));
+                                read.createReader(
+                                        DataSplit.builder()
+                                                .withPartition(entryWithPartition.getKey())
+                                                .withBucket(entryWithBucket.getKey())
+                                                .withDataFiles(entryWithBucket.getValue())
+                                                .isStreaming(isStreaming)
+                                                .build()));
                 while (iterator.hasNext()) {
                     kvs.add(iterator.next().copy(keySerializer, valueSerializer));
                 }

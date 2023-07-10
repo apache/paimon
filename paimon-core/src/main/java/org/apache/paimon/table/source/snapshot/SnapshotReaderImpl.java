@@ -238,19 +238,41 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
         List<DataSplit> splits = new ArrayList<>();
 
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles = groupByPartFiles(plan.files(FileKind.DELETE));
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles = groupByPartFiles(plan.files(FileKind.ADD));
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
+                groupByPartFiles(plan.files(FileKind.DELETE));
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
+                groupByPartFiles(plan.files(FileKind.ADD));
 
         Map<BinaryRow, Set<Integer>> buckets = new HashMap<>();
-        beforeFiles.forEach((part, bucketMap) -> buckets.computeIfAbsent(part, k -> new HashSet<>()).addAll(bucketMap.keySet()));
-        dataFiles.forEach((part, bucketMap) -> buckets.computeIfAbsent(part, k -> new HashSet<>()).addAll(bucketMap.keySet()));
+        beforeFiles.forEach(
+                (part, bucketMap) ->
+                        buckets.computeIfAbsent(part, k -> new HashSet<>())
+                                .addAll(bucketMap.keySet()));
+        dataFiles.forEach(
+                (part, bucketMap) ->
+                        buckets.computeIfAbsent(part, k -> new HashSet<>())
+                                .addAll(bucketMap.keySet()));
 
         for (Map.Entry<BinaryRow, Set<Integer>> entry : buckets.entrySet()) {
             BinaryRow part = entry.getKey();
             for (Integer bucket : entry.getValue()) {
-                List<DataFileMeta> before = beforeFiles.getOrDefault(part, Collections.emptyMap()).getOrDefault(bucket, Collections.emptyList());
-                List<DataFileMeta> data = dataFiles.getOrDefault(part, Collections.emptyMap()).getOrDefault(bucket, Collections.emptyList());
-                DataSplit split = DataSplit.builder().withSnapshot(snapshotId).withPartition(part).withBucket(bucket).withBeforeFiles(before).withDataFiles(data).isStreaming(true).build();
+                List<DataFileMeta> before =
+                        beforeFiles
+                                .getOrDefault(part, Collections.emptyMap())
+                                .getOrDefault(bucket, Collections.emptyList());
+                List<DataFileMeta> data =
+                        dataFiles
+                                .getOrDefault(part, Collections.emptyMap())
+                                .getOrDefault(bucket, Collections.emptyList());
+                DataSplit split =
+                        DataSplit.builder()
+                                .withSnapshot(snapshotId)
+                                .withPartition(part)
+                                .withBucket(bucket)
+                                .withBeforeFiles(before)
+                                .withDataFiles(data)
+                                .isStreaming(true)
+                                .build();
                 splits.add(split);
             }
         }
@@ -299,11 +321,18 @@ public class SnapshotReaderImpl implements SnapshotReader {
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
                 int bucket = bucketEntry.getKey();
                 List<DataFileMeta> bucketFiles = bucketEntry.getValue();
-                DataSplit.Builder builder = DataSplit.builder().withSnapshot(snapshotId).withPartition(partition).withBucket(bucket).isStreaming(isStreaming);
-                List<List<DataFileMeta>> splited = isStreaming ?
-                        splitGenerator.splitForStreaming(bucketFiles) :
-                        splitGenerator.splitForBatch(bucketFiles);
-                splited.stream().map(builder::withDataFiles)
+                DataSplit.Builder builder =
+                        DataSplit.builder()
+                                .withSnapshot(snapshotId)
+                                .withPartition(partition)
+                                .withBucket(bucket)
+                                .isStreaming(isStreaming);
+                List<List<DataFileMeta>> splited =
+                        isStreaming
+                                ? splitGenerator.splitForStreaming(bucketFiles)
+                                : splitGenerator.splitForBatch(bucketFiles);
+                splited.stream()
+                        .map(builder::withDataFiles)
                         .map(DataSplit.Builder::build)
                         .forEach(splits::add);
             }

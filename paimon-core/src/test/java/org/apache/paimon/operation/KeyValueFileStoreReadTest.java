@@ -234,9 +234,15 @@ public class KeyValueFileStoreReadTest {
         for (Map.Entry<BinaryRow, List<ManifestEntry>> entry : filesGroupedByPartition.entrySet()) {
             RecordReader<KeyValue> reader =
                     read.createReader(
-                            DataSplit.builder().withSnapshot(snapshotId).withPartition(entry.getKey()).withBucket(0).withDataFiles(entry.getValue().stream()
-                                    .map(ManifestEntry::file)
-                                    .collect(Collectors.toList())).build());
+                            DataSplit.builder()
+                                    .withSnapshot(snapshotId)
+                                    .withPartition(entry.getKey())
+                                    .withBucket(0)
+                                    .withDataFiles(
+                                            entry.getValue().stream()
+                                                    .map(ManifestEntry::file)
+                                                    .collect(Collectors.toList()))
+                                    .build());
             RecordReaderIterator<KeyValue> actualIterator = new RecordReaderIterator<>(reader);
             while (actualIterator.hasNext()) {
                 result.add(

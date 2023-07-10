@@ -20,7 +20,6 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataSplit;
 
@@ -118,9 +117,15 @@ public class FileStoreSourceSplitSerializerTest {
             List<DataFileMeta> files,
             boolean isIncremental,
             long recordsToSkip) {
-        DataSplit split = DataSplit.builder().withSnapshot(1).withPartition(partition).withBucket(bucket).withDataFiles(files).isStreaming(isIncremental).build();
-        return new FileStoreSourceSplit(
-                id, split, recordsToSkip);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1)
+                        .withPartition(partition)
+                        .withBucket(bucket)
+                        .withDataFiles(files)
+                        .isStreaming(isIncremental)
+                        .build();
+        return new FileStoreSourceSplit(id, split, recordsToSkip);
     }
 
     private static FileStoreSourceSplit serializeAndDeserialize(FileStoreSourceSplit split)
