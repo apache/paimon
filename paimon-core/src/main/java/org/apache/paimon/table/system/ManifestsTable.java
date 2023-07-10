@@ -246,7 +246,7 @@ public class ManifestsTable implements ReadonlyTable {
         }
 
         private List<ManifestFileMeta> manifestFileMetas() {
-            if (manifestFileMetas == null ||  manifestFileMetas.size() == 0) {
+            if (manifestFileMetas == null || manifestFileMetas.size() == 0) {
                 initialize();
             }
             return manifestFileMetas;
