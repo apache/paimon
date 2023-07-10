@@ -16,12 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.factories;
+package org.apache.paimon.factories;
 
-import org.apache.paimon.flink.log.LogStoreTableFactory;
-
-import org.apache.flink.table.api.TableException;
-import org.apache.flink.table.api.ValidationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,58 +27,52 @@ import java.util.List;
 import java.util.ServiceLoader;
 import java.util.stream.Collectors;
 
-import static org.apache.flink.table.factories.ManagedTableFactory.DEFAULT_IDENTIFIER;
+/** Utility for working with {@link Factory}s. */
+public class FactoryUtil {
+    private static final Logger LOG = LoggerFactory.getLogger(FactoryUtil.class);
 
-/** Utility for working with {@link LogStoreTableFactory}s. */
-public final class LogStoreFactoryUtil {
-
-    private static final Logger LOG = LoggerFactory.getLogger(LogStoreFactoryUtil.class);
-
-    /** Discovers a LogStoreTableFactory using the given factory base class and identifier. */
+    /** Discovers a factory using the given factory base class and identifier. */
     @SuppressWarnings("unchecked")
-    public static <T extends LogStoreTableFactory> T discoverLogStoreFactory(
-            ClassLoader classLoader, Class<T> factoryClass, String factoryIdentifier) {
-        final List<LogStoreTableFactory> factories = discoverLogStoreFactories(classLoader);
+    public static <T extends Factory> T discoverFactory(
+            ClassLoader classLoader, Class<T> factoryClass, String identifier) {
+        final List<Factory> factories = discoverFactories(classLoader);
 
-        final List<LogStoreTableFactory> foundFactories =
+        final List<Factory> foundFactories =
                 factories.stream()
                         .filter(f -> factoryClass.isAssignableFrom(f.getClass()))
                         .collect(Collectors.toList());
 
         if (foundFactories.isEmpty()) {
-            throw new ValidationException(
+            throw new FactoryException(
                     String.format(
                             "Could not find any factories that implement '%s' in the classpath.",
                             factoryClass.getName()));
         }
 
-        final List<LogStoreTableFactory> matchingFactories =
+        final List<Factory> matchingFactories =
                 foundFactories.stream()
-                        .filter(f -> f.factoryIdentifier().equals(factoryIdentifier))
+                        .filter(f -> f.identifier().equals(identifier))
                         .collect(Collectors.toList());
 
         if (matchingFactories.isEmpty()) {
-            throw new ValidationException(
+            throw new FactoryException(
                     String.format(
                             "Could not find any factory for identifier '%s' that implements '%s' in the classpath.\n\n"
                                     + "Available factory identifiers are:\n\n"
                                     + "%s",
-                            factoryIdentifier,
+                            identifier,
                             factoryClass.getName(),
                             foundFactories.stream()
-                                    .map(LogStoreTableFactory::factoryIdentifier)
-                                    .filter(identifier -> !DEFAULT_IDENTIFIER.equals(identifier))
-                                    .distinct()
-                                    .sorted()
+                                    .map(Factory::identifier)
                                     .collect(Collectors.joining("\n"))));
         }
         if (matchingFactories.size() > 1) {
-            throw new ValidationException(
+            throw new FactoryException(
                     String.format(
                             "Multiple factories for identifier '%s' that implement '%s' found in the classpath.\n\n"
                                     + "Ambiguous factory classes are:\n\n"
                                     + "%s",
-                            factoryIdentifier,
+                            identifier,
                             factoryClass.getName(),
                             matchingFactories.stream()
                                     .map(f -> f.getClass().getName())
@@ -93,15 +83,11 @@ public final class LogStoreFactoryUtil {
         return (T) matchingFactories.get(0);
     }
 
-    // --------------------------------------------------------------------------------------------
-    // Helper methods
-    // --------------------------------------------------------------------------------------------
+    private static List<Factory> discoverFactories(ClassLoader classLoader) {
+        final Iterator<Factory> serviceLoaderIterator =
+                ServiceLoader.load(Factory.class, classLoader).iterator();
 
-    static List<LogStoreTableFactory> discoverLogStoreFactories(ClassLoader classLoader) {
-        final Iterator<LogStoreTableFactory> serviceLoaderIterator =
-                ServiceLoader.load(LogStoreTableFactory.class, classLoader).iterator();
-
-        final List<LogStoreTableFactory> loadResults = new ArrayList<>();
+        final List<Factory> loadResults = new ArrayList<>();
         while (true) {
             try {
                 // error handling should also be applied to the hasNext() call because service
@@ -115,22 +101,16 @@ public final class LogStoreFactoryUtil {
                 if (t instanceof NoClassDefFoundError) {
                     LOG.debug(
                             "NoClassDefFoundError when loading a "
-                                    + LogStoreTableFactory.class.getCanonicalName()
-                                    + ". This is expected when trying to load a format dependency but no flink-connector-files is loaded.",
+                                    + Factory.class.getCanonicalName()
+                                    + ". This is expected when trying to load factory but no implementation is loaded.",
                             t);
                 } else {
-                    throw new TableException(
+                    throw new RuntimeException(
                             "Unexpected error when trying to load service provider.", t);
                 }
             }
         }
 
         return loadResults;
-    }
-
-    // --------------------------------------------------------------------------------------------
-
-    private LogStoreFactoryUtil() {
-        // no instantiation
     }
 }

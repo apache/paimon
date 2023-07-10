@@ -19,16 +19,14 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.factories.Factory;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.ServiceLoader;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
@@ -40,9 +38,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * @since 0.4.0
  */
 @Public
-public interface CatalogFactory {
-
-    String identifier();
+public interface CatalogFactory extends Factory {
 
     Catalog create(FileIO fileIO, Path warehouse, CatalogContext context);
 
@@ -69,28 +65,8 @@ public interface CatalogFactory {
         String warehouse = warehouse(context).toUri().toString();
 
         String metastore = context.options().get(METASTORE);
-        List<CatalogFactory> factories = new ArrayList<>();
-        ServiceLoader.load(CatalogFactory.class, classLoader)
-                .iterator()
-                .forEachRemaining(
-                        f -> {
-                            if (f.identifier().equals(metastore)) {
-                                factories.add(f);
-                            }
-                        });
-        if (factories.size() != 1) {
-            throw new RuntimeException(
-                    "Found "
-                            + factories.size()
-                            + " classes implementing "
-                            + CatalogFactory.class.getName()
-                            + " with metastore "
-                            + metastore
-                            + ". They are:\n"
-                            + factories.stream()
-                                    .map(t -> t.getClass().getName())
-                                    .collect(Collectors.joining("\n")));
-        }
+        CatalogFactory catalogFactory =
+                FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
 
         Path warehousePath = new Path(warehouse);
         FileIO fileIO;
@@ -110,6 +86,6 @@ public interface CatalogFactory {
             throw new UncheckedIOException(e);
         }
 
-        return factories.get(0).create(fileIO, warehousePath, context);
+        return catalogFactory.create(fileIO, warehousePath, context);
     }
 }

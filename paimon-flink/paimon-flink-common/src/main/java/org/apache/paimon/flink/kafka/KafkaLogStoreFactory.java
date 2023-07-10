@@ -59,7 +59,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     public static final String KAFKA_PREFIX = IDENTIFIER + ".";
 
     @Override
-    public String factoryIdentifier() {
+    public String identifier() {
         return IDENTIFIER;
     }
 
