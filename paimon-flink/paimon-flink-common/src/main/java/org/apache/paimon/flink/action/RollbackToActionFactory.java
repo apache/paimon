@@ -36,12 +36,12 @@ public class RollbackToActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        Action.checkRequiredArgument(params, "version");
+        checkRequiredArgument(params, "version");
         String version = params.get("version");
 
-        Map<String, String> catalogConfig = Action.optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 
         RollbackToAction action =
                 new RollbackToAction(

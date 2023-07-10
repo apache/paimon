@@ -26,9 +26,6 @@ import org.apache.flink.api.java.utils.MultipleParameterTool;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
-import static org.apache.paimon.flink.action.Action.optionalConfigMap;
-
 /** Factory to create {@link KafkaSyncDatabaseAction}. */
 public class KafkaSyncDatabaseActionFactory implements ActionFactory {
 

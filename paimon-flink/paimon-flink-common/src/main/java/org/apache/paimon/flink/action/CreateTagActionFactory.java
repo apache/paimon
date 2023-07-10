@@ -36,11 +36,11 @@ public class CreateTagActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        Action.checkRequiredArgument(params, "tag-name");
-        Action.checkRequiredArgument(params, "snapshot");
+        checkRequiredArgument(params, "tag-name");
+        checkRequiredArgument(params, "snapshot");
 
-        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
-        Map<String, String> catalogConfig = Action.optionalConfigMap(params, "catalog-conf");
+        Tuple3<String, String, String> tablePath = getTablePath(params);
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
         String tagName = params.get("tag-name");
         long snapshot = Long.parseLong(params.get("snapshot"));
 

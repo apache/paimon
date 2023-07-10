@@ -28,8 +28,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
-
 /** Factory to create {@link MergeIntoAction}. */
 public class MergeIntoActionFactory implements ActionFactory {
 
@@ -42,9 +40,9 @@ public class MergeIntoActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        Map<String, String> catalogConfig = Action.optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 
         MergeIntoAction action =
                 new MergeIntoAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);

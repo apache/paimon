@@ -25,8 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.Action.optionalConfigMap;
-
 /** Factory to create {@link DropPartitionAction}. */
 public class DropPartitionActionFactory implements ActionFactory {
 
@@ -39,10 +37,10 @@ public class DropPartitionActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        Action.checkRequiredArgument(params, "partition");
-        List<Map<String, String>> partitions = Action.getPartitions(params);
+        checkRequiredArgument(params, "partition");
+        List<Map<String, String>> partitions = getPartitions(params);
 
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 

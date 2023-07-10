@@ -36,10 +36,10 @@ public class DeleteTagActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        Action.checkRequiredArgument(params, "tag-name");
+        checkRequiredArgument(params, "tag-name");
 
-        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
-        Map<String, String> catalogConfig = Action.optionalConfigMap(params, "catalog-conf");
+        Tuple3<String, String, String> tablePath = getTablePath(params);
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
         String tagName = params.get("tag-name");
 
         DeleteTagAction action =

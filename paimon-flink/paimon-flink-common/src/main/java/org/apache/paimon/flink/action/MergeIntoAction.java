@@ -44,7 +44,7 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.paimon.flink.action.Action.parseCommaSeparatedKeyValues;
+import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
 
 /**
  * Flink action for 'MERGE INTO', which references the syntax as follows (we use 'upsert' semantics

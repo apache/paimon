@@ -37,15 +37,15 @@ public class CompactActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        Map<String, String> catalogConfig = Action.optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
 
         CompactAction action =
                 new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
 
         if (params.has("partition")) {
-            List<Map<String, String>> partitions = Action.getPartitions(params);
+            List<Map<String, String>> partitions = getPartitions(params);
             action.withPartitions(partitions);
         }
 

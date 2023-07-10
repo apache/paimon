@@ -32,9 +32,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
-import static org.apache.paimon.flink.action.Action.optionalConfigMap;
-
 /** Factory to create {@link KafkaSyncTableAction}. */
 public class KafkaSyncTableActionFactory implements ActionFactory {
 
@@ -47,7 +44,7 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        Tuple3<String, String, String> tablePath = Action.getTablePath(params);
+        Tuple3<String, String, String> tablePath = getTablePath(params);
 
         List<String> partitionKeys = Collections.emptyList();
         if (params.has("partition-keys")) {
