@@ -138,11 +138,19 @@ INSERT INTO MyTable SELECT ...
 
 For unpartitioned tables, Paimon supports overwriting the whole table.
 
+Use `INSERT OVERWRITE` to overwrite the whole unpartitioned table.
+
 {{< tabs "insert-overwrite-unpartitioned-example" >}}
 
 {{< tab "Flink" >}}
 
-Use `INSERT OVERWRITE` to overwrite the whole unpartitioned table.
+```sql
+INSERT OVERWRITE MyTable SELECT ...
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
 
 ```sql
 INSERT OVERWRITE MyTable SELECT ...
@@ -156,11 +164,19 @@ INSERT OVERWRITE MyTable SELECT ...
 
 For partitioned tables, Paimon supports overwriting a partition.
 
+Use `INSERT OVERWRITE` to overwrite a partition.
+
 {{< tabs "insert-overwrite-partitioned-example" >}}
 
 {{< tab "Flink" >}}
 
-Use `INSERT OVERWRITE` to overwrite a partition.
+```sql
+INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
 
 ```sql
 INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
@@ -250,6 +266,7 @@ For more information of drop-partition, see
 {{< /tabs >}}
 
 ## Updating tables
+
 Currently, Paimon supports updating records by using `UPDATE` in Flink 1.17 and later versions. You can perform `UPDATE` in Flink's `batch` mode.
 
 {{< hint info >}}
@@ -355,7 +372,17 @@ CREATE TABLE MyTable (
 );
 
 -- you can use
-DELETE FROM MyTable WHERE currency = 'UNKNOWN;
+DELETE FROM MyTable WHERE currency = 'UNKNOWN';
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+
+Spark `DELETE` currently supports only a single point execution, for deleting small amounts of data.
+
+```sql
+DELETE FROM MyTable WHERE currency = 'UNKNOWN';
 ```
 
 {{< /tab >}}
