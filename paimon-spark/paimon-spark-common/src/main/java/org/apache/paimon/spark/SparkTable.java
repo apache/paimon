@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
@@ -40,6 +41,7 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -118,7 +120,13 @@ public class SparkTable
     @Override
     public Map<String, String> properties() {
         if (table instanceof DataTable) {
-            return ((DataTable) table).coreOptions().toMap();
+            Map<String, String> properties =
+                    new HashMap<>(((DataTable) table).coreOptions().toMap());
+            if (table.primaryKeys().size() > 0) {
+                properties.put(
+                        CoreOptions.PRIMARY_KEY.key(), String.join(",", table.primaryKeys()));
+            }
+            return properties;
         } else {
             return Collections.emptyMap();
         }

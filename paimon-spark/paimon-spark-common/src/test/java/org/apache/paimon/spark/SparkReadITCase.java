@@ -246,7 +246,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThat(spark.sql("SHOW CREATE TABLE t_pk_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[%sTBLPROPERTIES (\n  'path' = '%s')\n]]",
+                                "[[%sTBLPROPERTIES (\n  'path' = '%s',\n  'primary-key' = 'a')\n]]",
                                 showCreateString("t_pk_as", "a BIGINT", "b STRING", "c STRING"),
                                 new Path(warehousePath, "default.db/t_pk_as")));
         List<Row> resultPk = spark.sql("SELECT * FROM t_pk_as").collectAsList();
@@ -273,7 +273,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 "[[%s"
                                         + "PARTITIONED BY (dt)\n"
                                         + "TBLPROPERTIES (\n"
-                                        + "  'path' = '%s')\n"
+                                        + "  'path' = '%s',\n"
+                                        + "  'primary-key' = 'dt,hh')\n"
                                         + "]]",
                                 showCreateString(
                                         "t_all_as",
@@ -358,7 +359,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         + "COMMENT 'tbl comment'\n"
                                         + "TBLPROPERTIES (\n"
                                         + "  'k1' = 'v1',\n"
-                                        + "  'path' = '%s')\n]]",
+                                        + "  'path' = '%s',\n"
+                                        + "  'primary-key' = 'a,b')\n]]",
                                 showCreateString("tbl", "a INT COMMENT 'a comment'", "b STRING"),
                                 new Path(warehousePath, "default.db/tbl")));
     }
