@@ -103,7 +103,7 @@ public abstract class AbstractCatalog implements Catalog {
         return dataTableLocation(warehouse(), identifier);
     }
 
-    private boolean isSystemTable(Identifier identifier) {
+    private static boolean isSystemTable(Identifier identifier) {
         return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER);
     }
 
@@ -131,7 +131,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public static Path dataTableLocation(String warehouse, Identifier identifier) {
-        if (identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
+        if (isSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Table name[%s] cannot contain '%s' separator",

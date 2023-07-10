@@ -167,9 +167,9 @@ public class ManifestsTable implements ReadonlyTable {
 
         private int[][] projection;
 
-        private FileIO fileIO;
+        private final FileIO fileIO;
 
-        private Table dataTable;
+        private final Table dataTable;
 
         public ManifestsRead(FileIO fileIO, Table dataTable) {
             this.fileIO = fileIO;
@@ -194,7 +194,6 @@ public class ManifestsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((ManifestsSplit) split).location;
-            Snapshot snapshot = new SnapshotManager(fileIO, location).latestSnapshot();
             List<ManifestFileMeta> manifestFileMetas =
                     new StatsManifestsGetter(fileIO, location, dataTable).manifestFileMetas();
 
@@ -233,6 +232,10 @@ public class ManifestsTable implements ReadonlyTable {
 
         private void initialize() {
             Snapshot snapshot = new SnapshotManager(fileIO, location).latestSnapshot();
+            if (snapshot == null) {
+                manifestFileMetas = Collections.emptyList();
+                return;
+            }
             FileStorePathFactory fileStorePathFactory = new FileStorePathFactory(location);
             CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
             FileFormat fileFormat = coreOptions.manifestFormat();
@@ -243,7 +246,7 @@ public class ManifestsTable implements ReadonlyTable {
         }
 
         private List<ManifestFileMeta> manifestFileMetas() {
-            if (manifestFileMetas == null) {
+            if (manifestFileMetas == null ||  manifestFileMetas.size() == 0) {
                 initialize();
             }
             return manifestFileMetas;
