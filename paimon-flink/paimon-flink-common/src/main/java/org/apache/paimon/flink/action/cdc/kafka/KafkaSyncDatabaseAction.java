@@ -24,9 +24,11 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
-import org.apache.paimon.flink.action.cdc.kafka.canal.CanalJsonEventParser;
+import org.apache.paimon.flink.action.cdc.kafka.canal.KafkaSourceConversionProcessFunction;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -212,18 +214,24 @@ public class KafkaSyncDatabaseAction extends ActionBase {
         kafkaConfig.set(KafkaConnectorOptions.TOPIC, monitoredTopics);
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
 
-        EventParser.Factory<String> parserFactory;
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory;
         String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
         if ("canal-json".equals(format)) {
-            parserFactory = () -> new CanalJsonEventParser(caseSensitive, tableNameConverter);
+            parserFactory = RichCdcMultiplexRecordEventParser::new;
         } else {
             throw new UnsupportedOperationException("This format: " + format + " is not support.");
         }
-        FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
-                new FlinkCdcSyncDatabaseSinkBuilder<String>()
+
+        FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
+                new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
                         .withInput(
                                 env.fromSource(
-                                        source, WatermarkStrategy.noWatermarks(), "Kafka Source"))
+                                                source,
+                                                WatermarkStrategy.noWatermarks(),
+                                                "Kafka Source")
+                                        .process(
+                                                new KafkaSourceConversionProcessFunction(
+                                                        caseSensitive, tableNameConverter)))
                         .withParserFactory(parserFactory)
                         .withTables(fileStoreTables)
                         .withCatalogLoader(catalogLoader())

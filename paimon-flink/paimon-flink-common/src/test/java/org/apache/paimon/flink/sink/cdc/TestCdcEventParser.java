@@ -47,11 +47,6 @@ public class TestCdcEventParser implements EventParser<TestCdcEvent> {
     }
 
     @Override
-    public String parseDatabaseName() {
-        return null;
-    }
-
-    @Override
     public List<CdcRecord> parseRecords() {
         return ObjectUtils.coalesce(raw.records(), Collections.emptyList());
     }
