@@ -35,6 +35,7 @@ import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CoreOptions#INCREMENTAL_BETWEEN}. */
 public class IncrementalTableTest extends TableTestBase {
@@ -198,5 +199,91 @@ public class IncrementalTableTest extends TableTestBase {
                         GenericRow.of(fromString("+I"), 1, 4, 1),
                         GenericRow.of(fromString("-D"), 1, 2, 1),
                         GenericRow.of(fromString("-D"), 1, 3, 1));
+    }
+
+    @Test
+    public void testTagIncremental() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+        Table auditLog = catalog.getTable(identifier("T$audit_log"));
+
+        // snapshot 1: append
+        write(
+                table,
+                GenericRow.of(1, 1, 1),
+                GenericRow.of(1, 2, 1),
+                GenericRow.of(1, 3, 1),
+                GenericRow.of(2, 1, 1));
+
+        // snapshot 2: append
+        write(
+                table,
+                // DELETE
+                GenericRow.ofKind(RowKind.DELETE, 1, 1, 1),
+                // UPDATE
+                GenericRow.of(1, 2, 2),
+                // NEW
+                GenericRow.of(1, 4, 1));
+
+        // snapshot 3: compact
+        compact(table, row(1), 0);
+
+        table.createTag("TAG1", 1);
+        table.createTag("TAG2", 2);
+        table.createTag("TAG3", 3);
+
+        // read tag1 tag2
+        List<InternalRow> result = read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(GenericRow.of(1, 2, 2), GenericRow.of(1, 4, 1));
+        result = read(auditLog, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(fromString("-D"), 1, 1, 1),
+                        GenericRow.of(fromString("+I"), 1, 2, 2),
+                        GenericRow.of(fromString("+I"), 1, 4, 1));
+
+        // read tag1 tag3
+        result = read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG3"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(GenericRow.of(1, 2, 2), GenericRow.of(1, 4, 1));
+        result = read(auditLog, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG3"));
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(fromString("-D"), 1, 1, 1),
+                        GenericRow.of(fromString("+I"), 1, 2, 2),
+                        GenericRow.of(fromString("+I"), 1, 4, 1));
+    }
+
+    @Test
+    public void testAppendTableTag() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+
+        write(table, GenericRow.of(1, 1, 1));
+        write(table, GenericRow.of(1, 1, 2));
+
+        table.createTag("TAG1", 1);
+        table.createTag("TAG2", 2);
+
+        assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
+                .hasMessageContaining("Append only not support before files now");
     }
 }

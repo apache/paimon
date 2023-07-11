@@ -117,7 +117,9 @@ SELECT * FROM t;
 
 Read incremental changes between start snapshot (exclusive) and end snapshot.
 
-For example, '5,10' means changes between snapshot 5 and snapshot 10.
+For example:
+- '5,10' means changes between snapshot 5 and snapshot 10.
+- 'TAG1,TAG3' means changes between TAG1 and TAG3.
 
 {{< tabs "incremental-example" >}}
 

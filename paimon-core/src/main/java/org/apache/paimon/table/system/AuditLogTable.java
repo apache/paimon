@@ -243,6 +243,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public Plan readIncrementalDiff(Snapshot before) {
+            return snapshotReader.readIncrementalDiff(before);
+        }
+
+        @Override
         public List<BinaryRow> partitions() {
             return snapshotReader.partitions();
         }

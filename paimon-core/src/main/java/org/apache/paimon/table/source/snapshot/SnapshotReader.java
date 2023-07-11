@@ -61,6 +61,8 @@ public interface SnapshotReader {
     /** Get splits plan from an overwritten snapshot. */
     Plan readOverwrittenChanges();
 
+    Plan readIncrementalDiff(Snapshot before);
+
     /** Get partitions from a snapshot. */
     List<BinaryRow> partitions();
 

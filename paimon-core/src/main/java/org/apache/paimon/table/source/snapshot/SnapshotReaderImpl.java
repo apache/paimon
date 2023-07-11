@@ -233,13 +233,20 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     "Cannot read overwrite splits from a non-overwrite snapshot.");
         }
 
-        List<DataSplit> splits = new ArrayList<>();
-
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
                 groupByPartFiles(plan.files(FileKind.DELETE));
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));
 
+        return toChangesPlan(true, plan, beforeFiles, dataFiles);
+    }
+
+    private Plan toChangesPlan(
+            boolean isStreaming,
+            FileStoreScan.Plan plan,
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles,
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles) {
+        List<DataSplit> splits = new ArrayList<>();
         Map<BinaryRow, Set<Integer>> buckets = new HashMap<>();
         beforeFiles.forEach(
                 (part, bucketMap) ->
@@ -261,14 +268,18 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         dataFiles
                                 .getOrDefault(part, Collections.emptyMap())
                                 .getOrDefault(bucket, Collections.emptyList());
+
+                // deduplicate
+                before.removeIf(data::remove);
+
                 DataSplit split =
                         DataSplit.builder()
-                                .withSnapshot(snapshotId)
+                                .withSnapshot(plan.snapshotId())
                                 .withPartition(part)
                                 .withBucket(bucket)
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
-                                .isStreaming(true)
+                                .isStreaming(isStreaming)
                                 .build();
                 splits.add(split);
             }
@@ -292,6 +303,17 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 return (List) splits;
             }
         };
+    }
+
+    @Override
+    public Plan readIncrementalDiff(Snapshot before) {
+        withKind(ScanKind.ALL);
+        FileStoreScan.Plan plan = scan.plan();
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
+                groupByPartFiles(plan.files(FileKind.ADD));
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
+                groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
+        return toChangesPlan(false, plan, beforeFiles, dataFiles);
     }
 
     private RecordComparator partitionComparator() {
