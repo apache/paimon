@@ -101,9 +101,10 @@ public class SchemaEvolutionTest {
                             Collections.emptyList(),
                             option,
                             "");
+
             assertThatThrownBy(() -> schemaManager.createTable(schema))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage(
+                    .hasMessageContaining(
                             "The column %s with datatype %s is currently not supported for default value.",
                             "a", DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()).asSQLString());
         }
@@ -127,7 +128,7 @@ public class SchemaEvolutionTest {
                             "");
             assertThatThrownBy(() -> schemaManager.createTable(schema))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage(
+                    .hasMessageContaining(
                             "The default value %s of the column a can not be cast to datatype: %s",
                             "abcxxxx", DataTypes.BIGINT().asSQLString());
         }
@@ -162,8 +163,8 @@ public class SchemaEvolutionTest {
                                                                     CoreOptions
                                                                             .DEFAULT_VALUE_SUFFIX),
                                                             "abcxxxx"))))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage(
+                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining(
                             "The default value %s of the column b can not be cast to datatype: %s",
                             "abcxxxx", DataTypes.BIGINT().asSQLString());
             assertThatThrownBy(
@@ -178,8 +179,8 @@ public class SchemaEvolutionTest {
                                                                     CoreOptions
                                                                             .DEFAULT_VALUE_SUFFIX),
                                                             "abc"))))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Primary key a should not be assign default column.");
+                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Primary key a should not be assign default column.");
 
             assertThatThrownBy(
                             () ->
@@ -193,8 +194,8 @@ public class SchemaEvolutionTest {
                                                                     CoreOptions
                                                                             .DEFAULT_VALUE_SUFFIX),
                                                             "abc"))))
-                    .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Partition key c should not be assign default column.");
+                    .hasCauseInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("Partition key c should not be assign default column.");
         }
     }
 
