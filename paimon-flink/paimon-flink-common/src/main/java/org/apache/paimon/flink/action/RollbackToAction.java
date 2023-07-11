@@ -20,17 +20,10 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.table.DataTable;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Map;
-import java.util.Optional;
-
-import static org.apache.paimon.flink.action.Action.checkRequiredArgument;
-import static org.apache.paimon.flink.action.Action.getTablePath;
-import static org.apache.paimon.flink.action.Action.optionalConfigMap;
 
 /** Rollback to specific version action for Flink. */
 public class RollbackToAction extends TableActionBase {
@@ -47,44 +40,6 @@ public class RollbackToAction extends TableActionBase {
             Map<String, String> catalogConfig) {
         super(warehouse, databaseName, tableName, catalogConfig);
         this.version = version;
-    }
-
-    public static Optional<Action> create(String[] args) {
-        LOG.info("rollback-to action args: {}", String.join(" ", args));
-
-        MultipleParameterTool params = MultipleParameterTool.fromArgs(args);
-
-        if (params.has("help")) {
-            printHelp();
-            return Optional.empty();
-        }
-
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        checkRequiredArgument(params, "version");
-        String version = params.get("version");
-
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-
-        RollbackToAction action =
-                new RollbackToAction(
-                        tablePath.f0, tablePath.f1, tablePath.f2, version, catalogConfig);
-
-        return Optional.of(action);
-    }
-
-    private static void printHelp() {
-        System.out.println(
-                "Action \"rollback-to\" roll back a table to a specific snapshot ID or tag.");
-        System.out.println();
-
-        System.out.println("Syntax:");
-        System.out.println(
-                "  rollback-to --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --version <version-string>");
-        System.out.println(
-                "  'version-string can be a long value representing a snapshot ID or a tag name.'");
-        System.out.println();
     }
 
     @Override
