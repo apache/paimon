@@ -535,4 +535,8 @@ public class StringUtils {
         }
         return true;
     }
+
+    public static String caseSensitiveConversion(String str, boolean caseSensitive) {
+        return caseSensitive ? str : str.toLowerCase();
+    }
 }

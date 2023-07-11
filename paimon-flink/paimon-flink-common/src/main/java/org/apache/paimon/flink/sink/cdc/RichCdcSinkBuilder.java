@@ -68,7 +68,7 @@ public class RichCdcSinkBuilder {
         CdcSinkBuilder<RichCdcRecord> builder = new CdcSinkBuilder<>();
         return builder.withTable(table)
                 .withInput(input)
-                .withParserFactory(new RichCdcParserFactory())
+                .withParserFactory(RichEventParser::new)
                 .withParallelism(parallelism)
                 .withIdentifier(identifier)
                 .withCatalogLoader(catalogLoader)

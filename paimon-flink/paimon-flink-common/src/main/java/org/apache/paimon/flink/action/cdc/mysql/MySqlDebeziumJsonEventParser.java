@@ -122,12 +122,6 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         return tableNameConverter.convert(tableName);
     }
 
-    @Override
-    public String parseDatabaseName() {
-        String databaseName = payload.get("source").get("db").asText();
-        return tableNameConverter.convert(databaseName);
-    }
-
     private boolean isSchemaChange() {
         return payload.get("op") == null;
     }

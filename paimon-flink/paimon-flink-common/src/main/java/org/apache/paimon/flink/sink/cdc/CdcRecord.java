@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.types.RowKind;
 
 import java.io.Serializable;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 
@@ -37,6 +38,10 @@ public class CdcRecord implements Serializable {
     public CdcRecord(RowKind kind, Map<String, String> fields) {
         this.kind = kind;
         this.fields = fields;
+    }
+
+    public static CdcRecord emptyRecord() {
+        return new CdcRecord(RowKind.INSERT, Collections.emptyMap());
     }
 
     public RowKind kind() {

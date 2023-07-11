@@ -18,41 +18,40 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.utils.ObjectUtils;
 
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 
-/** Testing {@link EventParser} for {@link TestCdcEvent}. */
-public class TestCdcEventParser implements EventParser<TestCdcEvent> {
+/** {@link EventParser} for {@link RichCdcMultiplexRecord}. */
+public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMultiplexRecord> {
 
-    private TestCdcEvent raw;
+    // TODO: currently we don't consider database
+    private String currentTable;
+    private RichEventParser currentParser;
+
+    private final Map<String, RichEventParser> parsers = new HashMap<>();
 
     @Override
-    public void setRawEvent(TestCdcEvent raw) {
-        this.raw = raw;
+    public void setRawEvent(RichCdcMultiplexRecord record) {
+        this.currentTable = record.tableName();
+        this.currentParser = parsers.computeIfAbsent(currentTable, t -> new RichEventParser());
+        currentParser.setRawEvent(record.toRichCdcRecord());
     }
 
     @Override
     public String parseTableName() {
-        return raw.tableName();
+        return currentTable;
     }
 
     @Override
     public List<DataField> parseSchemaChange() {
-        return ObjectUtils.coalesce(raw.updatedDataFields(), Collections.emptyList());
+        return currentParser.parseSchemaChange();
     }
 
     @Override
     public List<CdcRecord> parseRecords() {
-        return ObjectUtils.coalesce(raw.records(), Collections.emptyList());
-    }
-
-    @Override
-    public Optional<Schema> parseNewTable(String databaseName) {
-        return Optional.empty();
+        return currentParser.parseRecords();
     }
 }

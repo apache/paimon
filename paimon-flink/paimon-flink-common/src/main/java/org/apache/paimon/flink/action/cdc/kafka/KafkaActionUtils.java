@@ -158,7 +158,7 @@ class KafkaActionUtils {
     }
 
     static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
-        KafkaSourceBuilder kafkaSourceBuilder = KafkaSource.builder();
+        KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
         String groupId = kafkaConfig.get(KafkaConnectorOptions.PROPS_GROUP_ID);
         kafkaSourceBuilder
                 .setTopics(kafkaConfig.get(KafkaConnectorOptions.TOPIC))
