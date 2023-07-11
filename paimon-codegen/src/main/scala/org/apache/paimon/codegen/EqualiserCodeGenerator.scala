@@ -146,7 +146,7 @@ class EqualiserCodeGenerator(fieldTypes: Array[DataType]) {
       ctx.addReusableInitStatement(
         s"""
            |$equaliserTerm = ($equaliserTypeTerm)
-           |  $generatedEqualiserTerm.newInstance(Thread.currentThread().getContextClassLoader());
+           |  $generatedEqualiserTerm.newInstance(this.getClass().getClassLoader());
            |""".stripMargin)
       ("", s"$equaliserTerm.equals($leftFieldTerm, $rightFieldTerm)")
     } else {

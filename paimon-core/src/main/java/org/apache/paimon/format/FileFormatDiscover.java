@@ -47,11 +47,8 @@ public interface FileFormatDiscover {
 
     static FileFormat getFileFormat(Options options, String formatIdentifier) {
         int readBatchSize = options.get(CoreOptions.READ_BATCH_SIZE);
-        FileFormat fileFormat =
-                FileFormat.fromIdentifier(
-                        formatIdentifier,
-                        new FormatContext(
-                                options.removePrefix(formatIdentifier + "."), readBatchSize));
-        return fileFormat;
+        return FileFormat.fromIdentifier(
+                formatIdentifier,
+                new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
     }
 }

@@ -1111,9 +1111,7 @@ public class CoreOptions implements Serializable {
 
             Class<?> clazz;
             try {
-                clazz =
-                        Class.forName(
-                                className, true, Thread.currentThread().getContextClassLoader());
+                clazz = Class.forName(className, true, this.getClass().getClassLoader());
             } catch (ClassNotFoundException e) {
                 throw new RuntimeException(e);
             }

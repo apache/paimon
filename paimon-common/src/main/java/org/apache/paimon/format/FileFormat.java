@@ -89,7 +89,7 @@ public abstract class FileFormat {
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
         Optional<FileFormat> format =
-                fromIdentifier(identifier, context, Thread.currentThread().getContextClassLoader());
+                fromIdentifier(identifier, context, FileFormat.class.getClassLoader());
         return format.orElseGet(
                 () ->
                         fromIdentifier(identifier, context, FileFormat.class.getClassLoader())

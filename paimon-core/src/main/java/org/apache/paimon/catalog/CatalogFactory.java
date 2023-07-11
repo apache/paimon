@@ -55,7 +55,7 @@ public interface CatalogFactory extends Factory {
      * default.
      */
     static Catalog createCatalog(CatalogContext options) {
-        return createCatalog(options, Thread.currentThread().getContextClassLoader());
+        return createCatalog(options, CatalogFactory.class.getClassLoader());
     }
 
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
