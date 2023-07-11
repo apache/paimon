@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.SparkCatalog
+import org.apache.paimon.spark.{PaimonSparkSessionExtensions, SparkCatalog, SparkGenericCatalog}
 
 import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.QueryTest
@@ -29,19 +29,21 @@ import java.io.File
 
 class PaimonSparkTestBase extends QueryTest with SharedSparkSession {
 
-  protected var tempDBDir: File = _
+  protected lazy val tempDBDir: File = Utils.createTempDir
 
   protected val tableName0: String = "T"
 
+  override protected def sparkConf = {
+    super.sparkConf
+      .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
+      .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
+      .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
+  }
+
   override protected def beforeAll(): Unit = {
     super.beforeAll()
-
-    tempDBDir = Utils.createTempDir
-    spark.conf.set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
-    spark.conf.set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
     spark.sql("CREATE DATABASE paimon.db")
     spark.sql("USE paimon.db")
-    println(s"${tempDBDir.getCanonicalPath}")
   }
 
   override protected def afterAll(): Unit = {
