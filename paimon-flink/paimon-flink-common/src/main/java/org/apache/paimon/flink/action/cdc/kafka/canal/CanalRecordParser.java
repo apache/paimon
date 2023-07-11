@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.kafka.canal;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
+import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
@@ -42,7 +43,7 @@ import com.alibaba.druid.sql.ast.statement.SQLAlterTableStatement;
 import com.alibaba.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableChangeColumn;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.util.Collector;
 
 import java.nio.charset.StandardCharsets;
@@ -58,8 +59,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Convert canal-json format string to list of {@link RichCdcMultiplexRecord}s. */
-public class KafkaSourceConversionProcessFunction
-        extends ProcessFunction<String, RichCdcMultiplexRecord> {
+public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
 
     private static final String FIELD_DATABASE = "database";
     private static final String FIELD_TABLE = "table";
@@ -82,17 +82,15 @@ public class KafkaSourceConversionProcessFunction
     private String databaseName;
     private String tableName;
 
-    public KafkaSourceConversionProcessFunction(
-            boolean caseSensitive, List<ComputedColumn> computedColumns) {
+    public CanalRecordParser(boolean caseSensitive, List<ComputedColumn> computedColumns) {
         this(caseSensitive, new TableNameConverter(caseSensitive), computedColumns);
     }
 
-    public KafkaSourceConversionProcessFunction(
-            boolean caseSensitive, TableNameConverter tableNameConverter) {
+    public CanalRecordParser(boolean caseSensitive, TableNameConverter tableNameConverter) {
         this(caseSensitive, tableNameConverter, Collections.emptyList());
     }
 
-    public KafkaSourceConversionProcessFunction(
+    public CanalRecordParser(
             boolean caseSensitive,
             TableNameConverter tableNameConverter,
             List<ComputedColumn> computedColumns) {
@@ -102,11 +100,7 @@ public class KafkaSourceConversionProcessFunction
     }
 
     @Override
-    public void processElement(
-            String value,
-            ProcessFunction<String, RichCdcMultiplexRecord>.Context ctx,
-            Collector<RichCdcMultiplexRecord> out)
-            throws Exception {
+    public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) throws Exception {
         root = objectMapper.readValue(value, JsonNode.class);
         validateFormat();
 
@@ -173,18 +167,16 @@ public class KafkaSourceConversionProcessFunction
                         before = caseSensitive ? before : keyCaseInsensitive(before);
                         records.add(
                                 new RichCdcMultiplexRecord(
-                                        RowKind.DELETE,
+                                        new CdcRecord(RowKind.DELETE, before),
                                         paimonFieldTypes,
-                                        before,
                                         databaseName,
                                         tableName));
                     }
                     after = caseSensitive ? after : keyCaseInsensitive(after);
                     records.add(
                             new RichCdcMultiplexRecord(
-                                    RowKind.INSERT,
+                                    new CdcRecord(RowKind.INSERT, after),
                                     paimonFieldTypes,
-                                    after,
                                     databaseName,
                                     tableName));
                 }
@@ -195,11 +187,11 @@ public class KafkaSourceConversionProcessFunction
                 for (JsonNode datum : data) {
                     Map<String, String> after = extractRow(datum, mySqlFieldTypes);
                     after = caseSensitive ? after : keyCaseInsensitive(after);
+                    RowKind kind = type.equals(OP_INSERT) ? RowKind.INSERT : RowKind.DELETE;
                     records.add(
                             new RichCdcMultiplexRecord(
-                                    type.equals(OP_INSERT) ? RowKind.INSERT : RowKind.DELETE,
+                                    new CdcRecord(kind, after),
                                     paimonFieldTypes,
-                                    after,
                                     databaseName,
                                     tableName));
                 }
@@ -229,11 +221,7 @@ public class KafkaSourceConversionProcessFunction
 
         return Collections.singletonList(
                 new RichCdcMultiplexRecord(
-                        RowKind.INSERT, // not used
-                        fieldTypes,
-                        Collections.emptyMap(), // no field values
-                        databaseName,
-                        tableName));
+                        CdcRecord.emptyRecord(), fieldTypes, databaseName, tableName));
     }
 
     private void extractFieldTypesFromAlterTableItem(

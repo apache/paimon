@@ -24,7 +24,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.kafka.canal.KafkaSourceConversionProcessFunction;
+import org.apache.paimon.flink.action.cdc.kafka.canal.CanalRecordParser;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -182,8 +182,8 @@ public class KafkaSyncTableAction extends ActionBase {
                                                 source,
                                                 WatermarkStrategy.noWatermarks(),
                                                 "Kafka Source")
-                                        .process(
-                                                new KafkaSourceConversionProcessFunction(
+                                        .flatMap(
+                                                new CanalRecordParser(
                                                         caseSensitive, computedColumns)))
                         .withParserFactory(parserFactory)
                         .withTable(table)
