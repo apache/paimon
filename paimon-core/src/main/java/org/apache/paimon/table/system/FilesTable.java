@@ -169,7 +169,7 @@ public class FilesTable implements ReadonlyTable {
             TableScan.Plan plan = plan();
             return plan.splits().stream()
                     .map(s -> (DataSplit) s)
-                    .mapToLong(s -> s.files().size())
+                    .mapToLong(s -> s.dataFiles().size())
                     .sum();
         }
 
@@ -263,7 +263,7 @@ public class FilesTable implements ReadonlyTable {
             for (Split dataSplit : plan.splits()) {
                 iteratorList.add(
                         Iterators.transform(
-                                ((DataSplit) dataSplit).files().iterator(),
+                                ((DataSplit) dataSplit).dataFiles().iterator(),
                                 file ->
                                         toRow(
                                                 (DataSplit) dataSplit,

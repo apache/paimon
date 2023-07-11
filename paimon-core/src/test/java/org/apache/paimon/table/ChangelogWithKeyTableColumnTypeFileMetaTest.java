@@ -94,7 +94,7 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                             table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 3L);
                     return splits.stream()
-                            .flatMap(s -> s.files().stream())
+                            .flatMap(s -> s.dataFiles().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {

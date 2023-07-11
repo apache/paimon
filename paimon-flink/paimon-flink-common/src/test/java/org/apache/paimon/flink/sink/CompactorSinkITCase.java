@@ -126,10 +126,10 @@ public class CompactorSinkITCase extends AbstractTestBase {
             DataSplit dataSplit = (DataSplit) split;
             if (dataSplit.partition().getInt(1) == 15) {
                 // compacted
-                assertEquals(1, dataSplit.files().size());
+                assertEquals(1, dataSplit.dataFiles().size());
             } else {
                 // not compacted
-                assertEquals(2, dataSplit.files().size());
+                assertEquals(2, dataSplit.dataFiles().size());
             }
         }
     }

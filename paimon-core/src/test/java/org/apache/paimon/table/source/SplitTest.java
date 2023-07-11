@@ -45,12 +45,12 @@ public class SplitTest {
             files.add(gen.next().meta);
         }
         DataSplit split =
-                new DataSplit(
-                        ThreadLocalRandom.current().nextLong(100),
-                        data.partition,
-                        data.bucket,
-                        files,
-                        false);
+                DataSplit.builder()
+                        .withSnapshot(ThreadLocalRandom.current().nextLong(100))
+                        .withPartition(data.partition)
+                        .withBucket(data.bucket)
+                        .withDataFiles(files)
+                        .build();
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         split.serialize(new DataOutputViewStreamWrapper(out));

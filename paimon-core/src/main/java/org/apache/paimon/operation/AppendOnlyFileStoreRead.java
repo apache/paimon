@@ -98,7 +98,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
         List<ConcatRecordReader.ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
-        for (DataFileMeta file : split.files()) {
+        for (DataFileMeta file : split.dataFiles()) {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             BulkFormatMapping bulkFormatMapping =
                     bulkFormatMappings.computeIfAbsent(

@@ -113,10 +113,10 @@ public class CompactActionITCase extends ActionITCaseBase {
         for (DataSplit split : splits) {
             if (split.partition().getInt(1) == 15) {
                 // compacted
-                Assertions.assertEquals(1, split.files().size());
+                Assertions.assertEquals(1, split.dataFiles().size());
             } else {
                 // not compacted
-                Assertions.assertEquals(2, split.files().size());
+                Assertions.assertEquals(2, split.dataFiles().size());
             }
         }
     }

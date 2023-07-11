@@ -710,7 +710,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         SnapshotReader snapshotReader = table.newSnapshotReader().withKind(ScanKind.DELTA);
         List<DataSplit> splits0 = snapshotReader.read().dataSplits();
         assertThat(splits0).hasSize(1);
-        assertThat(splits0.get(0).files()).hasSize(1);
+        assertThat(splits0.get(0).dataFiles()).hasSize(1);
 
         write.write(rowData(1, 10, 1000L));
         write.write(rowData(1, 20, 2000L));
@@ -721,9 +721,9 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         List<DataSplit> splits1 = snapshotReader.read().dataSplits();
         assertThat(splits1).hasSize(1);
-        assertThat(splits1.get(0).files()).hasSize(1);
-        assertThat(splits1.get(0).files().get(0).fileName())
-                .isNotEqualTo(splits0.get(0).files().get(0).fileName());
+        assertThat(splits1.get(0).dataFiles()).hasSize(1);
+        assertThat(splits1.get(0).dataFiles().get(0).fileName())
+                .isNotEqualTo(splits0.get(0).dataFiles().get(0).fileName());
     }
 
     @Test

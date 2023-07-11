@@ -117,8 +117,15 @@ public class FileStoreSourceSplitSerializerTest {
             List<DataFileMeta> files,
             boolean isIncremental,
             long recordsToSkip) {
-        return new FileStoreSourceSplit(
-                id, new DataSplit(1L, partition, bucket, files, isIncremental), recordsToSkip);
+        DataSplit split =
+                DataSplit.builder()
+                        .withSnapshot(1)
+                        .withPartition(partition)
+                        .withBucket(bucket)
+                        .withDataFiles(files)
+                        .isStreaming(isIncremental)
+                        .build();
+        return new FileStoreSourceSplit(id, split, recordsToSkip);
     }
 
     private static FileStoreSourceSplit serializeAndDeserialize(FileStoreSourceSplit split)
