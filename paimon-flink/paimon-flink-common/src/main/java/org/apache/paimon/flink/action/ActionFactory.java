@@ -61,7 +61,7 @@ public interface ActionFactory extends Factory {
 
         LOG.info("{} job args: {}", actionFactory.identifier(), String.join(" ", actionArgs));
 
-        MultipleParameterTool params = MultipleParameterTool.fromArgs(args);
+        MultipleParameterTool params = MultipleParameterTool.fromArgs(actionArgs);
         if (params.has("help")) {
             actionFactory.printHelp();
             return Optional.empty();
