@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -199,43 +200,54 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                     ? dataSupplier.get()
                     : ConcatRecordReader.create(Arrays.asList(beforeSupplier, dataSupplier));
         } else {
-            // Sections are read by SortMergeReader, which sorts and merges records by keys.
-            // So we cannot project keys or else the sorting will be incorrect.
-            KeyValueFileReaderFactory overlappedSectionFactory =
-                    readerFactoryBuilder.build(
-                            split.partition(), split.bucket(), false, filtersForOverlappedSection);
-            KeyValueFileReaderFactory nonOverlappedSectionFactory =
-                    readerFactoryBuilder.build(
-                            split.partition(),
-                            split.bucket(),
-                            false,
-                            filtersForNonOverlappedSection);
-
-            List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
-            MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
-                    new ReducerMergeFunctionWrapper(mfFactory.create(pushdownProjection));
-            for (List<SortedRun> section :
-                    new IntervalPartition(split.dataFiles(), keyComparator).partition()) {
-                sectionReaders.add(
-                        () ->
-                                MergeTreeReaders.readerForSection(
-                                        section,
-                                        section.size() > 1
-                                                ? overlappedSectionFactory
-                                                : nonOverlappedSectionFactory,
-                                        keyComparator,
-                                        mergeFuncWrapper,
-                                        mergeSorter));
-            }
-
-            RecordReader<KeyValue> reader = ConcatRecordReader.create(sectionReaders);
-            if (!forceKeepDelete) {
-                reader = new DropDeleteReader(reader);
-            }
-
-            // Project results from SortMergeReader using ProjectKeyRecordReader.
-            return keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);
+            return split.beforeFiles().isEmpty()
+                    ? batchMergeRead(
+                            split.partition(), split.bucket(), split.dataFiles(), forceKeepDelete)
+                    : DiffReader.readDiff(
+                            batchMergeRead(
+                                    split.partition(), split.bucket(), split.beforeFiles(), false),
+                            batchMergeRead(
+                                    split.partition(), split.bucket(), split.dataFiles(), false),
+                            keyComparator,
+                            mergeSorter,
+                            forceKeepDelete);
         }
+    }
+
+    private RecordReader<KeyValue> batchMergeRead(
+            BinaryRow partition, int bucket, List<DataFileMeta> files, boolean keepDelete)
+            throws IOException {
+        // Sections are read by SortMergeReader, which sorts and merges records by keys.
+        // So we cannot project keys or else the sorting will be incorrect.
+        KeyValueFileReaderFactory overlappedSectionFactory =
+                readerFactoryBuilder.build(partition, bucket, false, filtersForOverlappedSection);
+        KeyValueFileReaderFactory nonOverlappedSectionFactory =
+                readerFactoryBuilder.build(
+                        partition, bucket, false, filtersForNonOverlappedSection);
+
+        List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
+        MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
+                new ReducerMergeFunctionWrapper(mfFactory.create(pushdownProjection));
+        for (List<SortedRun> section : new IntervalPartition(files, keyComparator).partition()) {
+            sectionReaders.add(
+                    () ->
+                            MergeTreeReaders.readerForSection(
+                                    section,
+                                    section.size() > 1
+                                            ? overlappedSectionFactory
+                                            : nonOverlappedSectionFactory,
+                                    keyComparator,
+                                    mergeFuncWrapper,
+                                    mergeSorter));
+        }
+
+        RecordReader<KeyValue> reader = ConcatRecordReader.create(sectionReaders);
+        if (!keepDelete) {
+            reader = new DropDeleteReader(reader);
+        }
+
+        // Project results from SortMergeReader using ProjectKeyRecordReader.
+        return keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);
     }
 
     private RecordReader<KeyValue> streamingConcat(
