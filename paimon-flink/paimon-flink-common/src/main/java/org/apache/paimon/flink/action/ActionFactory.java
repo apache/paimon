@@ -51,9 +51,7 @@ public interface ActionFactory extends Factory {
         try {
             actionFactory =
                     FactoryUtil.discoverFactory(
-                            Thread.currentThread().getContextClassLoader(),
-                            ActionFactory.class,
-                            action);
+                            ActionFactory.class.getClassLoader(), ActionFactory.class, action);
         } catch (FactoryException e) {
             printDefaultHelp();
             throw new UnsupportedOperationException("Unknown action \"" + action + "\".");
@@ -79,7 +77,7 @@ public interface ActionFactory extends Factory {
         System.out.println("Available actions:");
         List<String> identifiers =
                 FactoryUtil.discoverIdentifiers(
-                        Thread.currentThread().getContextClassLoader(), ActionFactory.class);
+                        ActionFactory.class.getClassLoader(), ActionFactory.class);
         identifiers.forEach(action -> System.out.println("  " + action));
         System.out.println("For detailed options of each action, run <action> --help");
     }
