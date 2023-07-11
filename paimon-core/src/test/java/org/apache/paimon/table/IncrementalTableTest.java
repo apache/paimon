@@ -35,7 +35,6 @@ import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CoreOptions#INCREMENTAL_BETWEEN}. */
 public class IncrementalTableTest extends TableTestBase {
@@ -283,7 +282,7 @@ public class IncrementalTableTest extends TableTestBase {
         table.createTag("TAG1", 1);
         table.createTag("TAG2", 2);
 
-        assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
-                .hasMessageContaining("Append only not support before files now");
+        assertThat(read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG1,TAG2")))
+                .containsExactlyInAnyOrder(GenericRow.of(1, 1, 2));
     }
 }
