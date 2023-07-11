@@ -38,6 +38,14 @@ public class IncrementalTagStartingScanner implements StartingScanner {
         TagManager tagManager = new TagManager(manager.fileIO(), manager.tablePath());
         Snapshot tag1 = tagManager.taggedSnapshot(start);
         Snapshot tag2 = tagManager.taggedSnapshot(end);
+
+        if (tag2.id() <= tag1.id()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Tag end %s with snapshot id %s should be larger than tag start %s with snapshot id %s",
+                            end, tag2.id(), start, tag1.id()));
+        }
+
         return StartingScanner.fromPlan(reader.withSnapshot(tag2).readIncrementalDiff(tag1));
     }
 }

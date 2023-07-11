@@ -35,6 +35,7 @@ import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link CoreOptions#INCREMENTAL_BETWEEN}. */
 public class IncrementalTableTest extends TableTestBase {
@@ -261,6 +262,10 @@ public class IncrementalTableTest extends TableTestBase {
                         GenericRow.of(fromString("-D"), 1, 1, 1),
                         GenericRow.of(fromString("+I"), 1, 2, 2),
                         GenericRow.of(fromString("+I"), 1, 4, 1));
+
+        assertThatThrownBy(() -> read(table, Pair.of(INCREMENTAL_BETWEEN, "TAG2,TAG1")))
+                .hasMessageContaining(
+                        "Tag end TAG1 with snapshot id 1 should be larger than tag start TAG2 with snapshot id 2");
     }
 
     @Test
