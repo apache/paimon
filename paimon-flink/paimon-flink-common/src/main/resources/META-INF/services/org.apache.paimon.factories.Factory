@@ -21,7 +21,6 @@ org.apache.paimon.flink.action.MergeIntoActionFactory
 org.apache.paimon.flink.action.RollbackToActionFactory
 org.apache.paimon.flink.action.CreateTagActionFactory
 org.apache.paimon.flink.action.DeleteTagActionFactory
-org.apache.paimon.flink.action.ExpireActionFactory
 org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableActionFactory
 org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseActionFactory
 org.apache.paimon.flink.action.cdc.kafka.KafkaSyncTableActionFactory
