@@ -28,6 +28,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.DefaultValueAssiger;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
@@ -70,13 +71,16 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private ScanKind scanKind = ScanKind.ALL;
     private RecordComparator lazyPartitionComparator;
 
+    private DefaultValueAssiger defaultValueAssiger;
+
     public SnapshotReaderImpl(
             FileStoreScan scan,
             TableSchema tableSchema,
             CoreOptions options,
             SnapshotManager snapshotManager,
             SplitGenerator splitGenerator,
-            BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer) {
+            BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer,
+            DefaultValueAssiger defaultValueAssiger) {
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.options = options;
@@ -85,6 +89,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.splitGenerator = splitGenerator;
         this.nonPartitionFilterConsumer = nonPartitionFilterConsumer;
+        this.defaultValueAssiger = defaultValueAssiger;
     }
 
     @Override
@@ -124,7 +129,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
-        for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
+        for (Predicate p :
+                PredicateBuilder.splitAnd(defaultValueAssiger.handlePredicate(predicate))) {
             Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
             if (mapped.isPresent()) {
                 partitionFilters.add(mapped.get());

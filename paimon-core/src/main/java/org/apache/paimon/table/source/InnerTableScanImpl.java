@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.operation.DefaultValueAssiger;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
@@ -33,16 +34,22 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
 
     private boolean hasNext;
 
+    private DefaultValueAssiger defaultValueAssiger;
+
     public InnerTableScanImpl(
-            CoreOptions options, SnapshotReader snapshotReader, SnapshotManager snapshotManager) {
+            CoreOptions options,
+            SnapshotReader snapshotReader,
+            SnapshotManager snapshotManager,
+            DefaultValueAssiger defaultValueAssiger) {
         super(options, snapshotReader);
         this.snapshotManager = snapshotManager;
         this.hasNext = true;
+        this.defaultValueAssiger = defaultValueAssiger;
     }
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        snapshotReader.withFilter(predicate);
+        snapshotReader.withFilter(defaultValueAssiger.handlePredicate(predicate));
         return this;
     }
 

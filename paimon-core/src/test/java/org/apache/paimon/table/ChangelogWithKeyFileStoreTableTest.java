@@ -46,6 +46,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -724,6 +725,56 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(splits1.get(0).dataFiles()).hasSize(1);
         assertThat(splits1.get(0).dataFiles().get(0).fileName())
                 .isNotEqualTo(splits0.get(0).dataFiles().get(0).fileName());
+    }
+
+    @Test
+    public void testAuditLogWithDefaultValueFields() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT);
+                            conf.set(
+                                    String.format(
+                                            "%s.%s.%s",
+                                            CoreOptions.FIELDS_PREFIX,
+                                            "b",
+                                            CoreOptions.DEFAULT_VALUE_SUFFIX),
+                                    "0");
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowDataWithKind(RowKind.INSERT, 2, 20, 200L));
+        write.write(rowDataWithKind(RowKind.INSERT, 2, 21, null));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.close();
+        commit.close();
+
+        AuditLogTable auditLogTable = new AuditLogTable(table);
+        Function<InternalRow, String> rowDataToString =
+                row ->
+                        internalRowToString(
+                                row,
+                                DataTypes.ROW(
+                                        DataTypes.STRING(),
+                                        DataTypes.INT(),
+                                        DataTypes.INT(),
+                                        DataTypes.BIGINT()));
+
+        PredicateBuilder predicateBuilder = new PredicateBuilder(auditLogTable.rowType());
+
+        SnapshotReader snapshotReader =
+                auditLogTable
+                        .newSnapshotReader()
+                        .withFilter(
+                                PredicateBuilder.and(
+                                        predicateBuilder.equal(predicateBuilder.indexOf("b"), 300),
+                                        predicateBuilder.equal(predicateBuilder.indexOf("pt"), 2)));
+        InnerTableRead read = auditLogTable.newRead();
+        List<String> result =
+                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[+I, 2, 20, 200]", "+I[+I, 2, 21, 0]");
     }
 
     @Test

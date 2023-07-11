@@ -32,6 +32,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.Configuration;
@@ -72,6 +73,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.CoreOptions.WRITE_MODE;
@@ -1474,7 +1476,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     @EnumSource(CoreOptions.MergeEngine.class)
     public void testUpdateWithPrimaryKey(CoreOptions.MergeEngine mergeEngine) throws Exception {
         Set<CoreOptions.MergeEngine> supportUpdateEngines = new HashSet<>();
-        supportUpdateEngines.add(CoreOptions.MergeEngine.DEDUPLICATE);
+        supportUpdateEngines.add(DEDUPLICATE);
         supportUpdateEngines.add(CoreOptions.MergeEngine.PARTIAL_UPDATE);
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
@@ -1531,6 +1533,74 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         }
     }
 
+    @Test
+    public void testDefaultValueWithoutPrimaryKey() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_MODE.key(), WriteMode.AUTO.name());
+        options.put(
+                CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
+
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt String"),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        options);
+        insertInto(
+                table,
+                "(1, 'US Dollar', 114, '2022-01-01')",
+                "(2, 'Yen', cast(null as int), '2022-01-01')",
+                "(3, 'Euro', cast(null as int), '2022-01-01')",
+                "(3, 'Euro', 119, '2022-01-02')");
+
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        // part = 2022-01-01
+                        changelogRow("+I", 2L, "Yen", 1000L, "2022-01-01"),
+                        changelogRow("+I", 3L, "Euro", 1000L, "2022-01-01"));
+
+        String querySql = String.format("SELECT * FROM %s where rate = 1000", table);
+        testBatchRead(querySql, expectedRecords);
+    }
+
+    @ParameterizedTest
+    @EnumSource(CoreOptions.MergeEngine.class)
+    public void testDefaultValueWithPrimaryKey(CoreOptions.MergeEngine mergeEngine)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(WRITE_MODE.key(), WriteMode.AUTO.name());
+        options.put(
+                CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
+        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id BIGINT NOT NULL",
+                                "currency STRING",
+                                "rate BIGINT",
+                                "dt String"),
+                        Lists.newArrayList("id", "dt"),
+                        Lists.newArrayList("dt"),
+                        options);
+        insertInto(
+                table,
+                "(1, 'US Dollar', 114, '2022-01-01')",
+                "(2, 'Yen', cast(null as int), '2022-01-01')",
+                "(2, 'Yen', cast(null as int), '2022-01-01')",
+                "(3, 'Euro', cast(null as int) , '2022-01-02')");
+
+        List<Row> expectedRecords =
+                Arrays.asList(changelogRow("+I", 3L, "Euro", 1000L, "2022-01-02"));
+
+        String querySql =
+                String.format("SELECT * FROM %s where rate = 1000 and currency ='Euro'", table);
+        testBatchRead(querySql, expectedRecords);
+    }
+
     @ParameterizedTest
     @EnumSource(WriteMode.class)
     public void testUpdateWithoutPrimaryKey(WriteMode writeMode) throws Exception {
@@ -1580,7 +1650,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     @EnumSource(CoreOptions.MergeEngine.class)
     public void testDeleteWithPrimaryKey(CoreOptions.MergeEngine mergeEngine) throws Exception {
         Set<CoreOptions.MergeEngine> supportUpdateEngines = new HashSet<>();
-        supportUpdateEngines.add(CoreOptions.MergeEngine.DEDUPLICATE);
+        supportUpdateEngines.add(DEDUPLICATE);
 
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();

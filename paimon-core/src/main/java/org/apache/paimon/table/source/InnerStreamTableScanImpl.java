@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
+import org.apache.paimon.operation.DefaultValueAssiger;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
@@ -58,20 +59,24 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     @Nullable private Long currentWatermark;
     @Nullable private Long nextSnapshotId;
 
+    private DefaultValueAssiger defaultValueAssiger;
+
     public InnerStreamTableScanImpl(
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
-            boolean supportStreamingReadOverwrite) {
+            boolean supportStreamingReadOverwrite,
+            DefaultValueAssiger defaultValueAssiger) {
         super(options, snapshotReader);
         this.options = options;
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
+        this.defaultValueAssiger = defaultValueAssiger;
     }
 
     @Override
     public InnerStreamTableScanImpl withFilter(Predicate predicate) {
-        snapshotReader.withFilter(predicate);
+        snapshotReader.withFilter(defaultValueAssiger.handlePredicate(predicate));
         return this;
     }
 
