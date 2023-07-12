@@ -19,7 +19,7 @@ package org.apache.paimon.spark
 
 import org.apache.spark.sql.SparkSessionExtensions
 
-class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
+class PaimonSparkSessionExtension extends (SparkSessionExtensions => Unit) {
 
   override def apply(extensions: SparkSessionExtensions): Unit = {
 

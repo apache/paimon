@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonSparkSessionExtensions, SparkCatalog, SparkGenericCatalog}
+import org.apache.paimon.spark.{PaimonSparkSessionExtension, SparkCatalog, SparkGenericCatalog}
 
 import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.QueryTest
@@ -37,7 +37,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession {
     super.sparkConf
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
-      .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
+      .set("spark.sql.extensions", classOf[PaimonSparkSessionExtension].getName)
   }
 
   override protected def beforeAll(): Unit = {

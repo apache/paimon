@@ -18,7 +18,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.WriteMode.{APPEND_ONLY, CHANGE_LOG}
-import org.apache.paimon.spark.PaimonSparkSessionExtensions
+import org.apache.paimon.spark.PaimonSparkSessionExtension
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row}
@@ -28,7 +28,7 @@ class TableValuedFunctionsTest extends PaimonSparkTestBase {
   override protected def sparkConf: SparkConf = {
     super.sparkConf
       .set("spark.sql.catalog.spark_catalog", "org.apache.paimon.spark.SparkGenericCatalog")
-      .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
+      .set("spark.sql.extensions", classOf[PaimonSparkSessionExtension].getName)
   }
 
   // 3: fixed bucket, -1: dynamic bucket
