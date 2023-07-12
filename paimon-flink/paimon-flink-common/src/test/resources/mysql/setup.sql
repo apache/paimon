@@ -274,6 +274,13 @@ CREATE TABLE test_computed_column (
     PRIMARY KEY (pk)
 );
 
+CREATE TABLE test_tinyint1_convert (
+    pk INT,
+    _datetime DATETIME,
+    _tinyint1 TINYINT(1),
+    PRIMARY KEY (pk)
+);
+
 -- ################################################################################
 --  MySqlSyncDatabaseActionITCase
 -- ################################################################################
@@ -298,6 +305,17 @@ CREATE TABLE t2 (
 -- no primary key, should be ignored
 CREATE TABLE t3 (
     v1 INT
+);
+
+-- test tinyint(1) convert
+CREATE DATABASE paimon_sync_database_tinyint;
+USE paimon_sync_database_tinyint;
+
+CREATE TABLE t4 (
+    pk INT,
+    _datetime DATETIME,
+    _tinyint1 TINYINT(1),
+    PRIMARY KEY (pk)
 );
 
 -- to make sure we use JDBC Driver correctly
@@ -548,4 +566,30 @@ CREATE TABLE t2 (
     v1 INT,
     v2 BIGINT,
     PRIMARY KEY (k1, k2)
+);
+
+CREATE DATABASE paimon_sync_table_tinyint;
+USE paimon_sync_table_tinyint;
+
+CREATE TABLE schema_evolution_3 (
+    pt INT comment  'primary',
+    _id INT comment  '_id',
+    v1 VARCHAR(10) comment  'v1',
+    PRIMARY KEY (_id)
+);
+
+CREATE DATABASE paimon_sync_database_tinyint;
+USE paimon_sync_database_tinyint;
+
+CREATE TABLE schema_evolution_4 (
+    _id INT comment  '_id',
+    v1 VARCHAR(10) comment  'v1',
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE schema_evolution_5 (
+    _id INT comment  '_id',
+    v1 VARCHAR(10) comment  'v1',
+    v2 TINYINT(1) comment 'tinyint(1)',
+    PRIMARY KEY (_id)
 );

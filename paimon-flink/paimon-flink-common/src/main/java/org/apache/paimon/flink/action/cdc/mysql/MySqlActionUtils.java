@@ -56,7 +56,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-class MySqlActionUtils {
+/** Utils for MySQL Action. * */
+public class MySqlActionUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
     public static final ConfigOption<Boolean> SCAN_NEWLY_ADDED_TABLE_ENABLED =
@@ -66,12 +67,33 @@ class MySqlActionUtils {
                     .withDescription(
                             "Whether capture the scan the newly added tables or not, by default is true.");
 
+    public static final ConfigOption<Boolean> MYSQL_CONVERTER_TINYINT1_BOOL =
+            ConfigOptions.key("mysql.converter.tinyint1-to-bool")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Mysql tinyint type will be converted to boolean type by default, if you want to convert to tinyint type, "
+                                    + "you can set this option to false.");
+
     static Connection getConnection(Configuration mySqlConfig) throws Exception {
-        return DriverManager.getConnection(
+        String url =
                 String.format(
-                        "jdbc:mysql://%s:%d/",
+                        "jdbc:mysql://%s:%d",
                         mySqlConfig.get(MySqlSourceOptions.HOSTNAME),
-                        mySqlConfig.get(MySqlSourceOptions.PORT)),
+                        mySqlConfig.get(MySqlSourceOptions.PORT));
+
+        // we need to add the `tinyInt1isBit` parameter to the connection url to make sure the
+        // tinyint(1) in MySQL is converted to bits or not. Refer to
+        // https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-connp-props-result-sets.html#cj-conn-prop_tinyInt1isBit
+        if (mySqlConfig.contains(MYSQL_CONVERTER_TINYINT1_BOOL)) {
+            url =
+                    String.format(
+                            "%s?tinyInt1isBit=%s",
+                            url, mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
+        }
+
+        return DriverManager.getConnection(
+                url,
                 mySqlConfig.get(MySqlSourceOptions.USERNAME),
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
     }

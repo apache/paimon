@@ -40,7 +40,22 @@ public class MySqlSchema {
     private final LinkedHashMap<String, Tuple2<DataType, String>> fields;
     private final List<String> primaryKeys;
 
-    public MySqlSchema(DatabaseMetaData metaData, String databaseName, String tableName)
+    public MySqlSchema(
+            String databaseName,
+            String tableName,
+            LinkedHashMap<String, Tuple2<DataType, String>> fields,
+            List<String> primaryKeys) {
+        this.databaseName = databaseName;
+        this.tableName = tableName;
+        this.fields = fields;
+        this.primaryKeys = primaryKeys;
+    }
+
+    public MySqlSchema(
+            DatabaseMetaData metaData,
+            String databaseName,
+            String tableName,
+            boolean convertTinyintToBool)
             throws Exception {
         this.databaseName = databaseName;
         this.tableName = tableName;
@@ -63,7 +78,8 @@ public class MySqlSchema {
                 fields.put(
                         fieldName,
                         Tuple2.of(
-                                MySqlTypeUtils.toDataType(fieldType, precision, scale),
+                                MySqlTypeUtils.toDataType(
+                                        fieldType, precision, scale, convertTinyintToBool),
                                 fieldComment));
             }
         }

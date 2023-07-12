@@ -90,3 +90,17 @@ CREATE TABLE T (
     _datetime DATETIME,
     PRIMARY KEY (pk)
 );
+
+-- ################################################################################
+--  MySqlTinyIntConvertE2ETest#testSyncTable
+-- ################################################################################
+
+CREATE DATABASE test_tinyint_convert;
+USE test_tinyint_convert;
+
+CREATE TABLE T (
+    pk INT,
+    _datetime DATETIME,
+    _tinyint1 TINYINT(1),
+    PRIMARY KEY (pk)
+);

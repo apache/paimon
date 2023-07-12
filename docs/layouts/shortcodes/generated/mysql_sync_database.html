@@ -59,7 +59,7 @@ under the License.
     </tr>
     <tr>
         <td><h5>--mysql-conf</h5></td>
-        <td>The configuration for Flink CDC MySQL table sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name and table-name are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document</a> for a complete list of configurations.</td>
+        <td>The configuration for Flink CDC MySQL table sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name and table-name are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document</a> for a complete list of configurations. <br> Furthermore, TINYINT(1) type in MySQL would be converted to Boolean by default. If you want to store number (-128~127) in it, you can specify the config 'mysql.converter.tinyint1-to-bool' to false, then the column will be mapped to TINYINT in paimon table.</td>
     </tr>
     <tr>
         <td><h5>--catalog-conf</h5></td>

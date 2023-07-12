@@ -57,6 +57,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
 import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -237,10 +238,11 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         MySqlTableSchemaBuilder schemaBuilder =
                 new MySqlTableSchemaBuilder(tableConfig, caseSensitive);
+        Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
-                                zoneId, caseSensitive, tableNameConverter, schemaBuilder);
+                                zoneId, caseSensitive, tableNameConverter, schemaBuilder, convertTinyint1ToBool);
 
         String database = this.database;
         DatabaseSyncMode mode = this.mode;
@@ -294,7 +296,12 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         excludedTables.add(tableName);
                         continue;
                     }
-                    MySqlSchema mySqlSchema = new MySqlSchema(metaData, databaseName, tableName);
+                    MySqlSchema mySqlSchema =
+                            new MySqlSchema(
+                                    metaData,
+                                    databaseName,
+                                    tableName,
+                                    mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
                     if (mySqlSchema.primaryKeys().size() > 0) {
                         // only tables with primary keys will be considered
                         mySqlSchemaList.add(mySqlSchema);
