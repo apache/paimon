@@ -20,6 +20,10 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.flink.log.LogStoreRegister;
+import org.apache.paimon.flink.log.LogStoreRegisterFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -89,6 +93,9 @@ import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_REGISTER;
+import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
@@ -97,15 +104,19 @@ import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deseriali
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNonPhysicalColumns;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeWatermarkSpec;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
+    private final ClassLoader classLoader;
 
     private final Catalog catalog;
 
-    public FlinkCatalog(Catalog catalog, String name, String defaultDatabase) {
+    public FlinkCatalog(
+            Catalog catalog, String name, String defaultDatabase, ClassLoader classLoader) {
         super(name, defaultDatabase);
         this.catalog = catalog;
+        this.classLoader = classLoader;
         try {
             this.catalog.createDatabase(defaultDatabase, true);
         } catch (Catalog.DatabaseAlreadyExistException ignore) {
@@ -210,8 +221,16 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
+        Identifier identifier = toIdentifier(tablePath);
+        Table table = null;
         try {
+            if (catalog.tableExists(identifier)) {
+                table = catalog.getTable(identifier);
+            }
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
+            if (table != null) {
+                unRegisterLogSystem(identifier, table.options());
+            }
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
         }
@@ -235,22 +254,73 @@ public class FlinkCatalog extends AbstractCatalog {
                             + " You can create TEMPORARY table instead if you want to create the table of other connector.");
         }
 
+        Identifier identifier = toIdentifier(tablePath);
+        Map<String, String> logSystemOptions =
+                catalog.tableExists(identifier)
+                        ? Collections.emptyMap()
+                        : registerLogSystem(identifier, options);
         // remove table path
         String specific = options.remove(PATH.key());
-        if (specific != null) {
+        if (specific != null || !logSystemOptions.isEmpty()) {
+            options.putAll(logSystemOptions);
             catalogTable = catalogTable.copy(options);
         }
 
+        boolean unRegisterLogSystem = false;
         try {
             catalog.createTable(
-                    toIdentifier(tablePath),
-                    FlinkCatalog.fromCatalogTable(catalogTable),
-                    ignoreIfExists);
+                    identifier, FlinkCatalog.fromCatalogTable(catalogTable), ignoreIfExists);
         } catch (Catalog.TableAlreadyExistException e) {
+            unRegisterLogSystem = true;
             throw new TableAlreadyExistException(getName(), tablePath);
         } catch (Catalog.DatabaseNotExistException e) {
+            unRegisterLogSystem = true;
             throw new DatabaseNotExistException(getName(), e.database());
+        } finally {
+            if (unRegisterLogSystem && !logSystemOptions.isEmpty()) {
+                unRegisterLogSystem(identifier, options);
+            }
         }
+    }
+
+    private Map<String, String> registerLogSystem(
+            Identifier identifier, Map<String, String> options) {
+        Options tableOptions = Options.fromMap(options);
+        Optional<String> register = tableOptions.getOptional(LOG_SYSTEM_REGISTER);
+        if (register.isPresent()) {
+            checkArgument(
+                    !tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE),
+                    String.format(
+                            "%s must be configured when you use log system register.",
+                            LOG_SYSTEM.key()));
+            LogStoreRegisterFactory registerFactory =
+                    FactoryUtil.discoverFactory(
+                            classLoader, LogStoreRegisterFactory.class, register.get());
+            LogStoreRegister logStoreRegister =
+                    registerFactory.createLogStoreRegister(tableOptions);
+            return logStoreRegister.registerTopic(identifier, options);
+        }
+        return Collections.emptyMap();
+    }
+
+    private void unRegisterLogSystem(Identifier identifier, Map<String, String> options) {
+        Options tableOptions = Options.fromMap(options);
+        tableOptions
+                .getOptional(LOG_SYSTEM_REGISTER)
+                .ifPresent(
+                        register -> {
+                            checkArgument(
+                                    !tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE),
+                                    String.format(
+                                            "%s must be configured when you use log system register.",
+                                            LOG_SYSTEM.key()));
+                            LogStoreRegisterFactory registerFactory =
+                                    FactoryUtil.discoverFactory(
+                                            classLoader, LogStoreRegisterFactory.class, register);
+                            LogStoreRegister logStoreRegister =
+                                    registerFactory.createLogStoreRegister(tableOptions);
+                            logStoreRegister.unRegisterTopic(identifier, options);
+                        });
     }
 
     private List<SchemaChange> toSchemaChange(TableChange change) {
@@ -611,7 +681,7 @@ public class FlinkCatalog extends AbstractCatalog {
         // watermark
         List<WatermarkSpec> watermarkSpecs = schema.getWatermarkSpecs();
         if (!watermarkSpecs.isEmpty()) {
-            Preconditions.checkArgument(watermarkSpecs.size() == 1);
+            checkArgument(watermarkSpecs.size() == 1);
             columnOptions.putAll(serializeWatermarkSpec(watermarkSpecs.get(0)));
         }
 

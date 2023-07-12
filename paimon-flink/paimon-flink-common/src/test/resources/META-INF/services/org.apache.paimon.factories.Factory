@@ -15,3 +15,5 @@
 
 org.apache.paimon.flink.action.cdc.mysql.TestCaseInsensitiveCatalogFactory
 org.apache.paimon.flink.action.cdc.mysql.TestAlterTableCatalogFactory
+
+org.apache.paimon.flink.FlinkCatalogTest$TestingLogStoreRegisterFactory

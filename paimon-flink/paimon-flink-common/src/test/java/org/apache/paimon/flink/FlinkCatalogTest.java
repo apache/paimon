@@ -21,6 +21,9 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.log.LogStoreRegister;
+import org.apache.paimon.flink.log.LogStoreRegisterFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
@@ -61,6 +64,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_REGISTER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -70,6 +75,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link FlinkCatalog}. */
 public class FlinkCatalogTest {
+    private static final String TESTING_LOG_STORE_REGISTER = "testing";
 
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
     private final ObjectPath path3 = new ObjectPath("db1", "t2");
@@ -468,6 +474,35 @@ public class FlinkCatalogTest {
         assertThat(catalogTable.getOptions()).isEqualTo(expected);
     }
 
+    @Test
+    public void testCreateTableWithLogSystemRegister() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+
+        TableSchema schema =
+                TableSchema.builder()
+                        .field("pk", DataTypes.INT().notNull())
+                        .field("test", DataTypes.INT())
+                        .field("comp", DataTypes.INT(), "test + 1")
+                        .primaryKey("pk")
+                        .build();
+        Map<String, String> options = new HashMap<>();
+        options.put(LOG_SYSTEM_REGISTER.key(), TESTING_LOG_STORE_REGISTER);
+        CatalogTable catalogTable1 = new CatalogTableImpl(schema, options, "");
+        assertThatThrownBy(() -> catalog.createTable(path1, catalogTable1, false))
+                .hasMessage("log.system must be configured when you use log system register.");
+
+        options.put(LOG_SYSTEM.key(), "kafka");
+        CatalogTable catalogTable2 = new CatalogTableImpl(schema, options, "");
+        catalog.createTable(path1, catalogTable2, false);
+
+        CatalogBaseTable storedTable2 = catalog.getTable(path1);
+        assertEquals(
+                String.format("%s-topic", path1.getObjectName()),
+                storedTable2.getOptions().get("testing.log.store.topic"));
+        assertThatThrownBy(() -> catalog.dropTable(path1, true))
+                .hasMessage("Check unregister log store topic here.");
+    }
+
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {
         Path tablePath =
                 ((AbstractCatalog) ((FlinkCatalog) catalog).catalog())
@@ -516,5 +551,34 @@ public class FlinkCatalogTest {
             allOptions.add(options);
         }
         return allOptions.stream();
+    }
+
+    /** Testing log store register factory to create {@link TestingLogStoreRegister}. */
+    public static class TestingLogStoreRegisterFactory implements LogStoreRegisterFactory {
+
+        @Override
+        public String identifier() {
+            return TESTING_LOG_STORE_REGISTER;
+        }
+
+        @Override
+        public LogStoreRegister createLogStoreRegister(Options options) {
+            return new TestingLogStoreRegister();
+        }
+    }
+
+    /** Testing log store register. */
+    private static class TestingLogStoreRegister implements LogStoreRegister {
+
+        @Override
+        public Map<String, String> registerTopic(Identifier table, Map<String, String> options) {
+            return Collections.singletonMap(
+                    "testing.log.store.topic", String.format("%s-topic", table.getObjectName()));
+        }
+
+        @Override
+        public void unRegisterTopic(Identifier table, Map<String, String> options) {
+            throw new UnsupportedOperationException("Check unregister log store topic here.");
+        }
     }
 }
