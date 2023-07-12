@@ -251,12 +251,18 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testFlinkWriteAndHiveRead() throws Exception {
-        tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+        tEnv.executeSql(
+                        "CREATE TABLE t ( a INT, b Map<STRING, STRING> ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
+        tEnv.executeSql(
+                        "INSERT INTO t VALUES (1, MAP['key1', 'value1', 'key2', 'value2']), (2, MAP['key1', 'value11', 'key2', 'value22'])")
+                .await();
+
         Assert.assertEquals(
-                Arrays.asList("1\tHi", "2\tHello"),
-                hiveShell.executeQuery("SELECT * FROM t ORDER BY a"));
+                Arrays.asList(
+                        "1\tvalue1\t{\"key1\":\"value1\",\"key2\":\"value2\"}",
+                        "2\tvalue11\t{\"key1\":\"value11\",\"key2\":\"value22\"}"),
+                hiveShell.executeQuery("SELECT a, b['key1'] as b1, b FROM t ORDER BY a"));
 
         try {
             tEnv.executeSql("INSERT INTO hive_table VALUES (1, 'Hi'), (2, 'Hello')").await();
