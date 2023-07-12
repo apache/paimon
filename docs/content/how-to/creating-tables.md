@@ -569,6 +569,10 @@ CREATE TABLE MyTable (
 
 ## Creating External Tables
 
+{{< hint info >}}
+If the table already exists, options will not be updated into the table's metadata, just as dynamic options.
+{{< /hint >}}
+
 External tables are recorded but not managed by catalogs. If an external table is dropped, its table files will not be deleted.
 
 Paimon external tables can be used in any catalog. If you do not want to create a Paimon catalog and just want to read / write a table, you can consider external tables.
