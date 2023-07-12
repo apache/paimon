@@ -255,10 +255,7 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         Identifier identifier = toIdentifier(tablePath);
-        Map<String, String> logSystemOptions =
-                catalog.tableExists(identifier)
-                        ? Collections.emptyMap()
-                        : registerLogSystem(identifier, options);
+        Map<String, String> logSystemOptions = registerLogSystem(identifier, options);
         // remove table path
         String specific = options.remove(PATH.key());
         if (specific != null || !logSystemOptions.isEmpty()) {
@@ -293,6 +290,9 @@ public class FlinkCatalog extends AbstractCatalog {
                     String.format(
                             "%s must be configured when you use log system register.",
                             LOG_SYSTEM.key()));
+            if (catalog.tableExists(identifier)) {
+                return Collections.emptyMap();
+            }
             LogStoreRegisterFactory registerFactory =
                     FactoryUtil.discoverFactory(
                             classLoader, LogStoreRegisterFactory.class, register.get());
