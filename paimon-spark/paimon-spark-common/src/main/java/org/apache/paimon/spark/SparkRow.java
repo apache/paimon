@@ -36,8 +36,10 @@ import org.apache.spark.sql.Row;
 
 import java.io.Serializable;
 import java.sql.Date;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -161,6 +163,10 @@ public class SparkRow implements InternalRow, Serializable {
     private static Timestamp toPaimonTimestamp(Object object) {
         if (object instanceof java.sql.Timestamp) {
             return Timestamp.fromSQLTimestamp((java.sql.Timestamp) object);
+        } else if (object instanceof java.time.Instant) {
+            LocalDateTime localDateTime =
+                    LocalDateTime.ofInstant((Instant) object, ZoneId.systemDefault());
+            return Timestamp.fromLocalDateTime(localDateTime);
         } else {
             return Timestamp.fromLocalDateTime((LocalDateTime) object);
         }
