@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
@@ -68,7 +69,15 @@ public class TableSchemaTest {
                 Arrays.asList(
                         new DataField(0, "f0", new IntType()),
                         new DataField(20, "f1", new IntType()));
-        assertThat(RowType.currentHighestFieldId(fields)).isEqualTo(20);
+        assertThat(RowType.currentHighestFieldId(fields)).isEqualTo(1);
+
+        fields =
+                Arrays.asList(
+                        new DataField(0, "f0", new IntType()),
+                        new DataField(
+                                1, "f1", DataTypes.ROW(DataTypes.STRING(), DataTypes.BIGINT())),
+                        new DataField(2, "f2", DataTypes.STRING()));
+        assertThat(RowType.currentHighestFieldId(fields)).isEqualTo(4);
     }
 
     static RowType newRowType(boolean isNullable, int fieldId) {

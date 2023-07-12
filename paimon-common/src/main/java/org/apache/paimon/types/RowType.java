@@ -164,13 +164,22 @@ public final class RowType extends DataType {
 
     @Override
     public void collectFieldIds(Set<Integer> fieldIds) {
+        int index = -1;
+        Set<Integer> duplicatedIds = new HashSet<>();
         for (DataField field : fields) {
-            if (fieldIds.contains(field.id())) {
+            if (duplicatedIds.contains(field.id())) {
                 throw new RuntimeException(
                         String.format("Broken schema, field id %s is duplicated.", field.id()));
             }
-            fieldIds.add(field.id());
-            field.type().collectFieldIds(fieldIds);
+            duplicatedIds.add(field.id());
+
+            fieldIds.add(++index);
+
+            Set<Integer> structuredFieldIds = new HashSet<>();
+            field.type().collectFieldIds(structuredFieldIds);
+            for (Integer ignored : structuredFieldIds) {
+                fieldIds.add(++index);
+            }
         }
     }
 
