@@ -315,6 +315,12 @@ under the License.
             <td>Define partition by table options, cannot define partition on DDL and table options at the same time.</td>
         </tr>
         <tr>
+            <td><h5>partition.add-to-metastore</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to add newly created partition into metastore. For example, if you want to list all partitions with Hive, you need to add all partitions into Hive metastore.</td>
+        </tr>
+        <tr>
             <td><h5>partition.default-name</h5></td>
             <td style="word-wrap: break-word;">"__DEFAULT_PARTITION__"</td>
             <td>String</td>

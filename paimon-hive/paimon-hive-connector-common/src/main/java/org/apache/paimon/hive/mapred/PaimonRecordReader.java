@@ -45,24 +45,34 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
     private final RecordReaderIterator<InternalRow> iterator;
     private final long splitLength;
 
+    // project from selectedColumns to hiveColumns
     @Nullable private final ProjectedRow reusedProjectedRow;
 
     private float progress;
 
+    /**
+     * @param paimonColumns columns stored in Paimon table
+     * @param hiveColumns columns Hive expects
+     * @param selectedColumns columns we really have to read
+     */
     public PaimonRecordReader(
             ReadBuilder readBuilder,
             PaimonInputSplit split,
-            List<String> columnNames,
+            List<String> paimonColumns,
+            List<String> hiveColumns,
             List<String> selectedColumns)
             throws IOException {
-        if (columnNames.equals(selectedColumns)) {
+        if (!paimonColumns.equals(selectedColumns)) {
+            readBuilder.withProjection(
+                    selectedColumns.stream().mapToInt(paimonColumns::indexOf).toArray());
+        }
+
+        if (hiveColumns.equals(selectedColumns)) {
             reusedProjectedRow = null;
         } else {
-            readBuilder.withProjection(
-                    selectedColumns.stream().mapToInt(columnNames::indexOf).toArray());
             reusedProjectedRow =
                     ProjectedRow.from(
-                            columnNames.stream().mapToInt(selectedColumns::indexOf).toArray());
+                            hiveColumns.stream().mapToInt(selectedColumns::indexOf).toArray());
         }
 
         this.iterator =

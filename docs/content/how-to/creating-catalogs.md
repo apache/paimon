@@ -135,14 +135,23 @@ USE paimon.default;
 
 > When using hive catalog to change incompatible column types through alter table, you need to configure `hive.metastore.disallow.incompatible.col.type.changes=false`. see [HIVE-17832](https://issues.apache.org/jira/browse/HIVE-17832).
 
+> If you are using Hive3, please disable Hive ACID:
+>
+> ```shell
+> hive.strict.managed.tables=false
+> hive.create.as.insert.only=false
+> metastore.create.as.acid=false
+> ```
+
+### Setting Location in Properties
+
 If you are using an object storage , and you don't want that the location of paimon table/database is accessed by the filesystem of hive,
 which may lead to the error such as "No FileSystem for scheme: s3a".
 You can set location in the properties of table/database by the config of `location-in-properties`. See
 [setting the location of table/database in properties ]({{< ref "maintenance/configurations#HiveCatalogOptions" >}})
 
-If you are using Hive3, please disable Hive ACID:
-```shell
-hive.strict.managed.tables=false
-hive.create.as.insert.only=false
-metastore.create.as.acid=false
-```
+### Synchronizing Partitions into Hive Metastore
+
+By default, Paimon does not synchronize newly created partitions into Hive metastore. Users will see an unpartitioned table in Hive. Partition push-down will be carried out by filter push-down instead.
+
+If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore, please set the table property `partition.add-to-metastore` to true. Also see [CoreOptions]({{< ref "maintenance/configurations#CoreOptions" >}}).

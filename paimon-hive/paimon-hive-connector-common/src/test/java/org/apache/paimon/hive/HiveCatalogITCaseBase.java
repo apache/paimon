@@ -24,7 +24,9 @@ import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
+import org.apache.paimon.s3.MinioTestContainer;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -36,21 +38,27 @@ import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.util.ExceptionUtils;
 import org.assertj.core.api.Assertions;
-import org.junit.After;
 import org.junit.Assert;
-import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
+import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
+import org.junit.runners.model.Statement;
 
 import java.io.File;
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -71,37 +79,73 @@ public abstract class HiveCatalogITCaseBase {
     @HiveSQL(files = {})
     protected static HiveShell hiveShell;
 
-    @Before
-    public void before() throws Exception {
+    @Minio private static MinioTestContainer minioTestContainer;
+
+    private void before(boolean locationInProperties) throws Exception {
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
         hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");
         hiveShell.executeQuery("SHOW TABLES");
 
-        path = folder.newFolder().toURI().toString();
+        Map<String, String> catalogProperties = new HashMap<>();
+        catalogProperties.put("type", "paimon");
+        catalogProperties.put("metastore", "hive");
+        catalogProperties.put("uri", "");
+        catalogProperties.put("lock.enabled", "true");
+        catalogProperties.put("location-in-properties", String.valueOf(locationInProperties));
+        if (locationInProperties) {
+            path = minioTestContainer.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
+            catalogProperties.putAll(minioTestContainer.getS3ConfigOptions());
+        } else {
+            path = folder.newFolder().toURI().toString();
+        }
+        catalogProperties.put("warehouse", path);
+
         EnvironmentSettings settings = EnvironmentSettings.newInstance().inBatchMode().build();
         tEnv = TableEnvironmentImpl.create(settings);
         tEnv.executeSql(
                         String.join(
                                 "\n",
                                 "CREATE CATALOG my_hive WITH (",
-                                "  'type' = 'paimon',",
-                                "  'metastore' = 'hive',",
-                                "  'uri' = '',",
-                                "  'warehouse' = '" + path + "',",
-                                "  'lock.enabled' = 'true'",
+                                catalogProperties.entrySet().stream()
+                                        .map(
+                                                e ->
+                                                        String.format(
+                                                                "'%s' = '%s'",
+                                                                e.getKey(), e.getValue()))
+                                        .collect(Collectors.joining(",\n")),
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive").await();
         tEnv.executeSql("USE test_db").await();
     }
 
-    @After
-    public void after() {
+    private void after() {
         hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
         hiveShell.execute("DROP DATABASE IF EXISTS test_db2 CASCADE");
     }
+
+    @Target(ElementType.METHOD)
+    @Retention(RetentionPolicy.RUNTIME)
+    private @interface LocationInProperties {}
+
+    @Rule
+    public TestRule environmentRule =
+            (base, description) ->
+                    new Statement() {
+                        @Override
+                        public void evaluate() throws Throwable {
+                            try {
+                                before(
+                                        description.getAnnotation(LocationInProperties.class)
+                                                != null);
+                                base.evaluate();
+                            } finally {
+                                after();
+                            }
+                        }
+                    };
 
     @Test
     public void testDatabaseOperations() throws Exception {
@@ -385,13 +429,13 @@ public abstract class HiveCatalogITCaseBase {
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_pk_ddl_option ("
-                                                        + "                            user_id BIGINT,"
-                                                        + "                            item_id BIGINT,"
-                                                        + "                            behavior STRING,"
-                                                        + "                            dt STRING,"
-                                                        + "                            hh STRING,"
-                                                        + "                            PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
-                                                        + "                        ) WITH ('primary-key' = 'dt')")
+                                                        + "    user_id BIGINT,"
+                                                        + "    item_id BIGINT,"
+                                                        + "    behavior STRING,"
+                                                        + "    dt STRING,"
+                                                        + "    hh STRING,"
+                                                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
+                                                        + ") WITH ('primary-key' = 'dt')")
                                         .await())
                 .hasRootCauseMessage(
                         "Cannot define primary key on DDL and table options at the same time.");
@@ -419,12 +463,12 @@ public abstract class HiveCatalogITCaseBase {
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_partition_ddl_option ("
-                                                        + "                            user_id BIGINT,"
-                                                        + "                            item_id BIGINT,"
-                                                        + "                            behavior STRING,"
-                                                        + "                            dt STRING,"
-                                                        + "                            hh STRING"
-                                                        + "                        ) PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')")
+                                                        + "    user_id BIGINT,"
+                                                        + "    item_id BIGINT,"
+                                                        + "    behavior STRING,"
+                                                        + "    dt STRING,"
+                                                        + "    hh STRING"
+                                                        + ") PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')")
                                         .await())
                 .hasRootCauseMessage(
                         "Cannot define partition on DDL and table options at the same time.");
@@ -676,6 +720,89 @@ public abstract class HiveCatalogITCaseBase {
         Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
         Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
         Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
+    }
+
+    @Test
+    public void testAddPartitionsToMetastore() throws Exception {
+        prepareTestAddPartitionsToMetastore();
+
+        String sql1 =
+                "select v, ptb, k from t where "
+                        + "pta >= 2 and ptb <= '3a' and (k % 10) >= 1 and (k % 10) <= 2";
+        assertThat(hiveShell.executeQuery(sql1))
+                .containsExactlyInAnyOrder(
+                        "2001\t2a\t21", "2002\t2a\t22", "3001\t3a\t31", "3002\t3a\t32");
+
+        String sql2 =
+                "select v, ptb, k from t where "
+                        + "pta >= 2 and ptb <= '3a' and (v % 10) >= 3 and (v % 10) <= 4";
+        assertThat(hiveShell.executeQuery(sql2))
+                .containsExactlyInAnyOrder(
+                        "2003\t2a\t23", "2004\t2a\t24", "3003\t3a\t33", "3004\t3a\t34");
+    }
+
+    @Test
+    @LocationInProperties
+    public void testAddPartitionsToMetastoreLocationInProperties() throws Exception {
+        prepareTestAddPartitionsToMetastore();
+
+        String sql1 =
+                "select v, ptb, k from t where "
+                        + "pta >= 2 and ptb <= '3a' and (k % 10) >= 1 and (k % 10) <= 2";
+        assertThat(collect(sql1).stream().map(Objects::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "+I[2001, 2a, 21]",
+                        "+I[2002, 2a, 22]",
+                        "+I[3001, 3a, 31]",
+                        "+I[3002, 3a, 32]");
+
+        String sql2 =
+                "select v, ptb, k from t where "
+                        + "pta >= 2 and ptb <= '3a' and (v % 10) >= 3 and (v % 10) <= 4";
+        assertThat(collect(sql2).stream().map(Objects::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder(
+                        "+I[2003, 2a, 23]",
+                        "+I[2004, 2a, 24]",
+                        "+I[3003, 3a, 33]",
+                        "+I[3004, 3a, 34]");
+    }
+
+    private void prepareTestAddPartitionsToMetastore() throws Exception {
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE TABLE t (",
+                        "    pta INT,",
+                        "    k INT,",
+                        "    ptb VARCHAR(10),",
+                        "    v BIGINT,",
+                        "    PRIMARY KEY (k, pta, ptb) NOT ENFORCED",
+                        ") PARTITIONED BY (ptb, pta) WITH (",
+                        "    'bucket' = '2',",
+                        "    'partition.add-to-metastore' = 'true'",
+                        ")"));
+        List<String> values = new ArrayList<>();
+        for (int pta = 1; pta <= 3; pta++) {
+            int k = pta * 10;
+            int v = pta * 1000;
+            for (int ptb = 0; ptb < 2; ptb++) {
+                for (int i = 0; i < 5; i++) {
+                    values.add(String.format("(%d, %d, '%d%c', %d)", pta, k, pta, 'a' + ptb, v));
+                    k++;
+                    v++;
+                }
+            }
+        }
+        tEnv.executeSql("INSERT INTO t VALUES " + String.join(", ", values)).await();
+
+        assertThat(hiveShell.executeQuery("show partitions t"))
+                .containsExactlyInAnyOrder(
+                        "ptb=1a/pta=1",
+                        "ptb=1b/pta=1",
+                        "ptb=2a/pta=2",
+                        "ptb=2b/pta=2",
+                        "ptb=3a/pta=3",
+                        "ptb=3b/pta=3");
     }
 
     protected List<Row> collect(String sql) throws Exception {

@@ -755,6 +755,15 @@ public class CoreOptions implements Serializable {
                             "Parameter string for the constructor of class #. "
                                     + "Callback class should parse the parameter by itself.");
 
+    public static final ConfigOption<Boolean> PARTITION_ADD_TO_METASTORE =
+            key("partition.add-to-metastore")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to add newly created partition into metastore. "
+                                    + "For example, if you want to list all partitions with Hive, "
+                                    + "you need to add all partitions into Hive metastore.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1085,6 +1094,10 @@ public class CoreOptions implements Serializable {
 
     public Duration consumerExpireTime() {
         return options.get(CONSUMER_EXPIRATION_TIME);
+    }
+
+    public boolean addPartitionToMetastore() {
+        return options.get(PARTITION_ADD_TO_METASTORE);
     }
 
     public Options getFieldDefaultValues() {
