@@ -490,7 +490,7 @@ public class HiveCatalog extends AbstractCatalog {
         serDeInfo.setSerializationLib(SERDE_CLASS_NAME);
         sd.setSerdeInfo(serDeInfo);
 
-        if (new CoreOptions(schema.options()).addPartitionToMetastore()) {
+        if (new CoreOptions(schema.options()).partitionedTableInMetastore()) {
             Map<String, DataField> fieldMap =
                     schema.fields().stream()
                             .collect(Collectors.toMap(DataField::name, Function.identity()));

@@ -779,7 +779,7 @@ public abstract class HiveCatalogITCaseBase {
                         "    PRIMARY KEY (k, pta, ptb) NOT ENFORCED",
                         ") PARTITIONED BY (ptb, pta) WITH (",
                         "    'bucket' = '2',",
-                        "    'partition.add-to-metastore' = 'true'",
+                        "    'metastore.partitioned-table' = 'true'",
                         ")"));
         List<String> values = new ArrayList<>();
         for (int pta = 1; pta <= 3; pta++) {

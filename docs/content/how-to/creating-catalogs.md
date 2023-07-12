@@ -154,4 +154,4 @@ You can set location in the properties of table/database by the config of `locat
 
 By default, Paimon does not synchronize newly created partitions into Hive metastore. Users will see an unpartitioned table in Hive. Partition push-down will be carried out by filter push-down instead.
 
-If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore, please set the table property `partition.add-to-metastore` to true. Also see [CoreOptions]({{< ref "maintenance/configurations#CoreOptions" >}}).
+If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore, please set the table property `metastore.partitioned-table` to true. Also see [CoreOptions]({{< ref "maintenance/configurations#CoreOptions" >}}).
