@@ -129,7 +129,20 @@ SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
 ```
 {{< /tab >}}
 
-{{< tab "Spark" >}}
+{{< tab "Spark3" >}}
+
+Requires Spark 3.2+.
+
+you can use `paimon_incremental_query` in query to extract the incremental data:
+
+```sql
+-- read the incremental data between snapshot id 12 and snapshot id 20.
+SELECT * FROM paimon_incremental_query('tableName', 12, 20);
+```
+
+{{< /tab >}}
+
+{{< tab "Spark-DF" >}}
 
 ```java
 spark.read()
