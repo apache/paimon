@@ -80,7 +80,6 @@ public class PaimonStorageHandlerITCase {
 
     private static String engine;
 
-    private String commitUser;
     private long commitIdentifier;
 
     @BeforeClass
@@ -111,7 +110,6 @@ public class PaimonStorageHandlerITCase {
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
 
-        commitUser = UUID.randomUUID().toString();
         commitIdentifier = 0;
     }
 

@@ -30,16 +30,15 @@ import org.apache.paimon.table.FileStoreTableFactory;
 
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
+import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.mapred.JobConf;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /** Utils for create {@link FileStoreTable} and {@link Predicate}. */
 public class HiveUtils {
-
-    private static final Logger LOG = LoggerFactory.getLogger(HiveUtils.class);
 
     public static FileStoreTable createFileStoreTable(JobConf jobConf) {
         PaimonJobConf wrapper = new PaimonJobConf(jobConf);
@@ -49,7 +48,8 @@ public class HiveUtils {
         return FileStoreTableFactory.create(catalogContext);
     }
 
-    public static Optional<Predicate> createPredicate(TableSchema tableSchema, JobConf jobConf) {
+    public static Optional<Predicate> createPredicate(
+            TableSchema tableSchema, JobConf jobConf, boolean limitToReadColumnNames) {
         SearchArgument sarg = ConvertAstToSearchArg.createFromConf(jobConf);
         if (sarg == null) {
             return Optional.empty();
@@ -58,7 +58,11 @@ public class HiveUtils {
                 new SearchArgumentToPredicateConverter(
                         sarg,
                         tableSchema.fieldNames(),
-                        tableSchema.logicalRowType().getFieldTypes());
+                        tableSchema.logicalRowType().getFieldTypes(),
+                        limitToReadColumnNames
+                                ? Arrays.stream(ColumnProjectionUtils.getReadColumnNames(jobConf))
+                                        .collect(Collectors.toSet())
+                                : null);
         return converter.convert();
     }
 }

@@ -24,6 +24,8 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.metastore.AddPartitionCommitCallback;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.DefaultValueAssiger;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.Lock;
@@ -33,6 +35,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
@@ -51,9 +54,13 @@ import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanne
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -71,9 +78,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final Lock.Factory lockFactory;
+    @Nullable protected final MetastoreClient.Factory metastoreClientFactory;
 
     public AbstractFileStoreTable(
-            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
+            FileIO fileIO,
+            Path path,
+            TableSchema tableSchema,
+            Lock.Factory lockFactory,
+            @Nullable MetastoreClient.Factory metastoreClientFactory) {
         this.fileIO = fileIO;
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
@@ -84,6 +96,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.lockFactory = lockFactory;
+        this.metastoreClientFactory = metastoreClientFactory;
     }
 
     @Override
@@ -239,12 +252,20 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     public TableCommitImpl newCommit(String commitUser) {
         return new TableCommitImpl(
                 store().newCommit(commitUser),
-                coreOptions().commitCallbacks(),
+                createCommitCallbacks(),
                 coreOptions().writeOnly() ? null : store().newExpire(),
                 coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
                 lockFactory.create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path));
+    }
+
+    private List<CommitCallback> createCommitCallbacks() {
+        List<CommitCallback> callbacks = new ArrayList<>(coreOptions().commitCallbacks());
+        if (coreOptions().partitionedTableInMetastore() && metastoreClientFactory != null) {
+            callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
+        }
+        return callbacks;
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {

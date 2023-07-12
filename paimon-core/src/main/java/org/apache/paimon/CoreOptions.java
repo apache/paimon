@@ -755,6 +755,16 @@ public class CoreOptions implements Serializable {
                             "Parameter string for the constructor of class #. "
                                     + "Callback class should parse the parameter by itself.");
 
+    public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
+            key("metastore.partitioned-table")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to create this table as a partitioned table in metastore.\n"
+                                    + "For example, if you want to list all partitions of a Paimon table in Hive, "
+                                    + "you need to create this table as a partitioned table in Hive metastore.\n"
+                                    + "This config option does not affect the default filesystem metastore.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1085,6 +1095,10 @@ public class CoreOptions implements Serializable {
 
     public Duration consumerExpireTime() {
         return options.get(CONSUMER_EXPIRATION_TIME);
+    }
+
+    public boolean partitionedTableInMetastore() {
+        return options.get(METASTORE_PARTITIONED_TABLE);
     }
 
     public Options getFieldDefaultValues() {

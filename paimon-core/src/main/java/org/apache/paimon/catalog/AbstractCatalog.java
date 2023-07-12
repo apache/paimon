@@ -85,7 +85,8 @@ public abstract class AbstractCatalog implements Catalog {
                 fileIO,
                 getDataTableLocation(identifier),
                 tableSchema,
-                Lock.factory(lockFactory().orElse(null), identifier));
+                Lock.factory(lockFactory().orElse(null), identifier),
+                metastoreClientFactory(identifier).orElse(null));
     }
 
     @VisibleForTesting

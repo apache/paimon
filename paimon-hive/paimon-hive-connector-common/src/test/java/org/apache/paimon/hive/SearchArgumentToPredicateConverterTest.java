@@ -86,7 +86,10 @@ public class SearchArgumentToPredicateConverterTest {
         SearchArgument sarg = builder.equals("a", hiveType, hiveLiteral).build();
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(
-                        sarg, Collections.singletonList("a"), Collections.singletonList(flinkType));
+                        sarg,
+                        Collections.singletonList("a"),
+                        Collections.singletonList(flinkType),
+                        null);
 
         Predicate expected =
                 new PredicateBuilder(RowType.of(new DataType[] {flinkType}, new String[] {"a"}))
@@ -393,7 +396,7 @@ public class SearchArgumentToPredicateConverterTest {
 
     private void assertExpected(SearchArgument sarg, Predicate expected) {
         SearchArgumentToPredicateConverter converter =
-                new SearchArgumentToPredicateConverter(sarg, COLUMN_NAMES, COLUMN_TYPES);
+                new SearchArgumentToPredicateConverter(sarg, COLUMN_NAMES, COLUMN_TYPES, null);
         Predicate actual = converter.convert().orElse(null);
         assertThat(actual).isEqualTo(expected);
     }

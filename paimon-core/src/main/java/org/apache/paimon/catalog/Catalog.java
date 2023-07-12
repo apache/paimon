@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
@@ -47,6 +48,11 @@ public interface Catalog extends AutoCloseable {
      * object store.
      */
     Optional<CatalogLock.Factory> lockFactory();
+
+    /** Get metastore client factory for the table specified by {@code identifier}. */
+    default Optional<MetastoreClient.Factory> metastoreClientFactory(Identifier identifier) {
+        return Optional.empty();
+    }
 
     /**
      * Get the names of all databases in this catalog.
