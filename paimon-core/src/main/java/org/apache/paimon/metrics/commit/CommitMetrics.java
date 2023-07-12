@@ -62,10 +62,6 @@ public class CommitMetrics {
         return genericMetricGroup;
     }
 
-    public CommitStats getLatestCommit() {
-        return latestCommit;
-    }
-
     private final Histogram durationHistogram =
             new DescriptiveStatisticsHistogram(HISTOGRAM_WINDOW_SIZE);
 
@@ -120,8 +116,8 @@ public class CommitMetrics {
     }
 
     private void registerTaggedCommitMetrics() {
-        if (getLatestCommit() != null) {
-            for (Integer bucket : getLatestCommit().getBucketsWritten()) {
+        if (latestCommit != null) {
+            for (Integer bucket : latestCommit.getBucketsWritten()) {
                 if (!bucketMetricGroups.containsKey(bucket)) {
                     BucketMetricGroup group =
                             bucketMetricGroups.compute(
@@ -162,7 +158,7 @@ public class CommitMetrics {
                 }
             }
 
-            for (BinaryRow partition : getLatestCommit().getPartitionsWritten()) {
+            for (BinaryRow partition : latestCommit.getPartitionsWritten()) {
                 if (!partitionMetricGroups.containsKey(partition)) {
                     PartitionMetricGroup group =
                             partitionMetricGroups.compute(
