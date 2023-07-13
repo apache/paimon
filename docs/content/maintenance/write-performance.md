@@ -33,6 +33,10 @@ Paimon's write performance is closely related to checkpoint, so if you need grea
 3. Enable `write-buffer-spillable`.
 4. Rescale bucket number if you are using Fixed-Bucket mode.
 
+Option `'changelog-producer' = 'lookup' or 'full-compaction'`, and option `'full-compaction.delta-commits'` have a
+large impact on write performance, if it is a snapshot / full synchronization phase you can unset these options and
+then enable them on again when needed in the incremental phase.
+
 ## Parallelism
 
 It is recommended that the parallelism of sink should be less than or equal to the number of buckets, preferably equal. You can control the parallelism of the sink with the `sink.parallelism` table property.
@@ -185,3 +189,6 @@ If your Flink job does not rely on state, please avoid using managed memory, whi
 ```shell
 taskmanager.memory.managed.size=1m
 ```
+
+## Example
+
