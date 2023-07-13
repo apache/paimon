@@ -189,6 +189,3 @@ If your Flink job does not rely on state, please avoid using managed memory, whi
 ```shell
 taskmanager.memory.managed.size=1m
 ```
-
-## Example
-
