@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.hive.utils.HiveUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -92,7 +93,7 @@ public class HiveSchema {
 
     /** Extract {@link HiveSchema} from Hive serde properties. */
     public static HiveSchema extract(@Nullable Configuration configuration, Properties properties) {
-        String location = LocationKeyExtractor.getLocation(properties);
+        String location = LocationKeyExtractor.getPaimonLocation(configuration, properties);
         Optional<TableSchema> tableSchema = getExistingSchema(configuration, location);
         String columnProperty = properties.getProperty(hive_metastoreConstants.META_TABLE_COLUMNS);
 
@@ -181,7 +182,7 @@ public class HiveSchema {
             return Optional.empty();
         }
         Path path = new Path(location);
-        Options options = PaimonJobConf.extractCatalogConfig(configuration);
+        Options options = HiveUtils.extractCatalogConfig(configuration);
         options.set(CoreOptions.PATH, location);
         CatalogContext context = CatalogContext.create(options, configuration);
         try {
