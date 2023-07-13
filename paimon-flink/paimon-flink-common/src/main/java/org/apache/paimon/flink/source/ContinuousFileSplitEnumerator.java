@@ -106,7 +106,8 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void start() {
-        context.callAsync(scan::plan, this::processDiscoveredSplits, 0, discoveryInterval);
+        context.callAsync(
+                this::scanNextSnapshot, this::processDiscoveredSplits, 0, discoveryInterval);
     }
 
     @Override
@@ -148,7 +149,14 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
-    private void processDiscoveredSplits(TableScan.Plan plan, Throwable error) {
+    private PlanWithNextSnapshotId scanNextSnapshot() {
+        TableScan.Plan plan = scan.plan();
+        Long nextSnapshotId = scan.checkpoint();
+        return new PlanWithNextSnapshotId(plan, nextSnapshotId);
+    }
+
+    private void processDiscoveredSplits(
+            PlanWithNextSnapshotId planWithNextSnapshotId, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
                 // finished
@@ -161,7 +169,8 @@ public class ContinuousFileSplitEnumerator
             return;
         }
 
-        nextSnapshotId = scan.checkpoint();
+        nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
+        TableScan.Plan plan = planWithNextSnapshotId.plan;
 
         if (plan.splits().isEmpty()) {
             return;
@@ -216,6 +225,16 @@ public class ContinuousFileSplitEnumerator
             // if not bucket unaware, we assign the bucket % parallelism, the same bucket data go
             // into the same task
             return bucket % context.currentParallelism();
+        }
+    }
+
+    private static class PlanWithNextSnapshotId {
+        private final TableScan.Plan plan;
+        private final Long nextSnapshotId;
+
+        public PlanWithNextSnapshotId(TableScan.Plan plan, Long nextSnapshotId) {
+            this.plan = plan;
+            this.nextSnapshotId = nextSnapshotId;
         }
     }
 }
