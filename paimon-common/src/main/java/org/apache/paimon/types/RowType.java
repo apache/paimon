@@ -170,7 +170,6 @@ public final class RowType extends DataType {
                         String.format("Broken schema, field id %s is duplicated.", field.id()));
             }
             fieldIds.add(field.id());
-            field.type().collectFieldIds(fieldIds);
         }
     }
 

@@ -243,7 +243,7 @@ public class Schema {
             Preconditions.checkNotNull(columnName, "Column name must not be null.");
             Preconditions.checkNotNull(dataType, "Data type must not be null.");
             columns.add(new DataField(++highestFieldId, columnName, dataType, description));
-            
+
             Set<Integer> structuredFieldIds = new HashSet<>();
             dataType.collectFieldIds(structuredFieldIds);
             highestFieldId += structuredFieldIds.size();

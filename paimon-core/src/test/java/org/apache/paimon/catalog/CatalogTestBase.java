@@ -208,17 +208,20 @@ public abstract class CatalogTestBase {
         catalog.createDatabase("test_db", false);
         // Create table creates a new table when it does not exist
         Identifier identifier = Identifier.create("test_db", "new_table");
-        Schema schema = Schema.newBuilder()
-                .column("pk1", DataTypes.INT())
-                .column("pk2", DataTypes.STRING())
-                .column("pk3", DataTypes.STRING())
-                .column("col1", DataTypes.ROW(
-                        DataTypes.STRING(),
-                        DataTypes.BIGINT(),
-                        DataTypes.TIMESTAMP()))
-                .partitionKeys("pk1", "pk2")
-                .primaryKey("pk1", "pk2", "pk3")
-                .build();
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk1", DataTypes.INT())
+                        .column("pk2", DataTypes.STRING())
+                        .column("pk3", DataTypes.STRING())
+                        .column(
+                                "col1",
+                                DataTypes.ROW(
+                                        DataTypes.STRING(),
+                                        DataTypes.BIGINT(),
+                                        DataTypes.TIMESTAMP()))
+                        .partitionKeys("pk1", "pk2")
+                        .primaryKey("pk1", "pk2", "pk3")
+                        .build();
         catalog.createTable(identifier, schema, false);
         boolean exists = catalog.tableExists(identifier);
         assertThat(exists).isTrue();
