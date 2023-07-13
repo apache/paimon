@@ -259,10 +259,9 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
 
         Assert.assertEquals(
-                Arrays.asList(
-                        "1\tvalue1\t{\"key1\":\"value1\",\"key2\":\"value2\"}",
-                        "2\tvalue11\t{\"key1\":\"value11\",\"key2\":\"value22\"}"),
-                hiveShell.executeQuery("SELECT a, b['key1'] as b1, b FROM t ORDER BY a"));
+                Arrays.asList("1\tvalue1\tvalue2", "2\tvalue11\tvalue22"),
+                hiveShell.executeQuery(
+                        "SELECT a, b['key1'] as b1, b['key2'] as b2 FROM t ORDER BY a"));
 
         try {
             tEnv.executeSql("INSERT INTO hive_table VALUES (1, 'Hi'), (2, 'Hello')").await();
