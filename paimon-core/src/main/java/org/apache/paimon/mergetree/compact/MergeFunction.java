@@ -25,6 +25,15 @@ import javax.annotation.Nullable;
 /**
  * Merge function to merge multiple {@link KeyValue}s.
  *
+ * <p>IMPORTANT, Object reusing inside the kv of the {@link #add} input:
+ *
+ * <ul>
+ *   <li>Please don't save KeyValue and InternalRow references to the List: the KeyValue of the
+ *       first two articles and the InternalRow object inside them are safe, but the reference of
+ *       the third article may overwrite the reference of the first article.
+ *   <li>You can save fields references: fields don't reuse their objects.
+ * </ul>
+ *
  * @param <T> result type
  */
 public interface MergeFunction<T> {
