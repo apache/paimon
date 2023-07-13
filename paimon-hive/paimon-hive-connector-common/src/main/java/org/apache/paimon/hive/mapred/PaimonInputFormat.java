@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive.mapred;
 
+import org.apache.paimon.hive.LocationKeyExtractor;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -56,15 +57,16 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
 
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) {
-        // If the path of the Paimon table is moved from the location of the Hive table to
-        // properties, Hive will add a location for this table based on the warehouse,
-        // database, and table automatically.When querying by Hive, an exception may occur
-        // because the specified path for split for Paimon may not match the location of Hive.
-        // To work around this problem, we specify the path for split as the location of Hive.
-        String location = jobConf.get(hive_metastoreConstants.META_TABLE_LOCATION);
-
         FileStoreTable table = createFileStoreTable(jobConf);
         InnerTableScan scan = table.newScan();
+
+        // If the path of the Paimon table is moved from the location of the Hive table to
+        // properties (see HiveCatalogOptions#LOCATION_IN_PROPERTIES), Hive will add a location for
+        // this table based on the warehouse, database, and table automatically. When querying by
+        // Hive, an exception may occur because the specified path for split for Paimon may not
+        // match the location of Hive. To work around this problem, we specify the path for split as
+        // the location of Hive.
+        String location = LocationKeyExtractor.getMetastoreLocation(jobConf, table.partitionKeys());
 
         List<Predicate> predicates = new ArrayList<>();
         String inputDir = jobConf.get(FileInputFormat.INPUT_DIR);
