@@ -18,34 +18,14 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.utils.ObjectUtils;
+import org.apache.paimon.schema.Schema;
 
-import java.util.Collections;
-import java.util.List;
+import java.io.Serializable;
+import java.util.Optional;
 
-/** Testing {@link EventParser} for {@link TestCdcEvent}. */
-public class TestCdcEventParser implements EventParser<TestCdcEvent> {
+/** Build table schema for newly added table in CDC ingestion. */
+@FunctionalInterface
+public interface NewTableSchemaBuilder extends Serializable {
 
-    private TestCdcEvent raw;
-
-    @Override
-    public void setRawEvent(TestCdcEvent raw) {
-        this.raw = raw;
-    }
-
-    @Override
-    public String parseTableName() {
-        return raw.tableName();
-    }
-
-    @Override
-    public List<DataField> parseSchemaChange() {
-        return ObjectUtils.coalesce(raw.updatedDataFields(), Collections.emptyList());
-    }
-
-    @Override
-    public List<CdcRecord> parseRecords() {
-        return ObjectUtils.coalesce(raw.records(), Collections.emptyList());
-    }
+    Optional<Schema> build();
 }

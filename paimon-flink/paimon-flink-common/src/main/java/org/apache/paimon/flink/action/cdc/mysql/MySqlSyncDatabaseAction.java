@@ -234,8 +234,12 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
+        MySqlTableSchemaBuilder schemaBuilder =
+                new MySqlTableSchemaBuilder(tableConfig, caseSensitive);
         EventParser.Factory<String> parserFactory =
-                () -> new MySqlDebeziumJsonEventParser(zoneId, caseSensitive, tableNameConverter);
+                () ->
+                        new MySqlDebeziumJsonEventParser(
+                                zoneId, caseSensitive, tableNameConverter, schemaBuilder);
 
         String database = this.database;
         MySqlDatabaseSyncMode mode = this.mode;

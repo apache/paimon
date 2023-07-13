@@ -18,26 +18,64 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
+
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /** {@link EventParser} for {@link RichCdcMultiplexRecord}. */
 public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMultiplexRecord> {
 
-    // TODO: currently we don't consider database
+    private static final Logger LOG =
+            LoggerFactory.getLogger(RichCdcMultiplexRecordEventParser.class);
+
+    private final RichCdcMultiplexRecordSchemaBuilder schemaBuilder;
+    @Nullable private final Pattern includingPattern;
+    @Nullable private final Pattern excludingPattern;
+    private final Map<String, RichEventParser> parsers = new HashMap<>();
+    private final Set<String> acceptedTables = new HashSet<>();
+    private final Set<String> rejectedTables = new HashSet<>();
+    private final Set<String> createdTables = new HashSet<>();
+
+    private RichCdcMultiplexRecord record;
     private String currentTable;
+    private boolean shouldSynchronizeCurrentTable;
     private RichEventParser currentParser;
 
-    private final Map<String, RichEventParser> parsers = new HashMap<>();
+    public RichCdcMultiplexRecordEventParser() {
+        this(RichCdcMultiplexRecordSchemaBuilder.dummyBuilder(), null, null);
+    }
+
+    public RichCdcMultiplexRecordEventParser(
+            RichCdcMultiplexRecordSchemaBuilder schemaBuilder,
+            @Nullable Pattern includingPattern,
+            @Nullable Pattern excludingPattern) {
+        this.schemaBuilder = schemaBuilder;
+        this.includingPattern = includingPattern;
+        this.excludingPattern = excludingPattern;
+    }
 
     @Override
     public void setRawEvent(RichCdcMultiplexRecord record) {
+        this.record = record;
         this.currentTable = record.tableName();
-        this.currentParser = parsers.computeIfAbsent(currentTable, t -> new RichEventParser());
-        currentParser.setRawEvent(record.toRichCdcRecord());
+        this.shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable(record.primaryKeys());
+        if (shouldSynchronizeCurrentTable) {
+            this.currentParser = parsers.computeIfAbsent(currentTable, t -> new RichEventParser());
+            this.currentParser.setRawEvent(record.toRichCdcRecord());
+        }
     }
 
     @Override
@@ -47,11 +85,66 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
 
     @Override
     public List<DataField> parseSchemaChange() {
-        return currentParser.parseSchemaChange();
+        return shouldSynchronizeCurrentTable
+                ? currentParser.parseSchemaChange()
+                : Collections.emptyList();
     }
 
     @Override
     public List<CdcRecord> parseRecords() {
-        return currentParser.parseRecords();
+        return shouldSynchronizeCurrentTable
+                ? currentParser.parseRecords()
+                : Collections.emptyList();
+    }
+
+    @Override
+    public Optional<Schema> parseNewTable() {
+        if (shouldCreateCurrentTable()) {
+            schemaBuilder.init(record);
+            return schemaBuilder.build();
+        }
+
+        return Optional.empty();
+    }
+
+    private boolean shouldSynchronizeCurrentTable(List<String> primaryKeys) {
+        if (acceptedTables.contains(currentTable)) {
+            return true;
+        }
+        if (rejectedTables.contains(currentTable)) {
+            return false;
+        }
+
+        boolean shouldSynchronized = true;
+        if (includingPattern != null) {
+            shouldSynchronized = includingPattern.matcher(currentTable).matches();
+        }
+        if (excludingPattern != null) {
+            shouldSynchronized =
+                    shouldSynchronized && !excludingPattern.matcher(currentTable).matches();
+        }
+        if (!shouldSynchronized) {
+            LOG.debug(
+                    "Source table {} won't be synchronized because it was excluded. ",
+                    currentTable);
+            rejectedTables.add(currentTable);
+            return false;
+        }
+
+        if (primaryKeys.isEmpty()) {
+            LOG.debug(
+                    "Didn't find primary keys from kafka topic's table schemas for table '{}'. "
+                            + "This table won't be synchronized.",
+                    currentTable);
+            rejectedTables.add(currentTable);
+            return false;
+        }
+
+        acceptedTables.add(currentTable);
+        return true;
+    }
+
+    private boolean shouldCreateCurrentTable() {
+        return shouldSynchronizeCurrentTable && createdTables.add(currentTable);
     }
 }

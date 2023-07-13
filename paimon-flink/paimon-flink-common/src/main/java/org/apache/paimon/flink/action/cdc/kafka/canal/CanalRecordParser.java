@@ -65,6 +65,7 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
     private static final String FIELD_TABLE = "table";
     private static final String FIELD_SQL = "sql";
     private static final String FIELD_MYSQL_TYPE = "mysqlType";
+    private static final String FIELD_PRIMARY_KEYS = "pkNames";
     private static final String FIELD_TYPE = "type";
     private static final String FIELD_DATA = "data";
     private static final String FIELD_OLD = "old";
@@ -124,6 +125,7 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
             checkNotNull(root.get(FIELD_SQL), errorMessageTemplate, FIELD_SQL);
         } else {
             checkNotNull(root.get(FIELD_MYSQL_TYPE), errorMessageTemplate, FIELD_MYSQL_TYPE);
+            checkNotNull(root.get(FIELD_PRIMARY_KEYS), errorMessageTemplate, FIELD_PRIMARY_KEYS);
         }
     }
 
@@ -135,6 +137,8 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
         if (isDdl()) {
             return extractRecordsFromDdl();
         }
+
+        List<String> primaryKeys = extractPrimaryKeys();
 
         // extract field types
         LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
@@ -167,18 +171,20 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
                         before = caseSensitive ? before : keyCaseInsensitive(before);
                         records.add(
                                 new RichCdcMultiplexRecord(
-                                        new CdcRecord(RowKind.DELETE, before),
-                                        paimonFieldTypes,
                                         databaseName,
-                                        tableName));
+                                        tableName,
+                                        paimonFieldTypes,
+                                        primaryKeys,
+                                        new CdcRecord(RowKind.DELETE, before)));
                     }
                     after = caseSensitive ? after : keyCaseInsensitive(after);
                     records.add(
                             new RichCdcMultiplexRecord(
-                                    new CdcRecord(RowKind.INSERT, after),
-                                    paimonFieldTypes,
                                     databaseName,
-                                    tableName));
+                                    tableName,
+                                    paimonFieldTypes,
+                                    primaryKeys,
+                                    new CdcRecord(RowKind.INSERT, after)));
                 }
                 break;
             case OP_INSERT:
@@ -190,10 +196,11 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
                     RowKind kind = type.equals(OP_INSERT) ? RowKind.INSERT : RowKind.DELETE;
                     records.add(
                             new RichCdcMultiplexRecord(
-                                    new CdcRecord(kind, after),
-                                    paimonFieldTypes,
                                     databaseName,
-                                    tableName));
+                                    tableName,
+                                    paimonFieldTypes,
+                                    primaryKeys,
+                                    new CdcRecord(kind, after)));
                 }
                 break;
             default:
@@ -221,7 +228,11 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
 
         return Collections.singletonList(
                 new RichCdcMultiplexRecord(
-                        CdcRecord.emptyRecord(), fieldTypes, databaseName, tableName));
+                        databaseName,
+                        tableName,
+                        fieldTypes,
+                        Collections.emptyList(),
+                        CdcRecord.emptyRecord()));
     }
 
     private void extractFieldTypesFromAlterTableItem(
@@ -274,6 +285,13 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
 
     private DataType toPaimonDataType(String mySqlType, boolean isNullable) {
         return MySqlTypeUtils.toDataType(mySqlType).copy(isNullable);
+    }
+
+    private List<String> extractPrimaryKeys() {
+        List<String> primaryKeys = new ArrayList<>();
+        ArrayNode pkNames = (ArrayNode) root.get(FIELD_PRIMARY_KEYS);
+        pkNames.iterator().forEachRemaining(pk -> primaryKeys.add(toFieldName(pk.asText())));
+        return primaryKeys;
     }
 
     private LinkedHashMap<String, String> extractFieldTypesFromMySqlType() {

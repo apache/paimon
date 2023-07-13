@@ -87,7 +87,7 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
         String tableName = parser.parseTableName();
 
         // check for newly added table
-        parser.parseNewTable(database)
+        parser.parseNewTable()
                 .ifPresent(
                         schema -> {
                             Identifier identifier =

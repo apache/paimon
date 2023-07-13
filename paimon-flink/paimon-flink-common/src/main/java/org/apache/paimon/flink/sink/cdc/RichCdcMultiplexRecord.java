@@ -22,6 +22,7 @@ import org.apache.paimon.types.DataType;
 
 import java.io.Serializable;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Objects;
 
 /** Compared to {@link CdcMultiplexRecord}, this contains schema information. */
@@ -29,24 +30,35 @@ public class RichCdcMultiplexRecord implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final CdcRecord cdcRecord;
-    private final LinkedHashMap<String, DataType> fieldTypes;
     private final String databaseName;
     private final String tableName;
+    private final LinkedHashMap<String, DataType> fieldTypes;
+    private final List<String> primaryKeys;
+    private final CdcRecord cdcRecord;
 
     public RichCdcMultiplexRecord(
-            CdcRecord cdcRecord,
-            LinkedHashMap<String, DataType> fieldTypes,
             String databaseName,
-            String tableName) {
-        this.cdcRecord = cdcRecord;
-        this.fieldTypes = fieldTypes;
+            String tableName,
+            LinkedHashMap<String, DataType> fieldTypes,
+            List<String> primaryKeys,
+            CdcRecord cdcRecord) {
         this.databaseName = databaseName;
         this.tableName = tableName;
+        this.fieldTypes = fieldTypes;
+        this.primaryKeys = primaryKeys;
+        this.cdcRecord = cdcRecord;
     }
 
     public String tableName() {
         return tableName;
+    }
+
+    public LinkedHashMap<String, DataType> fieldTypes() {
+        return fieldTypes;
+    }
+
+    public List<String> primaryKeys() {
+        return primaryKeys;
     }
 
     public RichCdcRecord toRichCdcRecord() {
@@ -55,7 +67,7 @@ public class RichCdcMultiplexRecord implements Serializable {
 
     @Override
     public int hashCode() {
-        return Objects.hash(cdcRecord, fieldTypes, databaseName, tableName);
+        return Objects.hash(databaseName, tableName, fieldTypes, primaryKeys, cdcRecord);
     }
 
     @Override
@@ -67,23 +79,26 @@ public class RichCdcMultiplexRecord implements Serializable {
             return false;
         }
         RichCdcMultiplexRecord that = (RichCdcMultiplexRecord) o;
-        return Objects.equals(cdcRecord, that.cdcRecord)
+        return databaseName.equals(that.databaseName)
+                && tableName.equals(that.tableName)
                 && Objects.equals(fieldTypes, that.fieldTypes)
-                && databaseName.equals(that.databaseName)
-                && tableName.equals(that.tableName);
+                && Objects.equals(primaryKeys, that.primaryKeys)
+                && Objects.equals(cdcRecord, that.cdcRecord);
     }
 
     @Override
     public String toString() {
         return "{"
-                + "cdcRecord="
-                + cdcRecord
-                + ", fieldTypes="
-                + fieldTypes
-                + ", databaseName="
+                + "databaseName="
                 + databaseName
                 + ", tableName="
                 + tableName
+                + ", fieldTypes="
+                + fieldTypes
+                + ", primaryKeys="
+                + primaryKeys
+                + ", cdcRecord="
+                + cdcRecord
                 + '}';
     }
 }
