@@ -257,7 +257,6 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql(
                         "INSERT INTO t VALUES (1, MAP['key1', 'value1', 'key2', 'value2']), (2, MAP['key1', 'value11', 'key2', 'value22'])")
                 .await();
-
         Assert.assertEquals(
                 Arrays.asList("1\tvalue1\tvalue2", "2\tvalue11\tvalue22"),
                 hiveShell.executeQuery(

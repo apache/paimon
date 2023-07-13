@@ -28,6 +28,7 @@ import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * {@link MapObjectInspector} for {@link InternalMap}.
@@ -69,7 +70,7 @@ public class PaimonMapObjectInspector implements MapObjectInspector {
         InternalArray valueArrayData = mapData.valueArray();
         for (int i = 0; i < mapData.size(); i++) {
             Object k = keyGetter.getElementOrNull(keyArrayData, i);
-            if (k != null && k.toString().equals(key.toString())) {
+            if (Objects.equals(k, key)) {
                 return valueGetter.getElementOrNull(valueArrayData, i);
             }
         }
