@@ -38,8 +38,8 @@ public class ContinuousFileStoreSource extends FlinkSource {
 
     private static final long serialVersionUID = 4L;
 
-    private final Map<String, String> options;
-    private final BucketMode bucketMode;
+    protected final Map<String, String> options;
+    protected final BucketMode bucketMode;
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
@@ -72,14 +72,21 @@ public class ContinuousFileStoreSource extends FlinkSource {
             nextSnapshotId = checkpoint.currentSnapshotId();
             splits = checkpoint.splits();
         }
-        CoreOptions coreOptions = CoreOptions.fromMap(options);
         StreamTableScan scan = readBuilder.newStreamScan();
         scan.restore(nextSnapshotId);
+        return buildEnumerator(context, splits, nextSnapshotId, scan);
+    }
+
+    protected SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> buildEnumerator(
+            SplitEnumeratorContext<FileStoreSourceSplit> context,
+            Collection<FileStoreSourceSplit> splits,
+            @Nullable Long nextSnapshotId,
+            StreamTableScan scan) {
         return new ContinuousFileSplitEnumerator(
                 context,
                 splits,
                 nextSnapshotId,
-                coreOptions.continuousDiscoveryInterval().toMillis(),
+                CoreOptions.fromMap(options).continuousDiscoveryInterval().toMillis(),
                 scan,
                 bucketMode);
     }
