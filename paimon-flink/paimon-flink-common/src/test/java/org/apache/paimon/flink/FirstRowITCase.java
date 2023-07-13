@@ -52,10 +52,26 @@ public class FirstRowITCase extends CatalogITCaseBase {
     public void testBatchQuery() {
         batchSql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
         List<Row> result = batchSql("SELECT * FROM T");
-        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1, "1"));
+        assertThat(result).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 1, 1, "1"));
 
         result = batchSql("SELECT c FROM T");
-        assertThat(result).containsExactlyInAnyOrder(Row.of("1"));
+        assertThat(result).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "1"));
+    }
+
+    @Test
+    public void testReadAfterFullCompaction() {
+        batchSql("ALTER TABLE T SET ('full-compaction.delta-commits'='1')");
+
+        batchSql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
+        List<Row> result = batchSql("SELECT * FROM T");
+        assertThat(result).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 1, 1, "1"));
+
+        batchSql("INSERT INTO T VALUES (1, 1, '1'), (2, 2, '2')");
+        result = batchSql("SELECT * FROM T");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, 1, "1"),
+                        Row.ofKind(RowKind.INSERT, 2, 2, "2"));
     }
 
     @Test
