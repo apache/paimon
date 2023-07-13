@@ -70,7 +70,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     private static final String DATABASE_NAME = "paimon_sync_database";
 
-    private static final String DATABASE_NAME_TINYINT_CONVERT = "paimon_sync_database_tinyint";
+    private static final String DATABASE_NAME_TINYINT_CONVERT =
+            "paimon_sync_database_tinyint_schema";
 
     private static final String DATABASE_NAME_TINYINT = "paimon_sync_database_tinyint";
     @TempDir java.nio.file.Path tempDir;
@@ -315,7 +316,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         },
                         new String[] {"_id", "v1", "v2", "v3"});
         expected =
-                Arrays.asList("+I[2, two, 21, NULL]", "+I[4, four, 24, NUL]", "+I[6, six, 42, 43]");
+                Arrays.asList(
+                        "+I[2, two, 21, NULL]", "+I[4, four, 24, NULL]", "+I[6, six, 42, 43]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
     }
 

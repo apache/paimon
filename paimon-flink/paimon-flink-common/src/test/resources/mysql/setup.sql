@@ -578,8 +578,8 @@ CREATE TABLE schema_evolution_3 (
     PRIMARY KEY (_id)
 );
 
-CREATE DATABASE paimon_sync_database_tinyint;
-USE paimon_sync_database_tinyint;
+CREATE DATABASE paimon_sync_database_tinyint_schema;
+USE paimon_sync_database_tinyint_schema;
 
 CREATE TABLE schema_evolution_4 (
     _id INT comment  '_id',

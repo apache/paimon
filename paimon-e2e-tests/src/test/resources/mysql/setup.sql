@@ -41,12 +41,42 @@ CREATE TABLE schema_evolution_2 (
     PRIMARY KEY (_id)
 );
 
+CREATE TABLE tinyint_schema_evolution_1 (
+    pt INT,
+    _id INT,
+    _tinyint1 TINYINT(1),
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE tinyint_schema_evolution_2 (
+    pt INT,
+    _id INT,
+    _tinyint1 TINYINT(1),
+    PRIMARY KEY (_id)
+);
+
 -- ################################################################################
 --  MySqlCdcE2eTestBase#testSyncDatabase
 -- ################################################################################
 
 CREATE DATABASE paimon_sync_database;
 USE paimon_sync_database;
+
+CREATE TABLE t1 (
+    k INT,
+    v INT,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k1 INT,
+    k2 VARCHAR(10),
+    v1 INT,
+    PRIMARY KEY (k1, k2)
+);
+
+CREATE DATABASE paimon_sync_database_tinyint;
+USE paimon_sync_database_tinyint;
 
 CREATE TABLE t1 (
     k INT,
@@ -103,4 +133,20 @@ CREATE TABLE T (
     _datetime DATETIME,
     _tinyint1 TINYINT(1),
     PRIMARY KEY (pk)
+);
+
+CREATE DATABASE paimon_sync_database_tinyint_schema;
+USE paimon_sync_database_tinyint_schema;
+
+CREATE TABLE schema_evolution_4 (
+    _id INT comment  '_id',
+    v1 VARCHAR(10) comment  'v1',
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE schema_evolution_5 (
+    _id INT comment  '_id',
+    v1 VARCHAR(10) comment  'v1',
+    v2 TINYINT(1) comment 'tinyint(1)',
+    PRIMARY KEY (_id)
 );

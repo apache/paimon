@@ -304,6 +304,192 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
         cancelJob(jobId);
     }
 
+    @Test
+    public void testSyncTableWithTinyConvert() throws Exception {
+        String runActionCommand =
+                String.join(
+                        " ",
+                        "bin/flink",
+                        "run",
+                        "-D",
+                        "execution.checkpointing.interval=1s",
+                        "--detached",
+                        "lib/paimon-flink-action.jar",
+                        "mysql-sync-table",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--table",
+                        "ts_table",
+                        "--partition-keys",
+                        "pt",
+                        "--primary-keys",
+                        "pt,_id",
+                        "--mysql-conf",
+                        "hostname=mysql-1",
+                        "--mysql-conf",
+                        String.format("port=%d", MySqlContainer.MYSQL_PORT),
+                        "--mysql-conf",
+                        String.format("username='%s'", mySqlContainer.getUsername()),
+                        "--mysql-conf",
+                        String.format("password='%s'", mySqlContainer.getPassword()),
+                        "--mysql-conf",
+                        "database-name='paimon_sync_table'",
+                        "--mysql-conf",
+                        "table-name='tinyint_schema_evolution_.+'",
+                        "--mysql-conf",
+                        "mysql.converter.tinyint1-to-bool='false'",
+                        "--table-conf",
+                        "bucket=2");
+        Container.ExecResult execResult =
+                jobManager.execInContainer("su", "flink", "-c", runActionCommand);
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
+
+        try (Connection conn = getMySqlConnection();
+                Statement statement = conn.createStatement()) {
+            testSyncTableImplWithTinyConvert(statement);
+        }
+    }
+
+    private void testSyncTableImplWithTinyConvert(Statement statement) throws Exception {
+        statement.executeUpdate("USE paimon_sync_table");
+
+        statement.executeUpdate("INSERT INTO tinyint_schema_evolution_1 VALUES (1, 1, 11)");
+        statement.executeUpdate(
+                "INSERT INTO tinyint_schema_evolution_2 VALUES (1, 2, 12), (2, 4, 24)");
+
+        String jobId =
+                runSql(
+                        "INSERT INTO result1 SELECT * FROM ts_table;",
+                        catalogDdl,
+                        useCatalogCmd,
+                        "",
+                        createResultSink("result1", "pt INT, _id INT, _tinyint1 TINYINT"));
+        checkResult("1, 1, 11", "1, 2, 12", "2, 4, 24");
+        clearCurrentResults();
+        cancelJob(jobId);
+
+        statement.executeUpdate("ALTER TABLE tinyint_schema_evolution_1 ADD COLUMN v1 TINYINT(1)");
+        statement.executeUpdate(
+                "INSERT INTO tinyint_schema_evolution_1 VALUES (2, 3, 23, 30), (1, 5, 15, 50)");
+        statement.executeUpdate("ALTER TABLE tinyint_schema_evolution_2 ADD COLUMN v1 TINYINT(1)");
+        statement.executeUpdate("INSERT INTO tinyint_schema_evolution_2 VALUES (1, 6, 16, 60)");
+
+        jobId =
+                runSql(
+                        "INSERT INTO result2 SELECT * FROM ts_table;",
+                        catalogDdl,
+                        useCatalogCmd,
+                        "",
+                        createResultSink(
+                                "result2", "pt INT, _id INT, _tinyint1 TINYINT, v1 TINYINT"));
+        checkResult(
+                "1, 1, 11, null",
+                "1, 2, 12, null",
+                "2, 3, 23, 30",
+                "2, 4, 24, null",
+                "1, 5, 15, 50",
+                "1, 6, 16, 60");
+        clearCurrentResults();
+        cancelJob(jobId);
+    }
+
+    @Test
+    public void testSyncDatabaseWithTinyConvert() throws Exception {
+        String runActionCommand =
+                String.join(
+                        " ",
+                        "bin/flink",
+                        "run",
+                        "-D",
+                        "execution.checkpointing.interval=1s",
+                        "--detached",
+                        "lib/paimon-flink-action.jar",
+                        "mysql-sync-database",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--mysql-conf",
+                        "hostname=mysql-1",
+                        "--mysql-conf",
+                        String.format("port=%d", MySqlContainer.MYSQL_PORT),
+                        "--mysql-conf",
+                        String.format("username='%s'", mySqlContainer.getUsername()),
+                        "--mysql-conf",
+                        String.format("password='%s'", mySqlContainer.getPassword()),
+                        "--mysql-conf",
+                        "database-name='paimon_sync_database_tinyint'",
+                        "--mysql-conf",
+                        "mysql.converter.tinyint1-to-bool='false'",
+                        "--table-conf",
+                        "bucket=2");
+        jobManager.execInContainer("su", "flink", "-c", runActionCommand);
+
+        try (Connection conn = getMySqlConnection();
+                Statement statement = conn.createStatement()) {
+            testSyncDatabaseImplWithTinyConvert(statement);
+        }
+    }
+
+    private void testSyncDatabaseImplWithTinyConvert(Statement statement) throws Exception {
+        statement.executeUpdate("USE paimon_sync_database_tinyint");
+
+        statement.executeUpdate("INSERT INTO t1 VALUES (1, 10)");
+        statement.executeUpdate("INSERT INTO t2 VALUES (2, 'two', 20)");
+
+        String jobId =
+                runSql(
+                        "INSERT INTO result1 SELECT * FROM t1;",
+                        catalogDdl,
+                        useCatalogCmd,
+                        "",
+                        createResultSink("result1", "k INT, v INT"));
+        checkResult("1, 10");
+        clearCurrentResults();
+        cancelJob(jobId);
+
+        jobId =
+                runSql(
+                        "INSERT INTO result2 SELECT * FROM t2;",
+                        catalogDdl,
+                        useCatalogCmd,
+                        "",
+                        createResultSink("result2", "k1 INT, k2 VARCHAR(10), v1 INT"));
+        checkResult("2, two, 20");
+        clearCurrentResults();
+        cancelJob(jobId);
+
+        statement.executeUpdate("ALTER TABLE t1 ADD COLUMN v1 TINYINT(1)");
+        statement.executeUpdate("INSERT INTO t1 VALUES (3, 30, 42)");
+        statement.executeUpdate("ALTER TABLE t2 ADD COLUMN v2 TINYINT(1)");
+        statement.executeUpdate("INSERT INTO t2 VALUES (4, 'four', 40, 40)");
+
+        jobId =
+                runSql(
+                        "INSERT INTO result3 SELECT * FROM t1;",
+                        catalogDdl,
+                        useCatalogCmd,
+                        "",
+                        createResultSink("result3", "k INT, v INT, v1 TINYINT"));
+        checkResult("1, 10, null", "3, 30, 42");
+        clearCurrentResults();
+        cancelJob(jobId);
+
+        jobId =
+                runSql(
+                        "INSERT INTO result4 SELECT * FROM t2;",
+                        catalogDdl,
+                        useCatalogCmd,
+                        "",
+                        createResultSink("result4", "k1 INT, k2 VARCHAR(10), v1 INT, v2 TINYINT"));
+        checkResult("2, two, 20, null", "4, four, 40, 40");
+        clearCurrentResults();
+        cancelJob(jobId);
+    }
+
     protected Connection getMySqlConnection() throws Exception {
         return DriverManager.getConnection(
                 String.format(
