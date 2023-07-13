@@ -80,6 +80,10 @@ under the License.
                     <groupId>org.apache.xbean</groupId>
                     <artifactId>xbean-asm6-shaded</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.glassfish.jersey.media</groupId>
+                    <artifactId>jersey-media-json-jackson</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
