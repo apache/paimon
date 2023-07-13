@@ -19,6 +19,8 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
@@ -34,12 +36,17 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     private final MergeFunction<KeyValue> mergeFunction;
     private final LinkedList<KeyValue> candidates = new LinkedList<>();
+    private final InternalRowSerializer keySerializer;
+    private final InternalRowSerializer valueSerializer;
 
     KeyValue highLevel;
     boolean containLevel0;
 
-    public LookupMergeFunction(MergeFunction<KeyValue> mergeFunction) {
+    public LookupMergeFunction(
+            MergeFunction<KeyValue> mergeFunction, RowType keyType, RowType valueType) {
         this.mergeFunction = mergeFunction;
+        this.keySerializer = new InternalRowSerializer(keyType);
+        this.valueSerializer = new InternalRowSerializer(valueType);
     }
 
     @Override
@@ -51,7 +58,7 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void add(KeyValue kv) {
-        candidates.add(kv);
+        candidates.add(kv.copy(keySerializer, valueSerializer));
     }
 
     @Override
@@ -77,8 +84,9 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         return mergeFunction.getResult();
     }
 
-    public static MergeFunctionFactory<KeyValue> wrap(MergeFunctionFactory<KeyValue> wrapped) {
-        return new Factory(wrapped);
+    public static MergeFunctionFactory<KeyValue> wrap(
+            MergeFunctionFactory<KeyValue> wrapped, RowType keyType, RowType valueType) {
+        return new Factory(wrapped, keyType, valueType);
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
@@ -86,14 +94,18 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         private static final long serialVersionUID = 1L;
 
         private final MergeFunctionFactory<KeyValue> wrapped;
+        private final RowType keyType;
+        private final RowType rowType;
 
-        private Factory(MergeFunctionFactory<KeyValue> wrapped) {
+        private Factory(MergeFunctionFactory<KeyValue> wrapped, RowType keyType, RowType rowType) {
             this.wrapped = wrapped;
+            this.keyType = keyType;
+            this.rowType = rowType;
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            return new LookupMergeFunction(wrapped.create(projection));
+            return new LookupMergeFunction(wrapped.create(projection), keyType, rowType);
         }
     }
 }

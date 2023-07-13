@@ -96,6 +96,8 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             CoreOptions options = new CoreOptions(conf);
             CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
             MergeFunctionFactory<KeyValue> mfFactory;
+            KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
+
             switch (mergeEngine) {
                 case DEDUPLICATE:
                     mfFactory = DeduplicateMergeFunction.factory();
@@ -117,10 +119,11 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             }
 
             if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
-                mfFactory = LookupMergeFunction.wrap(mfFactory);
+                mfFactory =
+                        LookupMergeFunction.wrap(
+                                mfFactory, new RowType(extractor.keyFields(tableSchema)), rowType);
             }
 
-            KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
             lazyStore =
                     new KeyValueFileStore(
                             fileIO(),

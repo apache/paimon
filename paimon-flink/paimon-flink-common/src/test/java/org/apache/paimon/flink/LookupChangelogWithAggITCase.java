@@ -22,6 +22,7 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -73,6 +74,22 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
                                 Row.ofKind(RowKind.UPDATE_AFTER, 2, 2 * (i + 1)));
             }
         }
+
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupChangelogProducerWithValueSwitch() throws Exception {
+        sql(
+                "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ("
+                        + "'bucket'='3', "
+                        + "'changelog-producer'='lookup', "
+                        + "'merge-engine'='aggregation', "
+                        + "'fields.v.aggregate-function'='sum')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
+
+        sql("INSERT INTO T VALUES (1, 1), (2, 2), (1, 3), (1, 4), (1, 5)");
+        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 13), Row.of(2, 2));
 
         iterator.close();
     }
