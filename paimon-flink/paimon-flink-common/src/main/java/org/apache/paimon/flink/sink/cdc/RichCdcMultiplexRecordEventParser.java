@@ -45,8 +45,8 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final Map<String, RichEventParser> parsers = new HashMap<>();
-    private final Set<String> acceptedTables = new HashSet<>();
-    private final Set<String> rejectedTables = new HashSet<>();
+    private final Set<String> includedTables = new HashSet<>();
+    private final Set<String> excludedTables = new HashSet<>();
     private final Set<String> createdTables = new HashSet<>();
 
     private RichCdcMultiplexRecord record;
@@ -108,10 +108,10 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     }
 
     private boolean shouldSynchronizeCurrentTable(List<String> primaryKeys) {
-        if (acceptedTables.contains(currentTable)) {
+        if (includedTables.contains(currentTable)) {
             return true;
         }
-        if (rejectedTables.contains(currentTable)) {
+        if (excludedTables.contains(currentTable)) {
             return false;
         }
 
@@ -127,7 +127,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
             LOG.debug(
                     "Source table {} won't be synchronized because it was excluded. ",
                     currentTable);
-            rejectedTables.add(currentTable);
+            excludedTables.add(currentTable);
             return false;
         }
 
@@ -136,11 +136,11 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
                     "Didn't find primary keys from kafka topic's table schemas for table '{}'. "
                             + "This table won't be synchronized.",
                     currentTable);
-            rejectedTables.add(currentTable);
+            excludedTables.add(currentTable);
             return false;
         }
 
-        acceptedTables.add(currentTable);
+        includedTables.add(currentTable);
         return true;
     }
 
