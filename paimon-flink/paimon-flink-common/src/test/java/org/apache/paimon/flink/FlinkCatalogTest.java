@@ -22,8 +22,10 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.log.LogSinkProvider;
+import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreRegister;
-import org.apache.paimon.flink.log.LogStoreRegisterFactory;
+import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
@@ -46,6 +48,10 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.factories.DynamicTableFactory;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -65,7 +71,7 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
-import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_REGISTER;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -75,7 +81,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link FlinkCatalog}. */
 public class FlinkCatalogTest {
-    private static final String TESTING_LOG_STORE_REGISTER = "testing";
+    private static final String TESTING_LOG_STORE = "testing";
 
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
     private final ObjectPath path3 = new ObjectPath("db1", "t2");
@@ -486,12 +492,12 @@ public class FlinkCatalogTest {
                         .primaryKey("pk")
                         .build();
         Map<String, String> options = new HashMap<>();
-        options.put(LOG_SYSTEM_REGISTER.key(), TESTING_LOG_STORE_REGISTER);
+        options.put(LOG_SYSTEM_AUTO_REGISTER.key(), "true");
         CatalogTable catalogTable1 = new CatalogTableImpl(schema, options, "");
         assertThatThrownBy(() -> catalog.createTable(path1, catalogTable1, false))
                 .hasMessage("log.system must be configured when you use log system register.");
 
-        options.put(LOG_SYSTEM.key(), "kafka");
+        options.put(LOG_SYSTEM.key(), TESTING_LOG_STORE);
         CatalogTable catalogTable2 = new CatalogTableImpl(schema, options, "");
         catalog.createTable(path1, catalogTable2, false);
 
@@ -554,15 +560,29 @@ public class FlinkCatalogTest {
     }
 
     /** Testing log store register factory to create {@link TestingLogStoreRegister}. */
-    public static class TestingLogStoreRegisterFactory implements LogStoreRegisterFactory {
+    public static class TestingLogSoreRegisterFactory implements LogStoreTableFactory {
 
         @Override
         public String identifier() {
-            return TESTING_LOG_STORE_REGISTER;
+            return TESTING_LOG_STORE;
         }
 
         @Override
-        public LogStoreRegister createLogStoreRegister(Options options) {
+        public LogSourceProvider createSourceProvider(
+                DynamicTableFactory.Context context,
+                DynamicTableSource.Context sourceContext,
+                @Nullable int[][] projectFields) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public LogSinkProvider createSinkProvider(
+                DynamicTableFactory.Context context, DynamicTableSink.Context sinkContext) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public LogStoreRegister createRegister(Options options) {
             return new TestingLogStoreRegister();
         }
     }

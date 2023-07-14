@@ -70,14 +70,14 @@ public class FlinkConnectorOptions {
                                     .build());
 
     @Documentation.Immutable
-    public static final ConfigOption<String> LOG_SYSTEM_REGISTER =
-            ConfigOptions.key("log.system.register")
-                    .stringType()
-                    .noDefaultValue()
+    public static final ConfigOption<Boolean> LOG_SYSTEM_AUTO_REGISTER =
+            ConfigOptions.key("log.system.auto-register")
+                    .booleanType()
+                    .defaultValue(false)
                     .withDescription(
-                            "The register can automatically create and delete topic in log system for Paimon table, "
-                                    + "kafka log system is supported in Paimon and users can implement customized register based on log "
-                                    + "store register and factory interfaces.");
+                            "If true, the register will automatically create and delete a topic in log system for Paimon table. Default kafka log store register "
+                                    + "is supported, users can implement customized register for log system, for example, create a new class which extends "
+                                    + "KafkaLogStoreFactory and return a customized LogStoreRegister for their kafka cluster to create/delete topics.");
 
     public static final ConfigOption<Integer> SINK_PARALLELISM =
             ConfigOptions.key("sink.parallelism")

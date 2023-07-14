@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.flink.log.LogStoreRegister;
-import org.apache.paimon.flink.log.LogStoreRegisterFactory;
+import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -94,7 +94,7 @@ import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
-import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_REGISTER;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
@@ -283,8 +283,8 @@ public class FlinkCatalog extends AbstractCatalog {
     private Map<String, String> registerLogSystem(
             Identifier identifier, Map<String, String> options) {
         Options tableOptions = Options.fromMap(options);
-        Optional<String> register = tableOptions.getOptional(LOG_SYSTEM_REGISTER);
-        if (register.isPresent()) {
+        if (tableOptions.get(LOG_SYSTEM_AUTO_REGISTER)) {
+            String logStore = tableOptions.get(LOG_SYSTEM);
             checkArgument(
                     !tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE),
                     String.format(
@@ -293,11 +293,9 @@ public class FlinkCatalog extends AbstractCatalog {
             if (catalog.tableExists(identifier)) {
                 return Collections.emptyMap();
             }
-            LogStoreRegisterFactory registerFactory =
-                    FactoryUtil.discoverFactory(
-                            classLoader, LogStoreRegisterFactory.class, register.get());
-            LogStoreRegister logStoreRegister =
-                    registerFactory.createLogStoreRegister(tableOptions);
+            LogStoreTableFactory registerFactory =
+                    FactoryUtil.discoverFactory(classLoader, LogStoreTableFactory.class, logStore);
+            LogStoreRegister logStoreRegister = registerFactory.createRegister(tableOptions);
             return logStoreRegister.registerTopic(identifier, options);
         }
         return Collections.emptyMap();
@@ -305,22 +303,18 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private void unRegisterLogSystem(Identifier identifier, Map<String, String> options) {
         Options tableOptions = Options.fromMap(options);
-        tableOptions
-                .getOptional(LOG_SYSTEM_REGISTER)
-                .ifPresent(
-                        register -> {
-                            checkArgument(
-                                    !tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE),
-                                    String.format(
-                                            "%s must be configured when you use log system register.",
-                                            LOG_SYSTEM.key()));
-                            LogStoreRegisterFactory registerFactory =
-                                    FactoryUtil.discoverFactory(
-                                            classLoader, LogStoreRegisterFactory.class, register);
-                            LogStoreRegister logStoreRegister =
-                                    registerFactory.createLogStoreRegister(tableOptions);
-                            logStoreRegister.unRegisterTopic(identifier, options);
-                        });
+        if (tableOptions.get(LOG_SYSTEM_AUTO_REGISTER)) {
+            String logStore = tableOptions.get(LOG_SYSTEM);
+            checkArgument(
+                    !tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE),
+                    String.format(
+                            "%s must be configured when you use log system register.",
+                            LOG_SYSTEM.key()));
+            LogStoreTableFactory registerFactory =
+                    FactoryUtil.discoverFactory(classLoader, LogStoreTableFactory.class, logStore);
+            LogStoreRegister logStoreRegister = registerFactory.createRegister(tableOptions);
+            logStoreRegister.unRegisterTopic(identifier, options);
+        }
     }
 
     private List<SchemaChange> toSchemaChange(TableChange change) {

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.log;
 import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelper;
+import org.apache.paimon.options.Options;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.common.serialization.SerializationSchema;
@@ -68,6 +69,12 @@ public interface LogStoreTableFactory extends Factory {
      * information.
      */
     LogSinkProvider createSinkProvider(Context context, DynamicTableSink.Context sinkContext);
+
+    /**
+     * Creates a {@link LogStoreRegister} instance for table ddl, it will register table to log
+     * store when a table is created or dropped.
+     */
+    LogStoreRegister createRegister(Options options);
 
     // --------------------------------------------------------------------------------------------
 
