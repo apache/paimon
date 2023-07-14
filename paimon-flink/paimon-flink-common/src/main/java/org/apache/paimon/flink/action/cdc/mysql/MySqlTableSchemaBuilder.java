@@ -118,7 +118,7 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder {
             }
         }
 
-        if (caseSensitive) {
+        if (!caseSensitive) {
             LinkedHashMap<String, Tuple2<DataType, String>> tmp = new LinkedHashMap<>();
             for (Map.Entry<String, Tuple2<DataType, String>> entry : fields.entrySet()) {
                 String fieldName = entry.getKey();
