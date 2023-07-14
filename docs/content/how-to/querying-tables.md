@@ -32,6 +32,11 @@ Just like all other tables, Paimon tables can be queried with `SELECT` statement
 
 Paimon's batch read returns all the data in a snapshot of the table. By default, batch reads return the latest snapshot.
 
+```sql
+-- Flink SQL
+SET 'execution.runtime-mode' = 'batch';
+```
+
 ### Batch Time Travel
 
 Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.
@@ -181,6 +186,11 @@ and continue to read the latest changes.
 
 Paimon by default ensures that your startup is properly processed with the full amount
 included.
+
+```sql
+-- Flink SQL
+SET 'execution.runtime-mode' = 'streaming';
+```
 
 You can also do streaming read without the snapshot data, you can use `latest` scan mode:
 
