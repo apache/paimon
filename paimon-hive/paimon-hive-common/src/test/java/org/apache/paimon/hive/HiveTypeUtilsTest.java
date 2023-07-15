@@ -64,14 +64,15 @@ public class HiveTypeUtilsTest {
         TypeInfo charTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.CHAR(1));
         assertThat(charTypeInfo.getTypeName()).isEqualTo("char(1)");
 
-        TypeInfo maxLengthCharType = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.CHAR(CharType.MAX_LENGTH));
+        TypeInfo maxLengthCharType =
+                HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.CHAR(CharType.MAX_LENGTH));
         assertThat(maxLengthCharType.getTypeName()).isEqualTo("string");
 
         TypeInfo varcharTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.VARCHAR(10));
         assertThat(varcharTypeInfo.getTypeName()).isEqualTo("varchar(10)");
 
         TypeInfo maxLengthVarcharType =
-            HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.VARCHAR(VarCharType.MAX_LENGTH));
+                HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.VARCHAR(VarCharType.MAX_LENGTH));
         assertThat(maxLengthVarcharType.getTypeName()).isEqualTo("string");
 
         TypeInfo binaryTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.BINARY(10));
