@@ -25,6 +25,9 @@ import java.util.List;
 public class Metrics {
     private static volatile Metrics instance;
 
+    /** The metrics groups. */
+    private final List<MetricGroup> metricGroups = new ArrayList<>();
+
     private Metrics() {}
 
     public static Metrics getInstance() {
@@ -38,16 +41,13 @@ public class Metrics {
         return instance;
     }
 
-    /** The metrics groups. */
-    private final List<MetricGroup> metricGroups = new ArrayList<>();
-
     /** Add a metric group. */
-    public void addGroup(AbstractMetricGroup group) {
+    public synchronized void addGroup(AbstractMetricGroup group) {
         metricGroups.add(group);
     }
 
     /** Get metric groups. */
-    public List<MetricGroup> getMetricGroups() {
+    public synchronized List<MetricGroup> getMetricGroups() {
         return metricGroups;
     }
 }

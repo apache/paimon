@@ -33,12 +33,9 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.locks.ReentrantLock;
 
 /** Metrics to measure a commit. */
 public class CommitMetrics {
-    private final ReentrantLock commitMetricsReadWriteLock = new ReentrantLock();
-
     private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
     private final Map<String, TaggedMetricGroup> taggedMetricGroups = new HashMap<>();
 
@@ -230,18 +227,13 @@ public class CommitMetrics {
     }
 
     public void reportCommit(CommitStats commitStats) {
-        commitMetricsReadWriteLock.lock();
-        try {
-            latestCommit = commitStats;
-            totalTableFilesCounter.inc(
-                    commitStats.getTableFilesAdded() - commitStats.getTableFilesDeleted());
-            totalChangelogFilesCounter.inc(
-                    commitStats.getChangelogFilesCommitAppended()
-                            + commitStats.getChangelogFilesCompacted());
-            durationHistogram.update(commitStats.getDuration());
-            registerTaggedCommitMetrics();
-        } finally {
-            commitMetricsReadWriteLock.unlock();
-        }
+        latestCommit = commitStats;
+        totalTableFilesCounter.inc(
+                commitStats.getTableFilesAdded() - commitStats.getTableFilesDeleted());
+        totalChangelogFilesCounter.inc(
+                commitStats.getChangelogFilesCommitAppended()
+                        + commitStats.getChangelogFilesCompacted());
+        durationHistogram.update(commitStats.getDuration());
+        registerTaggedCommitMetrics();
     }
 }
