@@ -18,6 +18,8 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.hadoop.hive.common.type.HiveChar;
+import org.apache.hadoop.hive.common.type.HiveVarchar;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -75,10 +77,14 @@ public class HiveTypeUtils {
                         decimalType.getPrecision(), decimalType.getScale());
             case CHAR:
                 CharType charType = (CharType) logicalType;
-                return TypeInfoFactory.getCharTypeInfo(charType.getLength());
+                if (charType.getLength() > HiveChar.MAX_CHAR_LENGTH) {
+                    return TypeInfoFactory.stringTypeInfo;
+                } else {
+                    return TypeInfoFactory.getCharTypeInfo(charType.getLength());
+                }
             case VARCHAR:
                 VarCharType varCharType = (VarCharType) logicalType;
-                if (varCharType.getLength() == VarCharType.MAX_LENGTH) {
+                if (varCharType.getLength() > HiveVarchar.MAX_VARCHAR_LENGTH) {
                     return TypeInfoFactory.stringTypeInfo;
                 } else {
                     return TypeInfoFactory.getVarcharTypeInfo(varCharType.getLength());
