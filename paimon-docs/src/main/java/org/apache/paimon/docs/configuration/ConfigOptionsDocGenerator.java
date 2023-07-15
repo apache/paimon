@@ -73,7 +73,7 @@ public class ConfigOptionsDocGenerator {
     static final OptionsClassLocation[] LOCATIONS =
             new OptionsClassLocation[] {
                 new OptionsClassLocation("paimon-common", "org.apache.paimon.options"),
-                new OptionsClassLocation("paimon-core", "org.apache.paimon"),
+                new OptionsClassLocation("paimon-common", "org.apache.paimon"),
                 new OptionsClassLocation(
                         "paimon-flink/paimon-flink-common", "org.apache.paimon.flink"),
                 new OptionsClassLocation(
