@@ -19,7 +19,6 @@
 package org.apache.paimon.metrics.commit;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -29,8 +28,7 @@ import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.Metrics;
-import org.apache.paimon.metrics.groups.BucketMetricGroup;
-import org.apache.paimon.metrics.groups.PartitionMetricGroup;
+import org.apache.paimon.metrics.groups.TaggedMetricGroup;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -45,7 +43,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.manifest.ManifestFileMetaTestBase.makeEntry;
-import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -67,9 +64,7 @@ public class CommitMetricsTest {
     @Test
     public void testGenericMetricsRegistration() {
         MetricGroup group = commitMetrics.getGenericMetricGroup();
-        Map<Integer, BucketMetricGroup> bucketMetricGroups = commitMetrics.getBucketMetricGroups();
-        Map<BinaryRow, PartitionMetricGroup> partitionMetricGroups =
-                commitMetrics.getPartitionMetricGroups();
+        Map<String, TaggedMetricGroup> taggedMetricGroups = commitMetrics.getTaggedMetricGroups();
 
         assertEquals(1, Metrics.getInstance().getMetricGroups().size());
         assertEquals(group, Metrics.getInstance().getMetricGroups().get(0));
@@ -93,16 +88,15 @@ public class CommitMetricsTest {
 
         reportOnce(commitMetrics);
 
-        assertEquals(3, bucketMetricGroups.size());
-        assertEquals(3, partitionMetricGroups.size());
+        assertEquals(3, taggedMetricGroups.size());
 
         List<MetricGroup> registeredGroups = Metrics.getInstance().getMetricGroups();
-        assertEquals(7, registeredGroups.size());
-        BucketMetricGroup bucketGroup1 = bucketMetricGroups.get(1);
-        assertEquals(bucketGroup1, registeredGroups.get(1));
-        assertEquals(BucketMetricGroup.GROUP_NAME, bucketGroup1.getGroupName());
+        assertEquals(4, registeredGroups.size());
+        TaggedMetricGroup taggedGroup = taggedMetricGroups.get("f0=1-1");
+        assertEquals(taggedGroup, registeredGroups.get(1));
+        assertEquals(TaggedMetricGroup.GROUP_NAME, taggedGroup.getGroupName());
 
-        Map<String, Metric> registeredMetricsByBucket1 = bucketGroup1.getMetrics();
+        Map<String, Metric> registeredMetricsByBucket1 = taggedGroup.getMetrics();
         assertTrue(
                 registeredMetricsByBucket1
                         .keySet()
@@ -122,9 +116,8 @@ public class CommitMetricsTest {
 
         reportAgain(commitMetrics);
 
-        assertEquals(4, bucketMetricGroups.size());
-        assertEquals(3, partitionMetricGroups.size());
-        assertEquals(8, Metrics.getInstance().getMetricGroups().size());
+        assertEquals(4, taggedMetricGroups.size());
+        assertEquals(5, Metrics.getInstance().getMetricGroups().size());
     }
 
     /** Tests that the metrics are updated properly. */
@@ -133,9 +126,7 @@ public class CommitMetricsTest {
     public void testMetricsAreUpdated() {
         Map<String, Metric> registeredGenericMetrics =
                 commitMetrics.getGenericMetricGroup().getMetrics();
-        Map<Integer, BucketMetricGroup> bucketMetricGroups = commitMetrics.getBucketMetricGroups();
-        Map<BinaryRow, PartitionMetricGroup> partitionMetricGroups =
-                commitMetrics.getPartitionMetricGroups();
+        Map<String, TaggedMetricGroup> taggedMetricGroups = commitMetrics.getTaggedMetricGroups();
 
         // Check initial values
         Gauge<Long> lastCommitDuration =
@@ -164,8 +155,7 @@ public class CommitMetricsTest {
         assertEquals(Long.valueOf(0), lastBucketsWritten.getValue());
         assertEquals(0, totalTableFiles.getCount());
         assertEquals(0, totalChangelogFiles.getCount());
-        assertEquals(0, bucketMetricGroups.size());
-        assertEquals(0, partitionMetricGroups.size());
+        assertEquals(0, taggedMetricGroups.size());
 
         // report once
         reportOnce(commitMetrics);
@@ -186,301 +176,149 @@ public class CommitMetricsTest {
         assertEquals(Long.valueOf(3), lastBucketsWritten.getValue());
         assertEquals(3, totalTableFiles.getCount());
         assertEquals(4, totalChangelogFiles.getCount());
-        assertTrue(bucketMetricGroups.keySet().containsAll(Arrays.asList(1, 3, 5)));
-        assertTrue(
-                partitionMetricGroups.keySet().containsAll(Arrays.asList(row(1), row(2), row(3))));
+        assertTrue(taggedMetricGroups.keySet().containsAll(Arrays.asList("f0=1-1", "f0=2-3", "f0=3-5")));
 
-        Map<String, Metric> metricsBucket1 = bucketMetricGroups.get(1).getMetrics();
+        Map<String, Metric> metricsTagged1 = taggedMetricGroups.get("f0=1-1").getMetrics();
         assertEquals(
                 Long.valueOf(2),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
                 ((Gauge<Long>)
-                                metricsBucket1.get(
+                                metricsTagged1.get(
                                         CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(201),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(202),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(203),
                 ((Gauge<Long>)
-                                metricsBucket1.get(
+                                metricsTagged1.get(
                                         CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(205),
                 ((Gauge<Long>)
-                                metricsBucket1.get(
+                                metricsTagged1.get(
                                         CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
                         .getValue());
 
-        Map<String, Metric> metricsBucket3 = bucketMetricGroups.get(3).getMetrics();
+        Map<String, Metric> metricsTagged3 = taggedMetricGroups.get("f0=2-3").getMetrics();
         assertEquals(
                 Long.valueOf(2),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
                 ((Gauge<Long>)
-                                metricsBucket3.get(
+                                metricsTagged3.get(
                                         CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(302),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(301),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(304),
                 ((Gauge<Long>)
-                                metricsBucket3.get(
+                                metricsTagged3.get(
                                         CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(307),
                 ((Gauge<Long>)
-                                metricsBucket3.get(
+                                metricsTagged3.get(
                                         CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
                         .getValue());
 
-        Map<String, Metric> metricsBucket5 = bucketMetricGroups.get(5).getMetrics();
+        Map<String, Metric> metricsTagged5 = taggedMetricGroups.get("f0=3-5").getMetrics();
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
                 ((Gauge<Long>)
-                                metricsBucket5.get(
+                                metricsTagged5.get(
                                         CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(106),
                 ((Gauge<Long>)
-                                metricsBucket5.get(
+                                metricsTagged5.get(
                                         CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
                 ((Gauge<Long>)
-                                metricsBucket5.get(
-                                        CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-
-        Map<String, Metric> metricsPartition1 = partitionMetricGroups.get(row(1)).getMetrics();
-        assertEquals(
-                Long.valueOf(2),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>)
-                                metricsPartition1.get(
-                                        CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>)
-                                metricsPartition1.get(
-                                        CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(201),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(202),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(203),
-                ((Gauge<Long>)
-                                metricsPartition1.get(
-                                        CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(205),
-                ((Gauge<Long>)
-                                metricsPartition1.get(
-                                        CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-
-        Map<String, Metric> metricsPartition2 = partitionMetricGroups.get(row(2)).getMetrics();
-        assertEquals(
-                Long.valueOf(2),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>)
-                                metricsPartition2.get(
-                                        CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>)
-                                metricsPartition2.get(
-                                        CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(302),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(301),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(304),
-                ((Gauge<Long>)
-                                metricsPartition2.get(
-                                        CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(307),
-                ((Gauge<Long>)
-                                metricsPartition2.get(
-                                        CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-
-        Map<String, Metric> metricsPartition3 = partitionMetricGroups.get(row(3)).getMetrics();
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>)
-                                metricsPartition3.get(
-                                        CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>)
-                                metricsPartition3.get(
-                                        CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(106),
-                ((Gauge<Long>)
-                                metricsPartition3.get(
-                                        CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>)
-                                metricsPartition3.get(
+                                metricsTagged5.get(
                                         CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
                         .getValue());
 
@@ -503,108 +341,105 @@ public class CommitMetricsTest {
         assertEquals(Long.valueOf(3), lastBucketsWritten.getValue());
         assertEquals(6, totalTableFiles.getCount());
         assertEquals(8, totalChangelogFiles.getCount());
-        assertEquals(4, bucketMetricGroups.size());
-        assertEquals(3, partitionMetricGroups.size());
+        assertEquals(4, taggedMetricGroups.size());
 
-        assertTrue(bucketMetricGroups.keySet().containsAll(Arrays.asList(1, 3, 4, 5)));
-        assertTrue(
-                partitionMetricGroups.keySet().containsAll(Arrays.asList(row(1), row(2), row(3))));
+        assertTrue(taggedMetricGroups.keySet().containsAll(Arrays.asList("f0=1-1", "f0=2-3", "f0=3-5", "f0=3-4")));
 
         assertEquals(
                 Long.valueOf(2),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
                 ((Gauge<Long>)
-                                metricsBucket1.get(
+                                metricsTagged1.get(
                                         CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(400),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(102),
-                ((Gauge<Long>) metricsBucket1.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged1.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(200),
                 ((Gauge<Long>)
-                                metricsBucket1.get(
+                                metricsTagged1.get(
                                         CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(300),
                 ((Gauge<Long>)
-                                metricsBucket1.get(
+                                metricsTagged1.get(
                                         CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
                         .getValue());
 
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
                 ((Gauge<Long>)
-                                metricsBucket3.get(
+                                metricsTagged3.get(
                                         CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket3.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged3.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
                 ((Gauge<Long>)
-                                metricsBucket3.get(
+                                metricsTagged3.get(
                                         CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
                 ((Gauge<Long>)
-                                metricsBucket3.get(
+                                metricsTagged3.get(
                                         CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
                         .getValue());
 
-        Map<String, Metric> metricsBucket4 = bucketMetricGroups.get(4).getMetrics();
+        Map<String, Metric> metricsBucket4 = taggedMetricGroups.get("f0=3-4").getMetrics();
         assertEquals(
                 Long.valueOf(2),
                 ((Gauge<Long>) metricsBucket4.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
@@ -654,195 +489,48 @@ public class CommitMetricsTest {
 
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(1),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
                 ((Gauge<Long>)
-                                metricsBucket5.get(
+                                metricsTagged5.get(
                                         CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
-                ((Gauge<Long>) metricsBucket5.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
+                ((Gauge<Long>) metricsTagged5.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
                         .getValue());
         assertEquals(
                 Long.valueOf(105),
                 ((Gauge<Long>)
-                                metricsBucket5.get(
+                                metricsTagged5.get(
                                         CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
                         .getValue());
         assertEquals(
                 Long.valueOf(0),
                 ((Gauge<Long>)
-                                metricsBucket5.get(
-                                        CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-
-        assertEquals(
-                Long.valueOf(2),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>)
-                                metricsPartition1.get(
-                                        CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>)
-                                metricsPartition1.get(
-                                        CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(400),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(102),
-                ((Gauge<Long>) metricsPartition1.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(200),
-                ((Gauge<Long>)
-                                metricsPartition1.get(
-                                        CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(300),
-                ((Gauge<Long>)
-                                metricsPartition1.get(
-                                        CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>)
-                                metricsPartition2.get(
-                                        CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>)
-                                metricsPartition2.get(
-                                        CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>) metricsPartition2.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>)
-                                metricsPartition2.get(
-                                        CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(0),
-                ((Gauge<Long>)
-                                metricsPartition2.get(
-                                        CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-
-        assertEquals(
-                Long.valueOf(2),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_TABLE_FILES_ADDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_TABLE_FILES_DELETED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_TABLE_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(2),
-                ((Gauge<Long>)
-                                metricsPartition3.get(
-                                        CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_CHANGELOG_FILES_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(1),
-                ((Gauge<Long>)
-                                metricsPartition3.get(
-                                        CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(405),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_DELTA_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(111),
-                ((Gauge<Long>) metricsPartition3.get(CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(306),
-                ((Gauge<Long>)
-                                metricsPartition3.get(
-                                        CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED))
-                        .getValue());
-        assertEquals(
-                Long.valueOf(301),
-                ((Gauge<Long>)
-                                metricsPartition3.get(
+                                metricsTagged5.get(
                                         CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED))
                         .getValue());
     }

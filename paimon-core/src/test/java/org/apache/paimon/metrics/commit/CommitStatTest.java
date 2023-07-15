@@ -64,17 +64,25 @@ public class CommitStatTest {
 
     @Test
     public void testGroupByBucket() {
-        Map<Integer, List<DataFileMeta>> bucketedFiles = CommitStats.groupByBucket(files);
-        assertEquals(4, bucketedFiles.get(1).size());
-        assertEquals(4, bucketedFiles.get(3).size());
-        assertEquals(1, bucketedFiles.get(5).size());
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedFiles = CommitStats.groupByBucket(files);
+        assertEquals(4, bucketedFiles.get(1).get(1).size());
+        assertEquals(0, bucketedFiles.get(1).get(3).size());
+        assertEquals(0, bucketedFiles.get(1).get(5).size());
+        assertEquals(0, bucketedFiles.get(2).get(1).size());
+        assertEquals(0, bucketedFiles.get(2).get(3).size());
+        assertEquals(0, bucketedFiles.get(2).get(5).size());
+        assertEquals(0, bucketedFiles.get(3).get(1).size());
+        assertEquals(0, bucketedFiles.get(3).get(3).size());
+        assertEquals(1, bucketedFiles.get(3).get(5).size());
     }
 
     @Test
     public void testCalcChangedPartitionsAndBuckets() {
         assertEquals(3, CommitStats.numChangedBuckets(files));
         assertEquals(3, CommitStats.numChangedPartitions(files));
-        assertTrue(CommitStats.changedBuckets(files).containsAll(Arrays.asList(1, 3, 5)));
+        assertTrue(CommitStats.changedPartBuckets(files).get(1).containsAll(Arrays.asList(1)));
+        assertTrue(CommitStats.changedPartBuckets(files).get(2).containsAll(Arrays.asList(3)));
+        assertTrue(CommitStats.changedPartBuckets(files).get(3).containsAll(Arrays.asList(5)));
         assertTrue(
                 CommitStats.changedPartitions(files)
                         .containsAll(Arrays.asList(row(1), row(2), row(3))));

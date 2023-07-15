@@ -29,8 +29,11 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /** Statistics for a commit. */
@@ -45,26 +48,26 @@ public class CommitStats {
     private final long numPartitionsWritten;
     private final long numBucketsWritten;
     private final List<BinaryRow> partitionsWritten;
-    private final List<Integer> bucketsWritten;
-    private final Map<Integer, Long> bucketedNumTableFilesAdded = new HashMap<>();
+    private final Map<BinaryRow, Set<Integer>> bucketsWritten;
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumTableFilesAdded = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumTableFilesAdded = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumTableFilesDeleted = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumTableFilesDeleted = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumTableFilesDeleted = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumTableFilesAppended = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumTableFilesAppended = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumTableFilesAppended = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumTableFilesCompacted = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumTableFilesCompacted = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumTableFilesCompacted = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumChangelogFilesAppended = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumChangelogFilesAppended = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumChangelogFilesAppended = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumChangelogFilesCompacted = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumChangelogFilesCompacted = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumChangelogFilesCompacted = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumDeltaRecordsAppended = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumDeltaRecordsAppended = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumDeltaRecordsAppended = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumChangelogRecordsAppended = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumChangelogRecordsAppended = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumChangelogRecordsAppended = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumDeltaRecordsCompacted = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumDeltaRecordsCompacted = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumDeltaRecordsCompacted = new HashMap<>();
-    private final Map<Integer, Long> bucketedNumChangelogRecordsCompacted = new HashMap<>();
+    private final Map<BinaryRow, Map<Integer, Long>> bucketedNumChangelogRecordsCompacted = new HashMap<>();
     private final Map<BinaryRow, Long> partitionedNumChangelogRecordsCompacted = new HashMap<>();
 
     public CommitStats(
@@ -86,64 +89,63 @@ public class CommitStats {
                                 .filter(f -> FileKind.DELETE.equals(f.kind()))
                                 .collect(Collectors.toList()));
 
-        Map<Integer, List<DataFileMeta>> bucketedTableFilesAdded = groupByBucket(addedTableFiles);
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedTableFilesAdded = groupByBucket(addedTableFiles);
         Map<BinaryRow, List<DataFileMeta>> partitionedTableFilesAdded =
                 groupByPartititon(addedTableFiles);
-        Map<Integer, List<DataFileMeta>> bucketedTableFilesDeleted =
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedTableFilesDeleted =
                 groupByBucket(deletedTableFiles);
         Map<BinaryRow, List<DataFileMeta>> partitionedTableFilesDeleted =
                 groupByPartititon(deletedTableFiles);
-        Map<Integer, List<DataFileMeta>> bucketedTableFilesAppended =
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedTableFilesAppended =
                 groupByBucket(appendTableFiles);
         Map<BinaryRow, List<DataFileMeta>> partitionedTableFilesAppended =
                 groupByPartititon(appendTableFiles);
-        Map<Integer, List<DataFileMeta>> bucketedTableFilesCompacted =
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedTableFilesCompacted =
                 groupByBucket(compactTableFiles);
         Map<BinaryRow, List<DataFileMeta>> partitionedTableFilesCompacted =
                 groupByPartititon(compactTableFiles);
-        Map<Integer, List<DataFileMeta>> bucketedChangelogFilesAppended =
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedChangelogFilesAppended =
                 groupByBucket(appendChangelogFiles);
         Map<BinaryRow, List<DataFileMeta>> partitionedChangelogFilesAppended =
                 groupByPartititon(appendChangelogFiles);
-        Map<Integer, List<DataFileMeta>> bucketedChangelogFilesCompacted =
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedChangelogFilesCompacted =
                 groupByBucket(compactChangelogFiles);
         Map<BinaryRow, List<DataFileMeta>> partitionedChangelogFilesCompacted =
                 groupByPartititon(compactChangelogFiles);
 
         bucketedTableFilesAdded.forEach(
-                (k, v) -> this.bucketedNumTableFilesAdded.put(k, (long) v.size()));
+                (k, v) -> this.bucketedNumTableFilesAdded.put(k, getBucketStats(v, e -> (long) e.size())));
         partitionedTableFilesAdded.forEach(
                 (k, v) -> this.partitionedNumTableFilesAdded.put(k, (long) v.size()));
 
         bucketedTableFilesDeleted.forEach(
-                (k, v) -> this.bucketedNumTableFilesDeleted.put(k, (long) v.size()));
+                (k, v) -> this.bucketedNumTableFilesDeleted.put(k, getBucketStats(v, e -> (long) e.size())));
         partitionedTableFilesDeleted.forEach(
                 (k, v) -> this.partitionedNumTableFilesDeleted.put(k, (long) v.size()));
 
         bucketedTableFilesAppended.forEach(
-                (k, v) -> this.bucketedNumTableFilesAppended.put(k, (long) v.size()));
+                (k, v) -> this.bucketedNumTableFilesAppended.put(k, getBucketStats(v, e -> (long) e.size())));
         partitionedTableFilesAppended.forEach(
                 (k, v) -> this.partitionedNumTableFilesAppended.put(k, (long) v.size()));
 
         bucketedTableFilesCompacted.forEach(
-                (k, v) -> this.bucketedNumTableFilesCompacted.put(k, (long) v.size()));
+                (k, v) -> this.bucketedNumTableFilesCompacted.put(k, getBucketStats(v, e -> (long) e.size())));
         partitionedTableFilesCompacted.forEach(
                 (k, v) -> this.partitionedNumTableFilesCompacted.put(k, (long) v.size()));
 
         bucketedChangelogFilesAppended.forEach(
-                (k, v) -> this.bucketedNumChangelogFilesAppended.put(k, (long) v.size()));
+                (k, v) -> this.bucketedNumChangelogFilesAppended.put(k, getBucketStats(v, e -> (long) e.size())));
         partitionedChangelogFilesAppended.forEach(
                 (k, v) -> this.partitionedNumChangelogFilesAppended.put(k, (long) v.size()));
 
         bucketedChangelogFilesCompacted.forEach(
-                (k, v) -> this.bucketedNumChangelogFilesCompacted.put(k, (long) v.size()));
+                (k, v) -> this.bucketedNumChangelogFilesCompacted.put(k, getBucketStats(v, e -> (long) e.size())));
         partitionedChangelogFilesCompacted.forEach(
                 (k, v) -> this.partitionedNumChangelogFilesCompacted.put(k, (long) v.size()));
 
         bucketedTableFilesAppended.forEach(
                 (k, v) ->
-                        this.bucketedNumDeltaRecordsAppended.put(
-                                k, v.stream().mapToLong(file -> file.rowCount()).sum()));
+                        this.bucketedNumDeltaRecordsAppended.put(k, getBucketStats(v, e -> getRowCounts(e))));
         partitionedTableFilesAppended.forEach(
                 (k, v) ->
                         this.partitionedNumDeltaRecordsAppended.put(
@@ -152,7 +154,7 @@ public class CommitStats {
         bucketedChangelogFilesAppended.forEach(
                 (k, v) ->
                         this.bucketedNumChangelogRecordsAppended.put(
-                                k, v.stream().mapToLong(file -> file.rowCount()).sum()));
+                                k, getBucketStats(v, e -> getRowCounts(e))));
         partitionedChangelogFilesAppended.forEach(
                 (k, v) ->
                         this.partitionedNumChangelogRecordsAppended.put(
@@ -161,7 +163,7 @@ public class CommitStats {
         bucketedTableFilesCompacted.forEach(
                 (k, v) ->
                         this.bucketedNumDeltaRecordsCompacted.put(
-                                k, v.stream().mapToLong(file -> file.rowCount()).sum()));
+                                k, getBucketStats(v, e -> getRowCounts(e))));
         partitionedTableFilesCompacted.forEach(
                 (k, v) ->
                         this.partitionedNumDeltaRecordsCompacted.put(
@@ -170,7 +172,7 @@ public class CommitStats {
         bucketedChangelogFilesCompacted.forEach(
                 (k, v) ->
                         this.bucketedNumChangelogRecordsCompacted.put(
-                                k, v.stream().mapToLong(file -> file.rowCount()).sum()));
+                                k, getBucketStats(v, e -> getRowCounts(e))));
         partitionedChangelogFilesCompacted.forEach(
                 (k, v) ->
                         this.partitionedNumChangelogRecordsCompacted.put(
@@ -183,10 +185,18 @@ public class CommitStats {
         this.numPartitionsWritten = numChangedPartitions(appendTableFiles, compactTableFiles);
         this.numBucketsWritten = numChangedBuckets(appendTableFiles, compactTableFiles);
         this.partitionsWritten = changedPartitions(appendTableFiles, compactTableFiles);
-        this.bucketsWritten = changedBuckets(appendTableFiles, compactTableFiles);
+        this.bucketsWritten = changedPartBuckets(appendTableFiles, compactTableFiles);
         this.duration = commitDuration;
         this.generatedSnapshots = generatedSnapshots;
         this.attempts = attempts;
+    }
+
+    private long getRowCounts(List<DataFileMeta> files) {
+        return files.stream().mapToLong(file -> file.rowCount()).sum();
+    }
+
+    private Map<Integer, Long> getBucketStats(Map<Integer, List<DataFileMeta>> bucketFiles, Function<List<DataFileMeta>, Long> func) {
+        return bucketFiles.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> func.apply(e.getValue())));
     }
 
     /** Return a map group by partition. */
@@ -202,14 +212,15 @@ public class CommitStats {
         return groupByPartition;
     }
 
-    /** Return a map group by bucket. */
-    @VisibleForTesting
-    protected static Map<Integer, List<DataFileMeta>> groupByBucket(List<ManifestEntry> files) {
-        Map<Integer, List<DataFileMeta>> groupByBucket = new LinkedHashMap<>();
+    protected static Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupByBucket(
+            List<ManifestEntry> files) {
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupBy = new LinkedHashMap<>();
         for (ManifestEntry entry : files) {
-            groupByBucket.computeIfAbsent(entry.bucket(), k -> new ArrayList<>()).add(entry.file());
+            groupBy.computeIfAbsent(entry.partition(), k -> new LinkedHashMap<>())
+                    .computeIfAbsent(entry.bucket(), k -> new ArrayList<>())
+                    .add(entry.file());
         }
-        return groupByBucket;
+        return groupBy;
     }
 
     @VisibleForTesting
@@ -224,12 +235,7 @@ public class CommitStats {
 
     @VisibleForTesting
     protected static long numChangedBuckets(List<ManifestEntry>... changes) {
-        return Arrays.stream(changes)
-                .flatMap(Collection::stream)
-                .map(ManifestEntry::bucket)
-                .distinct()
-                .collect(Collectors.toList())
-                .size();
+        return changedPartBuckets(changes).values().stream().map(Set::size).reduce((a, b) -> a + b).get();
     }
 
     @VisibleForTesting
@@ -242,112 +248,102 @@ public class CommitStats {
     }
 
     @VisibleForTesting
-    protected static List<Integer> changedBuckets(List<ManifestEntry>... changes) {
-        return Arrays.stream(changes)
+    protected static Map<BinaryRow, Set<Integer>> changedPartBuckets(List<ManifestEntry>... changes) {
+        Map<BinaryRow, Set<Integer>> changedPartBuckets = new LinkedHashMap<>();
+        Arrays.stream(changes)
                 .flatMap(Collection::stream)
-                .map(ManifestEntry::bucket)
-                .distinct()
-                .collect(Collectors.toList());
+                .forEach(entry -> changedPartBuckets.computeIfAbsent(entry.partition(), k -> new LinkedHashSet<>()).add(entry.bucket()));
+        return changedPartBuckets;
     }
 
     protected long getTableFilesAdded() {
         return tableFilesAdded;
     }
 
-    protected long getBucketedTableFilesAdded(int bucket) {
-        return bucketedNumTableFilesAdded.getOrDefault(bucket, 0L);
-    }
-
-    protected long getPartitionedTableFilesAdded(BinaryRow partition) {
-        return partitionedNumTableFilesAdded.getOrDefault(partition, 0L);
+    protected long getBucketedTableFilesAdded(BinaryRow partition, int bucket) {
+        if (bucketedNumTableFilesAdded.containsKey(partition)) {
+            return bucketedNumTableFilesAdded.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
     protected long getTableFilesDeleted() {
         return tableFilesDeleted;
     }
 
-    protected long getBucketedTableFilesDeleted(int bucket) {
-        return bucketedNumTableFilesDeleted.getOrDefault(bucket, 0L);
+    protected long getBucketedTableFilesDeleted(BinaryRow partition, int bucket) {
+        if (bucketedNumTableFilesDeleted.containsKey(partition)) {
+            return bucketedNumTableFilesDeleted.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
-    protected long getPartitionedTableFilesDeleted(BinaryRow partition) {
-        return partitionedNumTableFilesDeleted.getOrDefault(partition, 0L);
+    protected long getBucketedTableFilesAppended(BinaryRow partition, int bucket) {
+        if (bucketedNumTableFilesAppended.containsKey(partition)) {
+            return bucketedNumTableFilesAppended.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
-    protected long getBucketedTableFilesAppended(int bucket) {
-        return bucketedNumTableFilesAppended.getOrDefault(bucket, 0L);
-    }
-
-    protected long getPartitionedTableFilesAppended(BinaryRow partition) {
-        return partitionedNumTableFilesAppended.getOrDefault(partition, 0L);
-    }
-
-    protected long getBucketedTableFilesCompacted(int bucket) {
-        return bucketedNumTableFilesCompacted.getOrDefault(bucket, 0L);
-    }
-
-    protected long getPartitionedTableFilesCompacted(BinaryRow partition) {
-        return partitionedNumTableFilesCompacted.getOrDefault(partition, 0L);
+    protected long getBucketedTableFilesCompacted(BinaryRow partition, int bucket) {
+        if (bucketedNumTableFilesCompacted.containsKey(partition)) {
+            return bucketedNumTableFilesCompacted.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
     protected long getChangelogFilesCommitAppended() {
         return changelogFilesCommitAppended;
     }
 
-    protected long getBucketedChangelogFilesAppended(int bucket) {
-        return bucketedNumChangelogFilesAppended.getOrDefault(bucket, 0L);
-    }
-
-    protected long getPartitionedChangelogFilesAppended(BinaryRow partition) {
-        return partitionedNumChangelogFilesAppended.getOrDefault(partition, 0L);
+    protected long getBucketedChangelogFilesAppended(BinaryRow partition, int bucket) {
+        if (bucketedNumChangelogFilesAppended.containsKey(partition)) {
+            return bucketedNumChangelogFilesAppended.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
     protected long getChangelogFilesCompacted() {
         return changelogFilesCompacted;
     }
 
-    protected long getBucketedChangelogFilesCompacted(int bucket) {
-        return bucketedNumChangelogFilesCompacted.getOrDefault(bucket, 0L);
-    }
-
-    protected long getPartitionedChangelogFilesCompacted(BinaryRow partition) {
-        return partitionedNumChangelogFilesCompacted.getOrDefault(partition, 0L);
+    protected long getBucketedChangelogFilesCompacted(BinaryRow partition, int bucket) {
+        if (bucketedNumChangelogFilesCompacted.containsKey(partition)) {
+            return bucketedNumChangelogFilesCompacted.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
     protected long getGeneratedSnapshots() {
         return generatedSnapshots;
     }
 
-    protected long getBucketedDeltaRecordsAppended(int bucket) {
-        return bucketedNumDeltaRecordsAppended.getOrDefault(bucket, 0L);
+    protected long getBucketedDeltaRecordsAppended(BinaryRow partition, int bucket) {
+        if (bucketedNumDeltaRecordsAppended.containsKey(partition)) {
+            return bucketedNumDeltaRecordsAppended.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
-    protected long getPartitionedDeltaRecordsAppended(BinaryRow partition) {
-        return partitionedNumDeltaRecordsAppended.getOrDefault(partition, 0L);
+    protected long getBucketedChangelogRecordsAppended(BinaryRow partition, int bucket) {
+        if (bucketedNumChangelogRecordsAppended.containsKey(partition)) {
+            return bucketedNumChangelogRecordsAppended.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
-    protected long getBucketedChangelogRecordsAppended(int bucket) {
-        return bucketedNumChangelogRecordsAppended.getOrDefault(bucket, 0L);
+    protected long getBucketedDeltaRecordsCompacted(BinaryRow partition, int bucket) {
+        if (bucketedNumDeltaRecordsCompacted.containsKey(partition)) {
+            return bucketedNumDeltaRecordsCompacted.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
-    protected long getPartitionedChangelogRecordsAppended(BinaryRow partition) {
-        return partitionedNumChangelogRecordsAppended.getOrDefault(partition, 0L);
-    }
-
-    protected long getBucketedDeltaRecordsCompacted(int bucket) {
-        return bucketedNumDeltaRecordsCompacted.getOrDefault(bucket, 0L);
-    }
-
-    protected long getPartitionedDeltaRecordsCompacted(BinaryRow partition) {
-        return partitionedNumDeltaRecordsCompacted.getOrDefault(partition, 0L);
-    }
-
-    protected long getBucketedChangelogRecordsCompacted(int bucket) {
-        return bucketedNumChangelogRecordsCompacted.getOrDefault(bucket, 0L);
-    }
-
-    protected long getPartitionedChangelogRecordsCompacted(BinaryRow partition) {
-        return partitionedNumChangelogRecordsCompacted.getOrDefault(partition, 0L);
+    protected long getBucketedChangelogRecordsCompacted(BinaryRow partition, int bucket) {
+        if (bucketedNumChangelogRecordsCompacted.containsKey(partition)) {
+            return bucketedNumChangelogRecordsCompacted.get(partition).getOrDefault(bucket, 0L);
+        }
+        return 0L;
     }
 
     protected long getNumPartitionsWritten() {
@@ -358,11 +354,7 @@ public class CommitStats {
         return numBucketsWritten;
     }
 
-    protected List<BinaryRow> getPartitionsWritten() {
-        return partitionsWritten;
-    }
-
-    protected List<Integer> getBucketsWritten() {
+    protected Map<BinaryRow, Set<Integer>> getPartBucketsWritten() {
         return bucketsWritten;
     }
 

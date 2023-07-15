@@ -23,18 +23,17 @@ import org.junit.Test;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Tests for the {@link BucketMetricGroup}. */
-public class PartitionMetricGroupTest {
+/** Tests for the {@link TaggedMetricGroup}. */
+public class TaggedMetricGroupTest {
     // ------------------------------------------------------------------------
     //  scope name tests
     // ------------------------------------------------------------------------
 
     @Test
     public void testGenerateScopeDefault() throws Exception {
-        PartitionMetricGroup group =
-                PartitionMetricGroup.createPartitionMetricGroup("myTable", "dt=1");
+        TaggedMetricGroup group = TaggedMetricGroup.createTaggedMetricGroup("myTable", 1, "dt=1");
 
-        assertArrayEquals(new String[] {"myTable", "partition-dt=1"}, group.getScopeComponents());
-        assertEquals("myTable.partition-dt=1.name", group.getMetricIdentifier("name", '.'));
+        assertArrayEquals(new String[] {"myTable", "partition-dt=1", "bucket-1"}, group.getScopeComponents());
+        assertEquals("myTable.partition-dt=1.bucket-1.name", group.getMetricIdentifier("name", '.'));
     }
 }

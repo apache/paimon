@@ -20,18 +20,19 @@ package org.apache.paimon.metrics.commit;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.metrics.Counter;
 import org.apache.paimon.metrics.DescriptiveStatisticsHistogram;
 import org.apache.paimon.metrics.Gauge;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.MetricGroup;
-import org.apache.paimon.metrics.groups.BucketMetricGroup;
 import org.apache.paimon.metrics.groups.GenericMetricGroup;
-import org.apache.paimon.metrics.groups.PartitionMetricGroup;
+import org.apache.paimon.metrics.groups.TaggedMetricGroup;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 /** Metrics to measure a commit. */
@@ -39,8 +40,9 @@ public class CommitMetrics {
     private final ReentrantLock commitMetricsReadWriteLock = new ReentrantLock();
 
     private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
-    private final Map<Integer, BucketMetricGroup> bucketMetricGroups = new HashMap<>();
-    private final Map<BinaryRow, PartitionMetricGroup> partitionMetricGroups = new HashMap<>();
+    private final Map<String, TaggedMetricGroup> taggedMetricGroups = new HashMap<>();
+
+    private final String groupKeyFormat = "%s-%s";
     private final MetricGroup genericMetricGroup;
     private final FileStorePathFactory pathFactory;
 
@@ -50,12 +52,8 @@ public class CommitMetrics {
         registerGenericCommitMetrics();
     }
 
-    public Map<Integer, BucketMetricGroup> getBucketMetricGroups() {
-        return bucketMetricGroups;
-    }
-
-    public Map<BinaryRow, PartitionMetricGroup> getPartitionMetricGroups() {
-        return partitionMetricGroups;
+    public Map<String, TaggedMetricGroup> getTaggedMetricGroups() {
+        return taggedMetricGroups;
     }
 
     public MetricGroup getGenericMetricGroup() {
@@ -117,89 +115,58 @@ public class CommitMetrics {
 
     private void registerTaggedCommitMetrics() {
         if (latestCommit != null) {
-            for (Integer bucket : latestCommit.getBucketsWritten()) {
-                if (!bucketMetricGroups.containsKey(bucket)) {
-                    BucketMetricGroup group =
-                            bucketMetricGroups.compute(
-                                    bucket,
-                                    (k, v) ->
-                                            BucketMetricGroup.createBucketMetricGroup(
-                                                    pathFactory.root().getName(), bucket));
-                    group.gauge(
-                            LAST_TABLE_FILES_ADDED,
-                            () -> latestCommit.getBucketedTableFilesAdded(bucket));
-                    group.gauge(
-                            LAST_TABLE_FILES_DELETED,
-                            () -> latestCommit.getBucketedTableFilesDeleted(bucket));
-                    group.gauge(
-                            LAST_TABLE_FILES_APPENDED,
-                            () -> latestCommit.getBucketedTableFilesAppended(bucket));
-                    group.gauge(
-                            LAST_TABLE_FILES_COMMIT_COMPACTED,
-                            () -> latestCommit.getBucketedTableFilesCompacted(bucket));
-                    group.gauge(
-                            LAST_CHANGELOG_FILES_APPENDED,
-                            () -> latestCommit.getBucketedChangelogFilesAppended(bucket));
-                    group.gauge(
-                            LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
-                            () -> latestCommit.getBucketedChangelogFilesCompacted(bucket));
-                    group.gauge(
-                            LAST_DELTA_RECORDS_APPENDED,
-                            () -> latestCommit.getBucketedDeltaRecordsAppended(bucket));
-                    group.gauge(
-                            LAST_CHANGELOG_RECORDS_APPENDED,
-                            () -> latestCommit.getBucketedChangelogRecordsAppended(bucket));
-                    group.gauge(
-                            LAST_DELTA_RECORDS_COMMIT_COMPACTED,
-                            () -> latestCommit.getBucketedDeltaRecordsCompacted(bucket));
-                    group.gauge(
-                            LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
-                            () -> latestCommit.getBucketedChangelogRecordsCompacted(bucket));
-                }
-            }
-
-            for (BinaryRow partition : latestCommit.getPartitionsWritten()) {
-                if (!partitionMetricGroups.containsKey(partition)) {
-                    PartitionMetricGroup group =
-                            partitionMetricGroups.compute(
-                                    partition,
-                                    (k, v) ->
-                                            PartitionMetricGroup.createPartitionMetricGroup(
-                                                    pathFactory.root().getName(),
-                                                    pathFactory.getPartitionString(partition)));
-                    group.gauge(
-                            LAST_TABLE_FILES_ADDED,
-                            () -> latestCommit.getPartitionedTableFilesAdded(partition));
-                    group.gauge(
-                            LAST_TABLE_FILES_DELETED,
-                            () -> latestCommit.getPartitionedTableFilesDeleted(partition));
-                    group.gauge(
-                            LAST_TABLE_FILES_APPENDED,
-                            () -> latestCommit.getPartitionedTableFilesAppended(partition));
-                    group.gauge(
-                            LAST_TABLE_FILES_COMMIT_COMPACTED,
-                            () -> latestCommit.getPartitionedTableFilesCompacted(partition));
-                    group.gauge(
-                            LAST_CHANGELOG_FILES_APPENDED,
-                            () -> latestCommit.getPartitionedChangelogFilesAppended(partition));
-                    group.gauge(
-                            LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
-                            () -> latestCommit.getPartitionedChangelogFilesCompacted(partition));
-                    group.gauge(
-                            LAST_DELTA_RECORDS_APPENDED,
-                            () -> latestCommit.getPartitionedDeltaRecordsAppended(partition));
-                    group.gauge(
-                            LAST_CHANGELOG_RECORDS_APPENDED,
-                            () -> latestCommit.getPartitionedChangelogRecordsAppended(partition));
-                    group.gauge(
-                            LAST_DELTA_RECORDS_COMMIT_COMPACTED,
-                            () -> latestCommit.getPartitionedDeltaRecordsCompacted(partition));
-                    group.gauge(
-                            LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
-                            () -> latestCommit.getPartitionedChangelogRecordsCompacted(partition));
+            Map<BinaryRow, Set<Integer>> partBuckets = latestCommit.getPartBucketsWritten();
+            for (Map.Entry<BinaryRow, Set<Integer>> kv : partBuckets.entrySet()) {
+                BinaryRow partition = kv.getKey();
+                String partitionStr = getPartitionString(partition);
+                for (Integer bucket : kv.getValue()) {
+                    String groupKey = String.format(groupKeyFormat, partitionStr, bucket);
+                    if (!taggedMetricGroups.containsKey(groupKey)) {
+                        TaggedMetricGroup group =
+                                taggedMetricGroups.compute(
+                                        groupKey,
+                                        (k, v) ->
+                                                TaggedMetricGroup.createTaggedMetricGroup(
+                                                        pathFactory.root().getName(), bucket, partitionStr));
+                        group.gauge(
+                                LAST_TABLE_FILES_ADDED,
+                                () -> latestCommit.getBucketedTableFilesAdded(partition, bucket));
+                        group.gauge(
+                                LAST_TABLE_FILES_DELETED,
+                                () -> latestCommit.getBucketedTableFilesDeleted(partition, bucket));
+                        group.gauge(
+                                LAST_TABLE_FILES_APPENDED,
+                                () -> latestCommit.getBucketedTableFilesAppended(partition, bucket));
+                        group.gauge(
+                                LAST_TABLE_FILES_COMMIT_COMPACTED,
+                                () -> latestCommit.getBucketedTableFilesCompacted(partition, bucket));
+                        group.gauge(
+                                LAST_CHANGELOG_FILES_APPENDED,
+                                () -> latestCommit.getBucketedChangelogFilesAppended(partition, bucket));
+                        group.gauge(
+                                LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
+                                () -> latestCommit.getBucketedChangelogFilesCompacted(partition, bucket));
+                        group.gauge(
+                                LAST_DELTA_RECORDS_APPENDED,
+                                () -> latestCommit.getBucketedDeltaRecordsAppended(partition, bucket));
+                        group.gauge(
+                                LAST_CHANGELOG_RECORDS_APPENDED,
+                                () -> latestCommit.getBucketedChangelogRecordsAppended(partition, bucket));
+                        group.gauge(
+                                LAST_DELTA_RECORDS_COMMIT_COMPACTED,
+                                () -> latestCommit.getBucketedDeltaRecordsCompacted(partition, bucket));
+                        group.gauge(
+                                LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
+                                () -> latestCommit.getBucketedChangelogRecordsCompacted(partition, bucket));
+                    }
                 }
             }
         }
+    }
+
+    private String getPartitionString(BinaryRow partition) {
+        String partitionStr = pathFactory.getPartitionString(partition);
+        return partitionStr.replace(Path.SEPARATOR, "-").substring(0, partitionStr.length() - 1);
     }
 
     private class LatestDurationGauge implements Gauge<Long> {
