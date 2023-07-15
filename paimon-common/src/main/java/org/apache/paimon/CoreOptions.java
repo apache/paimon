@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
@@ -30,9 +29,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
-import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import java.io.Serializable;
@@ -834,7 +831,7 @@ public class CoreOptions implements Serializable {
     public static FileFormat createFileFormat(
             Options options, ConfigOption<FileFormatType> formatOption) {
         String formatIdentifier = options.get(formatOption).toString();
-        return FileFormatDiscover.getFileFormat(options, formatIdentifier);
+        return FileFormat.getFileFormat(options, formatIdentifier);
     }
 
     public Map<Integer, String> fileCompressionPerLevel() {
@@ -1115,39 +1112,16 @@ public class CoreOptions implements Serializable {
         return new Options(defultValues);
     }
 
-    public List<CommitCallback> commitCallbacks() {
-        List<CommitCallback> result = new ArrayList<>();
+    public Map<String, String> commitCallbacks() {
+        Map<String, String> result = new HashMap<>();
         for (String className : options.get(COMMIT_CALLBACKS).split(",")) {
             className = className.trim();
             if (className.length() == 0) {
                 continue;
             }
 
-            Class<?> clazz;
-            try {
-                clazz = Class.forName(className, true, this.getClass().getClassLoader());
-            } catch (ClassNotFoundException e) {
-                throw new RuntimeException(e);
-            }
-            Preconditions.checkArgument(
-                    CommitCallback.class.isAssignableFrom(clazz),
-                    "Class " + clazz + " must implement " + CommitCallback.class);
             String param = options.get(COMMIT_CALLBACK_PARAM.key().replace("#", className));
-
-            try {
-                if (param == null) {
-                    result.add((CommitCallback) clazz.newInstance());
-                } else {
-                    result.add(
-                            (CommitCallback) clazz.getConstructor(String.class).newInstance(param));
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(
-                        "Failed to initialize commit callback "
-                                + className
-                                + (param == null ? "" : " with param " + param),
-                        e);
-            }
+            result.put(className, param);
         }
         return result;
     }
