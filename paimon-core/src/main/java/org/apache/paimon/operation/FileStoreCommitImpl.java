@@ -238,8 +238,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
                 safeLatestSnapshotId = latestSnapshot.id();
             }
-
-            generatedSnapshot += 1;
             attempts +=
                     tryCommit(
                             appendTableFiles,
@@ -250,6 +248,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             committable.logOffsets(),
                             Snapshot.CommitKind.APPEND,
                             safeLatestSnapshotId);
+            generatedSnapshot += 1;
         }
 
         if (!compactTableFiles.isEmpty() || !compactChangelog.isEmpty()) {
@@ -265,7 +264,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // assume this compact commit follows just after the append commit created above
                 safeLatestSnapshotId += 1;
             }
-            generatedSnapshot += 1;
             attempts +=
                     tryCommit(
                             compactTableFiles,
@@ -276,6 +274,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             committable.logOffsets(),
                             Snapshot.CommitKind.COMPACT,
                             safeLatestSnapshotId);
+            generatedSnapshot += 1;
         }
         long commitDuration = (System.nanoTime() - started) / 1_000_000;
         CommitStats commitStats =

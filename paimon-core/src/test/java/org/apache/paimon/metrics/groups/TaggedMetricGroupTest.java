@@ -33,7 +33,9 @@ public class TaggedMetricGroupTest {
     public void testGenerateScopeDefault() throws Exception {
         TaggedMetricGroup group = TaggedMetricGroup.createTaggedMetricGroup("myTable", 1, "dt=1");
 
-        assertArrayEquals(new String[] {"myTable", "partition-dt=1", "bucket-1"}, group.getScopeComponents());
-        assertEquals("myTable.partition-dt=1.bucket-1.name", group.getMetricIdentifier("name", '.'));
+        assertArrayEquals(
+                new String[] {"myTable", "partition-dt=1", "bucket-1"}, group.getScopeComponents());
+        assertEquals(
+                "myTable.partition-dt=1.bucket-1.name", group.getMetricIdentifier("name", '.'));
     }
 }

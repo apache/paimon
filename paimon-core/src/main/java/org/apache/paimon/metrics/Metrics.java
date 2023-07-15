@@ -23,25 +23,24 @@ import java.util.List;
 
 /** Core of Paimon metrics system. */
 public class Metrics {
-    private static volatile Metrics instance;
+    private static volatile Metrics instance = new Metrics();
 
-    /** The metrics groups. */
+    /**
+     * The metrics groups. All the commit & compaction & scan metric groups are collected in this
+     * group container, there is no need to distinguish the groups by group name for reporters.
+     */
     private final List<MetricGroup> metricGroups = new ArrayList<>();
 
     private Metrics() {}
 
     public static Metrics getInstance() {
-        if (instance == null) {
-            synchronized (Metrics.class) {
-                if (instance == null) {
-                    instance = new Metrics();
-                }
-            }
-        }
         return instance;
     }
 
-    /** Add a metric group. */
+    /**
+     * Add a metric group. Which is called by {@link org.apache.paimon.metrics.commit.CommitMetrics}
+     * and other metrics instance
+     */
     public synchronized void addGroup(AbstractMetricGroup group) {
         metricGroups.add(group);
     }

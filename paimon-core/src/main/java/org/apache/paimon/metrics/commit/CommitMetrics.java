@@ -124,7 +124,9 @@ public class CommitMetrics {
                                         groupKey,
                                         (k, v) ->
                                                 TaggedMetricGroup.createTaggedMetricGroup(
-                                                        pathFactory.root().getName(), bucket, partitionStr));
+                                                        pathFactory.root().getName(),
+                                                        bucket,
+                                                        partitionStr));
                         group.gauge(
                                 LAST_TABLE_FILES_ADDED,
                                 () -> latestCommit.getBucketedTableFilesAdded(partition, bucket));
@@ -133,28 +135,44 @@ public class CommitMetrics {
                                 () -> latestCommit.getBucketedTableFilesDeleted(partition, bucket));
                         group.gauge(
                                 LAST_TABLE_FILES_APPENDED,
-                                () -> latestCommit.getBucketedTableFilesAppended(partition, bucket));
+                                () ->
+                                        latestCommit.getBucketedTableFilesAppended(
+                                                partition, bucket));
                         group.gauge(
                                 LAST_TABLE_FILES_COMMIT_COMPACTED,
-                                () -> latestCommit.getBucketedTableFilesCompacted(partition, bucket));
+                                () ->
+                                        latestCommit.getBucketedTableFilesCompacted(
+                                                partition, bucket));
                         group.gauge(
                                 LAST_CHANGELOG_FILES_APPENDED,
-                                () -> latestCommit.getBucketedChangelogFilesAppended(partition, bucket));
+                                () ->
+                                        latestCommit.getBucketedChangelogFilesAppended(
+                                                partition, bucket));
                         group.gauge(
                                 LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
-                                () -> latestCommit.getBucketedChangelogFilesCompacted(partition, bucket));
+                                () ->
+                                        latestCommit.getBucketedChangelogFilesCompacted(
+                                                partition, bucket));
                         group.gauge(
                                 LAST_DELTA_RECORDS_APPENDED,
-                                () -> latestCommit.getBucketedDeltaRecordsAppended(partition, bucket));
+                                () ->
+                                        latestCommit.getBucketedDeltaRecordsAppended(
+                                                partition, bucket));
                         group.gauge(
                                 LAST_CHANGELOG_RECORDS_APPENDED,
-                                () -> latestCommit.getBucketedChangelogRecordsAppended(partition, bucket));
+                                () ->
+                                        latestCommit.getBucketedChangelogRecordsAppended(
+                                                partition, bucket));
                         group.gauge(
                                 LAST_DELTA_RECORDS_COMMIT_COMPACTED,
-                                () -> latestCommit.getBucketedDeltaRecordsCompacted(partition, bucket));
+                                () ->
+                                        latestCommit.getBucketedDeltaRecordsCompacted(
+                                                partition, bucket));
                         group.gauge(
                                 LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
-                                () -> latestCommit.getBucketedChangelogRecordsCompacted(partition, bucket));
+                                () ->
+                                        latestCommit.getBucketedChangelogRecordsCompacted(
+                                                partition, bucket));
                     }
                 }
             }

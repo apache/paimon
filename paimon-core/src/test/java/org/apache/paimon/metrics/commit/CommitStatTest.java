@@ -64,7 +64,8 @@ public class CommitStatTest {
 
     @Test
     public void testGroupByBucket() {
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedFiles = CommitStats.groupByBucket(files);
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedFiles =
+                CommitStats.groupByBucket(files);
         assertEquals(4, bucketedFiles.get(1).get(1).size());
         assertEquals(0, bucketedFiles.get(1).get(3).size());
         assertEquals(0, bucketedFiles.get(1).get(5).size());

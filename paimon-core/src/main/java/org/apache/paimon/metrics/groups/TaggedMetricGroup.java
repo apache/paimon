@@ -39,7 +39,8 @@ public class TaggedMetricGroup extends AbstractMetricGroup {
         this.partition = partition;
     }
 
-    public static TaggedMetricGroup createTaggedMetricGroup(final String table, final int bucket, final String partition) {
+    public static TaggedMetricGroup createTaggedMetricGroup(
+            final String table, final int bucket, final String partition) {
         return new TaggedMetricGroup(table, bucket, partition);
     }
 

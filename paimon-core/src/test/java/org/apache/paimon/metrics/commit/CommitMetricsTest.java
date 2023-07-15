@@ -176,7 +176,10 @@ public class CommitMetricsTest {
         assertEquals(Long.valueOf(3), lastBucketsWritten.getValue());
         assertEquals(3, totalTableFiles.getCount());
         assertEquals(4, totalChangelogFiles.getCount());
-        assertTrue(taggedMetricGroups.keySet().containsAll(Arrays.asList("f0=1-1", "f0=2-3", "f0=3-5")));
+        assertTrue(
+                taggedMetricGroups
+                        .keySet()
+                        .containsAll(Arrays.asList("f0=1-1", "f0=2-3", "f0=3-5")));
 
         Map<String, Metric> metricsTagged1 = taggedMetricGroups.get("f0=1-1").getMetrics();
         assertEquals(
@@ -343,7 +346,10 @@ public class CommitMetricsTest {
         assertEquals(8, totalChangelogFiles.getCount());
         assertEquals(4, taggedMetricGroups.size());
 
-        assertTrue(taggedMetricGroups.keySet().containsAll(Arrays.asList("f0=1-1", "f0=2-3", "f0=3-5", "f0=3-4")));
+        assertTrue(
+                taggedMetricGroups
+                        .keySet()
+                        .containsAll(Arrays.asList("f0=1-1", "f0=2-3", "f0=3-5", "f0=3-4")));
 
         assertEquals(
                 Long.valueOf(2),
