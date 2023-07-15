@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
@@ -113,5 +114,12 @@ public abstract class FileFormat {
         }
 
         return Optional.empty();
+    }
+
+    public static FileFormat getFileFormat(Options options, String formatIdentifier) {
+        int readBatchSize = options.get(CoreOptions.READ_BATCH_SIZE);
+        return FileFormat.fromIdentifier(
+                formatIdentifier,
+                new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
     }
 }

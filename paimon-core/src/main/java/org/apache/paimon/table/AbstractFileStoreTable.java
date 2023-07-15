@@ -53,6 +53,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -263,11 +264,48 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private List<CommitCallback> createCommitCallbacks() {
-        List<CommitCallback> callbacks = new ArrayList<>(coreOptions().commitCallbacks());
+        List<CommitCallback> callbacks = new ArrayList<>(loadCommitCallbacks());
         if (coreOptions().partitionedTableInMetastore() && metastoreClientFactory != null) {
             callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
         }
         return callbacks;
+    }
+
+    private List<CommitCallback> loadCommitCallbacks() {
+        List<CommitCallback> result = new ArrayList<>();
+
+        Map<String, String> clazzParamMaps = coreOptions().commitCallbacks();
+        for (Map.Entry<String, String> classParamEntry : clazzParamMaps.entrySet()) {
+            String className = classParamEntry.getKey();
+            String param = classParamEntry.getValue();
+
+            Class<?> clazz;
+            try {
+                clazz = Class.forName(className, true, this.getClass().getClassLoader());
+            } catch (ClassNotFoundException e) {
+                throw new RuntimeException(e);
+            }
+
+            Preconditions.checkArgument(
+                    CommitCallback.class.isAssignableFrom(clazz),
+                    "Class " + clazz + " must implement " + CommitCallback.class);
+
+            try {
+                if (param == null) {
+                    result.add((CommitCallback) clazz.newInstance());
+                } else {
+                    result.add(
+                            (CommitCallback) clazz.getConstructor(String.class).newInstance(param));
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "Failed to initialize commit callback "
+                                + className
+                                + (param == null ? "" : " with param " + param),
+                        e);
+            }
+        }
+        return result;
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
