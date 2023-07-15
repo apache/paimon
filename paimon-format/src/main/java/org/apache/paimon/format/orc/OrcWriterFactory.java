@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
@@ -53,6 +54,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
     private final Map<String, String> confMap;
 
     private OrcFile.WriterOptions writerOptions;
+    private final CoreOptions coreOptions;
 
     /**
      * Creates a new OrcBulkWriterFactory using the provided Vectorizer implementation.
@@ -94,6 +96,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
         for (Map.Entry<String, String> entry : configuration) {
             confMap.put(entry.getKey(), entry.getValue());
         }
+        coreOptions = new CoreOptions(this.confMap);
     }
 
     @Override
@@ -101,7 +104,6 @@ public class OrcWriterFactory implements FormatWriterFactory {
         if (null != compression) {
             writerProperties.setProperty(OrcConf.COMPRESS.getAttribute(), compression);
         }
-
         OrcFile.WriterOptions opts = getWriterOptions();
         opts.physicalWriter(new PhysicalWriterImpl(out, opts));
 
@@ -110,7 +112,11 @@ public class OrcWriterFactory implements FormatWriterFactory {
         // to the give output stream directly. However, the path would be used as
         // the key of writer in the ORC memory manager, thus we need to make it unique.
         Path unusedPath = new Path(UUID.randomUUID().toString());
-        return new OrcBulkWriter(vectorizer, new WriterImpl(null, unusedPath, opts), out);
+        return new OrcBulkWriter(
+                vectorizer,
+                new WriterImpl(null, unusedPath, opts),
+                out,
+                coreOptions.orcWriteBatch());
     }
 
     @VisibleForTesting
