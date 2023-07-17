@@ -43,6 +43,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Schema builder for MySQL cdc. */
@@ -104,7 +105,10 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<String> {
                         name.getSimpleName(),
                         Tuple2.of(
                                 MySqlTypeUtils.toDataType(
-                                        column.getDataType().getName(), precision, scale),
+                                        column.getDataType().getName(),
+                                        precision,
+                                        scale,
+                                        MYSQL_CONVERTER_TINYINT1_BOOL.defaultValue()),
                                 comment == null ? null : String.valueOf(comment.getValue())));
             }
         }

@@ -242,7 +242,11 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
-                                zoneId, caseSensitive, tableNameConverter, schemaBuilder, convertTinyint1ToBool);
+                                zoneId,
+                                caseSensitive,
+                                tableNameConverter,
+                                schemaBuilder,
+                                convertTinyint1ToBool);
 
         String database = this.database;
         DatabaseSyncMode mode = this.mode;
