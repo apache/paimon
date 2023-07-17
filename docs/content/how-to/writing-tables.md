@@ -216,7 +216,8 @@ Currently, Paimon supports two ways to purge partitions.
 
 ```sql
 -- Syntax
-INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM MyTable WHERE false
+INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM MyTable WHERE false
 
 -- The following SQL is an example:
 -- table definition
@@ -227,10 +228,12 @@ CREATE TABLE MyTable (
 ) PARTITIONED BY (k0, k1);
 
 -- you can use
-INSERT OVERWRITE MyTable PARTITION (k0 = 0) SELECT k1, v FROM MyTable WHERE false
+INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+PARTITION (k0 = 0) SELECT k1, v FROM MyTable WHERE false
 
 -- or
-INSERT OVERWRITE MyTable PARTITION (k0 = 0, k1 = 0) SELECT v FROM MyTable WHERE false
+INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+PARTITION (k0 = 0, k1 = 0) SELECT v FROM MyTable WHERE false
 ```
 
 {{< /tab >}}
