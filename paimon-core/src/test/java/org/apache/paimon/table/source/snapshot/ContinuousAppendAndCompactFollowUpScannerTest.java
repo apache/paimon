@@ -144,6 +144,6 @@ public class ContinuousAppendAndCompactFollowUpScannerTest extends ScannerTestBa
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                fileIO, tablePath, tableSchema, conf, Lock.emptyFactory());
+                fileIO, tablePath, tableSchema, conf, Lock.emptyFactory(), null);
     }
 }

@@ -28,7 +28,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.operation.DefaultValueAssiger;
+import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
@@ -67,11 +67,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final ConsumerManager consumerManager;
     private final SplitGenerator splitGenerator;
     private final BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer;
+    private final DefaultValueAssigner defaultValueAssigner;
 
     private ScanKind scanKind = ScanKind.ALL;
     private RecordComparator lazyPartitionComparator;
-
-    private DefaultValueAssiger defaultValueAssiger;
 
     public SnapshotReaderImpl(
             FileStoreScan scan,
@@ -80,7 +79,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             SnapshotManager snapshotManager,
             SplitGenerator splitGenerator,
             BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer,
-            DefaultValueAssiger defaultValueAssiger) {
+            DefaultValueAssigner defaultValueAssigner) {
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.options = options;
@@ -89,7 +88,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.splitGenerator = splitGenerator;
         this.nonPartitionFilterConsumer = nonPartitionFilterConsumer;
-        this.defaultValueAssiger = defaultValueAssiger;
+        this.defaultValueAssigner = defaultValueAssigner;
     }
 
     @Override
@@ -130,7 +129,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
         for (Predicate p :
-                PredicateBuilder.splitAnd(defaultValueAssiger.handlePredicate(predicate))) {
+                PredicateBuilder.splitAnd(defaultValueAssigner.handlePredicate(predicate))) {
             Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
             if (mapped.isPresent()) {
                 partitionFilters.add(mapped.get());

@@ -61,7 +61,7 @@ public class CreateTableITCase extends HiveTestBase {
         assertThatThrownBy(() -> hiveShell.execute(hiveSql))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage(
-                        "Schema file not found in location "
+                        "Schema file not found in location file:"
                                 + path
                                 + ". Please create table first.");
     }

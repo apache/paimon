@@ -62,8 +62,8 @@ public class SparkTable
 
     @Override
     public ScanBuilder newScanBuilder(CaseInsensitiveStringMap options) {
-        // options is already merged into table
-        return new SparkScanBuilder(table);
+        Table newTable = table.copy(options.asCaseSensitiveMap());
+        return new SparkScanBuilder(newTable);
     }
 
     @Override

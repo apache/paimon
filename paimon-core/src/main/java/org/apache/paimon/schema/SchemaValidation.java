@@ -297,7 +297,7 @@ public class SchemaValidation {
 
     private static void validateDefaultValues(TableSchema schema) {
         CoreOptions coreOptions = new CoreOptions(schema.options());
-        Map<String, String> defaultValues = coreOptions.getFieldDefaultValues().toMap();
+        Map<String, String> defaultValues = coreOptions.getFieldDefaultValues();
 
         if (!defaultValues.isEmpty()) {
 

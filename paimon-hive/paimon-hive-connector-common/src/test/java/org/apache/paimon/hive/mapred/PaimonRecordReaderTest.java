@@ -187,10 +187,12 @@ public class PaimonRecordReaderTest {
         for (Split split : table.newReadBuilder().newScan().plan().splits()) {
             DataSplit dataSplit = (DataSplit) split;
             if (dataSplit.partition().equals(partition) && dataSplit.bucket() == bucket) {
+                List<String> originalColumns = ((FileStoreTable) table).schema().fieldNames();
                 return new PaimonRecordReader(
                         table.newReadBuilder(),
                         new PaimonInputSplit(tempDir.toString(), dataSplit),
-                        ((FileStoreTable) table).schema().fieldNames(),
+                        originalColumns,
+                        originalColumns,
                         selectedColumns);
             }
         }

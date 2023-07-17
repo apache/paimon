@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.casting.DefaultValueRow;
@@ -41,86 +42,82 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * the field Default value assigner. note that the invoke of assigning should be after merge and
- * schema evolution
+ * The field Default value assigner. note that invoke of assigning should be after merge and schema
+ * evolution.
  */
-public class DefaultValueAssiger {
+public class DefaultValueAssigner {
 
-    private GenericRow defaultValueMapping;
-    private TableSchema tableSchema;
+    private final RowType rowType;
+    private final Map<String, String> defaultValues;
 
-    private Map<String, String> defaultValues;
+    private boolean needToAssign;
 
     private int[][] project;
+    private DefaultValueRow defaultValueRow;
 
-    private boolean isCacheDefaultMapping;
-
-    public DefaultValueAssiger(TableSchema tableSchema) {
-        this.tableSchema = tableSchema;
-
-        CoreOptions coreOptions = new CoreOptions(tableSchema.options());
-        defaultValues = coreOptions.getFieldDefaultValues().toMap();
+    private DefaultValueAssigner(Map<String, String> defaultValues, RowType rowType) {
+        this.defaultValues = defaultValues;
+        this.needToAssign = defaultValues.size() > 0;
+        this.rowType = rowType;
     }
 
-    public DefaultValueAssiger handleProject(int[][] project) {
+    public DefaultValueAssigner handleProject(int[][] project) {
         this.project = project;
+        if (project != null) {
+            List<String> projected = Projection.of(project).project(rowType).getFieldNames();
+            needToAssign = defaultValues.keySet().stream().anyMatch(projected::contains);
+        }
         return this;
     }
 
-    /** assign default value for colomn which value is null. */
+    public boolean needToAssign() {
+        return needToAssign;
+    }
+
+    /** assign default value for column which value is null. */
     public RecordReader<InternalRow> assignFieldsDefaultValue(RecordReader<InternalRow> reader) {
-        if (defaultValues.isEmpty()) {
+        if (!needToAssign) {
             return reader;
         }
 
-        if (!isCacheDefaultMapping) {
-            isCacheDefaultMapping = true;
-            this.defaultValueMapping = createDefaultValueMapping();
+        if (defaultValueRow == null) {
+            defaultValueRow = createDefaultValueRow();
         }
 
-        RecordReader<InternalRow> result = reader;
-        if (defaultValueMapping != null) {
-            DefaultValueRow defaultValueRow = DefaultValueRow.from(defaultValueMapping);
-            result = reader.transform(defaultValueRow::replaceRow);
-        }
-        return result;
+        return reader.transform(defaultValueRow::replaceRow);
     }
 
-    GenericRow createDefaultValueMapping() {
-
-        RowType valueType = tableSchema.logicalRowType();
-
+    @VisibleForTesting
+    DefaultValueRow createDefaultValueRow() {
         List<DataField> fields;
         if (project != null) {
-            fields = Projection.of(project).project(valueType).getFields();
+            fields = Projection.of(project).project(rowType).getFields();
         } else {
-            fields = valueType.getFields();
+            fields = rowType.getFields();
         }
 
-        GenericRow defaultValuesMa = null;
-        if (!fields.isEmpty()) {
-            defaultValuesMa = new GenericRow(fields.size());
-            for (int i = 0; i < fields.size(); i++) {
-                DataField dataField = fields.get(i);
-                String defaultValueStr = defaultValues.get(dataField.name());
-                if (defaultValueStr == null) {
-                    continue;
-                }
-
-                CastExecutor<Object, Object> resolve =
-                        (CastExecutor<Object, Object>)
-                                CastExecutors.resolve(VarCharType.STRING_TYPE, dataField.type());
-
-                if (resolve == null) {
-                    throw new RuntimeException(
-                            "Default value do not support the type of " + dataField.type());
-                }
-                Object defaultValue = resolve.cast(BinaryString.fromString(defaultValueStr));
-                defaultValuesMa.setField(i, defaultValue);
+        GenericRow row = new GenericRow(fields.size());
+        for (int i = 0; i < fields.size(); i++) {
+            DataField dataField = fields.get(i);
+            String defaultValueStr = defaultValues.get(dataField.name());
+            if (defaultValueStr == null) {
+                continue;
             }
+
+            @SuppressWarnings("unchecked")
+            CastExecutor<Object, Object> resolve =
+                    (CastExecutor<Object, Object>)
+                            CastExecutors.resolve(VarCharType.STRING_TYPE, dataField.type());
+
+            if (resolve == null) {
+                throw new RuntimeException(
+                        "Default value do not support the type of " + dataField.type());
+            }
+            Object defaultValue = resolve.cast(BinaryString.fromString(defaultValueStr));
+            row.setField(i, defaultValue);
         }
 
-        return defaultValuesMa;
+        return DefaultValueRow.from(row);
     }
 
     public Predicate handlePredicate(Predicate filters) {
@@ -153,5 +150,11 @@ public class DefaultValueAssiger {
             }
         }
         return result;
+    }
+
+    public static DefaultValueAssigner create(TableSchema schema) {
+        CoreOptions coreOptions = new CoreOptions(schema.options());
+        Map<String, String> defaultValues = coreOptions.getFieldDefaultValues();
+        return new DefaultValueAssigner(defaultValues, schema.logicalRowType());
     }
 }

@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
+import org.apache.paimon.hive.utils.HiveUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -77,7 +78,7 @@ public class PaimonMetaHook implements HiveMetaHook {
 
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
-        String location = LocationKeyExtractor.getLocation(table, conf);
+        String location = LocationKeyExtractor.getPaimonLocation(conf, table);
         if (location == null) {
             String warehouse = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
             org.apache.hadoop.fs.Path hadoopPath =
@@ -130,7 +131,7 @@ public class PaimonMetaHook implements HiveMetaHook {
         }
 
         // we have created a paimon table, so we delete it to roll back;
-        String location = LocationKeyExtractor.getLocation(table);
+        String location = LocationKeyExtractor.getPaimonLocation(conf, table);
 
         Path path = new Path(location);
         CatalogContext context = catalogContext(table, location);
@@ -157,7 +158,7 @@ public class PaimonMetaHook implements HiveMetaHook {
     public void commitDropTable(Table table, boolean b) throws MetaException {}
 
     private CatalogContext catalogContext(Table table, String location) {
-        Options options = PaimonJobConf.extractCatalogConfig(conf);
+        Options options = HiveUtils.extractCatalogConfig(conf);
         options.set(CoreOptions.PATH, location);
         table.getParameters().forEach(options::set);
         return CatalogContext.create(options, conf);

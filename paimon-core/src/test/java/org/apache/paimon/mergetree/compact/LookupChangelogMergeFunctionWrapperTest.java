@@ -26,6 +26,7 @@ import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -53,7 +54,10 @@ public class LookupChangelogMergeFunctionWrapperTest {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(),
+                                RowType.of(DataTypes.INT()),
+                                RowType.of(DataTypes.INT())),
                         highLevel::get,
                         EQUALISER,
                         changelogRowDeduplicate);
@@ -207,7 +211,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 },
                                                 new FieldAggregator[] {
                                                     new FieldSumAgg(DataTypes.INT())
-                                                })),
+                                                }),
+                                RowType.of(DataTypes.INT()),
+                                RowType.of(DataTypes.INT())),
                         key -> null,
                         EQUALISER,
                         changlogRowDeduplicate);

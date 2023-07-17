@@ -127,6 +127,11 @@ public class FlinkSinkTest {
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                FileIOFinder.find(tablePath), tablePath, tableSchema, conf, Lock.emptyFactory());
+                FileIOFinder.find(tablePath),
+                tablePath,
+                tableSchema,
+                conf,
+                Lock.emptyFactory(),
+                null);
     }
 }

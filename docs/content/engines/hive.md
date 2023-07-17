@@ -101,6 +101,7 @@ CREATE CATALOG my_hive WITH (
   'type' = 'paimon',
   'metastore' = 'hive',
   'uri' = 'thrift://<hive-metastore-host-name>:<port>',
+  -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
   'warehouse' = 'hdfs:///path/to/table/store/warehouse'
 );
 

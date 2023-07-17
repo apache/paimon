@@ -22,9 +22,11 @@ import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
@@ -39,8 +41,11 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.function.BiConsumer;
@@ -53,17 +58,22 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     private transient AppendOnlyFileStore lazyStore;
 
     AppendOnlyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, Lock.emptyFactory());
+        this(fileIO, path, tableSchema, Lock.emptyFactory(), null);
     }
 
     AppendOnlyFileStoreTable(
-            FileIO fileIO, Path path, TableSchema tableSchema, Lock.Factory lockFactory) {
-        super(fileIO, path, tableSchema, lockFactory);
+            FileIO fileIO,
+            Path path,
+            TableSchema tableSchema,
+            Lock.Factory lockFactory,
+            @Nullable MetastoreClient.Factory metastoreClientFactory) {
+        super(fileIO, path, tableSchema, lockFactory, metastoreClientFactory);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new AppendOnlyFileStoreTable(fileIO, path, newTableSchema, lockFactory);
+        return new AppendOnlyFileStoreTable(
+                fileIO, path, newTableSchema, lockFactory, metastoreClientFactory);
     }
 
     @Override
@@ -117,6 +127,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             @Override
             public InnerTableRead withProjection(int[][] projection) {
                 read.withProjection(projection);
+                return this;
+            }
+
+            @Override
+            public TableRead withIOManager(IOManager ioManager) {
                 return this;
             }
 

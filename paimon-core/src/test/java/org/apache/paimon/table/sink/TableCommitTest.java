@@ -109,7 +109,11 @@ public class TableCommitTest {
 
         FileStoreTable table =
                 FileStoreTableFactory.create(
-                        new FailingFileIO(), new Path(path), tableSchema, Lock.emptyFactory());
+                        new FailingFileIO(),
+                        new Path(path),
+                        tableSchema,
+                        Lock.emptyFactory(),
+                        null);
 
         String commitUser = UUID.randomUUID().toString();
         StreamTableWrite write = table.newWrite(commitUser);

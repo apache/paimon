@@ -127,6 +127,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.outerProjection = projection.outerProjection;
         if (pushdownProjection != null) {
             readerFactoryBuilder.withValueProjection(pushdownProjection);
+            mergeSorter.setProjectedValueType(readerFactoryBuilder.projectedValueType());
         }
         return this;
     }

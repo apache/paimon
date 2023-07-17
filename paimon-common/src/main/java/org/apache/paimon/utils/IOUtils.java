@@ -18,6 +18,9 @@
 
 package org.apache.paimon.utils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -27,6 +30,8 @@ import static java.util.Arrays.asList;
 
 /** An utility class for I/O related functionality. */
 public final class IOUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(IOUtils.class);
 
     /** The block size for byte operations in byte. */
     private static final int BLOCKSIZE = 4096;
@@ -186,7 +191,8 @@ public final class IOUtils {
             if (closeable != null) {
                 closeable.close();
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable e) {
+            LOG.debug("Exception occurs when closing " + closeable, e);
         }
     }
 }
