@@ -238,6 +238,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         MySqlTableSchemaBuilder schemaBuilder =
                 new MySqlTableSchemaBuilder(tableConfig, caseSensitive);
+        Pattern includingPattern = this.includingPattern;
+        Pattern excludingPattern = this.excludingPattern;
         Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
         EventParser.Factory<String> parserFactory =
                 () ->
@@ -246,6 +248,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 caseSensitive,
                                 tableNameConverter,
                                 schemaBuilder,
+                                includingPattern,
+                                excludingPattern,
                                 convertTinyint1ToBool);
 
         String database = this.database;
