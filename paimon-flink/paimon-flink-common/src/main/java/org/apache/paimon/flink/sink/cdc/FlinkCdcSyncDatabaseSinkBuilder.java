@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
@@ -37,7 +37,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode.UNIFIED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
@@ -68,7 +68,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private Catalog.Loader catalogLoader;
     // database to sync, currently only support single database
     private String database;
-    private MySqlDatabaseSyncMode mode;
+    private DatabaseSyncMode mode;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -101,7 +101,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(MySqlDatabaseSyncMode mode) {
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(DatabaseSyncMode mode) {
         this.mode = mode;
         return this;
     }
@@ -112,14 +112,14 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         Preconditions.checkNotNull(database);
         Preconditions.checkNotNull(catalogLoader);
 
-        if (mode == UNIFIED) {
-            buildUnifiedCdcSink();
+        if (mode == COMBINED) {
+            buildCombinedCdcSink();
         } else {
-            buildStaticCdcSink();
+            buildDividedCdcSink();
         }
     }
 
-    private void buildUnifiedCdcSink() {
+    private void buildCombinedCdcSink() {
         SingleOutputStreamOperator<Void> parsed =
                 input.forward()
                         .process(
@@ -162,7 +162,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         new FlinkCdcSink(table).sinkFrom(partitioned);
     }
 
-    private void buildStaticCdcSink() {
+    private void buildDividedCdcSink() {
         Preconditions.checkNotNull(tables);
 
         SingleOutputStreamOperator<Void> parsed =

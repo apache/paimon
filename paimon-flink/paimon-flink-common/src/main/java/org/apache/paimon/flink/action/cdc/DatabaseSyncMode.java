@@ -16,19 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc;
 
 import java.io.Serializable;
 
 /**
  * There are two modes for database sync.
  *
- * <p>1) SEPARATE mode, start a sink for each table, the synchronization of the new table requires
+ * <p>1) DIVIDED mode, start a sink for each table, the synchronization of the new table requires
  * restarting the job.
  *
- * <p>2) UNIFIED mode, start a unified sink, the new table will be automatically synchronized.
+ * <p>2) COMBINED mode, start a single combined sink for all tables, the new table will be
+ * automatically synchronized.
  */
-public enum MySqlDatabaseSyncMode implements Serializable {
-    SEPARATE,
-    UNIFIED
+public enum DatabaseSyncMode implements Serializable {
+    DIVIDED,
+    COMBINED
 }

@@ -21,31 +21,21 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
-import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
-
 /** Schema builder for {@link RichCdcMultiplexRecord}. */
-public class RichCdcMultiplexRecordSchemaBuilder implements NewTableSchemaBuilder {
+public class RichCdcMultiplexRecordSchemaBuilder
+        implements NewTableSchemaBuilder<RichCdcMultiplexRecord> {
 
     private final Map<String, String> tableConfig;
-
-    private RichCdcMultiplexRecord record;
 
     public RichCdcMultiplexRecordSchemaBuilder(Map<String, String> tableConfig) {
         this.tableConfig = tableConfig;
     }
 
-    public void init(RichCdcMultiplexRecord record) {
-        this.record = record;
-    }
-
     @Override
-    public Optional<Schema> build() {
-        checkNotNull(record, "CanalTableSchemaBuilder wasn't initialized.");
-
+    public Optional<Schema> build(RichCdcMultiplexRecord record) {
         Schema.Builder builder = Schema.newBuilder();
         builder.options(tableConfig);
 
@@ -56,14 +46,5 @@ public class RichCdcMultiplexRecordSchemaBuilder implements NewTableSchemaBuilde
         Schema schema = builder.primaryKey(record.primaryKeys()).build();
 
         return Optional.of(schema);
-    }
-
-    public static RichCdcMultiplexRecordSchemaBuilder dummyBuilder() {
-        return new RichCdcMultiplexRecordSchemaBuilder(Collections.emptyMap()) {
-            @Override
-            public Optional<Schema> build() {
-                return Optional.empty();
-            }
-        };
     }
 }

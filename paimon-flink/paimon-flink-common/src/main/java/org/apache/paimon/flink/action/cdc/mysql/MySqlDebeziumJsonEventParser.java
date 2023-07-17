@@ -27,6 +27,7 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -68,7 +69,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
-    private final MySqlTableSchemaBuilder schemaBuilder;
+    private final NewTableSchemaBuilder<String> schemaBuilder;
 
     private JsonNode root;
     private JsonNode payload;
@@ -80,14 +81,14 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 caseSensitive,
                 computedColumns,
                 new TableNameConverter(caseSensitive),
-                MySqlTableSchemaBuilder.dummyBuilder());
+                ddl -> Optional.empty());
     }
 
     public MySqlDebeziumJsonEventParser(
             ZoneId serverTimeZone,
             boolean caseSensitive,
             TableNameConverter tableNameConverter,
-            MySqlTableSchemaBuilder schemaBuilder) {
+            NewTableSchemaBuilder<String> schemaBuilder) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -101,7 +102,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TableNameConverter tableNameConverter,
-            MySqlTableSchemaBuilder schemaBuilder) {
+            NewTableSchemaBuilder<String> schemaBuilder) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
@@ -193,9 +194,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             if (Strings.isNullOrEmpty(ddl)) {
                 return Optional.empty();
             }
-
-            schemaBuilder.init(ddl);
-            return schemaBuilder.build();
+            return schemaBuilder.build(ddl);
         } catch (Exception e) {
             LOG.info("Failed to parse history record for schema changes", e);
             return Optional.empty();

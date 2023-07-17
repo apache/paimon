@@ -25,7 +25,7 @@ import java.util.Optional;
 
 /** Build table schema for newly added table in CDC ingestion. */
 @FunctionalInterface
-public interface NewTableSchemaBuilder extends Serializable {
+public interface NewTableSchemaBuilder<T> extends Serializable {
 
-    Optional<Schema> build();
+    Optional<Schema> build(T source);
 }

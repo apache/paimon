@@ -37,7 +37,6 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,30 +44,22 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Schema builder for MySQL cdc. */
-public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder {
+public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<String> {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlTableSchemaBuilder.class);
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
 
-    private String ddl;
-
     public MySqlTableSchemaBuilder(Map<String, String> tableConfig, boolean caseSensitive) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
     }
 
-    public void init(String ddl) {
-        this.ddl = ddl;
-    }
-
     @Override
-    public Optional<Schema> build() {
-        checkNotNull(ddl, "MySqlTableSchemaBuilder wasn't initialized.");
+    public Optional<Schema> build(String ddl) {
         SQLStatement statement = SQLUtils.parseSingleStatement(ddl, JdbcConstants.MYSQL);
 
         if (!(statement instanceof MySqlCreateTableStatement)) {
@@ -144,14 +135,5 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder {
         Schema schema = builder.primaryKey(primaryKeys).build();
 
         return Optional.of(schema);
-    }
-
-    public static MySqlTableSchemaBuilder dummyBuilder() {
-        return new MySqlTableSchemaBuilder(Collections.emptyMap(), true) {
-            @Override
-            public Optional<Schema> build() {
-                return Optional.empty();
-            }
-        };
     }
 }

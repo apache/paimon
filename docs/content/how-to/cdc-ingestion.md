@@ -113,6 +113,7 @@ To use this feature through `flink run`, run the following shell command.
     [--table-suffix <paimon-table-suffix>] \
     [--including-tables <mysql-table-name|name-regular-expr>] \
     [--excluding-tables <mysql-table-name|name-regular-expr>] \
+    [--mode <sync-mode>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -302,9 +303,10 @@ To use this feature through `flink run`, run the following shell command.
 
 Only tables with primary keys will be synchronized.
 
-For each Kafka topic's table to be synchronized, if the corresponding Paimon table does not exist, this action will automatically 
-create the table, and its schema will be derived from all specified Kafka topic's tables. If the Paimon table already exists 
-and its schema is different from that parsed from Kafka record, this action will try to preform schema evolution.
+This action will build a single combined sink for all tables. For each Kafka topic's table to be synchronized, if the 
+corresponding Paimon table does not exist, this action will automatically create the table, and its schema will be derived 
+from all specified Kafka topic's tables. If the Paimon table already exists and its schema is different from that parsed 
+from Kafka record, this action will try to preform schema evolution.
 
 Example
 

@@ -41,7 +41,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private static final Logger LOG =
             LoggerFactory.getLogger(RichCdcMultiplexRecordEventParser.class);
 
-    private final RichCdcMultiplexRecordSchemaBuilder schemaBuilder;
+    private final NewTableSchemaBuilder<RichCdcMultiplexRecord> schemaBuilder;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final Map<String, RichEventParser> parsers = new HashMap<>();
@@ -55,11 +55,11 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private RichEventParser currentParser;
 
     public RichCdcMultiplexRecordEventParser() {
-        this(RichCdcMultiplexRecordSchemaBuilder.dummyBuilder(), null, null);
+        this(record -> Optional.empty(), null, null);
     }
 
     public RichCdcMultiplexRecordEventParser(
-            RichCdcMultiplexRecordSchemaBuilder schemaBuilder,
+            NewTableSchemaBuilder<RichCdcMultiplexRecord> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern) {
         this.schemaBuilder = schemaBuilder;
@@ -100,8 +100,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     @Override
     public Optional<Schema> parseNewTable() {
         if (shouldCreateCurrentTable()) {
-            schemaBuilder.init(record);
-            return schemaBuilder.build();
+            return schemaBuilder.build(record);
         }
 
         return Optional.empty();

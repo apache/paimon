@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.kafka.canal;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaSchema;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -27,6 +28,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -45,6 +47,8 @@ import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableChangeCo
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlAlterTableModifyColumn;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.util.Collector;
+
+import javax.annotation.Nullable;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -105,10 +109,35 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
         root = objectMapper.readValue(value, JsonNode.class);
         validateFormat();
 
-        databaseName = root.get(FIELD_DATABASE).asText();
-        tableName = tableNameConverter.convert(root.get(FIELD_TABLE).asText());
+        databaseName = extractString(FIELD_DATABASE);
+        tableName = tableNameConverter.convert(extractString(FIELD_TABLE));
 
         extractRecords().forEach(out::collect);
+    }
+
+    @Nullable
+    public KafkaSchema getKafkaSchema(String record) {
+        try {
+            root = objectMapper.readValue(record, JsonNode.class);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+        validateFormat();
+
+        if (isDdl()) {
+            return null;
+        }
+
+        LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
+        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
+        mySqlFieldTypes.forEach(
+                (name, type) -> paimonFieldTypes.put(name, toPaimonDataType(type, true)));
+
+        return new KafkaSchema(
+                extractString(FIELD_DATABASE),
+                extractString(FIELD_TABLE),
+                paimonFieldTypes,
+                extractPrimaryKeys());
     }
 
     private void validateFormat() {
@@ -127,6 +156,10 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
             checkNotNull(root.get(FIELD_MYSQL_TYPE), errorMessageTemplate, FIELD_MYSQL_TYPE);
             checkNotNull(root.get(FIELD_PRIMARY_KEYS), errorMessageTemplate, FIELD_PRIMARY_KEYS);
         }
+    }
+
+    private String extractString(String key) {
+        return root.get(key).asText();
     }
 
     private boolean isDdl() {
@@ -148,7 +181,7 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
 
         // extract row kind and field values
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
-        String type = root.get(FIELD_TYPE).asText();
+        String type = extractString(FIELD_TYPE);
         ArrayNode data = (ArrayNode) root.get(FIELD_DATA);
         switch (type) {
             case OP_UPDATE:
@@ -211,7 +244,7 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
     }
 
     private List<RichCdcMultiplexRecord> extractRecordsFromDdl() {
-        String sql = root.get(FIELD_SQL).asText();
+        String sql = extractString(FIELD_SQL);
         if (StringUtils.isEmpty(sql)) {
             return Collections.emptyList();
         }
