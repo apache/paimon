@@ -183,7 +183,7 @@ There are three main places in Paimon writer that takes up memory:
 * Writer's memory buffer, shared and preempted by all writers of a single task. This memory value can be adjusted by the `write-buffer-size` table property.
 * Memory consumed when merging several sorted runs for compaction. Can be adjusted by the `num-sorted-run.compaction-trigger` option to change the number of sorted runs to be merged.
 * If the row is very large, reading too many lines of data at once can consume a lot of memory when making a compaction. Reducing the `read.batch-size` option can alleviate the impact of this case.
-* The memory consumed by writing columnar (ORC, Parquet, etc.) file. Decreasing the `orc.write.batch-size` can improve the consume of memory for ORC format.
+* The memory consumed by writing columnar (ORC, Parquet, etc.) file. Decreasing the `orc.write.batch-size` option can reduce the consume of memory for ORC format.
 
 If your Flink job does not rely on state, please avoid using managed memory, which you can control with the following Flink parameters:
 ```shell

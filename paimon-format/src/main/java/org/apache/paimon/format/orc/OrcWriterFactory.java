@@ -104,6 +104,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
         if (null != compression) {
             writerProperties.setProperty(OrcConf.COMPRESS.getAttribute(), compression);
         }
+
         OrcFile.WriterOptions opts = getWriterOptions();
         opts.physicalWriter(new PhysicalWriterImpl(out, opts));
 
