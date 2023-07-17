@@ -164,9 +164,10 @@ public final class RowType extends DataType {
 
     @Override
     public void collectFieldIds(Set<Integer> fieldIds) {
-        int maxId = fieldIds.stream().max(Integer::compareTo).orElse(-1);
+        boolean nested = fieldIds.size() > 0;
         for (DataField field : fields) {
-            if (maxId > 0) {
+            if (nested) {
+                int maxId = fieldIds.stream().max(Integer::compareTo).orElse(-1);
                 field.resetId(++maxId);
             }
             if (fieldIds.contains(field.id())) {
