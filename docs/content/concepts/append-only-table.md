@@ -26,39 +26,23 @@ under the License.
 
 # Append Only Table
 
-If a table does not have a primary key defined, it is an append-only table by default.
+If a table does not have a primary key defined, it is an append-only table by default. Separated by the definition of bucket,
+we have two different append-only mode: "Append For Queue" and "Append For Scalable Table". 
+
+## Append For Queue
 
 You can only insert a complete record into the table. No delete or update is supported and you cannot define primary keys.
 This type of table is suitable for use cases that do not require updates (such as log data synchronization).
 
-## Bucketing
-In paimon, there are two bucket mode in append-only table, aware of bucket or not:
-<table class="configuration table table-bordered">
-    <thead>
-        <tr>
-            <th class="text-left" style="width: 5%">BucketMode</th>
-            <th class="text-left" style="width: 25%">Description</th>
-        </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td><h5>aware</h5></td>
-            <td>By setting 'bucket' field, you can define bucket number for Append-only table, see <a href="../basic-concepts#Bucket">Bucket</a>.
-                It is recommended that you set the 'bucket-key' field. Otherwise, the data will be hashed according to the whole row,
-                and the performance will be poor.</td>
-        </tr>
-        <tr>
-            <td><h5>unaware</h5></td>
-            <td><p>After version 0.5, we raised a configuration 'bucket' = '-1' to mark bucket unaware. While setting this, we put all
-                   data in one directory (we mark it as 'bucket-0' for compatibility). </p><p>We will not shuffle while writing and parallelism
-                   config will be able to work independently. When you mark bucket unaware, stream read will not guarantee order anymore.
-                   If you need a batch offline table and has no special demands on order, we recommend you to use unaware-bucket mode.</p></td>
-        </tr>
-    </tbody>
-</table>
+### Definition
+
+In this mode, you can regard append-only table as a queue separated by bucket. Every record in the same bucket is ordered strictly,
+streaming read will transfer the record to down-stream exactly in the order of writing. To use this mode, you do not need 
+to config special configurations, all the data will go into one bucket as a queue. You can also define the `bucket` and
+`bucket-key` to enable larger parallelism and disperse data (see [Example]({{< ref "#example" >}})).
 
 
-## Compaction
+### Compaction
 
 By default, the sink node will automatically perform compaction to control the number of files. The following options
 control the strategy of compaction:
@@ -100,11 +84,11 @@ control the strategy of compaction:
     </tbody>
 </table>
 
-## Streaming Source
+### Streaming Source
 
 Streaming source behavior is only supported in Flink engine at present.
 
-### Streaming Read Order
+#### Streaming Read Order
 
 For streaming reads, records are produced in the following order:
 
@@ -114,7 +98,7 @@ For streaming reads, records are produced in the following order:
 * For any two records from the same partition and the same bucket, the first written record will be produced first.
 * For any two records from the same partition but two different buckets, different buckets are processed by different tasks, there is no order guarantee between them.
 
-### Watermark Definition
+#### Watermark Definition
 
 You can define watermark for reading Paimon tables:
 
@@ -159,7 +143,7 @@ which will make sure no sources/splits/shards/partitions increase their watermar
     </tbody>
 </table>
 
-### Bounded Stream
+#### Bounded Stream
 
 Streaming Source can also be bounded, you can specify 'scan.bounded.watermark' to define the end condition for bounded streaming mode, stream reading will end until a larger watermark snapshot is encountered.
 
@@ -182,7 +166,7 @@ INSERT INTO paimon_table SELECT * FROM kakfa_table;
 SELECT * FROM paimon_table /*+ OPTIONS('scan.bounded.watermark'='...') */;
 ```
 
-## Example
+### Example
 
 The following is an example of creating the Append-Only table and specifying the bucket key.
 
@@ -200,7 +184,78 @@ CREATE TABLE MyTable (
     'bucket-key' = 'product_id'
 );
 ```
+{{< /tab >}}
 
+{{< /tabs >}}
+
+
+
+## Append For Scalable Table
+
+### Definition
+
+By defining `'bucket' = '-1'` in table properties, you can assign a special mode (we call it "unaware-bucket mode") to this 
+table (see [Example]({{< ref "#example-1" >}})). In this mode, all the things are different. We don't have
+the concept of bucket anymore, and we don't guarantee the order of streaming read. We regard this table as a batch off-line table (
+although we can stream read and write still). All the records will go into one directory (for compatibility, we put them in bucket-0),
+and we do not maintain the order anymore. As we don't have the concept of bucket, we will not shuffle the input records by bucket anymore,
+which will speed up the inserting.
+
+
+### Compaction
+
+In unaware-bucket mode, we don't do compaction in writer, instead, we use `Compact Coordinator` to scan the small files and submit compaction task
+to `Compact Worker`. By this, we can easily do compaction for one simple data directory in parallel. In streaming mode, if you run insert sql in flink,
+the topology will be like this:
+
+{{< img src="/img/unaware-bucket-topo.png">}}
+
+It will do its best to compact small files, but when a single small file in one partition remains long time 
+and no new file added to the partition, the `Compact Coordinator` will remove it from memory to reduce memory usage. 
+After you restart the job, it will scan the small files and add it to memory again. The options to control the compact
+behavior is exactly the same as [Append For Qeueue]({{< ref "#compaction" >}}). If you set `write-only` to true, the 
+`Compact Coordinator` and `Compact Worker` will be removed in the topology.
+
+The auto compaction is only supported in Flink engine streaming mode. You can also start a compaction job in flink by flink action in paimon
+and disable all the other compaction by set `write-only`.
+
+### Streaming Source
+
+Unaware-bucket mode append-only table supported streaming read and write, but no longer guarantee order anymore. You cannot regard it 
+as a queue, instead, as a lake with storage bins. Every commit will generate a new record bin, we can read the 
+increase by reading the new record bin, but records in one bin are flowing to anywhere they want, and we fetch them in any possible order.
+While in the `Append For Queue` mode, records are not stored in bins, but in record pipe. We can see the difference below.
+
+Append For Queue:
+
+{{< img src="/img/for-queue.png">}}
+
+Append For Scalable:
+
+{{< img src="/img/for-scalable.png">}}
+
+#### Watermark Definition
+
+We don't recommend you to do aggregate computation in streaming on this mode, because there is no order guarantee in streaming read.
+But you can still define your watermark if you understand what you are doing, you can also define watermark column by using system time.
+
+### Example
+
+The following is an example of creating the Append-Only table and specifying the bucket key.
+
+{{< tabs "create-append-only-table-unaware-bucket" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+CREATE TABLE MyTable (
+    product_id BIGINT,
+    price DOUBLE,
+    sales BIGINT
+) WITH (
+    'bucket' = '-1'
+);
+```
 {{< /tab >}}
 
 {{< /tabs >}}
