@@ -235,7 +235,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 baseEntries.addAll(
                         readAllEntriesFromChangedPartitions(
                                 latestSnapshot, appendTableFiles, compactTableFiles));
-                noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
+                try {
+                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
+                } catch (RuntimeException e) {
+                    reportCommit(
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            0,
+                            0,
+                            1);
+                    throw e;
+                }
                 safeLatestSnapshotId = latestSnapshot.id();
             }
             attempts +=
@@ -260,7 +272,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // This optimization is mainly used to decrease the number of times we read from files.
             if (safeLatestSnapshotId != null) {
                 baseEntries.addAll(appendTableFiles);
-                noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
+                try {
+                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
+                } catch (RuntimeException e) {
+                    long commitDuration = (System.nanoTime() - started) / 1_000_000;
+                    reportCommit(
+                            appendTableFiles,
+                            appendChangelog,
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            commitDuration,
+                            generatedSnapshot,
+                            attempts + 1);
+                    throw e;
+                }
                 // assume this compact commit follows just after the append commit created above
                 safeLatestSnapshotId += 1;
             }
@@ -277,16 +302,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             generatedSnapshot += 1;
         }
         long commitDuration = (System.nanoTime() - started) / 1_000_000;
-        CommitStats commitStats =
-                new CommitStats(
-                        appendTableFiles,
-                        appendChangelog,
-                        compactTableFiles,
-                        compactChangelog,
-                        commitDuration,
-                        generatedSnapshot,
-                        attempts);
-        commitMetrics.reportCommit(commitStats);
+        reportCommit(
+                appendTableFiles,
+                appendChangelog,
+                compactTableFiles,
+                compactChangelog,
+                commitDuration,
+                generatedSnapshot,
+                attempts);
     }
 
     @Override
@@ -391,6 +414,26 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     Snapshot.CommitKind.COMPACT,
                     null);
         }
+    }
+
+    private void reportCommit(
+            List<ManifestEntry> appendTableFiles,
+            List<ManifestEntry> appendChangelogFiles,
+            List<ManifestEntry> compactTableFiles,
+            List<ManifestEntry> compactChangelogFiles,
+            long commitDuration,
+            int generatedSnapshots,
+            long attempts) {
+        CommitStats commitStats =
+                new CommitStats(
+                        appendTableFiles,
+                        appendChangelogFiles,
+                        compactTableFiles,
+                        compactChangelogFiles,
+                        commitDuration,
+                        generatedSnapshots,
+                        attempts);
+        commitMetrics.reportCommit(commitStats);
     }
 
     @Override

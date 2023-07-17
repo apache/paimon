@@ -201,7 +201,7 @@ public class CommitMetrics {
         public Long getValue() {
             CommitStats commit = latestCommit;
             if (commit != null) {
-                return commit.getAttemps();
+                return commit.getAttempts();
             } else {
                 return 0L;
             }
