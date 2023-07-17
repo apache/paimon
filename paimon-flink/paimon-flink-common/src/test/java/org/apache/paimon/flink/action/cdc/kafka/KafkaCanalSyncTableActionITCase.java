@@ -98,7 +98,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -110,7 +110,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
     }
 
     private void testSchemaEvolutionImpl(String topic, String sourceDir) throws Exception {
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -271,7 +271,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         Collections.emptyMap());
         action.build(env);
@@ -283,7 +283,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
     }
 
     private void testSchemaEvolutionMultipleImpl(String topic) throws Exception {
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -533,7 +533,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                             "_geometrycollection",
                             "_set",
                         });
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
         List<String> expected =
                 Arrays.asList(
                         "+I["
@@ -637,8 +637,6 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
             waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
             SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
             schemaManager.commitChanges(SchemaChange.dropColumn("v"));
-            List<DataField> fields = table.schema().fields();
-            int size = fields.size();
         }
     }
 
@@ -675,7 +673,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         UnsupportedOperationException e =
@@ -719,7 +717,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         Exception e = assertThrows(Exception.class, () -> action.build(env), "Expecting Exception");
@@ -771,7 +769,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         IllegalArgumentException e =
@@ -821,7 +819,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -829,7 +827,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         waitJobRunning(client);
 
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -879,7 +877,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -892,7 +890,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -944,7 +942,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -957,7 +955,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -1007,7 +1005,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -1020,7 +1018,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -1072,7 +1070,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -1085,7 +1083,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -1101,11 +1099,5 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 Arrays.asList(
                         "+I[1, 1, one]", "+I[1, 2, two]", "+I[1, 3, three]", "+I[1, 4, four]");
         waitForResult(expected, table, rowType, primaryKeys);
-    }
-
-    private FileStoreTable getFileStoreTable() throws Exception {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
-        Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog.getTable(identifier);
     }
 }

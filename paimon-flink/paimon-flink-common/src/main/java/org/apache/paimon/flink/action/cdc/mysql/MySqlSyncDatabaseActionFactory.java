@@ -20,14 +20,15 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode.SEPARATE;
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode.UNIFIED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
 
 /** Factory to create {@link MySqlSyncDatabaseAction}. */
 public class MySqlSyncDatabaseActionFactory implements ActionFactory {
@@ -53,11 +54,21 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         String includingTables = params.get("including-tables");
         String excludingTables = params.get("excluding-tables");
         String mode = params.get("mode");
-        MySqlDatabaseSyncMode syncMode;
-        if ("unified".equalsIgnoreCase(mode)) {
-            syncMode = UNIFIED;
+        DatabaseSyncMode syncMode;
+        if (mode == null) {
+            syncMode = DIVIDED;
         } else {
-            syncMode = SEPARATE;
+            switch (mode.toLowerCase()) {
+                case "divided":
+                    syncMode = DIVIDED;
+                    break;
+                case "combined":
+                    syncMode = COMBINED;
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported mode '" + mode + "' for database synchronization mode.");
+            }
         }
 
         Map<String, String> mySqlConfig = optionalConfigMap(params, "mysql-conf");
@@ -96,6 +107,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--table-suffix <paimon-table-suffix>] "
                         + "[--including-tables <mysql-table-name|name-regular-expr>] "
                         + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
+                        + "[--mode <sync-mode>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -121,6 +133,15 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "The usage is same as --including-tables.");
         System.out.println(
                 "--excluding-tables has higher priority than --including-tables if you specified both.");
+        System.out.println();
+
+        System.out.println(
+                "--mode is used to specify synchronization mode. You can specify two modes:");
+        System.out.println(
+                "  1. 'divided' (the default mode if you haven't specified one): "
+                        + "start a sink for each table, the synchronization of the new table requires restarting the job;");
+        System.out.println(
+                "  2. 'combined': start a single combined sink for all tables, the new table will be automatically synchronized.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

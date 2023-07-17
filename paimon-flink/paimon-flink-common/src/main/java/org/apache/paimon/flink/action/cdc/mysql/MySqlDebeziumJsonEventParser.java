@@ -27,6 +27,7 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -39,18 +40,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeRefe
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import com.alibaba.druid.sql.SQLUtils;
-import com.alibaba.druid.sql.ast.SQLDataType;
-import com.alibaba.druid.sql.ast.SQLExpr;
-import com.alibaba.druid.sql.ast.SQLName;
-import com.alibaba.druid.sql.ast.SQLStatement;
-import com.alibaba.druid.sql.ast.expr.SQLCharExpr;
-import com.alibaba.druid.sql.ast.expr.SQLIntegerExpr;
-import com.alibaba.druid.sql.ast.statement.SQLColumnDefinition;
-import com.alibaba.druid.sql.ast.statement.SQLTableElement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
-import com.alibaba.druid.util.JdbcConstants;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -64,7 +53,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -81,29 +69,45 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
+    private final NewTableSchemaBuilder<String> schemaBuilder;
 
     private JsonNode root;
     private JsonNode payload;
 
     public MySqlDebeziumJsonEventParser(
             ZoneId serverTimeZone, boolean caseSensitive, List<ComputedColumn> computedColumns) {
-        this(serverTimeZone, caseSensitive, computedColumns, new TableNameConverter(caseSensitive));
+        this(
+                serverTimeZone,
+                caseSensitive,
+                computedColumns,
+                new TableNameConverter(caseSensitive),
+                ddl -> Optional.empty());
     }
 
     public MySqlDebeziumJsonEventParser(
-            ZoneId serverTimeZone, boolean caseSensitive, TableNameConverter tableNameConverter) {
-        this(serverTimeZone, caseSensitive, Collections.emptyList(), tableNameConverter);
+            ZoneId serverTimeZone,
+            boolean caseSensitive,
+            TableNameConverter tableNameConverter,
+            NewTableSchemaBuilder<String> schemaBuilder) {
+        this(
+                serverTimeZone,
+                caseSensitive,
+                Collections.emptyList(),
+                tableNameConverter,
+                schemaBuilder);
     }
 
     public MySqlDebeziumJsonEventParser(
             ZoneId serverTimeZone,
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
-            TableNameConverter tableNameConverter) {
+            TableNameConverter tableNameConverter,
+            NewTableSchemaBuilder<String> schemaBuilder) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
         this.tableNameConverter = tableNameConverter;
+        this.schemaBuilder = schemaBuilder;
     }
 
     @Override
@@ -178,7 +182,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public Optional<Schema> parseNewTable(String databaseName) {
+    public Optional<Schema> parseNewTable() {
         JsonNode historyRecord = payload.get("historyRecord");
         if (historyRecord == null) {
             return Optional.empty();
@@ -190,67 +194,11 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             if (Strings.isNullOrEmpty(ddl)) {
                 return Optional.empty();
             }
-
-            SQLStatement statement = SQLUtils.parseSingleStatement(ddl, JdbcConstants.MYSQL);
-
-            if (!(statement instanceof MySqlCreateTableStatement)) {
-                return Optional.empty();
-            }
-
-            MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) statement;
-
-            // TODO: add default table config, partitions, and computed column
-            //     for newly added table;
-            MySqlSchema mySqlSchema = buildMySqlSchema(databaseName, createTableStatement);
-            Schema fromMySql =
-                    MySqlActionUtils.buildPaimonSchema(
-                            mySqlSchema,
-                            Collections.emptyList(),
-                            mySqlSchema.getPrimaryKeys(),
-                            computedColumns,
-                            Collections.emptyMap(),
-                            caseSensitive);
-
-            return Optional.of(fromMySql);
-
+            return schemaBuilder.build(ddl);
         } catch (Exception e) {
             LOG.info("Failed to parse history record for schema changes", e);
             return Optional.empty();
         }
-    }
-
-    private MySqlSchema buildMySqlSchema(String database, MySqlCreateTableStatement statement) {
-        LinkedHashMap<String, Tuple2<DataType, String>> fields = new LinkedHashMap<>();
-
-        List<SQLTableElement> columns = statement.getTableElementList();
-        for (SQLTableElement element : columns) {
-            if (element instanceof SQLColumnDefinition) {
-                SQLColumnDefinition column = (SQLColumnDefinition) element;
-                SQLName name = column.getName();
-                SQLDataType dataType = column.getDataType();
-                List<SQLExpr> arguments = dataType.getArguments();
-                Integer precision = null;
-                Integer scale = null;
-                if (arguments.size() >= 1) {
-                    precision = (int) (((SQLIntegerExpr) arguments.get(0)).getValue());
-                }
-
-                if (arguments.size() >= 2) {
-                    scale = (int) (((SQLIntegerExpr) arguments.get(1)).getValue());
-                }
-
-                SQLCharExpr comment = (SQLCharExpr) column.getComment();
-                fields.put(
-                        name.getSimpleName(),
-                        Tuple2.of(
-                                MySqlTypeUtils.toDataType(
-                                        column.getDataType().getName(), precision, scale),
-                                comment == null ? null : String.valueOf(comment.getValue())));
-            }
-        }
-
-        return new MySqlSchema(
-                database, statement.getTableName(), fields, statement.getPrimaryKeyNames());
     }
 
     @Override
@@ -378,7 +326,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             } else if ("io.debezium.time.ZonedTimestamp".equals(className)) {
                 // MySQL timestamp
 
-                // dispaly value of timestamp is affected by timezone, see
+                // display value of timestamp is affected by timezone, see
                 // https://dev.mysql.com/doc/refman/8.0/en/datetime.html for standard, and
                 // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
                 // for implementation

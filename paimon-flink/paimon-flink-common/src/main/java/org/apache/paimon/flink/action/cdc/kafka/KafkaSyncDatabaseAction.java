@@ -18,21 +18,17 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.kafka.canal.CanalRecordParser;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordSchemaBuilder;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
@@ -40,19 +36,11 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.apache.flink.util.CollectionUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -63,10 +51,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/">document
  * of flink-connectors</a> for detailed keys and values.
  *
- * <p>For each topic's table to be synchronized, if the corresponding Paimon table does not exist,
- * this action will automatically create the table. Its schema will be derived from all specified
- * tables. If the Paimon table already exists, its schema will be compared against the schema of all
- * specified tables.
+ * <p>For each Kafka topic's table to be synchronized, if the corresponding Paimon table does not
+ * exist, this action will automatically create the table, and its schema will be derived from all
+ * specified Kafka topic's tables. If the Paimon table already exists and its schema is different
+ * from that parsed from Kafka record, this action will try to preform schema evolution.
  *
  * <p>This action supports a limited number of schema changes. Currently, the framework can not drop
  * columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently
@@ -88,18 +76,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *       are supported.
  * </ul>
  *
- * <p>This action creates a Paimon table sink for each Paimon table to be written, so this action is
- * not very efficient in resource saving. We may optimize this action by merging all sinks into one
- * instance in the future.
+ * <p>To automatically synchronize new table, This action creates a single sink for all Paimon
+ * tables to be written. See {@link DatabaseSyncMode#COMBINED}.
  */
 public class KafkaSyncDatabaseAction extends ActionBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(KafkaSyncDatabaseAction.class);
-
     private final Configuration kafkaConfig;
     private final String database;
-    private final int schemaInitMaxRead;
-    private final boolean ignoreIncompatible;
     private final String tablePrefix;
     private final String tableSuffix;
     @Nullable private final Pattern includingPattern;
@@ -110,29 +93,15 @@ public class KafkaSyncDatabaseAction extends ActionBase {
             Map<String, String> kafkaConfig,
             String warehouse,
             String database,
-            boolean ignoreIncompatible,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
-        this(
-                kafkaConfig,
-                warehouse,
-                database,
-                0,
-                ignoreIncompatible,
-                null,
-                null,
-                null,
-                null,
-                catalogConfig,
-                tableConfig);
+        this(kafkaConfig, warehouse, database, null, null, null, null, catalogConfig, tableConfig);
     }
 
     KafkaSyncDatabaseAction(
             Map<String, String> kafkaConfig,
             String warehouse,
             String database,
-            int schemaInitMaxRead,
-            boolean ignoreIncompatible,
             @Nullable String tablePrefix,
             @Nullable String tableSuffix,
             @Nullable String includingTables,
@@ -142,8 +111,6 @@ public class KafkaSyncDatabaseAction extends ActionBase {
         super(warehouse, catalogConfig);
         this.kafkaConfig = Configuration.fromMap(kafkaConfig);
         this.database = database;
-        this.schemaInitMaxRead = schemaInitMaxRead;
-        this.ignoreIncompatible = ignoreIncompatible;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
         this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
@@ -165,59 +132,23 @@ public class KafkaSyncDatabaseAction extends ActionBase {
             validateCaseInsensitive();
         }
 
-        Map<String, List<KafkaSchema>> kafkaCanalSchemaMap = getKafkaCanalSchemaMap();
-
         catalog.createDatabase(database, true);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, tablePrefix, tableSuffix);
 
-        List<FileStoreTable> fileStoreTables = new ArrayList<>();
-        List<String> monitoredTopics = new ArrayList<>();
-        for (Map.Entry<String, List<KafkaSchema>> kafkaCanalSchemaEntry :
-                kafkaCanalSchemaMap.entrySet()) {
-            List<KafkaSchema> kafkaSchemaList = kafkaCanalSchemaEntry.getValue();
-            String topic = kafkaCanalSchemaEntry.getKey();
-            for (KafkaSchema kafkaSchema : kafkaSchemaList) {
-                String paimonTableName = tableNameConverter.convert(kafkaSchema.tableName());
-                Identifier identifier = new Identifier(database, paimonTableName);
-                FileStoreTable table;
-                Schema fromCanal =
-                        KafkaActionUtils.buildPaimonSchema(
-                                kafkaSchema,
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                tableConfig,
-                                caseSensitive);
-                try {
-                    table = (FileStoreTable) catalog.getTable(identifier);
-                    Supplier<String> errMsg =
-                            incompatibleMessage(table.schema(), kafkaSchema, identifier);
-                    if (shouldMonitorTable(table.schema(), fromCanal, errMsg)) {
-                        monitoredTopics.add(topic);
-                        fileStoreTables.add(table);
-                    }
-                } catch (Catalog.TableNotExistException e) {
-                    catalog.createTable(identifier, fromCanal, false);
-                    table = (FileStoreTable) catalog.getTable(identifier);
-                    monitoredTopics.add(topic);
-                    fileStoreTables.add(table);
-                }
-            }
-        }
-        monitoredTopics = monitoredTopics.stream().distinct().collect(Collectors.toList());
-        Preconditions.checkState(
-                !fileStoreTables.isEmpty(),
-                "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
-                        + "Kafka topic's table are not compatible with those of existed Paimon tables. Please check the log.");
-
-        kafkaConfig.set(KafkaConnectorOptions.TOPIC, monitoredTopics);
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory;
         String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
         if ("canal-json".equals(format)) {
-            parserFactory = RichCdcMultiplexRecordEventParser::new;
+            RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
+                    new RichCdcMultiplexRecordSchemaBuilder(tableConfig);
+            Pattern includingPattern = this.includingPattern;
+            Pattern excludingPattern = this.excludingPattern;
+            parserFactory =
+                    () ->
+                            new RichCdcMultiplexRecordEventParser(
+                                    schemaBuilder, includingPattern, excludingPattern);
         } else {
             throw new UnsupportedOperationException("This format: " + format + " is not support.");
         }
@@ -233,9 +164,9 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                                                 new CanalRecordParser(
                                                         caseSensitive, tableNameConverter)))
                         .withParserFactory(parserFactory)
-                        .withTables(fileStoreTables)
                         .withCatalogLoader(catalogLoader())
-                        .withDatabase(database);
+                        .withDatabase(database)
+                        .withMode(DatabaseSyncMode.COMBINED);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
@@ -259,78 +190,6 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                 String.format(
                         "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
                         tableSuffix));
-    }
-
-    private Map<String, List<KafkaSchema>> getKafkaCanalSchemaMap() throws Exception {
-        Map<String, List<KafkaSchema>> kafkaCanalSchemaMap = new HashMap<>();
-        List<String> topicList = kafkaConfig.get(KafkaConnectorOptions.TOPIC);
-        if (topicList.size() > 1) {
-            topicList.forEach(
-                    topic -> {
-                        try {
-                            KafkaSchema kafkaSchema =
-                                    KafkaSchema.getKafkaSchema(kafkaConfig, topic);
-                            if (shouldMonitorTable(kafkaSchema.tableName())) {
-                                kafkaCanalSchemaMap.put(
-                                        topic, Collections.singletonList(kafkaSchema));
-                            }
-
-                        } catch (Exception e) {
-                            throw new RuntimeException(e);
-                        }
-                    });
-        } else {
-            List<KafkaSchema> kafkaSchemaList =
-                    KafkaSchema.getListKafkaSchema(
-                            kafkaConfig, topicList.get(0), schemaInitMaxRead);
-            kafkaSchemaList =
-                    kafkaSchemaList.stream()
-                            .filter(kafkaSchema -> shouldMonitorTable(kafkaSchema.tableName()))
-                            .collect(Collectors.toList());
-            kafkaCanalSchemaMap.put(topicList.get(0), kafkaSchemaList);
-        }
-
-        return kafkaCanalSchemaMap;
-    }
-
-    private boolean shouldMonitorTable(String mySqlTableName) {
-        boolean shouldMonitor = true;
-        if (includingPattern != null) {
-            shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
-        }
-        if (excludingPattern != null) {
-            shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
-        }
-        LOG.debug("Source table {} is monitored? {}", mySqlTableName, shouldMonitor);
-        return shouldMonitor;
-    }
-
-    private boolean shouldMonitorTable(
-            TableSchema tableSchema, Schema schema, Supplier<String> errMsg) {
-        if (KafkaActionUtils.schemaCompatible(tableSchema, schema)) {
-            return true;
-        } else if (ignoreIncompatible) {
-            LOG.warn(errMsg.get() + "This table will be ignored.");
-            return false;
-        } else {
-            throw new IllegalArgumentException(
-                    errMsg.get()
-                            + "If you want to ignore the incompatible tables, please specify --ignore-incompatible to true.");
-        }
-    }
-
-    private Supplier<String> incompatibleMessage(
-            TableSchema paimonSchema, KafkaSchema kafkaSchema, Identifier identifier) {
-        return () ->
-                String.format(
-                        "Incompatible schema found.\n"
-                                + "Paimon table is: %s, fields are: %s.\n"
-                                + "Kafka's table is: %s.%s, fields are: %s.\n",
-                        identifier.getFullName(),
-                        paimonSchema.fields(),
-                        kafkaSchema.databaseName(),
-                        kafkaSchema.tableName(),
-                        kafkaSchema.fields());
     }
 
     // ------------------------------------------------------------------------

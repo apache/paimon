@@ -16,19 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.sink.cdc;
+
+import org.apache.paimon.schema.Schema;
 
 import java.io.Serializable;
+import java.util.Optional;
 
-/**
- * There are two modes for database sync.
- *
- * <p>1) SEPARATE mode, start a sink for each table, the synchronization of the new table requires
- * restarting the job.
- *
- * <p>2) UNIFIED mode, start a unified sink, the new table will be automatically synchronized.
- */
-public enum MySqlDatabaseSyncMode implements Serializable {
-    SEPARATE,
-    UNIFIED
+/** Build table schema for newly added table in CDC ingestion. */
+@FunctionalInterface
+public interface NewTableSchemaBuilder<T> extends Serializable {
+
+    Optional<Schema> build(T source);
 }

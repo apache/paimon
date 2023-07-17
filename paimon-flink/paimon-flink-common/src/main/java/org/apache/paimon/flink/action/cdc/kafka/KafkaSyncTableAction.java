@@ -156,15 +156,7 @@ public class KafkaSyncTableAction extends ActionBase {
             table = (FileStoreTable) catalog.getTable(identifier);
             KafkaActionUtils.assertSchemaCompatible(table.schema(), fromCanal);
         } catch (Catalog.TableNotExistException e) {
-            Schema schema =
-                    KafkaActionUtils.buildPaimonSchema(
-                            kafkaSchema,
-                            partitionKeys,
-                            primaryKeys,
-                            computedColumns,
-                            paimonConfig,
-                            caseSensitive);
-            catalog.createTable(identifier, schema, false);
+            catalog.createTable(identifier, fromCanal, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
         String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);

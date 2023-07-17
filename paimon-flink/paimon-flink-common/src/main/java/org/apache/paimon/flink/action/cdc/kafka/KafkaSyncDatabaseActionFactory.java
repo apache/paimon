@@ -42,14 +42,8 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
         checkRequiredArgument(params, "database");
         checkRequiredArgument(params, "kafka-conf");
 
-        int schemaInitMaxRead = 1000;
-        if (params.has("schema-init-max-read")) {
-            schemaInitMaxRead = Integer.parseInt(params.get("schema-init-max-read"));
-        }
-
         String warehouse = params.get("warehouse");
         String database = params.get("database");
-        boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
         String tablePrefix = params.get("table-prefix");
         String tableSuffix = params.get("table-suffix");
         String includingTables = params.get("including-tables");
@@ -63,8 +57,6 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
                         kafkaConfigOption,
                         warehouse,
                         database,
-                        schemaInitMaxRead,
-                        ignoreIncompatible,
                         tablePrefix,
                         tableSuffix,
                         includingTables,
@@ -85,8 +77,6 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  kafka-sync-database --warehouse <warehouse-path> --database <database-name> "
-                        + "[--schema-init-max-read <schema-init-max-read>] "
-                        + "[--ignore-incompatible <true/false>] "
                         + "[--table-prefix <paimon-table-prefix>] "
                         + "[--table-suffix <paimon-table-suffix>] "
                         + "[--including-tables <table-name|name-regular-expr>] "
@@ -94,16 +84,6 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
                         + "[--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
-        System.out.println();
-
-        System.out.println(
-                "--schema-init-max-read is default 1000, if your tables are all from a topic, you can set this parameter to initialize the number of tables to be synchronized.");
-        System.out.println();
-
-        System.out.println(
-                "--ignore-incompatible is default false, in this case, if Topic's table name exists in Paimon "
-                        + "and their schema is incompatible, an exception will be thrown. "
-                        + "You can specify it to true explicitly to ignore the incompatible tables and exception.");
         System.out.println();
 
         System.out.println(

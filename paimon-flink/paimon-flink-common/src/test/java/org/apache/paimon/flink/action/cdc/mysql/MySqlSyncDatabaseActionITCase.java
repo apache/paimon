@@ -59,8 +59,8 @@ import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode.SEPARATE;
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlDatabaseSyncMode.UNIFIED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -374,7 +374,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         null,
                         Collections.emptyMap(),
                         tableConfig,
-                        SEPARATE);
+                        DIVIDED);
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -549,7 +549,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         excludingTables,
                         Collections.emptyMap(),
                         tableConfig,
-                        SEPARATE);
+                        DIVIDED);
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -924,7 +924,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         null,
                         catalogConfig,
                         tableConfig,
-                        UNIFIED);
+                        COMBINED);
         action.build(env);
 
         if (Objects.nonNull(savepointPath)) {

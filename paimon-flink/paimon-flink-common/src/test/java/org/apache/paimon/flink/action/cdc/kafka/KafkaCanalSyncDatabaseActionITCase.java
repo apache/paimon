@@ -28,6 +28,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommonTestUtils;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -96,12 +98,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        false,
-                        Collections.emptyMap(),
-                        tableConfig);
+                        kafkaConfig, warehouse, database, Collections.emptyMap(), tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -152,12 +149,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        false,
-                        Collections.emptyMap(),
-                        tableConfig);
+                        kafkaConfig, warehouse, database, Collections.emptyMap(), tableConfig);
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -167,6 +159,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     private void testSchemaEvolutionImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
+        waitTablesCreated("t1", "t2");
+
         FileStoreTable table1 = getFileStoreTable("t1");
         FileStoreTable table2 = getFileStoreTable("t2");
 
@@ -296,7 +290,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         kafkaConfig,
                         warehouse,
                         database,
-                        false,
                         Collections.emptyMap(),
                         Collections.emptyMap());
 
@@ -367,8 +360,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         kafkaConfig,
                         warehouse,
                         database,
-                        0,
-                        false,
                         "test_prefix_",
                         "_test_suffix",
                         null,
@@ -440,8 +431,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         kafkaConfig,
                         warehouse,
                         database,
-                        0,
-                        false,
                         "test_prefix_",
                         "_test_suffix",
                         null,
@@ -457,6 +446,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     private void testTableAffixImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
+        waitTablesCreated("test_prefix_t1_test_suffix", "test_prefix_t2_test_suffix");
+
         FileStoreTable table1 = getFileStoreTable("test_prefix_t1_test_suffix");
         FileStoreTable table2 = getFileStoreTable("test_prefix_t2_test_suffix");
 
@@ -631,8 +622,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         kafkaConfig,
                         warehouse,
                         database,
-                        0,
-                        false,
                         null,
                         null,
                         includingTables,
@@ -644,29 +633,30 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         waitJobRunning(client);
 
         // check paimon tables
-        assertTableExists(existedTables);
+        waitTablesCreated(existedTables.toArray(new String[0]));
         assertTableNotExists(notExistedTables);
     }
 
-    private FileStoreTable getFileStoreTable(String tableName) throws Exception {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
-        Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog.getTable(identifier);
-    }
-
-    private void assertTableExists(List<String> tableNames) {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
-        for (String tableName : tableNames) {
-            Identifier identifier = Identifier.create(database, tableName);
-            assertThat(catalog.tableExists(identifier)).isTrue();
-        }
-    }
-
     private void assertTableNotExists(List<String> tableNames) {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         for (String tableName : tableNames) {
             Identifier identifier = Identifier.create(database, tableName);
             assertThat(catalog.tableExists(identifier)).isFalse();
         }
+    }
+
+    private void waitTablesCreated(String... tables) throws Exception {
+        CommonTestUtils.waitUtil(
+                () -> {
+                    try {
+                        List<String> existed = catalog().listTables(database);
+                        return existed.containsAll(Arrays.asList(tables));
+                    } catch (Catalog.DatabaseNotExistException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                Duration.ofSeconds(5),
+                Duration.ofMillis(100),
+                "Failed to wait tables to be created in 5 seconds.");
     }
 }

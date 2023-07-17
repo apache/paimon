@@ -113,6 +113,7 @@ To use this feature through `flink run`, run the following shell command.
     [--table-suffix <paimon-table-suffix>] \
     [--including-tables <mysql-table-name|name-regular-expr>] \
     [--excluding-tables <mysql-table-name|name-regular-expr>] \
+    [--mode <sync-mode>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -289,8 +290,6 @@ To use this feature through `flink run`, run the following shell command.
     kafka-sync-database
     --warehouse <warehouse-path> \
     --database <database-name> \
-    [--schema-init-max-read <int>] \
-    [--ignore-incompatible <true/false>] \
     [--table-prefix <paimon-table-prefix>] \
     [--table-suffix <paimon-table-suffix>] \
     [--including-tables <table-name|name-regular-expr>] \
@@ -304,8 +303,10 @@ To use this feature through `flink run`, run the following shell command.
 
 Only tables with primary keys will be synchronized.
 
-For each Kafka topic's table to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table.
-Its schema will be derived from all specified Kafka topic's tables,it gets the earliest non-DDL data parsing schema from topic. If the Paimon table already exists, its schema will be compared against the schema of all specified Kafka topic's tables.
+This action will build a single combined sink for all tables. For each Kafka topic's table to be synchronized, if the 
+corresponding Paimon table does not exist, this action will automatically create the table, and its schema will be derived 
+from all specified Kafka topic's tables. If the Paimon table already exists and its schema is different from that parsed 
+from Kafka record, this action will try to preform schema evolution.
 
 Example
 
@@ -317,7 +318,6 @@ Synchronization from one Kafka topic to Paimon database.
     kafka-sync-database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --schema-init-max-read 500 \
     --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
     --kafka-conf topic=order \
     --kafka-conf properties.group.id=123456 \
