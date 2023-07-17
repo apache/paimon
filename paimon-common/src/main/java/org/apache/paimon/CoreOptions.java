@@ -106,6 +106,14 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Define the default false positive probability for bloom filters.");
 
+    public static final ConfigOption<Double> ORC_DICTIONARY_ENABLE =
+            key("orc.dictionary.key.threshold")
+                    .doubleType()
+                    .defaultValue(0.8)
+                    .withDescription(
+                            "If the number of distinct keys in a dictionary is greater than this "
+                                    + "fraction of the total number of non-null rows, turn off dictionary encoding. "
+                                    + "Use 1 to always use dictionary encoding, and use 0 to turn off dictionary encoding.");
     public static final ConfigOption<Map<String, String>> FILE_COMPRESSION_PER_LEVEL =
             key("file.compression.per.level")
                     .mapType()

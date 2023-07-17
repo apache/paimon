@@ -305,6 +305,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Define the default false positive probability for bloom filters.</td>
         </tr>
         <tr>
+            <td><h5>orc.dictionary.key.threshold</h5></td>
+            <td style="word-wrap: break-word;">0.8</td>
+            <td>Double</td>
+            <td>If the number of distinct keys in a dictionary is greater than this fraction of the total number of non-null rows, turn off dictionary encoding. Use 1 to always use dictionary encoding, and use 0 to turn off dictionary encoding.</td>
+        </tr>
+        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
