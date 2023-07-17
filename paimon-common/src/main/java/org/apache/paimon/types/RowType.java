@@ -164,12 +164,17 @@ public final class RowType extends DataType {
 
     @Override
     public void collectFieldIds(Set<Integer> fieldIds) {
+        int maxId = fieldIds.stream().max(Integer::compareTo).orElse(-1);
         for (DataField field : fields) {
+            if (maxId > 0) {
+                field.resetId(++maxId);
+            }
             if (fieldIds.contains(field.id())) {
                 throw new RuntimeException(
                         String.format("Broken schema, field id %s is duplicated.", field.id()));
             }
             fieldIds.add(field.id());
+            field.type().collectFieldIds(fieldIds);
         }
     }
 

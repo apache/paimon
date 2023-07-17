@@ -45,7 +45,7 @@ public final class DataField implements Serializable {
 
     public static final String FIELD_FORMAT_NO_DESCRIPTION = "%s %s";
 
-    private final int id;
+    private int id;
 
     private final String name;
 
@@ -66,6 +66,10 @@ public final class DataField implements Serializable {
 
     public int id() {
         return id;
+    }
+
+    public void resetId(int resetId) {
+        this.id = resetId;
     }
 
     public String name() {

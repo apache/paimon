@@ -218,7 +218,10 @@ public abstract class CatalogTestBase {
                                 DataTypes.ROW(
                                         DataTypes.STRING(),
                                         DataTypes.BIGINT(),
-                                        DataTypes.TIMESTAMP()))
+                                        DataTypes.TIMESTAMP(),
+                                        DataTypes.ARRAY(DataTypes.STRING())))
+                        .column("col2", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()))
+                        .column("col3", DataTypes.ARRAY(DataTypes.ROW(DataTypes.STRING())))
                         .partitionKeys("pk1", "pk2")
                         .primaryKey("pk1", "pk2", "pk3")
                         .build();
