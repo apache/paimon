@@ -21,7 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
-import org.apache.paimon.operation.DefaultValueAssiger;
+import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
@@ -51,6 +51,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     private final CoreOptions options;
     private final SnapshotManager snapshotManager;
     private final boolean supportStreamingReadOverwrite;
+    private final DefaultValueAssigner defaultValueAssigner;
 
     private StartingScanner startingScanner;
     private FollowUpScanner followUpScanner;
@@ -59,24 +60,22 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     @Nullable private Long currentWatermark;
     @Nullable private Long nextSnapshotId;
 
-    private DefaultValueAssiger defaultValueAssiger;
-
     public InnerStreamTableScanImpl(
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
             boolean supportStreamingReadOverwrite,
-            DefaultValueAssiger defaultValueAssiger) {
+            DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
         this.options = options;
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
-        this.defaultValueAssiger = defaultValueAssiger;
+        this.defaultValueAssigner = defaultValueAssigner;
     }
 
     @Override
     public InnerStreamTableScanImpl withFilter(Predicate predicate) {
-        snapshotReader.withFilter(defaultValueAssiger.handlePredicate(predicate));
+        snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
         return this;
     }
 

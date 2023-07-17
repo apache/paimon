@@ -67,7 +67,7 @@ import static org.apache.paimon.schema.SystemColumns.VALUE_KIND;
 public class MergeSorter {
 
     private final RowType keyType;
-    private final RowType valueType;
+    private RowType valueType;
 
     private final SortEngine sortEngine;
     private final int spillThreshold;
@@ -98,6 +98,10 @@ public class MergeSorter {
 
     public void setIOManager(IOManager ioManager) {
         this.ioManager = ioManager;
+    }
+
+    public void setProjectedValueType(RowType projectedType) {
+        this.valueType = projectedType;
     }
 
     public <T> RecordReader<T> mergeSort(

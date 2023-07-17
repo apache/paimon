@@ -31,9 +31,10 @@ import org.apache.paimon.types.RowKind;
  * InternalRow}.
  */
 public class DefaultValueRow implements InternalRow {
+
     private InternalRow row;
 
-    private InternalRow defaultValueRow;
+    private final InternalRow defaultValueRow;
 
     private DefaultValueRow(InternalRow defaultValueRow) {
         this.defaultValueRow = defaultValueRow;
@@ -42,6 +43,10 @@ public class DefaultValueRow implements InternalRow {
     public DefaultValueRow replaceRow(InternalRow row) {
         this.row = row;
         return this;
+    }
+
+    public InternalRow defaultValueRow() {
+        return defaultValueRow;
     }
 
     @Override

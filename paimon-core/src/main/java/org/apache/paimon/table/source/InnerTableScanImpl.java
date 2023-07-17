@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.operation.DefaultValueAssiger;
+import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
@@ -29,27 +29,25 @@ import org.apache.paimon.utils.SnapshotManager;
 public class InnerTableScanImpl extends AbstractInnerTableScan {
 
     private final SnapshotManager snapshotManager;
+    private final DefaultValueAssigner defaultValueAssigner;
 
     private StartingScanner startingScanner;
-
     private boolean hasNext;
-
-    private DefaultValueAssiger defaultValueAssiger;
 
     public InnerTableScanImpl(
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
-            DefaultValueAssiger defaultValueAssiger) {
+            DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
         this.snapshotManager = snapshotManager;
         this.hasNext = true;
-        this.defaultValueAssiger = defaultValueAssiger;
+        this.defaultValueAssigner = defaultValueAssigner;
     }
 
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
-        snapshotReader.withFilter(defaultValueAssiger.handlePredicate(predicate));
+        snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
         return this;
     }
 

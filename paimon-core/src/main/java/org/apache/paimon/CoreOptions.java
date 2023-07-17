@@ -1101,18 +1101,18 @@ public class CoreOptions implements Serializable {
         return options.get(METASTORE_PARTITIONED_TABLE);
     }
 
-    public Options getFieldDefaultValues() {
-        Map<String, String> defultValues = new HashMap<>();
+    public Map<String, String> getFieldDefaultValues() {
+        Map<String, String> defaultValues = new HashMap<>();
+        String fieldPrefix = FIELDS_PREFIX + ".";
+        String defaultValueSuffix = "." + DEFAULT_VALUE_SUFFIX;
         for (Map.Entry<String, String> option : options.toMap().entrySet()) {
             String key = option.getKey();
-            String fieldPrefix = FIELDS_PREFIX + ".";
-            String defaultValueSuffix = "." + DEFAULT_VALUE_SUFFIX;
             if (key != null && key.startsWith(fieldPrefix) && key.endsWith(defaultValueSuffix)) {
                 String fieldName = key.replace(fieldPrefix, "").replace(defaultValueSuffix, "");
-                defultValues.put(fieldName, option.getValue());
+                defaultValues.put(fieldName, option.getValue());
             }
         }
-        return new Options(defultValues);
+        return defaultValues;
     }
 
     public List<CommitCallback> commitCallbacks() {

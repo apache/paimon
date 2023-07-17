@@ -169,6 +169,10 @@ public class KeyValueFileReaderFactory {
             return this;
         }
 
+        public RowType projectedValueType() {
+            return projectedValueType;
+        }
+
         public KeyValueFileReaderFactory build(BinaryRow partition, int bucket) {
             return build(partition, bucket, true, Collections.emptyList());
         }

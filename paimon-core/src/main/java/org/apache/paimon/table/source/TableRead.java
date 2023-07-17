@@ -37,9 +37,7 @@ import java.util.List;
 @Public
 public interface TableRead {
 
-    default TableRead withIOManager(IOManager ioManager) {
-        return this;
-    }
+    TableRead withIOManager(IOManager ioManager);
 
     RecordReader<InternalRow> createReader(Split split) throws IOException;
 
