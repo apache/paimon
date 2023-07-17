@@ -189,14 +189,19 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     @Test
     public void testSortSpillMerge() {
         sql(
-                "CREATE TABLE IF NOT EXISTS KT (a INT PRIMARY KEY NOT ENFORCED, b INT) WITH ('sort-spill-threshold'='2')");
-        sql("INSERT INTO KT VALUES (1, 1)");
-        sql("INSERT INTO KT VALUES (1, 2)");
-        sql("INSERT INTO KT VALUES (1, 3)");
-        sql("INSERT INTO KT VALUES (1, 4)");
-        sql("INSERT INTO KT VALUES (1, 5)");
-        sql("INSERT INTO KT VALUES (1, 6)");
-        sql("INSERT INTO KT VALUES (1, 7)");
-        assertThat(sql("SELECT * FROM KT")).containsExactlyInAnyOrder(Row.of(1, 7));
+                "CREATE TABLE IF NOT EXISTS KT (a INT PRIMARY KEY NOT ENFORCED, b STRING) WITH ('sort-spill-threshold'='2')");
+        sql("INSERT INTO KT VALUES (1, '1')");
+        sql("INSERT INTO KT VALUES (1, '2')");
+        sql("INSERT INTO KT VALUES (1, '3')");
+        sql("INSERT INTO KT VALUES (1, '4')");
+        sql("INSERT INTO KT VALUES (1, '5')");
+        sql("INSERT INTO KT VALUES (1, '6')");
+        sql("INSERT INTO KT VALUES (1, '7')");
+
+        // select all
+        assertThat(sql("SELECT * FROM KT")).containsExactlyInAnyOrder(Row.of(1, "7"));
+
+        // select projection
+        assertThat(sql("SELECT b FROM KT")).containsExactlyInAnyOrder(Row.of("7"));
     }
 }

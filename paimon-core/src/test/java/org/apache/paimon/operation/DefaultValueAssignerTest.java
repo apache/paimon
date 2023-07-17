@@ -19,7 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.predicate.Predicate;
@@ -44,7 +44,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-class DefaultValueAssigerTest {
+class DefaultValueAssignerTest {
     @TempDir java.nio.file.Path tempDir;
 
     private TableSchema tableSchema;
@@ -82,20 +82,20 @@ class DefaultValueAssigerTest {
 
     @Test
     public void testGeneralRow() {
-        DefaultValueAssiger defaultValueAssiger = new DefaultValueAssiger(tableSchema);
+        DefaultValueAssigner defaultValueAssigner = DefaultValueAssigner.create(tableSchema);
         int[] projection = tableSchema.projection(Lists.newArrayList("col5", "col4", "col0"));
         Projection top = Projection.of(projection);
         int[][] nest = top.toNestedIndexes();
-        defaultValueAssiger = defaultValueAssiger.handleProject(nest);
-        GenericRow row = defaultValueAssiger.createDefaultValueMapping();
+        defaultValueAssigner = defaultValueAssigner.handleProject(nest);
+        InternalRow row = defaultValueAssigner.createDefaultValueRow().defaultValueRow();
         assertEquals(
                 "1|0|null",
                 String.format("%s|%s|%s", row.getString(0), row.getString(1), row.getString(2)));
     }
 
     @Test
-    public void testHanldePredicate() {
-        DefaultValueAssiger defaultValueAssiger = new DefaultValueAssiger(tableSchema);
+    public void testHandlePredicate() {
+        DefaultValueAssigner defaultValueAssigner = DefaultValueAssigner.create(tableSchema);
         PredicateBuilder predicateBuilder = new PredicateBuilder(tableSchema.logicalRowType());
 
         {
@@ -103,7 +103,7 @@ class DefaultValueAssigerTest {
                     PredicateBuilder.and(
                             predicateBuilder.equal(predicateBuilder.indexOf("col5"), "100"),
                             predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
-            Predicate actual = defaultValueAssiger.handlePredicate(predicate);
+            Predicate actual = defaultValueAssigner.handlePredicate(predicate);
             assertEquals(actual, predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
         }
 
@@ -112,18 +112,18 @@ class DefaultValueAssigerTest {
                     PredicateBuilder.and(
                             predicateBuilder.equal(predicateBuilder.indexOf("col5"), "100"),
                             predicateBuilder.equal(predicateBuilder.indexOf("col4"), "1"));
-            Predicate actual = defaultValueAssiger.handlePredicate(predicate);
+            Predicate actual = defaultValueAssigner.handlePredicate(predicate);
             Assertions.assertThat(actual).isNull();
         }
 
         {
-            Predicate actual = defaultValueAssiger.handlePredicate(null);
+            Predicate actual = defaultValueAssigner.handlePredicate(null);
             Assertions.assertThat(actual).isNull();
         }
 
         {
             Predicate actual =
-                    defaultValueAssiger.handlePredicate(
+                    defaultValueAssigner.handlePredicate(
                             predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
             assertEquals(actual, predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
         }

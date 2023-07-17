@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -39,6 +40,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -214,6 +216,11 @@ public class FilesTable implements ReadonlyTable {
         @Override
         public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
+            return this;
+        }
+
+        @Override
+        public TableRead withIOManager(IOManager ioManager) {
             return this;
         }
 

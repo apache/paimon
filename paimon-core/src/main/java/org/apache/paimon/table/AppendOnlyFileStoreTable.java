@@ -22,6 +22,7 @@ import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -40,6 +41,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
 
@@ -125,6 +127,11 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
             @Override
             public InnerTableRead withProjection(int[][] projection) {
                 read.withProjection(projection);
+                return this;
+            }
+
+            @Override
+            public TableRead withIOManager(IOManager ioManager) {
                 return this;
             }
 
