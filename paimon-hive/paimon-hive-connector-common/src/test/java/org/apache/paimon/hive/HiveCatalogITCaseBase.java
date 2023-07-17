@@ -295,12 +295,39 @@ public abstract class HiveCatalogITCaseBase {
 
     @Test
     public void testFlinkWriteAndHiveRead() throws Exception {
-        tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+        tEnv.executeSql(
+                        "CREATE TABLE t ( "
+                                + "f0 BOOLEAN, "
+                                + "f1 TINYINT, "
+                                + "f2 SMALLINT, "
+                                + "f3 INT, "
+                                + "f4 BIGINT, "
+                                + "f5 FLOAT, "
+                                + "f6 DOUBLE, "
+                                + "f7 DECIMAL(10,2), "
+                                + "f8 CHAR(3), "
+                                + "f9 VARCHAR(10), "
+                                + "f10 STRING, "
+                                + "f11 BINARY, "
+                                + "f12 VARBINARY, "
+                                + "f13 DATE, "
+                                + "f14 TIMESTAMP(6), "
+                                + "f15 ARRAY<STRING>, "
+                                + "f16 Map<STRING, STRING>, "
+                                + "f17 ROW<f0 STRING, f1 INT>"
+                                + ") WITH ( 'file.format' = 'avro' )")
                 .await();
-        tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
+        tEnv.executeSql(
+                        "INSERT INTO t VALUES "
+                                + "(true, CAST(1 AS TINYINT), CAST(1 AS SMALLINT), 1, 1234567890123456789, 1.23, 3.14159, CAST('1234.56' AS DECIMAL(10, 2)), 'ABC', 'v1', 'Hello, World!', X'010203', X'010203', DATE '2023-01-01', TIMESTAMP '2023-01-01 12:00:00.123', ARRAY['value1', 'value2', 'value3'], MAP['key1', 'value1', 'key2', 'value2'], ROW('v1', 1)), "
+                                + "(false, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), 2, 234567890123456789, 2.34, 2.111111, CAST('2345.67' AS DECIMAL(10, 2)), 'DEF', 'v2', 'Apache Paimon', X'040506',X'040506', DATE '2023-02-01', TIMESTAMP '2023-02-01 12:00:00.456', ARRAY['value4', 'value5', 'value6'], MAP['key1', 'value11', 'key2', 'value22'], ROW('v2', 2))")
+                .await();
         Assert.assertEquals(
-                Arrays.asList("1\tHi", "2\tHello"),
-                hiveShell.executeQuery("SELECT * FROM t ORDER BY a"));
+                Arrays.asList(
+                        "true\t1\t1\t1\t1234567890123456789\t1.23\t3.14159\t1234.56\tABC\tv1\tHello, World!\t01\t010203\t2023-01-01\t2023-01-01 12:00:00.123\t[\"value1\",\"value2\",\"value3\"]\tvalue1\tvalue1\tvalue2\t{\"f0\":\"v1\",\"f1\":1}\tv1\t1",
+                        "false\t2\t2\t2\t234567890123456789\t2.34\t2.111111\t2345.67\tDEF\tv2\tApache Paimon\t04\t040506\t2023-02-01\t2023-02-01 12:00:00.456\t[\"value4\",\"value5\",\"value6\"]\tvalue4\tvalue11\tvalue22\t{\"f0\":\"v2\",\"f1\":2}\tv2\t2"),
+                hiveShell.executeQuery(
+                        "SELECT f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, hex(f11), hex(f12), f13, f14, f15, f15[0] as f15a, f16['key1'] as f16a, f16['key2'] as f16b, f17, f17.f0, f17.f1 FROM t ORDER BY f3"));
 
         try {
             tEnv.executeSql("INSERT INTO hive_table VALUES (1, 'Hi'), (2, 'Hello')").await();
