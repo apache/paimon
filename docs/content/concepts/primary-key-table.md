@@ -214,6 +214,18 @@ If you allow some functions to ignore retraction messages, you can configure:
 For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
 {{< /hint >}}
 
+### First Row
+
+By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the `deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog. 
+
+{{< hint info >}}
+For streaming queries, `first-row` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
+{{< /hint >}}
+
+{{< hint info >}}
+Currently, only the first row of insert order supported, so you can not specify `sequence.field` for this merge engine. And also not accept `DELETE` and `UPDATE_BEFORE` message.
+{{< /hint>}}
+
 ## Changelog Producers
 
 Streaming queries will continuously produce the latest changes. These changes can come from the underlying table files or from an [external log system]({{< ref "concepts/external-log-systems" >}}) like Kafka. Compared to the external log system, changes from table files have lower cost but higher latency (depending on how often snapshots are created).

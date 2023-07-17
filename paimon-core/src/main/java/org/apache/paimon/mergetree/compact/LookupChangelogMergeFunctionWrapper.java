@@ -20,7 +20,7 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
-import org.apache.paimon.mergetree.LookupLevels;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowKind;
 
 import java.util.function.Function;
@@ -46,7 +46,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
 
     private final LookupMergeFunction mergeFunction;
     private final MergeFunction<KeyValue> mergeFunction2;
-    private final Function<LookupLevels.LookupContext, KeyValue> lookup;
+    private final Function<InternalRow, KeyValue> lookup;
 
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
@@ -54,16 +54,12 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
     private final RecordEqualiser valueEqualiser;
     private final boolean changelogRowDeduplicate;
     private final boolean isFirstRow;
-    private final int outputLevel;
-    private final int maxLevel;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
-            Function<LookupLevels.LookupContext, KeyValue> lookup,
+            Function<InternalRow, KeyValue> lookup,
             RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate,
-            int outputLevel,
-            int maxLevel) {
+            boolean changelogRowDeduplicate) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
                 mergeFunction instanceof LookupMergeFunction,
@@ -74,9 +70,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         this.mergeFunction2 = mergeFunctionFactory.create();
         this.lookup = lookup;
         this.valueEqualiser = valueEqualiser;
-        this.changelogRowDeduplicate = changelogRowDeduplicate || isFirstRow;
-        this.outputLevel = outputLevel;
-        this.maxLevel = maxLevel;
+        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     @Override
@@ -103,46 +97,25 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
             return reusedResult.setResult(result);
         }
 
-        LookupLevels.LookupOrder order;
-        int startLevel;
-        int endLevel;
-        if (isFirstRow) {
-            // For first row, find from the highest layer.
-            if (highLevel != null) {
-                if (highLevel.level() == maxLevel) {
-                    setChangelog(highLevel, result);
-                    return reusedResult.setResult(result);
-                }
-                endLevel = highLevel.level() + 1;
-            } else {
-                endLevel = Math.min(outputLevel + 1, maxLevel);
-            }
-
-            order = LookupLevels.LookupOrder.High2Lower;
-            startLevel = maxLevel;
-        } else {
-            // With level 0, with the latest high level, return changelog
-            if (highLevel != null) {
+        // 2. With level 0, with the latest high level, return changelog
+        if (highLevel != null) {
+            if (!isFirstRow) {
                 setChangelog(highLevel, result);
-                return reusedResult.setResult(result);
             }
-            order = LookupLevels.LookupOrder.Low2Higher;
-            startLevel = Math.min(outputLevel + 1, maxLevel);
-            endLevel = maxLevel;
+            return reusedResult.setResult(result);
         }
 
         // 3. Lookup to find the latest high level record
-        highLevel =
-                lookup.apply(
-                        new LookupLevels.LookupContext(order, startLevel, endLevel, result.key()));
+        highLevel = lookup.apply(result.key());
+
         if (highLevel != null) {
-            mergeFunction2.reset();
-            mergeFunction2.add(highLevel);
-            mergeFunction2.add(result);
-            result = mergeFunction2.getResult();
-            setChangelog(highLevel, result);
-        } else if (mergeFunction.highLevel != null) {
-            setChangelog(mergeFunction.highLevel, result);
+            if (!isFirstRow) {
+                mergeFunction2.reset();
+                mergeFunction2.add(highLevel);
+                mergeFunction2.add(result);
+                result = mergeFunction2.getResult();
+                setChangelog(highLevel, result);
+            }
         } else {
             setChangelog(null, result);
         }

@@ -62,11 +62,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 DeduplicateMergeFunction.factory(),
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
-                        (context) -> highLevel.get(context.key),
+                        highLevel::get,
                         EQUALISER,
-                        changelogRowDeduplicate,
-                        3,
-                        5);
+                        changelogRowDeduplicate);
 
         // Without level-0
         function.reset();
@@ -220,11 +218,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 }),
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
-                        (context) -> null,
+                        key -> null,
                         EQUALISER,
-                        changelogRowDeduplicate,
-                        4,
-                        5);
+                        changelogRowDeduplicate);
 
         // Without level-0
         function.reset();
@@ -309,11 +305,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                                         1, "f1", new IntType())))),
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
-                        (context) -> null,
+                        key -> null,
                         EQUALISER,
-                        true,
-                        3,
-                        5); // force to true for first_row merge engine.
+                        true); // force to true for first_row merge engine.
 
         // Without level-0
         function.reset();

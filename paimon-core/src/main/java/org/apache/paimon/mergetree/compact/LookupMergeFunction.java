@@ -41,7 +41,7 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     KeyValue highLevel;
     boolean containLevel0;
-    boolean isFirstRow;
+    protected final boolean isFirstRow;
 
     public LookupMergeFunction(
             MergeFunction<KeyValue> mergeFunction, RowType keyType, RowType valueType) {

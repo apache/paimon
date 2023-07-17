@@ -89,17 +89,15 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
     protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
         return new LookupChangelogMergeFunctionWrapper(
                 mfFactory,
-                (context) -> {
+                (key) -> {
                     try {
-                        return lookupLevels.lookup(context);
+                        return lookupLevels.lookup(key, outputLevel + 1);
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
                 },
                 valueEqualiser,
-                changelogRowDeduplicate,
-                outputLevel,
-                lookupLevels.maxLevel());
+                changelogRowDeduplicate);
     }
 
     @Override
