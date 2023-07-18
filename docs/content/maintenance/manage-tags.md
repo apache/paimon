@@ -37,7 +37,7 @@ snapshot. A typical usage is creating tags daily, then you can maintain the hist
 
 Paimon supports automatic creation of tags in writing job.
 
-**Option 1: Choose Creation Mode**
+**Step 1: Choose Creation Mode**
 
 You can set `'tag.automatic-creation'` to `process-time` or `watermark`:
 - `process-time`: Create TAG based on the time of the machine.
@@ -48,13 +48,13 @@ If you choose Watermark, you may need to specify the time zone of watermark, if 
 UTC time zone, please configure `'sink.watermark-time-zone'`.
 {{< /hint >}}
 
-**Option 2: Choose Creation Period**
+**Step 2: Choose Creation Period**
 
 What frequency is used to generate tags. You can choose `'daily'`, `'hourly'` and `'two-hours'` for `'tag.creation-period'`.
 
 If you need to wait for late data, you can configure a delay time: `'tag.creation-delay'`.
 
-**Option 3: Automatic deletion of tags**
+**Step 3: Automatic deletion of tags**
 
 You can configure `'tag.num-retained-max'` to delete tags automatically.
 
