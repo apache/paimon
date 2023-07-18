@@ -18,6 +18,8 @@
 
 package org.apache.paimon.options;
 
+import org.apache.paimon.options.description.Description;
+import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.table.TableType;
 
 import java.time.Duration;
@@ -75,4 +77,24 @@ public class CatalogOptions {
                     .defaultValue(true)
                     .withDescription(
                             "Allow to fallback to hadoop File IO when no file io found for the scheme.");
+
+    public static final ConfigOption<String> LINEAGE_META =
+            key("lineage-meta")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The lineage meta to store table and data lineage information.")
+                                    .linebreak()
+                                    .linebreak()
+                                    .text("Possible values:")
+                                    .linebreak()
+                                    .list(
+                                            TextElement.text(
+                                                    "\"jdbc\": Use standard jdbc to store table and data lineage information."))
+                                    .list(
+                                            TextElement.text(
+                                                    "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
+                                    .build());
 }

@@ -21,10 +21,13 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.lineage.LineageMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,8 +45,12 @@ public class FileSystemCatalog extends AbstractCatalog {
         this.warehouse = warehouse;
     }
 
-    public FileSystemCatalog(FileIO fileIO, Path warehouse, Map<String, String> options) {
-        super(fileIO, options);
+    public FileSystemCatalog(
+            FileIO fileIO,
+            Path warehouse,
+            Map<String, String> options,
+            @Nullable LineageMeta lineageMeta) {
+        super(fileIO, options, lineageMeta);
         this.warehouse = warehouse;
     }
 

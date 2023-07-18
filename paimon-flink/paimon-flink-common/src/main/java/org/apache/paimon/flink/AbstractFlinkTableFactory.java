@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.LogConsistency;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
@@ -30,8 +31,12 @@ import org.apache.paimon.flink.source.SystemTableSource;
 import org.apache.paimon.flink.source.table.PushedRichTableSource;
 import org.apache.paimon.flink.source.table.PushedTableSource;
 import org.apache.paimon.flink.source.table.RichTableSource;
+import org.apache.paimon.lineage.LineageMeta;
+import org.apache.paimon.lineage.TableLineageEntity;
+import org.apache.paimon.lineage.TableLineageEntityImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
@@ -39,6 +44,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.configuration.PipelineOptions;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
@@ -48,12 +54,15 @@ import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.DynamicTableSourceFactory;
 import org.apache.flink.table.types.logical.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
@@ -82,6 +91,12 @@ public abstract class AbstractFlinkTableFactory
                     new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode));
         } else {
             Table table = buildPaimonTable(context);
+            if (table instanceof FileStoreTable) {
+                storeTableLineage(
+                        ((FileStoreTable) table).catalogEnvironment().lineageMeta(),
+                        context,
+                        (entity, lineage) -> lineage.storeSourceTableLineage(entity));
+            }
             DataTableSource source =
                     new DataTableSource(
                             context.getObjectIdentifier(),
@@ -97,11 +112,37 @@ public abstract class AbstractFlinkTableFactory
 
     @Override
     public DynamicTableSink createDynamicTableSink(Context context) {
+        Table table = buildPaimonTable(context);
+        if (table instanceof FileStoreTable) {
+            storeTableLineage(
+                    ((FileStoreTable) table).catalogEnvironment().lineageMeta(),
+                    context,
+                    (entity, lineage) -> lineage.storeSinkTableLineage(entity));
+        }
         return new FlinkTableSink(
                 context.getObjectIdentifier(),
-                buildPaimonTable(context),
+                table,
                 context,
                 createOptionalLogStoreFactory(context).orElse(null));
+    }
+
+    private void storeTableLineage(
+            @Nullable LineageMeta lineageMeta,
+            Context context,
+            BiConsumer<TableLineageEntity, LineageMeta> tableLineage) {
+        if (lineageMeta != null) {
+            String pipelineName = context.getConfiguration().get(PipelineOptions.NAME);
+            if (pipelineName == null) {
+                throw new ValidationException("Cannot get pipeline name for lineage meta.");
+            }
+            tableLineage.accept(
+                    new TableLineageEntityImpl(
+                            context.getObjectIdentifier().getDatabaseName(),
+                            context.getObjectIdentifier().getObjectName(),
+                            pipelineName,
+                            Timestamp.fromEpochMillis(System.currentTimeMillis())),
+                    lineageMeta);
+        }
     }
 
     @Override
@@ -162,7 +203,9 @@ public abstract class AbstractFlinkTableFactory
 
     static CatalogContext createCatalogContext(DynamicTableFactory.Context context) {
         return CatalogContext.create(
-                Options.fromMap(context.getCatalogTable().getOptions()), new FlinkFileIOLoader());
+                Options.fromMap(context.getCatalogTable().getOptions()),
+                new FlinkFileIOLoader(),
+                context.getClassLoader());
     }
 
     static Table buildPaimonTable(DynamicTableFactory.Context context) {

@@ -21,14 +21,18 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.lineage.LineageMeta;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
+
+import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.HashMap;
@@ -46,13 +50,18 @@ public abstract class AbstractCatalog implements Catalog {
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
 
+    @Nullable protected final LineageMeta lineageMeta;
+
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
+        this.lineageMeta = null;
         this.tableDefaultOptions = new HashMap<>();
     }
 
-    protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
+    protected AbstractCatalog(
+            FileIO fileIO, Map<String, String> options, @Nullable LineageMeta lineageMeta) {
         this.fileIO = fileIO;
+        this.lineageMeta = lineageMeta;
         this.tableDefaultOptions = new HashMap<>();
 
         options.keySet().stream()
@@ -95,8 +104,10 @@ public abstract class AbstractCatalog implements Catalog {
                 fileIO,
                 getDataTableLocation(identifier),
                 tableSchema,
-                Lock.factory(lockFactory().orElse(null), identifier),
-                metastoreClientFactory(identifier).orElse(null));
+                new CatalogEnvironment(
+                        Lock.factory(lockFactory().orElse(null), identifier),
+                        metastoreClientFactory(identifier).orElse(null),
+                        lineageMeta));
     }
 
     @VisibleForTesting

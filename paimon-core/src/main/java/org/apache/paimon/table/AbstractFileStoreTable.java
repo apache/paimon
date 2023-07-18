@@ -26,10 +26,8 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -57,8 +55,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -80,15 +76,13 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final FileIO fileIO;
     protected final Path path;
     protected final TableSchema tableSchema;
-    protected final Lock.Factory lockFactory;
-    @Nullable protected final MetastoreClient.Factory metastoreClientFactory;
+    protected final CatalogEnvironment catalogEnvironment;
 
     public AbstractFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
-            Lock.Factory lockFactory,
-            @Nullable MetastoreClient.Factory metastoreClientFactory) {
+            CatalogEnvironment catalogEnvironment) {
         this.fileIO = fileIO;
         this.path = path;
         if (!tableSchema.options().containsKey(PATH.key())) {
@@ -98,13 +92,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             tableSchema = tableSchema.copy(newOptions);
         }
         this.tableSchema = tableSchema;
-        this.lockFactory = lockFactory;
-        this.metastoreClientFactory = metastoreClientFactory;
+        this.catalogEnvironment = catalogEnvironment;
     }
 
     @Override
     public BucketMode bucketMode() {
         return store().bucketMode();
+    }
+
+    @Override
+    public CatalogEnvironment catalogEnvironment() {
+        return catalogEnvironment;
     }
 
     public RowKeyExtractor createRowKeyExtractor() {
@@ -259,15 +257,18 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 coreOptions().writeOnly() ? null : store().newExpire(),
                 coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
                 coreOptions().writeOnly() ? null : store().newTagCreationManager(),
-                lockFactory.create(),
+                catalogEnvironment.lockFactory().create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path));
     }
 
     private List<CommitCallback> createCommitCallbacks() {
         List<CommitCallback> callbacks = new ArrayList<>(loadCommitCallbacks());
-        if (coreOptions().partitionedTableInMetastore() && metastoreClientFactory != null) {
-            callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
+        if (coreOptions().partitionedTableInMetastore()
+                && catalogEnvironment.metastoreClientFactory() != null) {
+            callbacks.add(
+                    new AddPartitionCommitCallback(
+                            catalogEnvironment.metastoreClientFactory().create()));
         }
         return callbacks;
     }

@@ -23,13 +23,10 @@ import org.apache.paimon.WriteMode;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -66,21 +63,29 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
-        return create(fileIO, tablePath, tableSchema, options, Lock.emptyFactory(), null);
+        return create(
+                fileIO,
+                tablePath,
+                tableSchema,
+                options,
+                new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
-        return create(fileIO, tablePath, tableSchema, new Options(), Lock.emptyFactory(), null);
+        return create(
+                fileIO,
+                tablePath,
+                tableSchema,
+                new Options(),
+                new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 
     public static FileStoreTable create(
             FileIO fileIO,
             Path tablePath,
             TableSchema tableSchema,
-            Lock.Factory lockFactory,
-            @Nullable MetastoreClient.Factory metastoreClientFactory) {
-        return create(
-                fileIO, tablePath, tableSchema, new Options(), lockFactory, metastoreClientFactory);
+            CatalogEnvironment catalogEnvironment) {
+        return create(fileIO, tablePath, tableSchema, new Options(), catalogEnvironment);
     }
 
     public static FileStoreTable create(
@@ -88,8 +93,7 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             Options dynamicOptions,
-            Lock.Factory lockFactory,
-            @Nullable MetastoreClient.Factory metastoreClientFactory) {
+            CatalogEnvironment catalogEnvironment) {
         FileStoreTable table;
         Options coreOptions = Options.fromMap(tableSchema.options());
         WriteMode writeMode = coreOptions.get(CoreOptions.WRITE_MODE);
@@ -103,24 +107,16 @@ public class FileStoreTableFactory {
         if (writeMode == WriteMode.APPEND_ONLY) {
             table =
                     new AppendOnlyFileStoreTable(
-                            fileIO, tablePath, tableSchema, lockFactory, metastoreClientFactory);
+                            fileIO, tablePath, tableSchema, catalogEnvironment);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
                 table =
                         new ChangelogValueCountFileStoreTable(
-                                fileIO,
-                                tablePath,
-                                tableSchema,
-                                lockFactory,
-                                metastoreClientFactory);
+                                fileIO, tablePath, tableSchema, catalogEnvironment);
             } else {
                 table =
                         new ChangelogWithKeyFileStoreTable(
-                                fileIO,
-                                tablePath,
-                                tableSchema,
-                                lockFactory,
-                                metastoreClientFactory);
+                                fileIO, tablePath, tableSchema, catalogEnvironment);
             }
         }
         return table.copy(dynamicOptions.toMap());

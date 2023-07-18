@@ -40,6 +40,7 @@ public class FileSystemCatalogFactory implements CatalogFactory {
             throw new IllegalArgumentException(
                     "Only managed table is supported in File system catalog.");
         }
-        return new FileSystemCatalog(fileIO, warehouse, context.options().toMap());
+        return new FileSystemCatalog(
+                fileIO, warehouse, context.options().toMap(), context.lineageMeta());
     }
 }

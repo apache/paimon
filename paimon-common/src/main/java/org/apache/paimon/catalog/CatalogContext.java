@@ -19,14 +19,18 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIOLoader;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.lineage.LineageMeta;
+import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.conf.Configuration;
 
 import javax.annotation.Nullable;
 
+import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.utils.HadoopUtils.getHadoopConfiguration;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -42,14 +46,17 @@ public class CatalogContext {
     private final Options options;
     private final Configuration hadoopConf;
     @Nullable private final FileIOLoader fallbackIOLoader;
+    @Nullable private final LineageMeta lineageMeta;
 
     private CatalogContext(
             Options options,
             @Nullable Configuration hadoopConf,
-            @Nullable FileIOLoader fallbackIOLoader) {
+            @Nullable FileIOLoader fallbackIOLoader,
+            @Nullable LineageMeta lineageMeta) {
         this.options = checkNotNull(options);
         this.hadoopConf = hadoopConf == null ? getHadoopConfiguration(options) : hadoopConf;
         this.fallbackIOLoader = fallbackIOLoader;
+        this.lineageMeta = lineageMeta;
     }
 
     public static CatalogContext create(Path warehouse) {
@@ -59,20 +66,33 @@ public class CatalogContext {
     }
 
     public static CatalogContext create(Options options) {
-        return new CatalogContext(options, null, null);
+        return new CatalogContext(options, null, null, null);
     }
 
     public static CatalogContext create(Options options, Configuration hadoopConf) {
-        return new CatalogContext(options, hadoopConf, null);
+        return new CatalogContext(options, hadoopConf, null, null);
     }
 
-    public static CatalogContext create(Options options, FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, null, fallbackIOLoader);
+    public static CatalogContext create(
+            Options options, FileIOLoader fallbackIOLoader, ClassLoader classLoader) {
+        return new CatalogContext(
+                options, null, fallbackIOLoader, findAndCreateLineageMeta(options, classLoader));
     }
 
     public static CatalogContext create(
             Options options, Configuration hadoopConf, FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, hadoopConf, fallbackIOLoader);
+        return new CatalogContext(options, hadoopConf, fallbackIOLoader, null);
+    }
+
+    @Nullable
+    private static LineageMeta findAndCreateLineageMeta(Options options, ClassLoader classLoader) {
+        return options.getOptional(LINEAGE_META)
+                .map(
+                        meta ->
+                                FactoryUtil.discoverFactory(
+                                                classLoader, LineageMetaFactory.class, meta)
+                                        .create(() -> options))
+                .orElse(null);
     }
 
     public Options options() {
@@ -87,5 +107,10 @@ public class CatalogContext {
     @Nullable
     public FileIOLoader fallbackIO() {
         return fallbackIOLoader;
+    }
+
+    @Nullable
+    public LineageMeta lineageMeta() {
+        return lineageMeta;
     }
 }

@@ -43,7 +43,8 @@ public class TestCaseInsensitiveCatalogFactory implements CatalogFactory {
 
     @Override
     public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        return new FileSystemCatalog(fileIO, warehouse, context.options().toMap()) {
+        return new FileSystemCatalog(
+                fileIO, warehouse, context.options().toMap(), context.lineageMeta()) {
             @Override
             public void createDatabase(String name, boolean ignoreIfExists)
                     throws DatabaseAlreadyExistException {

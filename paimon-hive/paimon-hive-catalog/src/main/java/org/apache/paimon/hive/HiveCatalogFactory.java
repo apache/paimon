@@ -77,6 +77,7 @@ public class HiveCatalogFactory implements CatalogFactory {
                 hiveConf,
                 clientClassName,
                 context.options().toMap(),
-                warehouse.toUri().toString());
+                warehouse.toUri().toString(),
+                context.lineageMeta());
     }
 }
