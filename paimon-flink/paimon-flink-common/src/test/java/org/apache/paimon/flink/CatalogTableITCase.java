@@ -528,5 +528,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         List<Row> result = sql("SELECT * FROM T$consumers");
         assertThat(result).containsExactly(Row.of("my1", 3L));
+
+        paimonTable("T").recordConsumer("my1", 1);
+        result = sql("SELECT * FROM T$consumers");
+        assertThat(result).containsExactly(Row.of("my1", 1L));
     }
 }

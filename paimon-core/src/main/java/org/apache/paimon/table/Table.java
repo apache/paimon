@@ -79,6 +79,9 @@ public interface Table extends Serializable {
     @Experimental
     void rollbackTo(String tagName);
 
+    /** Record the consumer of the table through consumer id and next snapshot id. */
+    void recordConsumer(String consumerId, long nextSnapshotId);
+
     // =============== Read & Write Operations ==================
 
     /** Returns a new read builder. */

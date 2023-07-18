@@ -14,6 +14,8 @@
 # limitations under the License.
 
 org.apache.paimon.flink.kafka.KafkaLogStoreFactory
+
+### action factories
 org.apache.paimon.flink.action.CompactActionFactory
 org.apache.paimon.flink.action.DropPartitionActionFactory
 org.apache.paimon.flink.action.DeleteActionFactory
@@ -25,3 +27,4 @@ org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableActionFactory
 org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseActionFactory
 org.apache.paimon.flink.action.cdc.kafka.KafkaSyncTableActionFactory
 org.apache.paimon.flink.action.cdc.kafka.KafkaSyncDatabaseActionFactory
+org.apache.paimon.flink.action.consumer.RecordConsumerActionFactory

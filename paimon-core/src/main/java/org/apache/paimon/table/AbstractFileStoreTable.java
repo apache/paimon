@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -440,6 +441,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         }
     }
 
+    @Override
+    public void recordConsumer(String consumerId, long nextSnapshotId) {
+        consumerManager().recordConsumer(consumerId, new Consumer(nextSnapshotId));
+    }
+
     private TagManager tagManager() {
         return new TagManager(fileIO, path);
     }
@@ -451,5 +457,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    private ConsumerManager consumerManager() {
+        return new ConsumerManager(fileIO, path);
     }
 }

@@ -400,6 +400,79 @@ public class FlinkActionsE2eTest extends E2eTestBase {
         checkResult();
     }
 
+    @Test
+    public void testRecordConsumer() throws Exception {
+        String tableDdl =
+                "CREATE TABLE IF NOT EXISTS T (\n"
+                        + "    k INT,\n"
+                        + "    v STRING,\n"
+                        + "    PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ");\n";
+
+        String inserts =
+                "INSERT INTO T VALUES (1, 'Apache');\n"
+                        + "INSERT INTO T VALUES (2, 'Flink');\n"
+                        + "INSERT INTO T VALUES (3, 'Paimon');\n";
+
+        runSql("SET 'table.dml-sync' = 'true';\n" + inserts, catalogDdl, useCatalogCmd, tableDdl);
+
+        runSql(
+                "SET 'execution.checkpointing.interval' = '5s';\n"
+                        + "INSERT INTO result1 SELECT * FROM T /*+ OPTIONS('consumer-id'='myid') */;",
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl,
+                createResultSink("result1", "k INT, v STRING"));
+        checkResult("1, Apache", "2, Flink", "3, Paimon");
+        clearCurrentResults();
+
+        runSql(
+                "SET 'execution.runtime-mode' = 'batch';\n"
+                        + "RESET 'execution.checkpointing.interval';\n"
+                        + "INSERT INTO _consumers1 SELECT consumer_id, next_snapshot_id FROM T\\$consumers;",
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl,
+                createResultSink("_consumers1", "consumer_id STRING, next_snapshot_id BIGINT"));
+        checkResult("myid, 4");
+        clearCurrentResults();
+
+        // run reset consumer action job
+        Container.ExecResult execResult =
+                jobManager.execInContainer(
+                        "bin/flink",
+                        "run",
+                        "-p",
+                        "1",
+                        "lib/paimon-flink-action.jar",
+                        "record-consumer",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--table",
+                        "T",
+                        "--consumer-id",
+                        "myid",
+                        "--snapshot",
+                        "1");
+
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
+
+        runSql(
+                "INSERT INTO _consumers2 SELECT consumer_id, next_snapshot_id FROM T\\$consumers;",
+                catalogDdl,
+                useCatalogCmd,
+                tableDdl,
+                createResultSink("_consumers2", "consumer_id STRING, next_snapshot_id BIGINT"));
+
+        // The value of next_snapshot_id in the result is 4 instead of 1,
+        // because the streaming read task is running, and the consumer `myid` is reset again,
+        // overwriting the value written by the action job.
+        checkResult("myid, 4");
+    }
+
     private void runSql(String sql, String... ddls) throws Exception {
         runSql(String.join("\n", ddls) + "\n" + sql);
     }
