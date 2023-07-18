@@ -29,15 +29,6 @@ import java.util.Map;
  */
 @Public
 public interface MetricGroup {
-    /**
-     * Creates and registers a new {@link org.apache.paimon.metrics.Counter} with Paimon.
-     *
-     * @param name name of the counter
-     * @return the created counter
-     */
-    default Counter counter(int name) {
-        return counter(String.valueOf(name));
-    }
 
     /**
      * Creates and registers a new {@link org.apache.paimon.metrics.Counter} with Paimon.
@@ -55,31 +46,7 @@ public interface MetricGroup {
      * @param <C> counter type
      * @return the given counter
      */
-    default <C extends Counter> C counter(int name, C counter) {
-        return counter(String.valueOf(name), counter);
-    }
-
-    /**
-     * Registers a {@link org.apache.paimon.metrics.Counter} with Paimon.
-     *
-     * @param name name of the counter
-     * @param counter counter to register
-     * @param <C> counter type
-     * @return the given counter
-     */
     <C extends Counter> C counter(String name, C counter);
-
-    /**
-     * Registers a new {@link org.apache.paimon.metrics.Gauge} with Paimon.
-     *
-     * @param name name of the gauge
-     * @param gauge gauge to register
-     * @param <T> return type of the gauge
-     * @return the given gauge
-     */
-    default <T, G extends Gauge<T>> G gauge(int name, G gauge) {
-        return gauge(String.valueOf(name), gauge);
-    }
 
     /**
      * Registers a new {@link org.apache.paimon.metrics.Gauge} with Paimon.
@@ -114,21 +81,15 @@ public interface MetricGroup {
     }
 
     /**
-     * Gets the scope as an array of the scope components, for example {@code ["myTable",
-     * "bucket-1"]}.
-     */
-    String[] getScopeComponents();
-
-    /**
      * Returns the fully qualified metric name, for example {@code "myTable.bucket-1.metricName"}.
      *
      * @param metricName metric name
      * @return fully qualified metric name
      */
-    String getMetricIdentifier(String metricName, char delimiter);
+    String getMetricIdentifier(String metricName, String delimiter);
 
     /** Returns a map of all variables and their associated value. */
-    Map<String, String> getAllVariables();
+    Map<String, String> getAllTags();
 
     /**
      * Returns the name for this group, meaning what kind of entity it represents, for example

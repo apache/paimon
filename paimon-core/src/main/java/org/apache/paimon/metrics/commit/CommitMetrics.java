@@ -26,8 +26,8 @@ import org.apache.paimon.metrics.DescriptiveStatisticsHistogram;
 import org.apache.paimon.metrics.Gauge;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.MetricGroup;
+import org.apache.paimon.metrics.groups.BucketMetricGroup;
 import org.apache.paimon.metrics.groups.GenericMetricGroup;
-import org.apache.paimon.metrics.groups.TaggedMetricGroup;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.HashMap;
@@ -37,7 +37,7 @@ import java.util.Set;
 /** Metrics to measure a commit. */
 public class CommitMetrics {
     private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
-    private final Map<String, TaggedMetricGroup> taggedMetricGroups = new HashMap<>();
+    private final Map<String, BucketMetricGroup> taggedMetricGroups = new HashMap<>();
 
     private final String groupKeyFormat = "%s-%s";
     private final MetricGroup genericMetricGroup;
@@ -49,7 +49,7 @@ public class CommitMetrics {
         registerGenericCommitMetrics();
     }
 
-    public Map<String, TaggedMetricGroup> getTaggedMetricGroups() {
+    public Map<String, BucketMetricGroup> getTaggedMetricGroups() {
         return taggedMetricGroups;
     }
 
@@ -119,11 +119,11 @@ public class CommitMetrics {
                 for (Integer bucket : kv.getValue()) {
                     String groupKey = String.format(groupKeyFormat, partitionStr, bucket);
                     if (!taggedMetricGroups.containsKey(groupKey)) {
-                        TaggedMetricGroup group =
+                        BucketMetricGroup group =
                                 taggedMetricGroups.compute(
                                         groupKey,
                                         (k, v) ->
-                                                TaggedMetricGroup.createTaggedMetricGroup(
+                                                BucketMetricGroup.createTaggedMetricGroup(
                                                         pathFactory.root().getName(),
                                                         bucket,
                                                         partitionStr));

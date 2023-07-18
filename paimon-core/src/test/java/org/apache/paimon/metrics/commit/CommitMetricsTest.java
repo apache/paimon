@@ -28,7 +28,7 @@ import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.Metrics;
-import org.apache.paimon.metrics.groups.TaggedMetricGroup;
+import org.apache.paimon.metrics.groups.BucketMetricGroup;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -64,11 +64,11 @@ public class CommitMetricsTest {
     @Test
     public void testGenericMetricsRegistration() {
         MetricGroup group = commitMetrics.getGenericMetricGroup();
-        Map<String, TaggedMetricGroup> taggedMetricGroups = commitMetrics.getTaggedMetricGroups();
+        Map<String, BucketMetricGroup> taggedMetricGroups = commitMetrics.getTaggedMetricGroups();
 
         assertEquals(1, Metrics.getInstance().getMetricGroups().size());
         assertEquals(group, Metrics.getInstance().getMetricGroups().get(0));
-        assertEquals(TABLE_NAME, group.getGroupName());
+        assertEquals("table", group.getGroupName());
 
         Map<String, Metric> registeredMetrics = group.getMetrics();
         assertTrue(
@@ -92,9 +92,9 @@ public class CommitMetricsTest {
 
         List<MetricGroup> registeredGroups = Metrics.getInstance().getMetricGroups();
         assertEquals(4, registeredGroups.size());
-        TaggedMetricGroup taggedGroup = taggedMetricGroups.get("f0=1-1");
+        BucketMetricGroup taggedGroup = taggedMetricGroups.get("f0=1-1");
         assertEquals(taggedGroup, registeredGroups.get(1));
-        assertEquals(TaggedMetricGroup.GROUP_NAME, taggedGroup.getGroupName());
+        assertEquals(BucketMetricGroup.GROUP_NAME, taggedGroup.getGroupName());
 
         Map<String, Metric> registeredMetricsByBucket1 = taggedGroup.getMetrics();
         assertTrue(
@@ -126,7 +126,7 @@ public class CommitMetricsTest {
     public void testMetricsAreUpdated() {
         Map<String, Metric> registeredGenericMetrics =
                 commitMetrics.getGenericMetricGroup().getMetrics();
-        Map<String, TaggedMetricGroup> taggedMetricGroups = commitMetrics.getTaggedMetricGroups();
+        Map<String, BucketMetricGroup> taggedMetricGroups = commitMetrics.getTaggedMetricGroups();
 
         // Check initial values
         Gauge<Long> lastCommitDuration =

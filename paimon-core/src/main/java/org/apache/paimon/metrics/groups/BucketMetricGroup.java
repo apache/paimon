@@ -23,25 +23,23 @@ import org.apache.paimon.metrics.AbstractMetricGroup;
 import java.util.Map;
 
 /** Special {@link org.apache.paimon.metrics.MetricGroup} representing a bucket. */
-public class TaggedMetricGroup extends AbstractMetricGroup {
+public class BucketMetricGroup extends AbstractMetricGroup {
 
     private final int bucket;
     private final String partition;
-    private final String table;
-    public static final String GROUP_NAME = "tagged";
+    public static final String GROUP_NAME = "bucket";
 
     // ------------------------------------------------------------------------
 
-    TaggedMetricGroup(String table, int bucket, String partition) {
-        super(new String[] {table, "partition-" + partition, "bucket-" + bucket});
+    BucketMetricGroup(String table, int bucket, String partition) {
+        super(table);
         this.bucket = bucket;
-        this.table = table;
         this.partition = partition;
     }
 
-    public static TaggedMetricGroup createTaggedMetricGroup(
+    public static BucketMetricGroup createTaggedMetricGroup(
             final String table, final int bucket, final String partition) {
-        return new TaggedMetricGroup(table, bucket, partition);
+        return new BucketMetricGroup(table, bucket, partition);
     }
 
     // ------------------------------------------------------------------------
@@ -49,9 +47,9 @@ public class TaggedMetricGroup extends AbstractMetricGroup {
     // ------------------------------------------------------------------------
 
     @Override
-    protected void putVariables(Map<String, String> variables) {
-        variables.put("bucket", String.valueOf(bucket));
-        variables.put("partition", String.valueOf(partition));
+    protected void putTags(Map<String, String> tags) {
+        tags.put("bucket", String.valueOf(bucket));
+        tags.put("partition", String.valueOf(partition));
     }
 
     @Override

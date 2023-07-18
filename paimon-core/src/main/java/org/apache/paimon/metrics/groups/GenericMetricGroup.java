@@ -22,16 +22,14 @@ import org.apache.paimon.metrics.AbstractMetricGroup;
 
 /** A simple named {@link org.apache.paimon.metrics.MetricGroup} that is untagged. */
 public class GenericMetricGroup extends AbstractMetricGroup {
-    /** The name of this group. */
-    private String name;
 
-    public GenericMetricGroup(String name) {
-        super(new String[] {name});
-        this.name = name;
+    public static final String GROUP_NAME = "table";
+    public GenericMetricGroup(String table) {
+        super(table);
     }
 
     @Override
     public String getGroupName() {
-        return name;
+        return GROUP_NAME;
     }
 }

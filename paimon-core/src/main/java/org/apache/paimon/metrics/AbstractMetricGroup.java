@@ -26,8 +26,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
-
 /**
  * Contains key functionality for adding metrics and carries metrics.
  *
@@ -38,53 +36,43 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
     // ------------------------------------------------------------------------
 
-    /** The map containing all variables and their associated values, lazily computed. */
-    protected volatile Map<String, String> variables;
-
-    /** The metrics scope represented by this group. For example ["myTable", "bucket-1"]. */
-    private final String[] scopeComponents;
+    /** The map containing all tags and their associated values, lazily computed. */
+    protected volatile Map<String, String> tags;
 
     /** Flag indicating whether this group has been closed. */
     private volatile boolean closed;
 
     private final Map<String, Metric> metrics = new HashMap<>();
 
+    private final String table;
+
     // ------------------------------------------------------------------------
 
-    public AbstractMetricGroup(String[] scope) {
-        this.scopeComponents = checkNotNull(scope);
+    public AbstractMetricGroup(String table) {
+        this.table = table;
         Metrics.getInstance().addGroup(this);
     }
 
-    /**
-     * Gets the scope as an array of the scope components, for example {@code ["myTable",
-     * "bucket-1"]}.
-     */
     @Override
-    public String[] getScopeComponents() {
-        return scopeComponents;
+    public Map<String, String> getAllTags() {
+        return internalGetAllTags(Collections.emptySet());
     }
 
-    @Override
-    public Map<String, String> getAllVariables() {
-        return internalGetAllVariables(Collections.emptySet());
-    }
-
-    private Map<String, String> internalGetAllVariables(Set<String> excludedVariables) {
-        Map<String, String> tmpVariables = new HashMap<>();
-        putVariables(tmpVariables);
-        excludedVariables.forEach(tmpVariables::remove);
-        variables = tmpVariables;
-        return variables;
+    private Map<String, String> internalGetAllTags(Set<String> excludedTags) {
+        Map<String, String> tmpTags = new HashMap<>();
+        putTags(tmpTags);
+        excludedTags.forEach(tmpTags::remove);
+        tags = tmpTags;
+        return tags;
     }
 
     /**
-     * Enters all variables specific to this {@link AbstractMetricGroup} and their associated values
+     * Enters all tags specific to this {@link AbstractMetricGroup} and their associated values
      * into the map.
      *
-     * @param variables map to enter variables and their values into
+     * @param tags map to enter tags and their values into
      */
-    protected void putVariables(Map<String, String> variables) {}
+    protected void putTags(Map<String, String> tags) {}
 
     /**
      * Returns the fully qualified metric name using the configured delimiter for the reporter with
@@ -94,26 +82,8 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @param delimiter delimiter to use
      * @return fully qualified metric name
      */
-    public String getMetricIdentifier(String metricName, char delimiter) {
-        return scopeConcat(delimiter, scopeComponents) + delimiter + metricName;
-    }
-
-    /**
-     * Concatenates the given component names separated by the delimiter character. Additionally the
-     * character filter is applied to all component names.
-     *
-     * @param delimiter Delimiter to separate component names
-     * @param components Array of component names
-     * @return The concatenated component name
-     */
-    public String scopeConcat(Character delimiter, String... components) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(components[0]);
-        for (int x = 1; x < components.length; x++) {
-            sb.append(delimiter);
-            sb.append(components[x]);
-        }
-        return sb.toString();
+    public String getMetricIdentifier(String metricName, String delimiter) {
+        return String.join(delimiter, table, metricName);
     }
 
     /**

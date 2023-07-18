@@ -20,22 +20,22 @@ package org.apache.paimon.metrics.groups;
 
 import org.junit.Test;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Tests for the {@link TaggedMetricGroup}. */
-public class TaggedMetricGroupTest {
+/** Tests for the {@link BucketMetricGroup}. */
+public class BucketMetricGroupTest {
     // ------------------------------------------------------------------------
     //  scope name tests
     // ------------------------------------------------------------------------
 
     @Test
-    public void testGenerateScopeDefault() throws Exception {
-        TaggedMetricGroup group = TaggedMetricGroup.createTaggedMetricGroup("myTable", 1, "dt=1");
+    public void testGenerateScopeDefault() {
+        BucketMetricGroup group = BucketMetricGroup.createTaggedMetricGroup("myTable", 1, "dt=1");
 
-        assertArrayEquals(
-                new String[] {"myTable", "partition-dt=1", "bucket-1"}, group.getScopeComponents());
+        assertEquals(2, group.getAllTags().size());
+        assertEquals("1", group.getAllTags().get("bucket"));
+        assertEquals("dt=1", group.getAllTags().get("partition"));
         assertEquals(
-                "myTable.partition-dt=1.bucket-1.name", group.getMetricIdentifier("name", '.'));
+                "myTable.name", group.getMetricIdentifier("name", "."));
     }
 }
