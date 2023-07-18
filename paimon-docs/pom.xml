@@ -33,8 +33,6 @@ under the License.
 
     <properties>
         <generated.docs.dir>./docs/layouts/shortcodes/generated</generated.docs.dir>
-        <assertj.version>3.21.0</assertj.version>
-        <jsoup.version>1.15.3</jsoup.version>
     </properties>
 
     <dependencies>

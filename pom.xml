@@ -126,6 +126,7 @@ under the License.
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
         <scala-maven-plugin.version>3.2.2</scala-maven-plugin.version>
+        <jsoup.version>1.15.3</jsoup.version>
     </properties>
 
     <dependencies>
