@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Data type of an array of elements with same subtype. Compared to the SQL standard, the maximum
@@ -60,6 +61,11 @@ public final class ArrayType extends DataType {
     @Override
     public DataType copy(boolean isNullable) {
         return new ArrayType(isNullable, elementType.copy());
+    }
+
+    @Override
+    public DataType copy(AtomicInteger id) {
+        return new ArrayType(this.isNullable(), elementType.copy(id));
     }
 
     @Override

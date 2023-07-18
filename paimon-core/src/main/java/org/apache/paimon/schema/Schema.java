@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -216,10 +217,10 @@ public class Schema {
 
         @Nullable private String comment;
 
-        private int highestFieldId = -1;
+        private AtomicInteger highestFieldId = new AtomicInteger(-1);
 
         public int getHighestFieldId() {
-            return highestFieldId;
+            return highestFieldId.get();
         }
 
         /**
@@ -242,11 +243,13 @@ public class Schema {
         public Builder column(String columnName, DataType dataType, @Nullable String description) {
             Preconditions.checkNotNull(columnName, "Column name must not be null.");
             Preconditions.checkNotNull(dataType, "Data type must not be null.");
-            columns.add(new DataField(++highestFieldId, columnName, dataType, description));
 
-            Set<Integer> structuredFieldIds = new HashSet<>();
-            dataType.collectFieldIds(structuredFieldIds);
-            highestFieldId += structuredFieldIds.size();
+            columns.add(
+                    new DataField(
+                            highestFieldId.incrementAndGet(),
+                            columnName,
+                            dataType.copy(highestFieldId),
+                            description));
             return this;
         }
 

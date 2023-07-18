@@ -26,6 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Data type of a multiset (=bag). Unlike a set, it allows for multiple instances for each of its
@@ -63,7 +64,12 @@ public class MultisetType extends DataType {
 
     @Override
     public DataType copy(boolean isNullable) {
-        return new MultisetType(isNullable, elementType);
+        return new MultisetType(isNullable, elementType.copy());
+    }
+
+    @Override
+    public DataType copy(AtomicInteger id) {
+        return new MultisetType(this.isNullable(), elementType.copy(id));
     }
 
     @Override

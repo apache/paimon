@@ -27,6 +27,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.EncodingUtils.escapeIdentifier;
 import static org.apache.paimon.utils.EncodingUtils.escapeSingleQuotes;
@@ -45,7 +46,7 @@ public final class DataField implements Serializable {
 
     public static final String FIELD_FORMAT_NO_DESCRIPTION = "%s %s";
 
-    private int id;
+    private final int id;
 
     private final String name;
 
@@ -66,10 +67,6 @@ public final class DataField implements Serializable {
 
     public int id() {
         return id;
-    }
-
-    public void resetId(int resetId) {
-        this.id = resetId;
     }
 
     public String name() {
@@ -95,6 +92,10 @@ public final class DataField implements Serializable {
 
     public DataField copy() {
         return new DataField(id, name, type.copy(), description);
+    }
+
+    public DataField copy(AtomicInteger id) {
+        return new DataField(id.get(), name, type.copy(id), description);
     }
 
     public String asSQLString() {

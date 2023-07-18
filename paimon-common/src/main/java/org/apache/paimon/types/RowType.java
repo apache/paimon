@@ -102,6 +102,19 @@ public final class RowType extends DataType {
     }
 
     @Override
+    public DataType copy(AtomicInteger id) {
+        return new RowType(
+                this.isNullable(),
+                fields.stream()
+                        .map(
+                                field -> {
+                                    id.incrementAndGet();
+                                    return field.copy(id);
+                                })
+                        .collect(Collectors.toList()));
+    }
+
+    @Override
     public String asSQLString() {
         return withNullability(
                 FORMAT,
@@ -164,12 +177,7 @@ public final class RowType extends DataType {
 
     @Override
     public void collectFieldIds(Set<Integer> fieldIds) {
-        boolean nested = fieldIds.size() > 0;
         for (DataField field : fields) {
-            if (nested) {
-                int maxId = fieldIds.stream().max(Integer::compareTo).orElse(-1);
-                field.resetId(++maxId);
-            }
             if (fieldIds.contains(field.id())) {
                 throw new RuntimeException(
                         String.format("Broken schema, field id %s is duplicated.", field.id()));
