@@ -56,7 +56,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final boolean ignoreDelete;
     private final Map<Integer, SequenceGenerator> fieldSequences;
 
-    private KeyValue latestKv;
+    private InternalRow currentKey;
+    private long latestSequenceNumber;
+    private boolean isEmpty;
     private GenericRow row;
     private KeyValue reused;
 
@@ -71,13 +73,18 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void reset() {
-        this.latestKv = null;
+        this.currentKey = null;
         this.row = new GenericRow(getters.length);
+        this.isEmpty = true;
     }
 
     @Override
     public void add(KeyValue kv) {
-        if (kv.valueKind() == RowKind.UPDATE_BEFORE || kv.valueKind() == RowKind.DELETE) {
+        // refresh key object to avoid reference overwritten
+        currentKey = kv.key();
+
+        // ignore delete?
+        if (kv.valueKind().isRetract()) {
             if (ignoreDelete) {
                 return;
             }
@@ -91,7 +98,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     "Partial update can not accept delete records. Partial delete is not supported!");
         }
 
-        latestKv = kv;
+        latestSequenceNumber = kv.sequenceNumber();
+        isEmpty = false;
         if (fieldSequences.isEmpty()) {
             updateNonNullFields(kv);
         } else {
@@ -131,19 +139,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     @Override
     @Nullable
     public KeyValue getResult() {
-        if (latestKv == null) {
-            if (ignoreDelete) {
-                return null;
-            }
-
-            throw new IllegalArgumentException(
-                    "Trying to get result from merge function without any input. This is unexpected.");
+        if (isEmpty) {
+            return null;
         }
 
         if (reused == null) {
             reused = new KeyValue();
         }
-        return reused.replace(latestKv.key(), latestKv.sequenceNumber(), RowKind.INSERT, row);
+        return reused.replace(currentKey, latestSequenceNumber, RowKind.INSERT, row);
     }
 
     public static MergeFunctionFactory<KeyValue> factory(Options options, RowType rowType) {

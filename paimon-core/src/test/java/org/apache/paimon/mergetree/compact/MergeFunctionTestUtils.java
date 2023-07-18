@@ -26,6 +26,7 @@ import org.apache.paimon.utils.ReusingTestData;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -67,6 +68,87 @@ public class MergeFunctionTestUtils {
             }
         }
         return expected;
+    }
+
+    public static List<ReusingTestData> getExpectedForPartialUpdate(List<ReusingTestData> input) {
+        input = new ArrayList<>(input);
+        Collections.sort(input);
+
+        List<ReusingTestData> expected = new ArrayList<>();
+        List<ReusingTestData> current = new ArrayList<>();
+        for (ReusingTestData data : input) {
+            while (true) {
+                if (current.isEmpty() || data.key == current.get(current.size() - 1).key) {
+                    current.add(data);
+                    break;
+                } else {
+                    mergePartialUpdate(current).ifPresent(expected::add);
+                }
+            }
+        }
+        mergePartialUpdate(current).ifPresent(expected::add);
+        return expected;
+    }
+
+    private static Optional<ReusingTestData> mergePartialUpdate(List<ReusingTestData> records) {
+        try {
+            if (records.size() == 1) {
+                return Optional.of(records.get(0));
+            } else {
+                for (int i = records.size() - 1; i >= 0; i--) {
+                    if (records.get(i).valueKind.isAdd()) {
+                        return Optional.of(records.get(i));
+                    }
+                }
+            }
+        } finally {
+            records.clear();
+        }
+        return Optional.empty();
+    }
+
+    public static List<ReusingTestData> getExpectedForAgg(List<ReusingTestData> input) {
+        input = new ArrayList<>(input);
+        Collections.sort(input);
+
+        List<ReusingTestData> expected = new ArrayList<>();
+        List<ReusingTestData> current = new ArrayList<>();
+        for (ReusingTestData data : input) {
+            while (true) {
+                if (current.isEmpty() || data.key == current.get(current.size() - 1).key) {
+                    current.add(data);
+                    break;
+                } else {
+                    expected.add(mergeAgg(current));
+                }
+            }
+        }
+        expected.add(mergeAgg(current));
+        return expected;
+    }
+
+    private static ReusingTestData mergeAgg(List<ReusingTestData> records) {
+        try {
+            if (records.size() == 1) {
+                return records.get(0);
+            } else {
+                ReusingTestData lastOne = records.get(records.size() - 1);
+                ReusingTestData data =
+                        new ReusingTestData(lastOne.key, lastOne.sequenceNumber, RowKind.INSERT, 0);
+                for (int i = records.size() - 1; i >= 0; i--) {
+                    ReusingTestData current = records.get(i);
+                    data =
+                            data.copy(
+                                    data.value
+                                            + (current.valueKind.isAdd()
+                                                    ? current.value
+                                                    : -current.value));
+                }
+                return data;
+            }
+        } finally {
+            records.clear();
+        }
     }
 
     public static void assertKvsEquals(List<KeyValue> expected, List<KeyValue> actual) {

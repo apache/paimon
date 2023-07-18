@@ -67,6 +67,10 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
         assertThat(kv.value().getLong(0)).isEqualTo(value);
     }
 
+    public ReusingTestData copy(long newValue) {
+        return new ReusingTestData(key, sequenceNumber, valueKind, newValue);
+    }
+
     /**
      * String format:
      *

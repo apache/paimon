@@ -18,16 +18,23 @@
 
 package org.apache.paimon.mergetree;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionTestUtils;
+import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
+import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReusingKeyValue;
@@ -106,7 +113,10 @@ public abstract class SortBufferWriteBufferTestBase {
                 KEY_COMPARATOR,
                 createMergeFunction(),
                 null,
-                kv -> expected.poll().assertEquals(kv));
+                kv -> {
+                    assertThat(expected.isEmpty()).isFalse();
+                    expected.poll().assertEquals(kv);
+                });
         assertThat(expected).isEmpty();
     }
 
@@ -175,6 +185,85 @@ public abstract class SortBufferWriteBufferTestBase {
                                     + "7, 456, +, 300"));
             table.clear();
             runTest(ReusingTestData.parse("1, 2, +, 100 | 1, 1, +, -100"));
+        }
+    }
+
+    /** Test for {@link SortBufferWriteBuffer} with {@link PartialUpdateMergeFunction}. */
+    public static class WithPartialUpdateMergeFunctionTest extends SortBufferWriteBufferTestBase {
+
+        @Override
+        protected boolean addOnly() {
+            return false;
+        }
+
+        @Override
+        protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
+            return MergeFunctionTestUtils.getExpectedForPartialUpdate(input);
+        }
+
+        @Override
+        protected MergeFunction<KeyValue> createMergeFunction() {
+            Options options = new Options();
+            options.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
+            return PartialUpdateMergeFunction.factory(options, RowType.of(DataTypes.BIGINT()))
+                    .create();
+        }
+    }
+
+    /** Test for {@link SortBufferWriteBuffer} with {@link AggregateMergeFunction}. */
+    public static class WithAggMergeFunctionTest extends SortBufferWriteBufferTestBase {
+
+        @Override
+        protected boolean addOnly() {
+            return false;
+        }
+
+        @Override
+        protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
+            return MergeFunctionTestUtils.getExpectedForAgg(input);
+        }
+
+        @Override
+        protected MergeFunction<KeyValue> createMergeFunction() {
+            Options options = new Options();
+            options.set("fields.value.aggregate-function", "sum");
+            return AggregateMergeFunction.factory(
+                            options,
+                            Collections.singletonList("value"),
+                            Collections.singletonList(DataTypes.BIGINT()),
+                            Collections.emptyList())
+                    .create();
+        }
+    }
+
+    /** Test for {@link SortBufferWriteBuffer} with {@link LookupMergeFunction}. */
+    public static class WithLookupFunctionTest extends SortBufferWriteBufferTestBase {
+
+        @Override
+        protected boolean addOnly() {
+            return false;
+        }
+
+        @Override
+        protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
+            return MergeFunctionTestUtils.getExpectedForAgg(input);
+        }
+
+        @Override
+        protected MergeFunction<KeyValue> createMergeFunction() {
+            Options options = new Options();
+            options.set("fields.value.aggregate-function", "sum");
+            MergeFunctionFactory<KeyValue> aggMergeFunction =
+                    AggregateMergeFunction.factory(
+                            options,
+                            Collections.singletonList("value"),
+                            Collections.singletonList(DataTypes.BIGINT()),
+                            Collections.emptyList());
+            return LookupMergeFunction.wrap(
+                            aggMergeFunction,
+                            RowType.of(DataTypes.INT()),
+                            RowType.of(DataTypes.BIGINT()))
+                    .create();
         }
     }
 }
