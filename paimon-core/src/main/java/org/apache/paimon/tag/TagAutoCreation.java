@@ -38,12 +38,12 @@ import java.time.format.SignStyle;
 import java.util.Optional;
 import java.util.SortedMap;
 
-import static com.google.common.base.Objects.firstNonNull;
 import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
 import static java.time.temporal.ChronoField.MONTH_OF_YEAR;
 import static java.time.temporal.ChronoField.YEAR;
 import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
+import static org.apache.paimon.shade.guava30.com.google.common.base.MoreObjects.firstNonNull;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A manager to create tags automatically. */
