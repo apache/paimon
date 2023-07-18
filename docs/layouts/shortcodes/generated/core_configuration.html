@@ -267,6 +267,14 @@ under the License.
             <td>The mode of metadata stats collection. none, counts, truncate(16), full is available.<br /><ul><li>"none": means disable the metadata stats collection.</li></ul><ul><li>"counts" means only collect the null count.</li></ul><ul><li>"full": means collect the null count, min/max value.</li></ul><ul><li>"truncate(16)": means collect the null count, min/max value with truncated length of 16.</li></ul><ul><li>Field level stats mode can be specified by fields.{field_name}.stats-mode</li></ul></td>
         </tr>
         <tr>
+            <td><h5>metastore.partitioned-table</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to create this table as a partitioned table in metastore.
+For example, if you want to list all partitions of a Paimon table in Hive, you need to create this table as a partitioned table in Hive metastore.
+This config option does not affect the default filesystem metastore.</td>
+        </tr>
+        <tr>
             <td><h5>num-levels</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -411,6 +419,12 @@ under the License.
             <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
         </tr>
         <tr>
+            <td><h5>sink.watermark-time-zone</h5></td>
+            <td style="word-wrap: break-word;">"UTC"</td>
+            <td>String</td>
+            <td>The time zone to parse the long watermark value to TIMESTAMP value. The default value is 'UTC', which means the watermark is defined on TIMESTAMP column or not defined. If the watermark is defined on TIMESTAMP_LTZ column, the time zone of watermark is user configured time zone, the value should be the user configured local time zone. The option value is either a full name such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.</td>
+        </tr>
+        <tr>
             <td><h5>snapshot.num-retained.max</h5></td>
             <td style="word-wrap: break-word;">2147483647</td>
             <td>Integer</td>
@@ -469,6 +483,30 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to read the changes from overwrite in streaming mode.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.automatic-creation</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>Whether to create tag automatically. And how to generate tags.<br /><br />Possible values:<ul><li>"none": No automatically created tags.</li><li>"process-time": Based on the time of the machine, create TAG once the processing time passes period time plus delay.</li><li>"watermark": Based on the watermark of the input, create TAG once the watermark passes period time plus delay.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.creation-delay</h5></td>
+            <td style="word-wrap: break-word;">0 ms</td>
+            <td>Duration</td>
+            <td>How long is the delay after the period ends before creating a tag. This can allow some late data to enter the Tag.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.creation-period</h5></td>
+            <td style="word-wrap: break-word;">daily</td>
+            <td><p>Enum</p></td>
+            <td>What frequency is used to generate tags.<br /><br />Possible values:<ul><li>"daily": Generate a tag every day.</li><li>"hourly": Generate a tag every hour.</li><li>"two-hours": Generate a tag every two hours.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.num-retained-max</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of tags to retain.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>
