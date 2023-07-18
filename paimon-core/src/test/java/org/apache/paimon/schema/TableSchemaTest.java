@@ -82,9 +82,15 @@ public class TableSchemaTest {
                                 1,
                                 "f1",
                                 DataTypes.ROW(
-                                        DataTypes.STRING(), DataTypes.ARRAY(DataTypes.INT()))),
+                                        new DataField(2, "f0", DataTypes.STRING()),
+                                        new DataField(3, "f1", DataTypes.ARRAY(DataTypes.INT())))),
                         new DataField(4, "f2", DataTypes.STRING()),
-                        new DataField(5, "f3", DataTypes.ARRAY(DataTypes.ROW(DataTypes.BIGINT()))));
+                        new DataField(
+                                5,
+                                "f3",
+                                DataTypes.ARRAY(
+                                        DataTypes.ROW(
+                                                new DataField(6, "f0", DataTypes.BIGINT())))));
         assertThat(RowType.currentHighestFieldId(fields1)).isEqualTo(6);
 
         List<DataField> fields2 =
@@ -98,7 +104,7 @@ public class TableSchemaTest {
                         new DataField(2, "f2", DataTypes.STRING()));
         assertThatThrownBy(() -> RowType.currentHighestFieldId(fields2))
                 .isInstanceOf(RuntimeException.class)
-                .hasMessage("Broken schema, field id 2 is duplicated.");
+                .hasMessage("Broken schema, field id 0 is duplicated.");
     }
 
     static RowType newRowType(boolean isNullable, int fieldId) {
