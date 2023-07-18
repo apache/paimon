@@ -582,6 +582,7 @@ CREATE TABLE a (
     v1 VARCHAR(10),
     PRIMARY KEY (k)
 );
+
 CREATE DATABASE paimon_sync_table_tinyint;
 USE paimon_sync_table_tinyint;
 

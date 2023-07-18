@@ -114,15 +114,15 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
             return false;
         }
 
-        boolean shouldSynchroniz = true;
+        boolean shouldSynchronize = true;
         if (includingPattern != null) {
-            shouldSynchroniz = includingPattern.matcher(currentTable).matches();
+            shouldSynchronize = includingPattern.matcher(currentTable).matches();
         }
         if (excludingPattern != null) {
-            shouldSynchroniz =
-                    shouldSynchroniz && !excludingPattern.matcher(currentTable).matches();
+            shouldSynchronize =
+                    shouldSynchronize && !excludingPattern.matcher(currentTable).matches();
         }
-        if (!shouldSynchroniz) {
+        if (!shouldSynchronize) {
             LOG.debug(
                     "Source table {} won't be synchronized because it was excluded. ",
                     currentTable);

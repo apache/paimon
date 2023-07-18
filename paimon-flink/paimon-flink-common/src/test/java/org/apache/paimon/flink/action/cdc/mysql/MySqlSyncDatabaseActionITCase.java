@@ -1115,10 +1115,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         return env.executeAsync();
     }
 
-    private Catalog catalog() {
-        return CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
-    }
-
     @Test
     @Timeout(60)
     public void testTinyInt1Convert() throws Exception {
@@ -1172,6 +1168,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         List<String> expected =
                 Arrays.asList("+I[1, 2021-09-15T15:00:10, 21]", "+I[2, 2023-03-23T16:00:20, 42]");
         waitForResult(expected, table, rowType, Arrays.asList("pk"));
+    }
+
+    private Catalog catalog() {
+        return CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
     }
 
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {

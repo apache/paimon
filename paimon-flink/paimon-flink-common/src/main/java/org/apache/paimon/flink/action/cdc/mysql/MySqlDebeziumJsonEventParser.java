@@ -81,6 +81,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final NewTableSchemaBuilder<MySqlCreateTableStatement> schemaBuilder;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
+    private final Set<String> includedTables = new HashSet<>();
     private final Set<String> excludedTables = new HashSet<>();
     private final boolean convertTinyint1ToBool;
 
@@ -88,7 +89,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private JsonNode payload;
     // NOTE: current table name is not converted by tableNameConverter
     private String currentTable;
-    private boolean shouldExcludeCurrentTable;
+    private boolean shouldSynchronizeCurrentTable;
 
     public MySqlDebeziumJsonEventParser(
             ZoneId serverTimeZone,
@@ -150,7 +151,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             root = objectMapper.readValue(rawEvent, JsonNode.class);
             payload = root.get("payload");
             currentTable = payload.get("source").get("table").asText();
-            shouldExcludeCurrentTable = shouldExcludeCurrentTable();
+            shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -167,7 +168,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     @Override
     public List<DataField> parseSchemaChange() {
-        if (shouldExcludeCurrentTable || !isSchemaChange()) {
+        if (!shouldSynchronizeCurrentTable || !isSchemaChange()) {
             return Collections.emptyList();
         }
 
@@ -219,7 +220,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     @Override
     public Optional<Schema> parseNewTable() {
-        if (shouldExcludeCurrentTable) {
+        if (!shouldSynchronizeCurrentTable) {
             return Optional.empty();
         }
 
@@ -249,7 +250,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                 + "This table won't be synchronized.",
                         tableName);
                 excludedTables.add(tableName);
-                shouldExcludeCurrentTable = true;
+                shouldSynchronizeCurrentTable = false;
                 return Optional.empty();
             }
 
@@ -262,7 +263,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     @Override
     public List<CdcRecord> parseRecords() {
-        if (shouldExcludeCurrentTable || isSchemaChange()) {
+        if (!shouldSynchronizeCurrentTable || isSchemaChange()) {
             return Collections.emptyList();
         }
         List<CdcRecord> records = new ArrayList<>();
@@ -442,27 +443,32 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         return keyCaseInsensitive;
     }
 
-    private boolean shouldExcludeCurrentTable() {
+    private boolean shouldSynchronizeCurrentTable() {
         if (excludedTables.contains(currentTable)) {
+            return false;
+        }
+
+        if (includedTables.contains(currentTable)) {
             return true;
         }
 
-        boolean shouldInclude = true;
+        boolean shouldSynchronize = true;
         if (includingPattern != null) {
-            shouldInclude = includingPattern.matcher(currentTable).matches();
+            shouldSynchronize = includingPattern.matcher(currentTable).matches();
         }
         if (excludingPattern != null) {
-            shouldInclude = shouldInclude && !excludingPattern.matcher(currentTable).matches();
+            shouldSynchronize =
+                    shouldSynchronize && !excludingPattern.matcher(currentTable).matches();
         }
-
-        boolean shouldExclude = !shouldInclude;
-        if (shouldExclude) {
+        if (!shouldSynchronize) {
             LOG.debug(
                     "Source table {} won't be synchronized because it was excluded. ",
                     currentTable);
             excludedTables.add(currentTable);
+            return false;
         }
 
-        return shouldExclude;
+        includedTables.add(currentTable);
+        return true;
     }
 }
