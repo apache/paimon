@@ -258,6 +258,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 createCommitCallbacks(),
                 coreOptions().writeOnly() ? null : store().newExpire(),
                 coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
+                coreOptions().writeOnly() ? null : store().newTagCreationManager(),
                 lockFactory.create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path));

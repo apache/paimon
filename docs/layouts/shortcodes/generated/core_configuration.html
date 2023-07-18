@@ -267,14 +267,6 @@ under the License.
             <td>The mode of metadata stats collection. none, counts, truncate(16), full is available.<br /><ul><li>"none": means disable the metadata stats collection.</li></ul><ul><li>"counts" means only collect the null count.</li></ul><ul><li>"full": means collect the null count, min/max value.</li></ul><ul><li>"truncate(16)": means collect the null count, min/max value with truncated length of 16.</li></ul><ul><li>Field level stats mode can be specified by fields.{field_name}.stats-mode</li></ul></td>
         </tr>
         <tr>
-            <td><h5>metastore.partitioned-table</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to create this table as a partitioned table in metastore.
-For example, if you want to list all partitions of a Paimon table in Hive, you need to create this table as a partitioned table in Hive metastore.
-This config option does not affect the default filesystem metastore.</td>
-        </tr>
-        <tr>
             <td><h5>num-levels</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
