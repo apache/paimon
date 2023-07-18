@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
@@ -56,6 +58,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -958,5 +961,92 @@ public class PaimonStorageHandlerITCase {
                 Collections.singletonList("NULL\t2022-06-18 08:30:00.1"),
                 hiveShell.executeQuery(
                         "SELECT * FROM test_table WHERE ts = '2022-06-18 08:30:00.1'"));
+    }
+
+    @Test
+    public void testMapKey() throws Exception {
+        String path = folder.newFolder().toURI().toString();
+        String tablePath = String.format("%s/default.db/hive_test_table", path);
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Options conf = new Options();
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        conf.set(
+                CoreOptions.FILE_FORMAT,
+                random.nextBoolean()
+                        ? CoreOptions.FileFormatType.ORC
+                        : CoreOptions.FileFormatType.PARQUET);
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.MAP(DataTypes.DATE(), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.TIMESTAMP(3), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.DECIMAL(2, 1), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.VARCHAR(10), DataTypes.STRING())
+                                },
+                                new String[] {
+                                    "date_key",
+                                    "timestamp_key",
+                                    "decimal_key",
+                                    "string_key",
+                                    "varchar_key"
+                                }),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+
+        Map<Integer, BinaryString> dateMap =
+                Collections.singletonMap(375, BinaryString.fromString("Date 1971-01-11"));
+        Map<Timestamp, BinaryString> timestampMap =
+                Collections.singletonMap(
+                        Timestamp.fromLocalDateTime(
+                                LocalDateTime.of(2023, 7, 18, 12, 29, 59, 123_000_000)),
+                        BinaryString.fromString("Test timestamp(3)"));
+        Map<Decimal, BinaryString> decimalMap =
+                Collections.singletonMap(
+                        Decimal.fromBigDecimal(new BigDecimal("1.2"), 2, 1),
+                        BinaryString.fromString("一点二"));
+        Map<BinaryString, BinaryString> stringMap =
+                Collections.singletonMap(
+                        BinaryString.fromString("Engine"), BinaryString.fromString("Hive"));
+        Map<BinaryString, BinaryString> varcharMap =
+                Collections.singletonMap(
+                        BinaryString.fromString("Name"), BinaryString.fromString("Paimon"));
+
+        write.write(
+                GenericRow.of(
+                        new GenericMap(dateMap),
+                        new GenericMap(timestampMap),
+                        new GenericMap(decimalMap),
+                        new GenericMap(stringMap),
+                        new GenericMap(varcharMap)));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.close();
+        commit.close();
+
+        hiveShell.execute(
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE EXTERNAL TABLE test_table",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "LOCATION '" + tablePath + "'")));
+
+        Assert.assertEquals(
+                Collections.singletonList("Date 1971-01-11\tTest timestamp(3)\t一点二\tHive\tPaimon"),
+                hiveShell.executeQuery(
+                        "SELECT "
+                                + "date_key[CAST('1971-01-11' AS DATE)],"
+                                + "timestamp_key[CAST('2023-7-18 12:29:59.123' AS TIMESTAMP)],"
+                                + "decimal_key[1.2],"
+                                + "string_key['Engine'],"
+                                + "varchar_key['Name']"
+                                + " FROM test_table"));
     }
 }

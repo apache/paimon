@@ -70,7 +70,11 @@ public class PaimonMapObjectInspector implements MapObjectInspector {
         InternalArray valueArrayData = mapData.valueArray();
         for (int i = 0; i < mapData.size(); i++) {
             Object k = keyGetter.getElementOrNull(keyArrayData, i);
-            if (Objects.equals(k, key)) {
+            Object normalizedSearchKey = key;
+            if (keyObjectInspector instanceof WriteableObjectInspector) {
+                normalizedSearchKey = ((WriteableObjectInspector) keyObjectInspector).convert(key);
+            }
+            if (Objects.equals(k, normalizedSearchKey)) {
                 return valueGetter.getElementOrNull(valueArrayData, i);
             }
         }
