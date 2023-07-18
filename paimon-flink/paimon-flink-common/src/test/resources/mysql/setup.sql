@@ -568,6 +568,21 @@ CREATE TABLE t2 (
     PRIMARY KEY (k1, k2)
 );
 
+CREATE DATABASE paimon_sync_database_add_ignored_table;
+USE paimon_sync_database_add_ignored_table;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE a (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
 CREATE DATABASE paimon_sync_table_tinyint;
 USE paimon_sync_table_tinyint;
 

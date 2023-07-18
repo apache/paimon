@@ -768,6 +768,82 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         testNewlyAddedTable(1, true, true, "paimon_sync_database_newly_added_tables_4");
     }
 
+    @Test
+    public void testAddIgnoredTable() throws Exception {
+        String mySqlDatabase = "paimon_sync_database_add_ignored_table";
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", mySqlDatabase);
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(2) + 2));
+
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        false,
+                        null,
+                        null,
+                        "t.+",
+                        ".*a$",
+                        Collections.emptyMap(),
+                        tableConfig,
+                        COMBINED);
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(mySqlDatabase),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+
+            FileStoreTable table1 = getFileStoreTable("t1");
+
+            statement.executeUpdate("USE " + mySqlDatabase);
+            statement.executeUpdate("INSERT INTO t1 VALUES (1, 'one')");
+            statement.executeUpdate("INSERT INTO a VALUES (1, 'one')");
+
+            // make sure the job steps into incremental phase
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new String[] {"k", "v1"});
+            List<String> primaryKeys = Collections.singletonList("k");
+            waitForResult(Collections.singletonList("+I[1, one]"), table1, rowType, primaryKeys);
+
+            // create new tables at runtime
+            // synchronized table: t2
+            statement.executeUpdate("CREATE TABLE t2 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+            statement.executeUpdate("INSERT INTO t2 VALUES (1, 'Hi')");
+            // not synchronized tables: ta, t3
+            statement.executeUpdate("CREATE TABLE ta (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+            statement.executeUpdate("INSERT INTO ta VALUES (1, 'Apache')");
+            statement.executeUpdate("CREATE TABLE t3 (k INT, v1 VARCHAR(10))");
+            statement.executeUpdate("INSERT INTO t3 VALUES (1, 'Paimon')");
+
+            statement.executeUpdate("INSERT INTO t1 VALUES (2, 'two')");
+            waitForResult(Arrays.asList("+I[1, one]", "+I[2, two]"), table1, rowType, primaryKeys);
+
+            // check tables
+            assertTableExists(Arrays.asList("t1", "t2"));
+            assertTableNotExists(Arrays.asList("a", "ta", "t3"));
+
+            FileStoreTable newTable = getFileStoreTable("t2");
+            waitForResult(Collections.singletonList("+I[1, Hi]"), newTable, rowType, primaryKeys);
+        }
+    }
+
     public void testNewlyAddedTable(
             int numOfNewlyAddedTables,
             boolean testSavepointRecovery,
@@ -1094,14 +1170,17 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         waitForResult(expected, table, rowType, Arrays.asList("pk"));
     }
 
+    private Catalog catalog() {
+        return CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+    }
+
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
         Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog.getTable(identifier);
+        return (FileStoreTable) catalog().getTable(identifier);
     }
 
     private void assertTableExists(List<String> tableNames) {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         for (String tableName : tableNames) {
             Identifier identifier = Identifier.create(database, tableName);
             assertThat(catalog.tableExists(identifier)).isTrue();
@@ -1109,7 +1188,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     private void assertTableNotExists(List<String> tableNames) {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         for (String tableName : tableNames) {
             Identifier identifier = Identifier.create(database, tableName);
             assertThat(catalog.tableExists(identifier)).isFalse();
