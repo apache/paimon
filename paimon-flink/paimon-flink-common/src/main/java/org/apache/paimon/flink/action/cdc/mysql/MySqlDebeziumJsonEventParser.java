@@ -67,34 +67,42 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
     private final boolean caseSensitive;
+
     private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
     private final NewTableSchemaBuilder<String> schemaBuilder;
+    private final boolean convertTinyint1ToBool;
 
     private JsonNode root;
     private JsonNode payload;
 
     public MySqlDebeziumJsonEventParser(
-            ZoneId serverTimeZone, boolean caseSensitive, List<ComputedColumn> computedColumns) {
+            ZoneId serverTimeZone,
+            boolean caseSensitive,
+            List<ComputedColumn> computedColumns,
+            boolean convertTinyint1ToBool) {
         this(
                 serverTimeZone,
                 caseSensitive,
                 computedColumns,
                 new TableNameConverter(caseSensitive),
-                ddl -> Optional.empty());
+                ddl -> Optional.empty(),
+                convertTinyint1ToBool);
     }
 
     public MySqlDebeziumJsonEventParser(
             ZoneId serverTimeZone,
             boolean caseSensitive,
             TableNameConverter tableNameConverter,
-            NewTableSchemaBuilder<String> schemaBuilder) {
+            NewTableSchemaBuilder<String> schemaBuilder,
+            boolean convertTinyint1ToBool) {
         this(
                 serverTimeZone,
                 caseSensitive,
                 Collections.emptyList(),
                 tableNameConverter,
-                schemaBuilder);
+                schemaBuilder,
+                convertTinyint1ToBool);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -102,12 +110,14 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TableNameConverter tableNameConverter,
-            NewTableSchemaBuilder<String> schemaBuilder) {
+            NewTableSchemaBuilder<String> schemaBuilder,
+            boolean convertTinyint1ToBool) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
         this.tableNameConverter = tableNameConverter;
         this.schemaBuilder = schemaBuilder;
+        this.convertTinyint1ToBool = convertTinyint1ToBool;
     }
 
     @Override
@@ -168,7 +178,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     MySqlTypeUtils.toDataType(
                             column.get("typeName").asText(),
                             length == null ? null : length.asInt(),
-                            scale == null ? null : scale.asInt());
+                            scale == null ? null : scale.asInt(),
+                            convertTinyint1ToBool);
             if (column.get("optional").asBoolean()) {
                 type = type.nullable();
             } else {
