@@ -24,11 +24,16 @@ import org.apache.paimon.operation.Lock;
 
 import javax.annotation.Nullable;
 
+import java.io.Serializable;
+
 /**
  * Catalog environment in table which contains log factory, metastore client factory and lineage
  * meta.
  */
-public class CatalogEnvironment {
+public class CatalogEnvironment implements Serializable {
+
+    private static final long serialVersionUID = 1L;
+
     private final Lock.Factory lockFactory;
     @Nullable private final MetastoreClient.Factory metastoreClientFactory;
     @Nullable private final LineageMeta lineageMeta;

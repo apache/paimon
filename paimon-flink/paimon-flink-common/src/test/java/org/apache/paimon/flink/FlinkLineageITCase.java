@@ -93,6 +93,8 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
     /** Throwing specific exception in each method. */
     private static class ThrowingLineageMeta implements LineageMeta {
 
+        private static final long serialVersionUID = 1L;
+
         @Override
         public void storeSourceTableLineage(TableLineageEntity entity) {
             throw new UnsupportedOperationException(
