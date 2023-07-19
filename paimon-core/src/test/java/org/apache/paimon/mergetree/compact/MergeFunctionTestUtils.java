@@ -94,48 +94,23 @@ public class MergeFunctionTestUtils {
         return expected;
     }
 
-    public static List<ReusingTestData> getExpectedForAgg(List<ReusingTestData> input) {
+public static List<ReusingTestData> getExpectedForAgg(List<ReusingTestData> input) {
         input = new ArrayList<>(input);
         Collections.sort(input);
 
-        List<ReusingTestData> expected = new ArrayList<>();
-        List<ReusingTestData> current = new ArrayList<>();
-        for (ReusingTestData data : input) {
-            while (true) {
-                if (current.isEmpty() || data.key == current.get(current.size() - 1).key) {
-                    current.add(data);
-                    break;
-                } else {
-                    expected.add(mergeAgg(current));
-                }
-            }
+        LinkedHashMap<Integer, List<ReusingTestData>> groups = new LinkedHashMap<>();
+        for (ReusingTestData d : input) {
+            groups.computeIfAbsent(d.key, k -> new ArrayList<>()).add(d);
         }
-        expected.add(mergeAgg(current));
-        return expected;
-    }
 
-    private static ReusingTestData mergeAgg(List<ReusingTestData> records) {
-        try {
-            if (records.size() == 1) {
-                return records.get(0);
-            } else {
-                ReusingTestData lastOne = records.get(records.size() - 1);
-                ReusingTestData data =
-                        new ReusingTestData(lastOne.key, lastOne.sequenceNumber, RowKind.INSERT, 0);
-                for (int i = records.size() - 1; i >= 0; i--) {
-                    ReusingTestData current = records.get(i);
-                    data =
-                            data.copy(
-                                    data.value
-                                            + (current.valueKind.isAdd()
-                                                    ? current.value
-                                                    : -current.value));
-                }
-                return data;
-            }
-        } finally {
-            records.clear();
+        List<ReusingTestData> expected = new ArrayList<>();
+        for (List<ReusingTestData> group : groups.values()) {
+            long sum =
+                    group.stream().mapToLong(d -> d.valueKind.isAdd() ? d.value : -d.value).sum();
+            ReusingTestData last = group.get(group.size() - 1);
+            expected.add(new ReusingTestData(last.key, last.sequenceNumber, RowKind.INSERT, sum));
         }
+        return expected;
     }
 
     public static void assertKvsEquals(List<KeyValue> expected, List<KeyValue> actual) {
