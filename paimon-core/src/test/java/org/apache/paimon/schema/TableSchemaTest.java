@@ -19,10 +19,9 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -32,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link TableSchema}. */
 public class TableSchemaTest {
@@ -40,40 +40,76 @@ public class TableSchemaTest {
     public void testInvalidPrimaryKeys() {
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new IntType()),
-                        new DataField(1, "f1", new IntType()),
-                        new DataField(2, "f2", new IntType()));
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()));
         List<String> partitionKeys = Collections.singletonList("f0");
         List<String> primaryKeys = Collections.singletonList("f1");
         Map<String, String> options = new HashMap<>();
 
-        Assertions.assertThrows(
-                IllegalStateException.class,
-                () -> new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, ""));
+        assertThatThrownBy(
+                        () ->
+                                new TableSchema(
+                                        1, fields, 10, partitionKeys, primaryKeys, options, ""))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Primary key constraint [f1] should include all partition fields [f0]");
     }
 
     @Test
     public void testInvalidFieldIds() {
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new IntType()),
-                        new DataField(0, "f1", new IntType()));
-        Assertions.assertThrows(
-                RuntimeException.class, () -> RowType.currentHighestFieldId(fields));
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(0, "f1", DataTypes.INT()));
+
+        assertThatThrownBy(() -> RowType.currentHighestFieldId(fields))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Broken schema, field id 0 is duplicated.");
     }
 
     @Test
     public void testHighestFieldId() {
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new IntType()),
-                        new DataField(20, "f1", new IntType()));
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(20, "f1", DataTypes.INT()));
         assertThat(RowType.currentHighestFieldId(fields)).isEqualTo(20);
+
+        List<DataField> fields1 =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "f1",
+                                DataTypes.ROW(
+                                        new DataField(2, "f0", DataTypes.STRING()),
+                                        new DataField(3, "f1", DataTypes.ARRAY(DataTypes.INT())))),
+                        new DataField(4, "f2", DataTypes.STRING()),
+                        new DataField(
+                                5,
+                                "f3",
+                                DataTypes.ARRAY(
+                                        DataTypes.ROW(
+                                                new DataField(6, "f0", DataTypes.BIGINT())))));
+        assertThat(RowType.currentHighestFieldId(fields1)).isEqualTo(6);
+
+        List<DataField> fields2 =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(
+                                1,
+                                "f1",
+                                DataTypes.ROW(
+                                        DataTypes.STRING(), DataTypes.ARRAY(DataTypes.INT()))),
+                        new DataField(2, "f2", DataTypes.STRING()));
+        assertThatThrownBy(() -> RowType.currentHighestFieldId(fields2))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Broken schema, field id 0 is duplicated.");
     }
 
     static RowType newRowType(boolean isNullable, int fieldId) {
         return new RowType(
                 isNullable,
-                Collections.singletonList(new DataField(fieldId, "nestedField", new IntType())));
+                Collections.singletonList(new DataField(fieldId, "nestedField", DataTypes.INT())));
     }
 }

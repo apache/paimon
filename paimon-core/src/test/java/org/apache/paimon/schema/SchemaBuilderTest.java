@@ -23,7 +23,8 @@ import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link Schema.Builder}. */
 public class SchemaBuilderTest {
@@ -63,5 +64,23 @@ public class SchemaBuilderTest {
                                 IllegalStateException.class,
                                 "Partition key constraint [id, id] must not contain duplicate columns. Found: [id]"
                                         + ""));
+    }
+
+    @Test
+    public void testHighestFieldId() {
+        Schema.Builder builder =
+                Schema.newBuilder()
+                        .column("id", DataTypes.INT())
+                        .column(
+                                "col1",
+                                DataTypes.ROW(
+                                        DataTypes.STRING(),
+                                        DataTypes.INT(),
+                                        DataTypes.ARRAY(DataTypes.STRING())))
+                        .column("col2", DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()))
+                        .column("col3", DataTypes.ARRAY(DataTypes.ROW(DataTypes.STRING())))
+                        .partitionKeys("id")
+                        .partitionKeys("id");
+        assertThat(builder.getHighestFieldId()).isEqualTo(7);
     }
 }
