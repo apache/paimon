@@ -29,8 +29,8 @@ import javax.annotation.Nullable;
  *
  * <ul>
  *   <li>Please don't save KeyValue and InternalRow references to the List: the KeyValue of the
- *       first two articles and the InternalRow object inside them are safe, but the reference of
- *       the third article may overwrite the reference of the first article.
+ *       first two objects and the InternalRow object inside them are safe, but the reference of the
+ *       third object may overwrite the reference of the first object.
  *   <li>You can save fields references: fields don't reuse their objects.
  * </ul>
  *

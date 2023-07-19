@@ -25,6 +25,7 @@ import org.apache.paimon.utils.ReusingTestData;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -64,6 +65,57 @@ public class MergeFunctionTestUtils {
             ReusingTestData data = input.get(i);
             if (i + 1 >= input.size() || data.key != input.get(i + 1).key) {
                 expected.add(data);
+            }
+        }
+        return expected;
+    }
+
+    public static List<ReusingTestData> getExpectedForPartialUpdate(List<ReusingTestData> input) {
+        input = new ArrayList<>(input);
+        Collections.sort(input);
+
+        LinkedHashMap<Integer, List<ReusingTestData>> groups = new LinkedHashMap<>();
+        for (ReusingTestData d : input) {
+            groups.computeIfAbsent(d.key, k -> new ArrayList<>()).add(d);
+        }
+
+        List<ReusingTestData> expected = new ArrayList<>();
+        for (List<ReusingTestData> group : groups.values()) {
+            if (group.size() == 1) {
+                // due to ReducerMergeFunctionWrapper
+                expected.add(group.get(0));
+            } else {
+                group.stream()
+                        .filter(d -> d.valueKind.isAdd())
+                        .reduce((first, second) -> second)
+                        .ifPresent(expected::add);
+            }
+        }
+        return expected;
+    }
+
+    public static List<ReusingTestData> getExpectedForAggSum(List<ReusingTestData> input) {
+        input = new ArrayList<>(input);
+        Collections.sort(input);
+
+        LinkedHashMap<Integer, List<ReusingTestData>> groups = new LinkedHashMap<>();
+        for (ReusingTestData d : input) {
+            groups.computeIfAbsent(d.key, k -> new ArrayList<>()).add(d);
+        }
+
+        List<ReusingTestData> expected = new ArrayList<>();
+        for (List<ReusingTestData> group : groups.values()) {
+            if (group.size() == 1) {
+                // due to ReducerMergeFunctionWrapper
+                expected.add(group.get(0));
+            } else {
+                long sum =
+                        group.stream()
+                                .mapToLong(d -> d.valueKind.isAdd() ? d.value : -d.value)
+                                .sum();
+                ReusingTestData last = group.get(group.size() - 1);
+                expected.add(
+                        new ReusingTestData(last.key, last.sequenceNumber, RowKind.INSERT, sum));
             }
         }
         return expected;
