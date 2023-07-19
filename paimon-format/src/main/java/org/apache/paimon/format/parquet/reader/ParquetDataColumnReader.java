@@ -65,8 +65,11 @@ public interface ParquetDataColumnReader {
     /** @return the next Bytes from the page */
     byte[] readBytes();
 
-    /** @return the next TimestampData from the page */
-    Timestamp readTimestamp();
+    /** @return the next Timestamp with millisecond precision. */
+    Timestamp readMillsTimestamp();
+
+    /** @return the next Timestamp with microsecond precision. */
+    Timestamp readMicrosTimestamp();
 
     /** @return the underlying dictionary if current reader is dictionary encoded */
     Dictionary getDictionary();

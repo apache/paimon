@@ -959,13 +959,11 @@ public class PaimonStorageHandlerITCase {
     @Test
     public void testMapKey() throws Exception {
         Options conf = getBasicConf();
-        // TODO fix PARQUET
-        //        conf.set(
-        //                CoreOptions.FILE_FORMAT,
-        //                ThreadLocalRandom.current().nextBoolean()
-        //                        ? CoreOptions.FileFormatType.ORC
-        //                        : CoreOptions.FileFormatType.PARQUET);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.ORC);
+        conf.set(
+                CoreOptions.FILE_FORMAT,
+                ThreadLocalRandom.current().nextBoolean()
+                        ? CoreOptions.FileFormatType.ORC
+                        : CoreOptions.FileFormatType.PARQUET);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
@@ -973,13 +971,15 @@ public class PaimonStorageHandlerITCase {
                                 new DataType[] {
                                     DataTypes.MAP(DataTypes.DATE(), DataTypes.STRING()),
                                     DataTypes.MAP(DataTypes.TIMESTAMP(3), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.TIMESTAMP(5), DataTypes.STRING()),
                                     DataTypes.MAP(DataTypes.DECIMAL(2, 1), DataTypes.STRING()),
                                     DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()),
                                     DataTypes.MAP(DataTypes.VARCHAR(10), DataTypes.STRING())
                                 },
                                 new String[] {
                                     "date_key",
-                                    "timestamp_key",
+                                    "timestamp3_key",
+                                    "timestamp5_key",
                                     "decimal_key",
                                     "string_key",
                                     "varchar_key"
@@ -993,11 +993,16 @@ public class PaimonStorageHandlerITCase {
 
         Map<Integer, BinaryString> dateMap =
                 Collections.singletonMap(375, BinaryString.fromString("Date 1971-01-11"));
-        Map<Timestamp, BinaryString> timestampMap =
+        Map<Timestamp, BinaryString> timestamp3Map =
                 Collections.singletonMap(
                         Timestamp.fromLocalDateTime(
                                 LocalDateTime.of(2023, 7, 18, 12, 29, 59, 123_000_000)),
                         BinaryString.fromString("Test timestamp(3)"));
+        Map<Timestamp, BinaryString> timestamp5Map =
+                Collections.singletonMap(
+                        Timestamp.fromLocalDateTime(
+                                LocalDateTime.of(2023, 7, 18, 12, 29, 59, 123_450_000)),
+                        BinaryString.fromString("Test timestamp(5)"));
         Map<Decimal, BinaryString> decimalMap =
                 Collections.singletonMap(
                         Decimal.fromBigDecimal(new BigDecimal("1.2"), 2, 1),
@@ -1012,7 +1017,8 @@ public class PaimonStorageHandlerITCase {
         write.write(
                 GenericRow.of(
                         new GenericMap(dateMap),
-                        new GenericMap(timestampMap),
+                        new GenericMap(timestamp3Map),
+                        new GenericMap(timestamp5Map),
                         new GenericMap(decimalMap),
                         new GenericMap(stringMap),
                         new GenericMap(varcharMap)));
@@ -1022,11 +1028,13 @@ public class PaimonStorageHandlerITCase {
         createExternalTable();
 
         Assert.assertEquals(
-                Collections.singletonList("Date 1971-01-11\tTest timestamp(3)\t一点二\tHive\tPaimon"),
+                Collections.singletonList(
+                        "Date 1971-01-11\tTest timestamp(3)\tTest timestamp(5)\t一点二\tHive\tPaimon"),
                 hiveShell.executeQuery(
                         "SELECT "
                                 + "date_key[CAST('1971-01-11' AS DATE)],"
-                                + "timestamp_key[CAST('2023-7-18 12:29:59.123' AS TIMESTAMP)],"
+                                + "timestamp3_key[CAST('2023-7-18 12:29:59.123' AS TIMESTAMP)],"
+                                + "timestamp5_key[CAST('2023-7-18 12:29:59.12345' AS TIMESTAMP)],"
                                 + "decimal_key[1.2],"
                                 + "string_key['Engine'],"
                                 + "varchar_key['Name']"
