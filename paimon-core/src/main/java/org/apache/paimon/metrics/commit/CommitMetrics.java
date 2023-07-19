@@ -37,7 +37,7 @@ import java.util.Set;
 /** Metrics to measure a commit. */
 public class CommitMetrics {
     private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
-    private final Map<String, BucketMetricGroup> taggedMetricGroups = new HashMap<>();
+    private final Map<String, BucketMetricGroup> bucketMetricGroups = new HashMap<>();
 
     private final String groupKeyFormat = "%s-%s";
     private final MetricGroup genericMetricGroup;
@@ -49,8 +49,8 @@ public class CommitMetrics {
         registerGenericCommitMetrics();
     }
 
-    public Map<String, BucketMetricGroup> getTaggedMetricGroups() {
-        return taggedMetricGroups;
+    public Map<String, BucketMetricGroup> getBucketMetricGroups() {
+        return bucketMetricGroups;
     }
 
     public MetricGroup getGenericMetricGroup() {
@@ -110,7 +110,7 @@ public class CommitMetrics {
         totalChangelogFilesCounter = genericMetricGroup.counter(TOTAL_CHANGELOG_FILES);
     }
 
-    private void registerTaggedCommitMetrics() {
+    private void registerBucketCommitMetrics() {
         if (latestCommit != null) {
             Map<BinaryRow, Set<Integer>> partBuckets = latestCommit.getPartBucketsWritten();
             for (Map.Entry<BinaryRow, Set<Integer>> kv : partBuckets.entrySet()) {
@@ -118,12 +118,12 @@ public class CommitMetrics {
                 String partitionStr = getPartitionString(partition);
                 for (Integer bucket : kv.getValue()) {
                     String groupKey = String.format(groupKeyFormat, partitionStr, bucket);
-                    if (!taggedMetricGroups.containsKey(groupKey)) {
+                    if (!bucketMetricGroups.containsKey(groupKey)) {
                         BucketMetricGroup group =
-                                taggedMetricGroups.compute(
+                                bucketMetricGroups.compute(
                                         groupKey,
                                         (k, v) ->
-                                                BucketMetricGroup.createTaggedMetricGroup(
+                                                BucketMetricGroup.createBucketMetricGroup(
                                                         pathFactory.root().getName(),
                                                         bucket,
                                                         partitionStr));
@@ -252,6 +252,6 @@ public class CommitMetrics {
                 commitStats.getChangelogFilesCommitAppended()
                         + commitStats.getChangelogFilesCompacted());
         durationHistogram.update(commitStats.getDuration());
-        registerTaggedCommitMetrics();
+        registerBucketCommitMetrics();
     }
 }

@@ -64,7 +64,7 @@ public class CommitMetricsTest {
     @Test
     public void testGenericMetricsRegistration() {
         MetricGroup group = commitMetrics.getGenericMetricGroup();
-        Map<String, BucketMetricGroup> taggedMetricGroups = commitMetrics.getTaggedMetricGroups();
+        Map<String, BucketMetricGroup> taggedMetricGroups = commitMetrics.getBucketMetricGroups();
 
         assertEquals(1, Metrics.getInstance().getMetricGroups().size());
         assertEquals(group, Metrics.getInstance().getMetricGroups().get(0));
@@ -126,7 +126,7 @@ public class CommitMetricsTest {
     public void testMetricsAreUpdated() {
         Map<String, Metric> registeredGenericMetrics =
                 commitMetrics.getGenericMetricGroup().getMetrics();
-        Map<String, BucketMetricGroup> taggedMetricGroups = commitMetrics.getTaggedMetricGroups();
+        Map<String, BucketMetricGroup> taggedMetricGroups = commitMetrics.getBucketMetricGroups();
 
         // Check initial values
         Gauge<Long> lastCommitDuration =

@@ -21,10 +21,10 @@ package org.apache.paimon.metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collections;
+import javax.annotation.Nullable;
+
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Contains key functionality for adding metrics and carries metrics.
@@ -37,10 +37,10 @@ public abstract class AbstractMetricGroup implements MetricGroup {
     // ------------------------------------------------------------------------
 
     /** The map containing all tags and their associated values, lazily computed. */
-    protected volatile Map<String, String> tags;
+    protected Map<String, String> tags;
 
     /** Flag indicating whether this group has been closed. */
-    private volatile boolean closed;
+    private boolean closed = false;
 
     private final Map<String, Metric> metrics = new HashMap<>();
 
@@ -48,31 +48,16 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
     // ------------------------------------------------------------------------
 
-    public AbstractMetricGroup(String table) {
+    public AbstractMetricGroup(String table, @Nullable Map<String, String> tags) {
         this.table = table;
+        this.tags = tags;
         Metrics.getInstance().addGroup(this);
     }
 
     @Override
     public Map<String, String> getAllTags() {
-        return internalGetAllTags(Collections.emptySet());
-    }
-
-    private Map<String, String> internalGetAllTags(Set<String> excludedTags) {
-        Map<String, String> tmpTags = new HashMap<>();
-        putTags(tmpTags);
-        excludedTags.forEach(tmpTags::remove);
-        tags = tmpTags;
         return tags;
     }
-
-    /**
-     * Enters all tags specific to this {@link AbstractMetricGroup} and their associated values
-     * into the map.
-     *
-     * @param tags map to enter tags and their values into
-     */
-    protected void putTags(Map<String, String> tags) {}
 
     /**
      * Returns the fully qualified metric name using the configured delimiter for the reporter with
@@ -151,20 +136,18 @@ public abstract class AbstractMetricGroup implements MetricGroup {
         }
         // add the metric only if the group is still open
         synchronized (this) {
-            if (!closed) {
-                synchronized (this) {
-                    switch (metric.getMetricType()) {
-                        case COUNTER:
-                        case GAUGE:
-                        case HISTOGRAM:
-                            metrics.put(metricName, metric);
-                            break;
-                        default:
-                            LOG.warn(
-                                    "Cannot add unknown metric type {}. This indicates that the paimon "
-                                            + "does not support this metric type.",
-                                    metric.getClass().getName());
-                    }
+            if (!isClosed()) {
+                switch (metric.getMetricType()) {
+                    case COUNTER:
+                    case GAUGE:
+                    case HISTOGRAM:
+                        metrics.put(metricName, metric);
+                        break;
+                    default:
+                        LOG.warn(
+                                "Cannot add unknown metric type {}. This indicates that the paimon "
+                                        + "does not support this metric type.",
+                                metric.getClass().getName());
                 }
             }
         }
@@ -172,7 +155,11 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
     @Override
     public Map<String, Metric> getMetrics() {
-        return metrics;
+        Map<String, Metric> metricsMap = new HashMap<>();
+        synchronized (this) {
+            metrics.forEach((k, v) -> metricsMap.put(k, v));
+        }
+        return metricsMap;
     }
 
     /**

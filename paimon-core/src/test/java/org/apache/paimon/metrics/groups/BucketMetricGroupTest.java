@@ -30,7 +30,7 @@ public class BucketMetricGroupTest {
 
     @Test
     public void testGenerateScopeDefault() {
-        BucketMetricGroup group = BucketMetricGroup.createTaggedMetricGroup("myTable", 1, "dt=1");
+        BucketMetricGroup group = BucketMetricGroup.createBucketMetricGroup("myTable", 1, "dt=1");
 
         assertEquals(2, group.getAllTags().size());
         assertEquals("1", group.getAllTags().get("bucket"));
