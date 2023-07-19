@@ -42,6 +42,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 
 import com.alibaba.druid.sql.SQLUtils;
 import com.alibaba.druid.sql.ast.SQLStatement;
+import com.alibaba.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
 import com.alibaba.druid.util.JdbcConstants;
 import org.apache.kafka.connect.json.JsonConverterConfig;
@@ -243,8 +244,12 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
             MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) statement;
             List<String> primaryKeys = createTableStatement.getPrimaryKeyNames();
+            boolean hasNotPrimaryKeys =
+                    createTableStatement.getTableElementList().stream()
+                            .filter(f -> f instanceof SQLColumnDefinition)
+                            .allMatch(f -> ((SQLColumnDefinition) f).getConstraints().isEmpty());
             String tableName = createTableStatement.getTableName();
-            if (primaryKeys.isEmpty()) {
+            if (primaryKeys.isEmpty() && hasNotPrimaryKeys) {
                 LOG.debug(
                         "Didn't find primary keys from MySQL DDL for table '{}'. "
                                 + "This table won't be synchronized.",

@@ -26,6 +26,7 @@ import com.alibaba.druid.sql.ast.SQLDataType;
 import com.alibaba.druid.sql.ast.SQLExpr;
 import com.alibaba.druid.sql.ast.SQLName;
 import com.alibaba.druid.sql.ast.expr.SQLCharExpr;
+import com.alibaba.druid.sql.ast.expr.SQLIdentifierExpr;
 import com.alibaba.druid.sql.ast.expr.SQLIntegerExpr;
 import com.alibaba.druid.sql.ast.statement.SQLColumnDefinition;
 import com.alibaba.druid.sql.ast.statement.SQLTableElement;
@@ -87,6 +88,23 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<MySqlCreat
         }
 
         List<String> primaryKeys = statement.getPrimaryKeyNames();
+
+        if (primaryKeys.isEmpty()) {
+            primaryKeys =
+                    statement.getTableElementList().stream()
+                            .filter(
+                                    f ->
+                                            f instanceof SQLColumnDefinition
+                                                    && !((SQLColumnDefinition) f)
+                                                            .getConstraints()
+                                                            .isEmpty())
+                            .map(
+                                    f ->
+                                            ((SQLIdentifierExpr)
+                                                            ((SQLColumnDefinition) f).getName())
+                                                    .getName())
+                            .collect(Collectors.toList());
+        }
 
         if (!caseSensitive) {
             LinkedHashMap<String, Tuple2<DataType, String>> tmp = new LinkedHashMap<>();
