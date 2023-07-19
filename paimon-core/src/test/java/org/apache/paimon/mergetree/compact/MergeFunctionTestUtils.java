@@ -74,37 +74,24 @@ public class MergeFunctionTestUtils {
         input = new ArrayList<>(input);
         Collections.sort(input);
 
-        List<ReusingTestData> expected = new ArrayList<>();
-        List<ReusingTestData> current = new ArrayList<>();
-        for (ReusingTestData data : input) {
-            while (true) {
-                if (current.isEmpty() || data.key == current.get(current.size() - 1).key) {
-                    current.add(data);
-                    break;
-                } else {
-                    mergePartialUpdate(current).ifPresent(expected::add);
-                }
-            }
+        LinkedHashMap<Integer, List<ReusingTestData>> groups = new LinkedHashMap<>();
+        for (ReusingTestData d : input) {
+            groups.computeIfAbsent(d.key, k -> new ArrayList<>()).add(d);
         }
-        mergePartialUpdate(current).ifPresent(expected::add);
-        return expected;
-    }
 
-    private static Optional<ReusingTestData> mergePartialUpdate(List<ReusingTestData> records) {
-        try {
-            if (records.size() == 1) {
-                return Optional.of(records.get(0));
+        List<ReusingTestData> expected = new ArrayList<>();
+        for (List<ReusingTestData> group : groups.values()) {
+            if (group.size() == 1) {
+                // due to ReducerMergeFunctionWrapper
+                expected.add(group.get(0));
             } else {
-                for (int i = records.size() - 1; i >= 0; i--) {
-                    if (records.get(i).valueKind.isAdd()) {
-                        return Optional.of(records.get(i));
-                    }
-                }
+                group.stream()
+                        .filter(d -> d.valueKind.isAdd())
+                        .reduce((first, second) -> second)
+                        .ifPresent(expected::add);
             }
-        } finally {
-            records.clear();
         }
-        return Optional.empty();
+        return expected;
     }
 
     public static List<ReusingTestData> getExpectedForAgg(List<ReusingTestData> input) {
