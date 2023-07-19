@@ -131,7 +131,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     }
 
     @Override
-    public LogStoreRegister createRegister(Options options) {
+    public LogStoreRegister createRegister(RegisterContext context) {
         throw new UnsupportedOperationException();
     }
 

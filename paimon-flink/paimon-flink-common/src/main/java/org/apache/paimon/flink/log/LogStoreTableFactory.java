@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.log;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelper;
@@ -74,7 +75,16 @@ public interface LogStoreTableFactory extends Factory {
      * Creates a {@link LogStoreRegister} instance for table ddl, it will register table to log
      * store when a table is created or dropped.
      */
-    LogStoreRegister createRegister(Options options);
+    LogStoreRegister createRegister(RegisterContext context);
+
+    /** Context to create log store register. */
+    interface RegisterContext {
+        /** Options for the table. */
+        Options getOptions();
+
+        /** Identifier for the table. */
+        Identifier getIdentifier();
+    }
 
     // --------------------------------------------------------------------------------------------
 

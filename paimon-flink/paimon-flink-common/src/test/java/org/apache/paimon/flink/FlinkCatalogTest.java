@@ -582,22 +582,27 @@ public class FlinkCatalogTest {
         }
 
         @Override
-        public LogStoreRegister createRegister(Options options) {
-            return new TestingLogStoreRegister();
+        public LogStoreRegister createRegister(RegisterContext context) {
+            return new TestingLogStoreRegister(context.getIdentifier());
         }
     }
 
     /** Testing log store register. */
     private static class TestingLogStoreRegister implements LogStoreRegister {
+        private final Identifier table;
+
+        private TestingLogStoreRegister(Identifier table) {
+            this.table = table;
+        }
 
         @Override
-        public Map<String, String> registerTopic(Identifier table, Map<String, String> options) {
+        public Map<String, String> registerTopic() {
             return Collections.singletonMap(
                     "testing.log.store.topic", String.format("%s-topic", table.getObjectName()));
         }
 
         @Override
-        public void unRegisterTopic(Identifier table, Map<String, String> options) {
+        public void unRegisterTopic() {
             throw new UnsupportedOperationException("Check unregister log store topic here.");
         }
     }
