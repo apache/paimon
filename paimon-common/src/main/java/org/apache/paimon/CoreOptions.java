@@ -612,6 +612,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Read batch size for orc and parquet.");
 
+    public static final ConfigOption<Integer> ORC_WRITE_BATCH_SIZE =
+            key("orc.write.batch-size")
+                    .intType()
+                    .defaultValue(1024)
+                    .withDescription("write batch size for orc.");
+
     public static final ConfigOption<String> CONSUMER_ID =
             key("consumer-id")
                     .stringType()
@@ -1124,6 +1130,10 @@ public class CoreOptions implements Serializable {
             result.put(className, param);
         }
         return result;
+    }
+
+    public int orcWriteBatch() {
+        return options.getInteger(ORC_WRITE_BATCH_SIZE.key(), ORC_WRITE_BATCH_SIZE.defaultValue());
     }
 
     /** Specifies the merge engine for table with primary key. */
