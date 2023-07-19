@@ -220,7 +220,7 @@ public abstract class SortBufferWriteBufferTestBase {
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return MergeFunctionTestUtils.getExpectedForAgg(input);
+            return MergeFunctionTestUtils.getExpectedForAggSum(input);
         }
 
         @Override
@@ -246,7 +246,7 @@ public abstract class SortBufferWriteBufferTestBase {
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return MergeFunctionTestUtils.getExpectedForAgg(input);
+            return MergeFunctionTestUtils.getExpectedForAggSum(input);
         }
 
         @Override

@@ -94,7 +94,7 @@ public class MergeFunctionTestUtils {
         return expected;
     }
 
-    public static List<ReusingTestData> getExpectedForAgg(List<ReusingTestData> input) {
+    public static List<ReusingTestData> getExpectedForAggSum(List<ReusingTestData> input) {
         input = new ArrayList<>(input);
         Collections.sort(input);
 
