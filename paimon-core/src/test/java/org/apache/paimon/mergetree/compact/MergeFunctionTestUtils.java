@@ -25,8 +25,8 @@ import org.apache.paimon.utils.ReusingTestData;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -94,7 +94,7 @@ public class MergeFunctionTestUtils {
         return expected;
     }
 
-public static List<ReusingTestData> getExpectedForAgg(List<ReusingTestData> input) {
+    public static List<ReusingTestData> getExpectedForAgg(List<ReusingTestData> input) {
         input = new ArrayList<>(input);
         Collections.sort(input);
 
@@ -105,10 +105,18 @@ public static List<ReusingTestData> getExpectedForAgg(List<ReusingTestData> inpu
 
         List<ReusingTestData> expected = new ArrayList<>();
         for (List<ReusingTestData> group : groups.values()) {
-            long sum =
-                    group.stream().mapToLong(d -> d.valueKind.isAdd() ? d.value : -d.value).sum();
-            ReusingTestData last = group.get(group.size() - 1);
-            expected.add(new ReusingTestData(last.key, last.sequenceNumber, RowKind.INSERT, sum));
+            if (group.size() == 1) {
+                // due to ReducerMergeFunctionWrapper
+                expected.add(group.get(0));
+            } else {
+                long sum =
+                        group.stream()
+                                .mapToLong(d -> d.valueKind.isAdd() ? d.value : -d.value)
+                                .sum();
+                ReusingTestData last = group.get(group.size() - 1);
+                expected.add(
+                        new ReusingTestData(last.key, last.sequenceNumber, RowKind.INSERT, sum));
+            }
         }
         return expected;
     }
