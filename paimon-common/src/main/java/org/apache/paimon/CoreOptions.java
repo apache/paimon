@@ -50,6 +50,7 @@ import static org.apache.paimon.options.description.TextElement.text;
 
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
+
     public static final String DEFAULT_VALUE_SUFFIX = "default-value";
 
     public static final String FIELDS_PREFIX = "fields";
@@ -768,6 +769,44 @@ public class CoreOptions implements Serializable {
                                     + "you need to create this table as a partitioned table in Hive metastore.\n"
                                     + "This config option does not affect the default filesystem metastore.");
 
+    public static final ConfigOption<TagCreationMode> TAG_AUTOMATIC_CREATION =
+            key("tag.automatic-creation")
+                    .enumType(TagCreationMode.class)
+                    .defaultValue(TagCreationMode.NONE)
+                    .withDescription(
+                            "Whether to create tag automatically. And how to generate tags.");
+
+    public static final ConfigOption<TagCreationPeriod> TAG_CREATION_PERIOD =
+            key("tag.creation-period")
+                    .enumType(TagCreationPeriod.class)
+                    .defaultValue(TagCreationPeriod.DAILY)
+                    .withDescription("What frequency is used to generate tags.");
+
+    public static final ConfigOption<Duration> TAG_CREATION_DELAY =
+            key("tag.creation-delay")
+                    .durationType()
+                    .defaultValue(Duration.ofMillis(0))
+                    .withDescription(
+                            "How long is the delay after the period ends before creating a tag."
+                                    + " This can allow some late data to enter the Tag.");
+
+    public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
+            key("tag.num-retained-max")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription("The maximum number of tags to retain.");
+
+    public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
+            key("sink.watermark-time-zone")
+                    .stringType()
+                    .defaultValue("UTC")
+                    .withDescription(
+                            "The time zone to parse the long watermark value to TIMESTAMP value."
+                                    + " The default value is 'UTC', which means the watermark is defined on TIMESTAMP column or not defined."
+                                    + " If the watermark is defined on TIMESTAMP_LTZ column, the time zone of watermark is user configured time zone,"
+                                    + " the value should be the user configured local time zone. The option value is either a full name"
+                                    + " such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1102,6 +1141,26 @@ public class CoreOptions implements Serializable {
 
     public boolean partitionedTableInMetastore() {
         return options.get(METASTORE_PARTITIONED_TABLE);
+    }
+
+    public TagCreationMode tagCreationMode() {
+        return options.get(TAG_AUTOMATIC_CREATION);
+    }
+
+    public TagCreationPeriod tagCreationPeriod() {
+        return options.get(TAG_CREATION_PERIOD);
+    }
+
+    public Duration tagCreationDelay() {
+        return options.get(TAG_CREATION_DELAY);
+    }
+
+    public Integer tagNumRetainedMax() {
+        return options.get(TAG_NUM_RETAINED_MAX);
+    }
+
+    public String sinkWatermarkTimeZone() {
+        return options.get(SINK_WATERMARK_TIME_ZONE);
     }
 
     public Map<String, String> getFieldDefaultValues() {
@@ -1552,6 +1611,60 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         SequenceAutoPadding(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The mode for tag creation. */
+    public enum TagCreationMode implements DescribedEnum {
+        NONE("none", "No automatically created tags."),
+        PROCESS_TIME(
+                "process-time",
+                "Based on the time of the machine, create TAG once the processing time passes period time plus delay."),
+        WATERMARK(
+                "watermark",
+                "Based on the watermark of the input, create TAG once the watermark passes period time plus delay.");
+
+        private final String value;
+        private final String description;
+
+        TagCreationMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The period for tag creation. */
+    public enum TagCreationPeriod implements DescribedEnum {
+        DAILY("daily", "Generate a tag every day."),
+        HOURLY("hourly", "Generate a tag every hour."),
+        TWO_HOURS("two-hours", "Generate a tag every two hours.");
+
+        private final String value;
+        private final String description;
+
+        TagCreationPeriod(String value, String description) {
             this.value = value;
             this.description = description;
         }
