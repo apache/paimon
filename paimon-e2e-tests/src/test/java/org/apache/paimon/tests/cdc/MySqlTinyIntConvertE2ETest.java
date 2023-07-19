@@ -18,14 +18,12 @@
 
 package org.apache.paimon.tests.cdc;
 
-import org.apache.paimon.flink.action.cdc.mysql.MySqlContainer;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.Container;
 
 import java.sql.Connection;
 import java.sql.Statement;
@@ -33,52 +31,25 @@ import java.sql.Statement;
 /** E2e test for MySql CDC type convert tinyint(1) to tinyint. */
 public class MySqlTinyIntConvertE2ETest extends MySqlCdcE2eTestBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MySqlTinyIntConvertE2ETest.class);
-
     protected MySqlTinyIntConvertE2ETest() {
         super(MySqlVersion.V5_7);
     }
 
     @Test
     public void testSyncTable() throws Exception {
-        String runActionCommand =
-                String.join(
-                        " ",
-                        "bin/flink",
-                        "run",
-                        "-D",
-                        "execution.checkpointing.interval=1s",
-                        "--detached",
-                        "lib/paimon-flink-action.jar",
-                        "mysql-sync-table",
-                        "--warehouse",
-                        warehousePath,
-                        "--database",
-                        "default",
-                        "--table",
-                        "tinyint_table",
-                        "--primary-keys",
-                        "pk",
-                        "--mysql-conf",
-                        "hostname=mysql-1",
-                        "--mysql-conf",
-                        String.format("port=%d", MySqlContainer.MYSQL_PORT),
-                        "--mysql-conf",
-                        String.format("username='%s'", mySqlContainer.getUsername()),
-                        "--mysql-conf",
-                        String.format("password='%s'", mySqlContainer.getPassword()),
-                        "--mysql-conf",
-                        "database-name='test_tinyint_convert'",
-                        "--mysql-conf",
-                        "table-name='T'",
-                        "--mysql-conf",
-                        "mysql.converter.tinyint1-to-bool='false'",
-                        "--table-conf",
-                        "bucket=2");
-        Container.ExecResult execResult =
-                jobManager.execInContainer("su", "flink", "-c", runActionCommand);
-        LOG.info(execResult.getStdout());
-        LOG.info(execResult.getStderr());
+        runAction(
+                ACTION_SYNC_TABLE,
+                null,
+                "pk",
+                ImmutableMap.of(),
+                ImmutableMap.of(
+                        "database-name",
+                        "test_tinyint_convert",
+                        "table-name",
+                        "'T'",
+                        "mysql.converter.tinyint1-to-bool",
+                        "false"),
+                ImmutableMap.of("bucket", "2"));
 
         try (Connection conn = getMySqlConnection();
                 Statement statement = conn.createStatement()) {
@@ -88,7 +59,7 @@ public class MySqlTinyIntConvertE2ETest extends MySqlCdcE2eTestBase {
 
             String jobId =
                     runSql(
-                            "INSERT INTO result1 SELECT * FROM tinyint_table",
+                            "INSERT INTO result1 SELECT * FROM ts_table",
                             catalogDdl,
                             useCatalogCmd,
                             createResultSink(
