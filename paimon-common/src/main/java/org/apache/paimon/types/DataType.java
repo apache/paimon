@@ -34,7 +34,6 @@ import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Describes the data type in the paimon ecosystem.
@@ -120,10 +119,6 @@ public abstract class DataType implements Serializable {
      */
     public final DataType copy() {
         return copy(isNullable);
-    }
-
-    public DataType copy(AtomicInteger id) {
-        return copy();
     }
 
     /**

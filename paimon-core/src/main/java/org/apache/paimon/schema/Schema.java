@@ -21,6 +21,7 @@ package org.apache.paimon.schema;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -217,7 +218,7 @@ public class Schema {
 
         @Nullable private String comment;
 
-        private AtomicInteger highestFieldId = new AtomicInteger(-1);
+        private final AtomicInteger highestFieldId = new AtomicInteger(-1);
 
         public int getHighestFieldId() {
             return highestFieldId.get();
@@ -244,12 +245,9 @@ public class Schema {
             Preconditions.checkNotNull(columnName, "Column name must not be null.");
             Preconditions.checkNotNull(dataType, "Data type must not be null.");
 
-            columns.add(
-                    new DataField(
-                            highestFieldId.incrementAndGet(),
-                            columnName,
-                            dataType.copy(highestFieldId),
-                            description));
+            int id = highestFieldId.incrementAndGet();
+            DataType reassignDataType = ReassignFieldId.reassign(dataType, highestFieldId);
+            columns.add(new DataField(id, columnName, reassignDataType, description));
             return this;
         }
 

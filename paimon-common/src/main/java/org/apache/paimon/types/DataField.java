@@ -27,7 +27,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.paimon.utils.EncodingUtils.escapeIdentifier;
 import static org.apache.paimon.utils.EncodingUtils.escapeSingleQuotes;
@@ -92,10 +91,6 @@ public final class DataField implements Serializable {
 
     public DataField copy() {
         return new DataField(id, name, type.copy(), description);
-    }
-
-    public DataField copy(AtomicInteger id) {
-        return new DataField(id.get(), name, type.copy(id), description);
     }
 
     public String asSQLString() {

@@ -26,7 +26,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator
 import java.io.IOException;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Data type of an associative array that maps keys (including {@code NULL}) to values (including
@@ -68,11 +67,6 @@ public class MapType extends DataType {
     @Override
     public DataType copy(boolean isNullable) {
         return new MapType(isNullable, keyType.copy(), valueType.copy());
-    }
-
-    @Override
-    public DataType copy(AtomicInteger id) {
-        return new MapType(this.isNullable(), keyType.copy(id), valueType.copy(id));
     }
 
     @Override

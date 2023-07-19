@@ -102,19 +102,6 @@ public final class RowType extends DataType {
     }
 
     @Override
-    public DataType copy(AtomicInteger id) {
-        return new RowType(
-                this.isNullable(),
-                fields.stream()
-                        .map(
-                                field -> {
-                                    id.incrementAndGet();
-                                    return field.copy(id);
-                                })
-                        .collect(Collectors.toList()));
-    }
-
-    @Override
     public String asSQLString() {
         return withNullability(
                 FORMAT,
