@@ -27,7 +27,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.spark.sql.SparkSession;
@@ -43,6 +42,7 @@ import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
@@ -395,14 +395,23 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
                         : Arrays.stream(pkAsString.split(","))
                                 .map(String::trim)
                                 .collect(Collectors.toList());
-        return new Schema(
-                ((RowType) toPaimonType(schema)).getFields(),
-                Arrays.stream(partitions)
-                        .map(partition -> partition.references()[0].describe())
-                        .collect(Collectors.toList()),
-                primaryKeys,
-                normalizedProperties,
-                properties.getOrDefault(TableCatalog.PROP_COMMENT, ""));
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .options(normalizedProperties)
+                        .primaryKey(primaryKeys)
+                        .partitionKeys(
+                                Arrays.stream(partitions)
+                                        .map(partition -> partition.references()[0].describe())
+                                        .collect(Collectors.toList()))
+                        .comment(properties.getOrDefault(TableCatalog.PROP_COMMENT, ""));
+
+        for (StructField field : schema.fields()) {
+            schemaBuilder.column(
+                    field.name(),
+                    toPaimonType(field.dataType()),
+                    field.getComment().getOrElse(() -> ""));
+        }
+        return schemaBuilder.build();
     }
 
     private void validateAlterNestedField(String[] fieldNames) {

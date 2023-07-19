@@ -100,6 +100,12 @@ public class SparkGenericCatalogTest {
         testReadWrite("CT");
     }
 
+    @Test
+    public void testStructTable() {
+        spark.sql(
+                "CREATE TABLE ST (a INT, b STRUCT<b1: STRING, b2: STRING, b3: STRING>) USING paimon");
+    }
+
     private void testReadWrite(String table) {
         spark.sql("INSERT INTO " + table + " VALUES (1, 2, '3'), (4, 5, '6')").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM " + table).collectAsList();
