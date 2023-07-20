@@ -924,7 +924,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         createNewTable(statement, newTableName);
         statement.executeUpdate(
                 String.format("INSERT INTO `%s`.`t2` VALUES (8, 'eight', 80, 800)", databaseName));
-        List<Tuple2<Integer, String>> newTableRecords = getNewTableRecords(newTableCount);
+        List<Tuple2<Integer, String>> newTableRecords = getNewTableRecords();
         recordsMap.put(newTableName, newTableRecords);
         List<String> newTableExpected = getNewTableExpected(newTableRecords);
         insertRecordsIntoNewTable(statement, databaseName, newTableName, newTableRecords);
@@ -963,7 +963,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             Thread.sleep(5000L);
 
             // insert records
-            newTableRecords = getNewTableRecords(newTableCount);
+            newTableRecords = getNewTableRecords();
             recordsMap.put(newTableName, newTableRecords);
             insertRecordsIntoNewTable(statement, databaseName, newTableName, newTableRecords);
             newTable = getFileStoreTable(newTableName);
@@ -1027,7 +1027,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 .collect(Collectors.toList());
     }
 
-    private List<Tuple2<Integer, String>> getNewTableRecords(int newTableCount) {
+    private List<Tuple2<Integer, String>> getNewTableRecords() {
         List<Tuple2<Integer, String>> records = new LinkedList<>();
         int count = ThreadLocalRandom.current().nextInt(10) + 1;
         for (int i = 0; i < count; i++) {
@@ -1060,7 +1060,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     private void createNewTable(Statement statement, String newTableName) throws SQLException {
         statement.executeUpdate(
                 String.format(
-                        "CREATE TABLE %s (k INT, v1 VARCHAR(10), PRIMARY KEY (k))", newTableName));
+                        "CREATE TABLE %s (`k` INT, `v1` VARCHAR(10), PRIMARY KEY (`k`))",
+                        newTableName));
     }
 
     private JobClient buildSyncDatabaseActionWithNewlyAddedTables(

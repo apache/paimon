@@ -108,8 +108,13 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<MySqlCreat
         Schema.Builder builder = Schema.newBuilder();
         builder.options(tableConfig);
         for (Map.Entry<String, Tuple2<DataType, String>> entry : fields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue().f0, entry.getValue().f1);
+            builder.column(
+                    entry.getKey().replaceAll("`", ""), entry.getValue().f0, entry.getValue().f1);
         }
+
+        primaryKeys =
+                primaryKeys.stream().map(m -> m.replaceAll("`", "")).collect(Collectors.toList());
+
         Schema schema = builder.primaryKey(primaryKeys).build();
 
         return Optional.of(schema);
