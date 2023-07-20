@@ -268,13 +268,7 @@ public class KeyValueFileReadWriteTest {
                         new FlushingFileFormat(format),
                         pathFactoryMap,
                         suggestedFileSize)
-                .build(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        null,
-                        null,
-                        new HashMap<>(),
-                        new CoreOptions(options));
+                .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(options));
     }
 
     private KeyValueFileReaderFactory createReaderFactory(
