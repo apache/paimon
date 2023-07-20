@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.WriteMode.{APPEND_ONLY, CHANGE_LOG}
+import org.apache.paimon.WriteMode.CHANGE_LOG
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
@@ -25,10 +25,7 @@ import org.scalactic.source.Position
 
 class InsertOverwriteTest extends PaimonSparkTestBase {
 
-  // 3: fixed bucket, -1: dynamic bucket
-  private val bucketModes = Seq(3, -1)
-
-  Seq(APPEND_ONLY, CHANGE_LOG).foreach {
+  writeModes.foreach {
     writeMode =>
       bucketModes.foreach {
         bucket =>
@@ -58,7 +55,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       }
   }
 
-  Seq(APPEND_ONLY, CHANGE_LOG).foreach {
+  writeModes.foreach {
     writeMode =>
       bucketModes.foreach {
         bucket =>
@@ -98,7 +95,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       }
   }
 
-  Seq(APPEND_ONLY, CHANGE_LOG).foreach {
+  writeModes.foreach {
     writeMode =>
       bucketModes.foreach {
         bucket =>

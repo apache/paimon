@@ -15,30 +15,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark
+package org.apache.paimon.spark.sql
 
-import org.apache.spark.sql.{SaveMode => SparkSaveMode}
-import org.apache.spark.sql.sources.{AlwaysTrue, Filter}
+import org.apache.paimon.WriteMode
+import org.apache.paimon.WriteMode._
 
-sealed trait SaveMode extends Serializable
+trait WithTableOptions {
 
-object InsertInto extends SaveMode
+  // 3: fixed bucket, -1: dynamic bucket
+  protected val bucketModes: Seq[Int] = Seq(3, -1)
 
-case class Overwrite(filters: Option[Filter]) extends SaveMode
+  protected val writeModes: Seq[WriteMode] = Seq(CHANGE_LOG, APPEND_ONLY)
 
-object DynamicOverWrite extends SaveMode
-
-object ErrorIfExists extends SaveMode
-
-object Ignore extends SaveMode
-
-object SaveMode {
-  def transform(saveMode: SparkSaveMode): SaveMode = {
-    saveMode match {
-      case SparkSaveMode.Overwrite => Overwrite(Some(AlwaysTrue))
-      case SparkSaveMode.Ignore => Ignore
-      case SparkSaveMode.Append => InsertInto
-      case SparkSaveMode.ErrorIfExists => ErrorIfExists
-    }
-  }
 }

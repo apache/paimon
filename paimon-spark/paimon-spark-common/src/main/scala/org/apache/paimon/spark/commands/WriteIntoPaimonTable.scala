@@ -20,8 +20,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.index.PartitionIndex
-import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode}
-import org.apache.paimon.spark.SparkRow
+import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
@@ -159,6 +158,8 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
       case DynamicOverWrite =>
         dynamicPartitionOverwriteMode = true
         throw new UnsupportedOperationException("Dynamic Overwrite is unsupported for now.")
+      case _ =>
+        throw new UnsupportedOperationException(s" This mode is unsupported for now.")
     }
     (dynamicPartitionOverwriteMode, overwritePartition)
   }
