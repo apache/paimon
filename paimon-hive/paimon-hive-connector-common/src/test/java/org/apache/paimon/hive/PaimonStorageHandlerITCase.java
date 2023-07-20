@@ -252,7 +252,7 @@ public class PaimonStorageHandlerITCase {
                         "2\t40\tNULL\t400",
                         "3\t50\tStore\t200");
         Assert.assertEquals(expected, actual);
-        hiveShell.execute("RESET paimon.scan.snapshot-id");
+        hiveShell.execute("SET paimon.scan.snapshot-id=null");
     }
 
     @Test

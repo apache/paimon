@@ -184,7 +184,7 @@ OK
 2	Store
 3	Paimon
 */
-RESET paimon.scan.snapshot-id;
+SET paimon.scan.snapshot-id=null;
 
 ```
 

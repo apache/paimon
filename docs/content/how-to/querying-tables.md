@@ -120,7 +120,7 @@ SELECT * FROM t;
 ```sql
 SET paimon.scan.timestamp-millis=1679486589444;
 SELECT * FROM t;
-RESET paimon.scan.timestamp-millis;
+SET paimon.scan.timestamp-millis=null;
 ```
 {{< /tab >}}
 
@@ -178,7 +178,7 @@ spark.read()
 ```sql
 SET paimon.incremental-between='12,20';
 SELECT * FROM t;
-RESET paimon.incremental-between;
+SET paimon.incremental-between=null;
 ```
 {{< /tab >}}
 
