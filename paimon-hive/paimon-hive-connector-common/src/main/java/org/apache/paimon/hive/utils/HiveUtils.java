@@ -81,7 +81,6 @@ public class HiveUtils {
                 if (name.startsWith(PAIMON_PREFIX) && !"NULL".equalsIgnoreCase(value)) {
                     name = name.substring(PAIMON_PREFIX.length());
                     configMap.put(name, value);
-                    System.out.println(name + ":" + value);
                 }
             }
         }
