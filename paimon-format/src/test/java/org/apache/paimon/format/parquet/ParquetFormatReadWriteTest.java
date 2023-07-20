@@ -16,21 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.avro;
+package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.options.Options;
 
-/** An avro {@link FormatReadWriteTest}. */
-public class AvroFormatReadWriteTest extends FormatReadWriteTest {
+/** A parquet {@link FormatReadWriteTest}. */
+public class ParquetFormatReadWriteTest extends FormatReadWriteTest {
 
-    protected AvroFormatReadWriteTest() {
-        super("avro");
+    protected ParquetFormatReadWriteTest() {
+        super("parquet");
     }
 
     @Override
     protected FileFormat fileFormat() {
-        return new AvroFileFormat(new Options());
+        return new ParquetFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024));
     }
 }

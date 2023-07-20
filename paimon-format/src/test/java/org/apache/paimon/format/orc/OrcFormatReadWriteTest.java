@@ -16,17 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.avro;
+package org.apache.paimon.format.orc;
 
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReadWriteTest;
+import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.options.Options;
 
-/** An avro {@link FormatReadWriteTest}. */
-public class AvroFormatReadWriteTest extends FormatReadWriteTest {
+/** An orc {@link FormatReadWriteTest}. */
+public class OrcFormatReadWriteTest extends FormatReadWriteTest {
 
-    protected AvroFormatReadWriteTest() {
-        super("avro");
+    protected OrcFormatReadWriteTest() {
+        super("orc");
     }
 
     @Override
