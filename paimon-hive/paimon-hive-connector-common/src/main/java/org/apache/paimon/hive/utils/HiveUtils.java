@@ -77,8 +77,8 @@ public class HiveUtils {
         if (hiveConf != null) {
             for (Map.Entry<String, String> entry : hiveConf) {
                 String name = entry.getKey();
-                if (name.startsWith(PAIMON_PREFIX)) {
-                    String value = hiveConf.get(name);
+                String value = entry.getValue();
+                if (name.startsWith(PAIMON_PREFIX) && !"NULL".equalsIgnoreCase(value)) {
                     name = name.substring(PAIMON_PREFIX.length());
                     configMap.put(name, value);
                 }
