@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.WriteMode.{APPEND_ONLY, CHANGE_LOG}
+import org.apache.paimon.WriteMode.CHANGE_LOG
 import org.apache.paimon.spark.PaimonSparkSessionExtension
 
 import org.apache.spark.SparkConf
@@ -31,10 +31,7 @@ class TableValuedFunctionsTest extends PaimonSparkTestBase {
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtension].getName)
   }
 
-  // 3: fixed bucket, -1: dynamic bucket
-  private val bucketModes = Seq(3, -1)
-
-  Seq(APPEND_ONLY, CHANGE_LOG).foreach {
+  writeModes.foreach {
     writeMode =>
       bucketModes.foreach {
         bucket =>
