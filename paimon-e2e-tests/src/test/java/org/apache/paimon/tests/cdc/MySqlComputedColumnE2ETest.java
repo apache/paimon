@@ -18,14 +18,12 @@
 
 package org.apache.paimon.tests.cdc;
 
-import org.apache.paimon.flink.action.cdc.mysql.MySqlContainer;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.Container;
 
 import java.sql.Connection;
 import java.sql.Statement;
@@ -33,54 +31,19 @@ import java.sql.Statement;
 /** E2e test for MySql CDC with computed column. */
 public class MySqlComputedColumnE2ETest extends MySqlCdcE2eTestBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MySqlComputedColumnE2ETest.class);
-
     protected MySqlComputedColumnE2ETest() {
         super(MySqlVersion.V5_7);
     }
 
     @Test
     public void testSyncTable() throws Exception {
-        String runActionCommand =
-                String.join(
-                        " ",
-                        "bin/flink",
-                        "run",
-                        "-D",
-                        "execution.checkpointing.interval=1s",
-                        "--detached",
-                        "lib/paimon-flink-action.jar",
-                        "mysql-sync-table",
-                        "--warehouse",
-                        warehousePath,
-                        "--database",
-                        "default",
-                        "--table",
-                        "ts_table",
-                        "--partition-keys",
-                        // computed from _datetime
-                        "_year",
-                        "--primary-keys",
-                        "pk,_year",
-                        "--computed-column '_year=year(_datetime)'",
-                        "--mysql-conf",
-                        "hostname=mysql-1",
-                        "--mysql-conf",
-                        String.format("port=%d", MySqlContainer.MYSQL_PORT),
-                        "--mysql-conf",
-                        String.format("username='%s'", mySqlContainer.getUsername()),
-                        "--mysql-conf",
-                        String.format("password='%s'", mySqlContainer.getPassword()),
-                        "--mysql-conf",
-                        "database-name='test_computed_column'",
-                        "--mysql-conf",
-                        "table-name='T'",
-                        "--table-conf",
-                        "bucket=2");
-        Container.ExecResult execResult =
-                jobManager.execInContainer("su", "flink", "-c", runActionCommand);
-        LOG.info(execResult.getStdout());
-        LOG.info(execResult.getStderr());
+        runAction(
+                ACTION_SYNC_TABLE,
+                "_year",
+                "pk,_year",
+                ImmutableMap.of("_year", "'year(_datetime)'"),
+                ImmutableMap.of("database-name", "'test_computed_column'", "table-name", "'T'"),
+                ImmutableMap.of("bucket", "2"));
 
         try (Connection conn = getMySqlConnection();
                 Statement statement = conn.createStatement()) {
