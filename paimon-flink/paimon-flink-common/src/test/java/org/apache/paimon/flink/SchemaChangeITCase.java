@@ -191,27 +191,30 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     public void testModifyColumnTypeFromNumericToNumericPrimitive() {
         // decimal and numeric primitive to numeric primitive
         sql(
-                "CREATE TABLE T (a TINYINT, b INT, c FLOAT, d DOUBLE, e DECIMAL(10, 4), f DECIMAL(10, 4), g DOUBLE)");
+                "CREATE TABLE T (a TINYINT COMMENT 'a field', b INT COMMENT 'b field', c FLOAT COMMENT 'c field', d DOUBLE, e DECIMAL(10, 4), f DECIMAL(10, 4), g DOUBLE)");
         sql(
                 "INSERT INTO T VALUES(cast(1 as TINYINT), 123, 1.23, 3.141592, 3.14156, 3.14159, 1.23)");
 
         sql(
                 "ALTER TABLE T MODIFY (a INT, b SMALLINT, c DOUBLE, d FLOAT, e BIGINT, f DOUBLE, g TINYINT)");
-        List<Row> result = sql("SHOW CREATE TABLE T");
-        assertThat(result.toString())
-                .contains(
-                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
-                                + "  `a` INT,\n"
-                                + "  `b` SMALLINT,\n"
-                                + "  `c` DOUBLE,\n"
-                                + "  `d` FLOAT,\n"
-                                + "  `e` BIGINT,\n"
-                                + "  `f` DOUBLE,\n"
-                                + "  `g` TINYINT");
+
+        List<String> result =
+                sql("DESC T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[a, INT, true, null, null, null, a field]",
+                        "+I[b, SMALLINT, true, null, null, null, b field]",
+                        "+I[c, DOUBLE, true, null, null, null, c field]",
+                        "+I[d, FLOAT, true, null, null, null, null]",
+                        "+I[e, BIGINT, true, null, null, null, null]",
+                        "+I[f, DOUBLE, true, null, null, null, null]",
+                        "+I[g, TINYINT, true, null, null, null, null]");
+
         sql(
                 "INSERT INTO T VALUES(2, cast(456 as SMALLINT), 4.56, 3.14, 456, 4.56, cast(2 as TINYINT))");
-        result = sql("SELECT * FROM T");
-        assertThat(result.stream().map(Objects::toString).collect(Collectors.toList()))
+        result =
+                sql("SELECT * FROM T").stream().map(Objects::toString).collect(Collectors.toList());
+        assertThat(result)
                 .containsExactlyInAnyOrder(
                         "+I[1, 123, 1.2300000190734863, 3.141592, 3, 3.1416, 1]",
                         "+I[2, 456, 4.56, 3.14, 456, 4.56, 2]");

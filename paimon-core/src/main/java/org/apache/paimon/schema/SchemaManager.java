@@ -301,7 +301,10 @@ public class SchemaManager implements Serializable {
                                                     update.newDataType()));
                                 }
                                 return new DataField(
-                                        field.id(), field.name(), update.newDataType());
+                                        field.id(),
+                                        field.name(),
+                                        update.newDataType(),
+                                        field.description());
                             });
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;
