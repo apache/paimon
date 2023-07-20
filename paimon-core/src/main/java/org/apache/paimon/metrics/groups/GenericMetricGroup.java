@@ -24,6 +24,7 @@ import org.apache.paimon.metrics.AbstractMetricGroup;
 public class GenericMetricGroup extends AbstractMetricGroup {
 
     public static final String GROUP_NAME = "table";
+
     public GenericMetricGroup(String table) {
         super(table, null);
     }

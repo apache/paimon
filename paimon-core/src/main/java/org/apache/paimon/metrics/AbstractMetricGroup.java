@@ -30,6 +30,10 @@ import java.util.Map;
  * Contains key functionality for adding metrics and carries metrics.
  *
  * <p>A MetricGroup can be {@link #close() closed}. Upon closing, the group de-register all metrics.
+ *
+ * <p>The {@link #close()} method and {@link #addMetric(String, Metric)} method won't be invoked by
+ * multiple threads at the same time, {@link #addMetric(String, Metric)} and {@link #getMetrics()}
+ * have multi-threads problems, so they should be synchronized by the object lock.
  */
 public abstract class AbstractMetricGroup implements MetricGroup {
     protected static final Logger LOG = LoggerFactory.getLogger(MetricGroup.class);
@@ -171,11 +175,9 @@ public abstract class AbstractMetricGroup implements MetricGroup {
     public abstract String getGroupName();
 
     public void close() {
-        synchronized (this) {
-            if (!closed) {
-                closed = true;
-                metrics.clear();
-            }
+        if (!closed) {
+            closed = true;
+            metrics.clear();
         }
     }
 

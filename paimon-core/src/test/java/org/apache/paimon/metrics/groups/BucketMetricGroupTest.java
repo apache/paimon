@@ -35,7 +35,6 @@ public class BucketMetricGroupTest {
         assertEquals(2, group.getAllTags().size());
         assertEquals("1", group.getAllTags().get("bucket"));
         assertEquals("dt=1", group.getAllTags().get("partition"));
-        assertEquals(
-                "myTable.name", group.getMetricIdentifier("name", "."));
+        assertEquals("myTable.name", group.getMetricIdentifier("name", "."));
     }
 }
