@@ -32,6 +32,7 @@ import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -222,6 +223,36 @@ public class PaimonStorageHandlerITCase {
                         "2\t40\t40\t800",
                         "3\t50\t50\t400");
         Assert.assertEquals(expected, actual);
+
+        long snapshotId = ((FileStoreTable) table).snapshotManager().latestSnapshot().id();
+
+        // write new data
+        data =
+                Collections.singletonList(
+                        GenericRow.of(1, 10L, BinaryString.fromString("Hi Time Travel"), 10000L));
+        writeData(table, data);
+
+        // validate new data
+        actual = hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY b");
+        expected =
+                Arrays.asList(
+                        "1\t10\tHi Time Travel\t10000",
+                        "1\t20\tHello\t200",
+                        "2\t40\tNULL\t400",
+                        "3\t50\tStore\t200");
+        Assert.assertEquals(expected, actual);
+
+        // test time travel
+        hiveShell.execute("SET paimon.scan.snapshot-id=" + snapshotId);
+        actual = hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY b");
+        expected =
+                Arrays.asList(
+                        "1\t10\tHi Again\t1000",
+                        "1\t20\tHello\t200",
+                        "2\t40\tNULL\t400",
+                        "3\t50\tStore\t200");
+        Assert.assertEquals(expected, actual);
+        hiveShell.execute("RESET paimon.scan.snapshot-id");
     }
 
     @Test

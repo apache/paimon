@@ -116,6 +116,14 @@ SELECT * FROM t;
 
 {{< /tab >}}
 
+{{< tab "Hive" >}}
+```sql
+SET paimon.scan.timestamp-millis=1679486589444;
+SELECT * FROM t;
+RESET paimon.scan.timestamp-millis;
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ### Batch Incremental
@@ -164,6 +172,14 @@ spark.read()
   .load("path/to/table")
 ```
 
+{{< /tab >}}
+
+{{< tab "Hive" >}}
+```sql
+SET paimon.incremental-between='12,20';
+SELECT * FROM t;
+RESET paimon.incremental-between;
+```
 {{< /tab >}}
 
 {{< /tabs >}}
