@@ -239,13 +239,7 @@ public class LookupLevelsTest {
                         new FlushingFileFormat(identifier),
                         pathFactoryMap,
                         TARGET_FILE_SIZE.defaultValue().getBytes())
-                .build(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        null,
-                        null,
-                        new HashMap<>(),
-                        new CoreOptions(new Options()));
+                .build(BinaryRow.EMPTY_ROW, 0, new CoreOptions(new Options()));
     }
 
     private KeyValueFileReaderFactory createReaderFactory() {

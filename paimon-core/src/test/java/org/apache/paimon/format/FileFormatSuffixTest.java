@@ -56,7 +56,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
     public void testFileSuffix(@TempDir java.nio.file.Path tempDir) throws Exception {
         String format = "avro";
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
-        Path path = writerFactory.pathFactory(format).newPath();
+        Path path = writerFactory.pathFactory(0).newPath();
         Assertions.assertTrue(path.getPath().endsWith(format));
 
         DataFilePathFactory dataFilePathFactory =
