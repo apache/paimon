@@ -71,4 +71,95 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
           }
       }
   }
+
+  writeModes.foreach {
+    writeMode =>
+      bucketModes.foreach {
+        bucket =>
+          test(s"Schema evolution: write data into Paimon: $writeMode, bucket: $bucket") {
+            val _spark = spark
+            import _spark.implicits._
+
+            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+              "'primary-key'='a',"
+            } else {
+              ""
+            }
+
+            spark.sql(
+              s"""
+                 |CREATE TABLE T (a INT, b STRING)
+                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
+                 |""".stripMargin)
+
+            val paimonTable = loadTable("T")
+            val location = paimonTable.location().getPath
+
+            val df1 = Seq((1, "a"), (2, "b")).toDF("a", "b")
+            df1.write.format("paimon").mode("append").save(location)
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a, b"),
+              Row(1, "a") :: Row(2, "b") :: Nil)
+
+            // Case 1: two additional fields
+            val df2 = Seq((1, "a2", 123L, Map("k" -> 11.1)), (3, "c", 345L, Map("k" -> 33.3)))
+              .toDF("a", "b", "c", "d")
+            df2.write
+              .format("paimon")
+              .mode("append")
+              .option("write.merge-schema", "true")
+              .save(location)
+            val expected2 = if (writeMode == CHANGE_LOG) {
+              Row(1, "a2", 123L, Map("k" -> 11.1)) ::
+                Row(2, "b", null, null) :: Row(3, "c", 345L, Map("k" -> 33.3)) :: Nil
+            } else {
+              Row(1, "a", null, null) :: Row(1, "a2", 123L, Map("k" -> 11.1)) :: Row(
+                2,
+                "b",
+                null,
+                null) :: Row(3, "c", 345L, Map("k" -> 33.3)) :: Nil
+            }
+            checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected2)
+
+            // Case 2: two fields with the evolved types: Int -> Long, Long -> Decimal
+            val df3 = Seq(
+              (2L, "b2", BigDecimal.decimal(234), Map("k" -> 22.2)),
+              (4L, "d", BigDecimal.decimal(456), Map("k" -> 44.4))).toDF("a", "b", "c", "d")
+            df3.schema.printTreeString()
+            df3.write
+              .format("paimon")
+              .mode("append")
+              .option("write.merge-schema", "true")
+              .save(location)
+            val expected3 = if (writeMode == CHANGE_LOG) {
+              Row(1L, "a2", BigDecimal.decimal(123), Map("k" -> 11.1)) :: Row(
+                2L,
+                "b2",
+                BigDecimal.decimal(234),
+                Map("k" -> 22.2)) :: Row(3L, "c", BigDecimal.decimal(345), Map("k" -> 33.3)) :: Row(
+                4L,
+                "d",
+                BigDecimal.decimal(456),
+                Map("k" -> 44.4)) :: Nil
+            } else {
+              Row(1L, "a", null, null) :: Row(
+                1L,
+                "a2",
+                BigDecimal.decimal(123),
+                Map("k" -> 11.1)) :: Row(2L, "b", null, null) :: Row(
+                2L,
+                "b2",
+                BigDecimal.decimal(234),
+                Map("k" -> 22.2)) :: Row(3L, "c", BigDecimal.decimal(345), Map("k" -> 33.3)) :: Row(
+                4L,
+                "d",
+                BigDecimal.decimal(456),
+                Map("k" -> 44.4)) :: Nil
+            }
+            checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+
+          }
+      }
+  }
+
 }

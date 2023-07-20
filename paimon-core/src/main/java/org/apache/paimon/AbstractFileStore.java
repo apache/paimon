@@ -33,6 +33,7 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -44,6 +45,7 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.Optional;
 
 /**
  * Base {@link FileStore} implementation.
@@ -140,6 +142,16 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     @Override
     public CoreOptions options() {
         return options;
+    }
+
+    @Override
+    public boolean commitSchema(TableSchema tableSchema) {
+        Optional<TableSchema> current = schemaManager.latest();
+        if (current.isPresent() && current.get().equals(tableSchema)) {
+            return false;
+        } else {
+            return schemaManager.commitSchema(tableSchema);
+        }
     }
 
     @Override

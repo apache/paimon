@@ -388,6 +388,14 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    public boolean commitSchema(TableSchema tableSchema) {
+        try {
+            return commit(tableSchema);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to commit the schema.", e);
+        }
+    }
+
     private static void checkMoveIndexEqual(SchemaChange.Move move, int fieldIndex, int refIndex) {
         if (refIndex == fieldIndex) {
             throw new UnsupportedOperationException(

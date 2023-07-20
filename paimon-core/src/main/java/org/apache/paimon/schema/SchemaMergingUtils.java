@@ -1,0 +1,195 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.schema;
+
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeCasts;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.ILength;
+import org.apache.paimon.types.IPrecision;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.MultisetType;
+import org.apache.paimon.types.ReassignFieldId;
+import org.apache.paimon.types.RowType;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+/** The util class for merging the schemas. */
+public class SchemaMergingUtils {
+
+    public static TableSchema mergeSchemas(TableSchema currentTableSchema, RowType dataFields) {
+        if (currentTableSchema.logicalRowType().equals(dataFields)) {
+            return currentTableSchema;
+        }
+
+        AtomicInteger highestFieldId = new AtomicInteger(currentTableSchema.highestFieldId());
+        RowType newRowType =
+                mergeSchemas(currentTableSchema.logicalRowType(), dataFields, highestFieldId);
+        return new TableSchema(
+                currentTableSchema.id() + 1,
+                newRowType.getFields(),
+                highestFieldId.get(),
+                currentTableSchema.partitionKeys(),
+                currentTableSchema.primaryKeys(),
+                currentTableSchema.options(),
+                currentTableSchema.comment());
+    }
+
+    public static RowType mergeSchemas(
+            RowType tableSchema, RowType dataSchema, AtomicInteger highestFieldId) {
+        return (RowType) merge(tableSchema, dataSchema, highestFieldId);
+    }
+
+    /**
+     * Merge the base data type and the update data type if possible.
+     *
+     * <p>For RowType, find the fields which exists in both the base schema and the update schema,
+     * and try to merge them by calling the method iteratively; remain those fields that are only in
+     * the base schema and append those fields that are only in the update schema.
+     *
+     * <p>For other complex type, try to merge the element types.
+     *
+     * <p>For primitive data type, we treat that's compatible if the original type can be safely
+     * cast to the new type.
+     */
+    static DataType merge(DataType base0, DataType update0, AtomicInteger highestFieldId) {
+        // Here we ignore the nullability.
+        DataType base = base0.copy(true);
+        DataType update = update0.copy(true);
+
+        if (base.equals(update)) {
+            return base;
+        } else if (base instanceof RowType && update instanceof RowType) {
+            List<DataField> baseFields = ((RowType) base).getFields();
+            List<DataField> updateFields = ((RowType) update).getFields();
+            Map<String, DataField> updateFieldMap =
+                    updateFields.stream()
+                            .collect(Collectors.toMap(DataField::name, Function.identity()));
+            List<DataField> updatedFields =
+                    baseFields.stream()
+                            .map(
+                                    baseField -> {
+                                        if (updateFieldMap.containsKey(baseField.name())) {
+                                            DataField updateField =
+                                                    updateFieldMap.get(baseField.name());
+                                            DataType updatedDataType =
+                                                    merge(
+                                                            baseField.type(),
+                                                            updateField.type(),
+                                                            highestFieldId);
+                                            return new DataField(
+                                                    baseField.id(),
+                                                    baseField.name(),
+                                                    updatedDataType,
+                                                    baseField.description());
+                                        } else {
+                                            return baseField;
+                                        }
+                                    })
+                            .collect(Collectors.toList());
+
+            Map<String, DataField> baseFieldMap =
+                    baseFields.stream()
+                            .collect(Collectors.toMap(DataField::name, Function.identity()));
+            List<DataField> newFields =
+                    updateFields.stream()
+                            .filter(field -> !baseFieldMap.containsKey(field.name()))
+                            .map(field -> assignIdForNewField(field, highestFieldId))
+                            .collect(Collectors.toList());
+
+            updatedFields.addAll(newFields);
+            return new RowType(base.isNullable(), updatedFields);
+        } else if (base instanceof MapType && update instanceof MapType) {
+            return new MapType(
+                    base.isNullable(),
+                    merge(
+                            ((MapType) base).getKeyType(),
+                            ((MapType) update).getKeyType(),
+                            highestFieldId),
+                    merge(
+                            ((MapType) base).getValueType(),
+                            ((MapType) update).getValueType(),
+                            highestFieldId));
+        } else if (base instanceof ArrayType && update instanceof ArrayType) {
+            return new ArrayType(
+                    base.isNullable(),
+                    merge(
+                            ((ArrayType) base).getElementType(),
+                            ((ArrayType) update).getElementType(),
+                            highestFieldId));
+        } else if (base instanceof MultisetType && update instanceof MultisetType) {
+            return new MultisetType(
+                    base.isNullable(),
+                    merge(
+                            ((MultisetType) base).getElementType(),
+                            ((MultisetType) update).getElementType(),
+                            highestFieldId));
+        } else if (base instanceof DecimalType && update instanceof DecimalType) {
+            if (base.equals(update)) {
+                return base;
+            } else {
+                throw new UnsupportedOperationException(
+                        String.format(
+                                "Failed to merge decimal types with different precision or scale: %s and %s",
+                                base, update));
+            }
+        } else if (DataTypeCasts.supportsImplicitCast(base, update)) {
+            if (base instanceof ILength && update instanceof ILength) {
+                // this will check and merge types which has a `length` attribute, like BinaryType,
+                // CharType, VarBinaryType, VarCharType.
+                if (((ILength) base).getLength() <= ((ILength) update).getLength()) {
+                    return update;
+                } else {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Failed to merge the target type that has a smaller length: %s and %s",
+                                    base, update));
+                }
+            } else if (base instanceof IPrecision && update instanceof IPrecision) {
+                // this will check and merge types which has a `precision` attribute, like
+                // LocalZonedTimestampType, TimeType, TimestampType.
+                if (((IPrecision) base).getPrecision() <= ((IPrecision) update).getPrecision()) {
+                    return update;
+                } else {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "Failed to merge the target type that has a lower precision: %s and %s",
+                                    base, update));
+                }
+            } else {
+                return update;
+            }
+        } else {
+            throw new UnsupportedOperationException(
+                    String.format("Failed to merge data types %s and %s", base, update));
+        }
+    }
+
+    private static DataField assignIdForNewField(DataField field, AtomicInteger highestFieldId) {
+        DataType dataType = ReassignFieldId.reassign(field.type(), highestFieldId);
+        return new DataField(
+                highestFieldId.incrementAndGet(), field.name(), dataType, field.description());
+    }
+}

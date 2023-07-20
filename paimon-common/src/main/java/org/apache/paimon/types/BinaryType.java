@@ -28,7 +28,7 @@ import java.util.Objects;
  * @since 0.4.0
  */
 @Public
-public class BinaryType extends DataType {
+public class BinaryType extends DataType implements ILength {
 
     private static final long serialVersionUID = 1L;
 
@@ -61,6 +61,7 @@ public class BinaryType extends DataType {
         this(DEFAULT_LENGTH);
     }
 
+    @Override
     public int getLength() {
         return length;
     }

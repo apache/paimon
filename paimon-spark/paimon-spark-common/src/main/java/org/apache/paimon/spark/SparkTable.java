@@ -96,7 +96,8 @@ public class SparkTable
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
         try {
-            return new SparkWriteBuilder((FileStoreTable) table);
+            return new SparkWriteBuilder(
+                    (FileStoreTable) table, CoreOptions.fromMap(info.options()));
         } catch (Exception e) {
             throw new RuntimeException("Only FileStoreTable can be written.");
         }

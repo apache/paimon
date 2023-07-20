@@ -17,6 +17,7 @@
  */
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
@@ -67,7 +68,11 @@ class SparkSource
       parameters: Map[String, String],
       data: DataFrame): BaseRelation = {
     val table = loadTable(parameters.asJava)
-    WriteIntoPaimonTable(table, SaveMode.transform(mode), data).run(sqlContext.sparkSession)
+    WriteIntoPaimonTable(
+      table,
+      SaveMode.transform(mode),
+      data,
+      CoreOptions.fromMap(parameters.asJava)).run(sqlContext.sparkSession)
     SparkSource.toBaseRelation(table, sqlContext)
   }
 

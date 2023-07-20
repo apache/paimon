@@ -15,24 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.commands.WriteIntoPaimonTable
-import org.apache.paimon.table.FileStoreTable
+package org.apache.paimon.types;
 
-import org.apache.spark.sql.DataFrame
-import org.apache.spark.sql.connector.write.V1Write
-import org.apache.spark.sql.sources.InsertableRelation
+/** An interface with a getLength method. */
+public interface ILength {
 
-/** Spark [[V1Write]], it is required to use v1 write for grouping by bucket. */
-class SparkWrite(val table: FileStoreTable, saveMode: SaveMode, options: CoreOptions)
-  extends V1Write {
-
-  override def toInsertableRelation: InsertableRelation = {
-    (data: DataFrame, overwrite: Boolean) =>
-      {
-        WriteIntoPaimonTable(table, saveMode, data, options).run(data.sparkSession)
-      }
-  }
+    int getLength();
 }

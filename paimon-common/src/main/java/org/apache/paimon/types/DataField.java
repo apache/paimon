@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.annotation.VisibleForTesting;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 
@@ -74,6 +75,11 @@ public final class DataField implements Serializable {
 
     public DataType type() {
         return type;
+    }
+
+    @VisibleForTesting
+    public DataField newId(int newid) {
+        return new DataField(newid, name, type, description);
     }
 
     public DataField newName(String newName) {
