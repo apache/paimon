@@ -51,7 +51,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-/** */
+/** Zorder Rewrite Action tests for {@link ZorderRewriteAction}. */
 public class ZorderRewriteActionITCase extends ActionITCaseBase {
 
     @TempDir private java.nio.file.Path path;
