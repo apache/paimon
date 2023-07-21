@@ -31,7 +31,7 @@ we have two different append-only mode: "Append For Queue" and "Append For Scala
 
 ## Append For Queue
 
-You can only insert a complete record into the table. No delete or update is supported and you cannot define primary keys.
+You can only insert a complete record into the table. No delete or update is supported, and you cannot define primary keys.
 This type of table is suitable for use cases that do not require updates (such as log data synchronization).
 
 ### Definition
@@ -40,6 +40,8 @@ In this mode, you can regard append-only table as a queue separated by bucket. E
 streaming read will transfer the record to down-stream exactly in the order of writing. To use this mode, you do not need 
 to config special configurations, all the data will go into one bucket as a queue. You can also define the `bucket` and
 `bucket-key` to enable larger parallelism and disperse data (see [Example]({{< ref "#example" >}})).
+
+{{< img src="/img/for-queue.png">}}
 
 
 ### Compaction
@@ -201,6 +203,8 @@ although we can stream read and write still). All the records will go into one d
 and we do not maintain the order anymore. As we don't have the concept of bucket, we will not shuffle the input records by bucket anymore,
 which will speed up the inserting.
 
+{{< img src="/img/for-scalable.png">}}
+
 
 ### Compaction
 
@@ -226,18 +230,6 @@ as a queue, instead, as a lake with storage bins. Every commit will generate a n
 increase by reading the new record bin, but records in one bin are flowing to anywhere they want, and we fetch them in any possible order.
 While in the `Append For Queue` mode, records are not stored in bins, but in record pipe. We can see the difference below.
 
-Append For Queue:
-
-{{< img src="/img/for-queue.png">}}
-
-Append For Scalable:
-
-{{< img src="/img/for-scalable.png">}}
-
-#### Watermark Definition
-
-We don't recommend you to do aggregate computation in streaming on this mode, because there is no order guarantee in streaming read.
-But you can still define your watermark if you understand what you are doing, you can also define watermark column by using system time.
 
 ### Example
 
