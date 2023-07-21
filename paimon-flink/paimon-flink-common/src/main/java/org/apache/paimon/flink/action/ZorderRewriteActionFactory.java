@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/** Action Factory to create {@link ZorderRewriteAction}. */
 public class ZorderRewriteActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "zorder-rewrite";
