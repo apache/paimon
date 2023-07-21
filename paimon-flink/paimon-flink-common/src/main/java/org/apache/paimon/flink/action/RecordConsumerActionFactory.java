@@ -16,10 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.consumer;
-
-import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.ActionFactory;
+package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
@@ -40,12 +37,12 @@ public class RecordConsumerActionFactory implements ActionFactory {
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
         checkRequiredArgument(params, "consumer-id");
-        checkRequiredArgument(params, "snapshot");
+        checkRequiredArgument(params, "next-snapshot");
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
         String consumerId = params.get("consumer-id");
-        long snapshot = Long.parseLong(params.get("snapshot"));
+        long nextSnapshotId = Long.parseLong(params.get("next-snapshot"));
 
         RecordConsumerAction action =
                 new RecordConsumerAction(
@@ -54,7 +51,7 @@ public class RecordConsumerActionFactory implements ActionFactory {
                         tablePath.f2,
                         catalogConfig,
                         consumerId,
-                        snapshot);
+                        nextSnapshotId);
         return Optional.of(action);
     }
 
@@ -67,7 +64,7 @@ public class RecordConsumerActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  record-consumer --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --consumer-id <consumer-id> --snapshot <next-snapshot-id>");
+                        + "--table <table-name> --consumer-id <consumer-id> --next-snapshot <next-snapshot-id>");
         System.out.println();
     }
 }

@@ -48,7 +48,7 @@ First, you need to stop the streaming task using this consumer ID, and then exec
     --database <database-name> \ 
     --table <table-name> \
     --consumer-id <consumer-id> \
-    --snapshot <next-snapshot-id> \
+    --next-snapshot <next-snapshot-id> \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
 ```
 

@@ -16,9 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.consumer;
-
-import org.apache.paimon.flink.action.TableActionBase;
+package org.apache.paimon.flink.action;
 
 import java.util.Map;
 

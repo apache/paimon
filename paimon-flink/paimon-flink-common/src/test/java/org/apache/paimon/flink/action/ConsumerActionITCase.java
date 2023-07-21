@@ -16,12 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.consumer;
+package org.apache.paimon.flink.action;
 
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.types.DataType;
