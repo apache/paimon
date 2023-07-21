@@ -164,8 +164,7 @@ public interface ActionFactory extends Factory {
     default List<String> getOrderColumns(MultipleParameterTool params) {
         List<String> columns = Arrays.asList(params.get("zorder-by").split(","));
         if (columns.size() == 0) {
-            throw new IllegalArgumentException(
-                    "Please specify \"zorder-by\".");
+            throw new IllegalArgumentException("Please specify \"zorder-by\".");
         }
         return columns;
     }

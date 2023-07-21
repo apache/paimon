@@ -25,7 +25,6 @@ import org.apache.flink.table.api.Table;
 import java.util.List;
 import java.util.Map;
 
-
 /**
  * Rewrite the target table by z-order with specified columns.
  *
