@@ -823,24 +823,33 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             waitForResult(Collections.singletonList("+I[1, one]"), table1, rowType, primaryKeys);
 
             // create new tables at runtime
-            // synchronized table: t2
+            // synchronized table: t2, t22
             statement.executeUpdate("CREATE TABLE t2 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
             statement.executeUpdate("INSERT INTO t2 VALUES (1, 'Hi')");
-            // not synchronized tables: ta, t3
+
+            statement.executeUpdate("CREATE TABLE t22 LIKE t2");
+            statement.executeUpdate("INSERT INTO t22 VALUES (1, 'Hello')");
+
+            // not synchronized tables: ta, t3, t4
             statement.executeUpdate("CREATE TABLE ta (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
             statement.executeUpdate("INSERT INTO ta VALUES (1, 'Apache')");
             statement.executeUpdate("CREATE TABLE t3 (k INT, v1 VARCHAR(10))");
             statement.executeUpdate("INSERT INTO t3 VALUES (1, 'Paimon')");
+            statement.executeUpdate("CREATE TABLE t4 SELECT * FROM t2");
 
             statement.executeUpdate("INSERT INTO t1 VALUES (2, 'two')");
             waitForResult(Arrays.asList("+I[1, one]", "+I[2, two]"), table1, rowType, primaryKeys);
 
             // check tables
-            assertTableExists(Arrays.asList("t1", "t2"));
-            assertTableNotExists(Arrays.asList("a", "ta", "t3"));
+            assertTableExists(Arrays.asList("t1", "t2", "t22"));
+            assertTableNotExists(Arrays.asList("a", "ta", "t3", "t4"));
 
             FileStoreTable newTable = getFileStoreTable("t2");
             waitForResult(Collections.singletonList("+I[1, Hi]"), newTable, rowType, primaryKeys);
+
+            newTable = getFileStoreTable("t22");
+            waitForResult(
+                    Collections.singletonList("+I[1, Hello]"), newTable, rowType, primaryKeys);
         }
     }
 
