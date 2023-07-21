@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-public class ZorderRewriteActionFactory implements ActionFactory{
+public class ZorderRewriteActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "zorder-rewrite";
 
@@ -58,7 +58,6 @@ public class ZorderRewriteActionFactory implements ActionFactory{
                         catalogConfig,
                         orderColumns));
     }
-
 
     @Override
     public void printHelp() {
