@@ -57,7 +57,7 @@ public abstract class TableActionBase extends ActionBase {
 
     protected Table table;
 
-    protected TableActionBase(
+    TableActionBase(
             String warehouse,
             String databaseName,
             String tableName,
