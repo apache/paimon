@@ -252,10 +252,4 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
         throw new UnsupportedOperationException(
                 "ColumnarArray do not support equals, please compare fields one by one!");
     }
-
-    @Override
-    public int hashCode() {
-        throw new UnsupportedOperationException(
-                "ColumnarArray do not support hashCode, please hash fields one by one!");
-    }
 }
