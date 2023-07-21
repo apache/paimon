@@ -57,7 +57,9 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -171,6 +173,9 @@ public class TestChangelogDataReadWrite {
     public RecordWriter<KeyValue> createMergeTreeWriter(BinaryRow partition, int bucket) {
         CoreOptions options =
                 new CoreOptions(Collections.singletonMap(CoreOptions.FILE_FORMAT.key(), "avro"));
+
+        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
+        pathFactoryMap.put("avro", pathFactory);
         RecordWriter<KeyValue> writer =
                 new KeyValueFileStoreWrite(
                                 LocalFileIO.create(),
@@ -183,6 +188,7 @@ public class TestChangelogDataReadWrite {
                                 () -> EQUALISER,
                                 DeduplicateMergeFunction.factory(),
                                 pathFactory,
+                                pathFactoryMap,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
                                 null,

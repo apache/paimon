@@ -62,6 +62,7 @@ import javax.annotation.Nullable;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
@@ -93,6 +94,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             Supplier<RecordEqualiser> valueEqualiserSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
+            Map<String, FileStorePathFactory> format2PathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
@@ -119,7 +121,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         keyType,
                         valueType,
                         options.fileFormat(),
-                        pathFactory,
+                        format2PathFactory,
                         options.targetFileSize());
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.valueEqualiserSupplier = valueEqualiserSupplier;
@@ -143,12 +145,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         }
 
         KeyValueFileWriterFactory writerFactory =
-                writerFactoryBuilder.build(
-                        partition,
-                        bucket,
-                        options.fileCompressionPerLevel(),
-                        options.fileCompression(),
-                        options);
+                writerFactoryBuilder.build(partition, bucket, options);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         UniversalCompaction universalCompaction =
@@ -207,12 +204,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             BinaryRow partition, int bucket, Comparator<InternalRow> keyComparator, Levels levels) {
         KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
         KeyValueFileWriterFactory writerFactory =
-                writerFactoryBuilder.build(
-                        partition,
-                        bucket,
-                        options.fileCompressionPerLevel(),
-                        options.fileCompression(),
-                        options);
+                writerFactoryBuilder.build(partition, bucket, options);
         MergeSorter mergeSorter = new MergeSorter(options, keyType, valueType, ioManager);
         switch (options.changelogProducer()) {
             case FULL_COMPACTION:
