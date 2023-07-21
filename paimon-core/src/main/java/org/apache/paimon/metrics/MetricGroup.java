@@ -69,18 +69,6 @@ public interface MetricGroup {
     <H extends Histogram> H histogram(String name, H histogram);
 
     /**
-     * Registers a new {@link Histogram} with Paimon.
-     *
-     * @param name name of the histogram
-     * @param histogram histogram to register
-     * @param <H> histogram type
-     * @return the registered histogram
-     */
-    default <H extends Histogram> H histogram(int name, H histogram) {
-        return histogram(String.valueOf(name), histogram);
-    }
-
-    /**
      * Returns the fully qualified metric name, for example {@code "myTable.bucket-1.metricName"}.
      *
      * @param metricName metric name

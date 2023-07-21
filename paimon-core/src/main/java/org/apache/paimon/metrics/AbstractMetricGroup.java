@@ -31,9 +31,10 @@ import java.util.Map;
  *
  * <p>A MetricGroup can be {@link #close() closed}. Upon closing, the group de-register all metrics.
  *
- * <p>The {@link #close()} method and {@link #addMetric(String, Metric)} method won't be invoked by
- * multiple threads at the same time, {@link #addMetric(String, Metric)} and {@link #getMetrics()}
- * have multi-threads problems, so they should be synchronized by the object lock.
+ * <p>The {@link #close()} method and {@link #addMetric(String, Metric)} method should never be
+ * invoked by multiple threads at the same time, {@link #addMetric(String, Metric)} and {@link
+ * #getMetrics()} have multi-threads problems, like the reporter is reading the metrics map and the
+ * group is adding metrics to the map at the same time.
  */
 public abstract class AbstractMetricGroup implements MetricGroup {
     protected static final Logger LOG = LoggerFactory.getLogger(MetricGroup.class);
@@ -76,10 +77,11 @@ public abstract class AbstractMetricGroup implements MetricGroup {
     }
 
     /**
-     * Creates and registers a new {@link org.apache.paimon.metrics.Counter}.
+     * Creates and registers a new {@link org.apache.paimon.metrics.Counter} or return the existing
+     * {@link org.apache.paimon.metrics.Counter}.
      *
      * @param name name of the counter
-     * @return the created counter
+     * @return the created or existing counter
      */
     public Counter counter(String name) {
         return counter(name, new SimpleCounter());
@@ -94,8 +96,8 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @return the given counter
      */
     public <C extends Counter> C counter(String name, C counter) {
-        addMetric(name, counter);
-        return counter;
+        Metric metric = addMetric(name, counter);
+        return (C) metric;
     }
 
     /**
@@ -107,8 +109,8 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @return the given gauge
      */
     public <T, G extends Gauge<T>> G gauge(String name, G gauge) {
-        addMetric(name, gauge);
-        return gauge;
+        Metric metric = addMetric(name, gauge);
+        return (G) metric;
     }
 
     /**
@@ -120,8 +122,8 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @return the registered histogram
      */
     public <H extends Histogram> H histogram(String name, H histogram) {
-        addMetric(name, histogram);
-        return histogram;
+        Metric metric = addMetric(name, histogram);
+        return (H) metric;
     }
 
     /**
@@ -131,12 +133,12 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @param metricName the name to register the metric under
      * @param metric the metric to register
      */
-    protected void addMetric(String metricName, Metric metric) {
+    protected Metric addMetric(String metricName, Metric metric) {
         if (metric == null) {
             LOG.warn(
                     "Ignoring attempted registration of a metric due to being null for name {}.",
                     metricName);
-            return;
+            return null;
         }
         // add the metric only if the group is still open
         synchronized (this) {
@@ -145,7 +147,26 @@ public abstract class AbstractMetricGroup implements MetricGroup {
                     case COUNTER:
                     case GAUGE:
                     case HISTOGRAM:
-                        metrics.put(metricName, metric);
+                        // immediately put without a 'contains' check to optimize the common case
+                        // (no
+                        // collision)
+                        // collisions are resolved later
+                        Metric prior = metrics.put(metricName, metric);
+
+                        // check for collisions with other metric names
+                        if (prior != null) {
+                            // we had a collision. put back the original value
+                            metrics.put(metricName, prior);
+
+                            // we warn here, rather than failing, because metrics are tools that
+                            // should not
+                            // fail the
+                            // program when used incorrectly
+                            LOG.warn(
+                                    "Name collision: Group already contains a Metric with the name '"
+                                            + metricName
+                                            + "'. The new added Metric will not be reported.");
+                        }
                         break;
                     default:
                         LOG.warn(
@@ -154,6 +175,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
                                 metric.getClass().getName());
                 }
             }
+            return metrics.get(metricName);
         }
     }
 

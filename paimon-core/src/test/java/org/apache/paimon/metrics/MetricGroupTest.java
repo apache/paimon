@@ -20,11 +20,11 @@ package org.apache.paimon.metrics;
 
 import org.apache.paimon.metrics.groups.GenericMetricGroup;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for the {@link MetricGroup}. */
 public class MetricGroupTest {
@@ -46,6 +46,7 @@ public class MetricGroupTest {
                         return null;
                     }
                 });
+        assertThat(group.getMetrics().size()).isEqualTo(0);
     }
 
     @Test
@@ -53,7 +54,9 @@ public class MetricGroupTest {
         final String name = "abctestname";
         GenericMetricGroup group = new GenericMetricGroup("testgroup");
 
-        assertNotNull(group.counter(name));
-        assertNotNull(group.counter(name));
+        Counter counter1 = group.counter(name);
+
+        // return the old one with the metric name collision
+        assertThat(group.counter(name)).isEqualTo(counter1);
     }
 }

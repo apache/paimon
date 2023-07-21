@@ -18,8 +18,7 @@
 
 package org.apache.paimon.metrics;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /** Core of Paimon metrics system. */
 public class Metrics {
@@ -29,7 +28,7 @@ public class Metrics {
      * The metrics groups. All the commit & compaction & scan metric groups are collected in this
      * group container, there is no need to distinguish the groups by group name for reporters.
      */
-    private final List<MetricGroup> metricGroups = new ArrayList<>();
+    private final ConcurrentLinkedQueue<MetricGroup> metricGroups = new ConcurrentLinkedQueue<>();
 
     private Metrics() {}
 
@@ -46,7 +45,7 @@ public class Metrics {
     }
 
     /** Get metric groups. */
-    public synchronized List<MetricGroup> getMetricGroups() {
+    public synchronized ConcurrentLinkedQueue<MetricGroup> getMetricGroups() {
         return metricGroups;
     }
 }

@@ -18,9 +18,9 @@
 
 package org.apache.paimon.metrics.groups;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for the {@link BucketMetricGroup}. */
 public class BucketMetricGroupTest {
@@ -32,9 +32,9 @@ public class BucketMetricGroupTest {
     public void testGenerateScopeDefault() {
         BucketMetricGroup group = BucketMetricGroup.createBucketMetricGroup("myTable", 1, "dt=1");
 
-        assertEquals(2, group.getAllTags().size());
-        assertEquals("1", group.getAllTags().get("bucket"));
-        assertEquals("dt=1", group.getAllTags().get("partition"));
-        assertEquals("myTable.name", group.getMetricIdentifier("name", "."));
+        assertThat(group.getAllTags().size()).isEqualTo(2);
+        assertThat(group.getAllTags().get("bucket")).isEqualTo("1");
+        assertThat(group.getAllTags().get("partition")).isEqualTo("dt=1");
+        assertThat(group.getMetricIdentifier("name", ".")).isEqualTo("myTable.name");
     }
 }
