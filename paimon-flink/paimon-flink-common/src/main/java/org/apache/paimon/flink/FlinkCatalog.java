@@ -570,15 +570,25 @@ public class FlinkCatalog extends AbstractCatalog {
                                         .map(pk -> pk.getColumns())
                                         .orElse(Collections.emptyList()))
                         .partitionKeys(catalogTable.getPartitionKeys());
+        Map<String, String> columnComments = getColumnComments(catalogTable);
         rowType.getFields()
                 .forEach(
                         field ->
                                 schemaBuilder.column(
                                         field.getName(),
                                         toDataType(field.getType()),
-                                        field.getDescription().orElse("")));
+                                        columnComments.get(field.getName())));
 
         return schemaBuilder.build();
+    }
+
+    private static Map<String, String> getColumnComments(CatalogTable catalogTable) {
+        return catalogTable.getUnresolvedSchema().getColumns().stream()
+                .filter(c -> c.getComment().isPresent())
+                .collect(
+                        Collectors.toMap(
+                                org.apache.flink.table.api.Schema.UnresolvedColumn::getName,
+                                c -> c.getComment().get()));
     }
 
     /** Only reserve necessary options. */
