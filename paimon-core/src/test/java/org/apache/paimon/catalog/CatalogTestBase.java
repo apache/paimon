@@ -605,7 +605,7 @@ public abstract class CatalogTestBase {
                 new Schema(
                         Lists.newArrayList(
                                 new DataField(0, "dt", DataTypes.STRING()),
-                                new DataField(1, "col1", DataTypes.BIGINT())),
+                                new DataField(1, "col1", DataTypes.BIGINT(), "col1 field")),
                         Lists.newArrayList("dt"),
                         Collections.emptyList(),
                         Maps.newHashMap(),
@@ -619,6 +619,7 @@ public abstract class CatalogTestBase {
 
         assertThat(table.rowType().getFieldIndex("col1")).isEqualTo(1);
         assertThat(table.rowType().getTypeAt(1)).isEqualTo(DataTypes.DOUBLE());
+        assertThat(table.rowType().getFields().get(1).description()).isEqualTo("col1 field");
 
         // Alter table update a column type throws Exception when column data type does not support
         // cast

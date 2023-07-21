@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
@@ -289,19 +290,25 @@ public class SchemaEvolutionTest {
     @Test
     public void testUpdateFieldType() throws Exception {
         Schema schema =
-                new Schema(
-                        RowType.of(DataTypes.INT(), DataTypes.BIGINT()).getFields(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        new HashMap<>(),
-                        "");
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT(), "f0 field")
+                        .column("f1", DataTypes.BIGINT())
+                        .build();
         schemaManager.createTable(schema);
 
-        schemaManager.commitChanges(
-                Collections.singletonList(SchemaChange.updateColumnType("f0", DataTypes.BIGINT())));
+        TableSchema tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnType("f0", DataTypes.BIGINT())));
+        assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.BIGINT());
+        assertThat(tableSchema.fields().get(0).description()).isEqualTo("f0 field");
+
         // bigint to string
-        schemaManager.commitChanges(
-                Collections.singletonList(SchemaChange.updateColumnType("f0", DataTypes.STRING())));
+        tableSchema =
+                schemaManager.commitChanges(
+                        Collections.singletonList(
+                                SchemaChange.updateColumnType("f0", DataTypes.STRING())));
+        assertThat(tableSchema.fields().get(0).type()).isEqualTo(DataTypes.STRING());
     }
 
     @Test
