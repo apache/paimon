@@ -26,6 +26,7 @@ import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StateUtils;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -104,8 +105,16 @@ public class CdcRecordStoreMultiWriteOperator
 
         FileStoreTable table = getTable(tableId);
 
-        // TODO memoryPool should not be null
         // TODO set executor service to write
+
+        // avoid allocating memory pool for every sink write
+        // the options of all tables should be the same in CDC
+        if (memoryPool == null) {
+            memoryPool =
+                    new HeapMemorySegmentPool(
+                            table.coreOptions().writeBufferSize(), table.coreOptions().pageSize());
+        }
+
         StoreSinkWrite write =
                 writes.computeIfAbsent(
                         tableId,
