@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -165,9 +166,18 @@ public class MySqlSyncTableAction extends ActionBase {
                         caseSensitive);
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
-            checkArgument(
-                    computedColumnArgs.isEmpty(),
-                    "Cannot add computed column when table already exists.");
+            if (computedColumns.size() > 0) {
+                List<String> computedFields =
+                        computedColumns.stream()
+                                .map(ComputedColumn::columnName)
+                                .collect(Collectors.toList());
+                List<String> fieldNames = table.schema().fieldNames();
+                checkArgument(
+                        fieldNames.containsAll(computedFields),
+                        " Exists Table should contain all computed columns %s, but are %s.",
+                        computedFields,
+                        fieldNames);
+            }
             MySqlActionUtils.assertSchemaCompatible(table.schema(), fromMySql);
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromMySql, false);
