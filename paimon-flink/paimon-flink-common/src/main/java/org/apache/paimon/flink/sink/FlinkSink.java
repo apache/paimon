@@ -56,6 +56,7 @@ public abstract class FlinkSink<T> implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private static final String WRITER_NAME = "Writer";
+    private static final String WRITER_ONLY_NAME = "Writer(write-only)";
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
     protected final FileStoreTable table;
@@ -145,9 +146,12 @@ public abstract class FlinkSink<T> implements Serializable {
                                 .get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
 
+        Boolean writeOnly = table.coreOptions().writeOnly();
         SingleOutputStreamOperator<Committable> written =
                 input.transform(
-                                WRITER_NAME + " -> " + table.name(),
+                                (writeOnly ? WRITER_ONLY_NAME : WRITER_NAME)
+                                        + " -> "
+                                        + table.name(),
                                 new CommittableTypeInfo(),
                                 createWriteOperator(
                                         createWriteProvider(env.getCheckpointConfig(), isStreaming),
