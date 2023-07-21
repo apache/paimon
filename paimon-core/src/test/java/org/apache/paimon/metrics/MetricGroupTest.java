@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class MetricGroupTest {
     @Test
     public void closedGroupDoesNotRegisterMetrics() {
-        GenericMetricGroup group = new GenericMetricGroup("testgroup");
+        GenericMetricGroup group = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
         assertFalse(group.isClosed());
 
         group.close();
@@ -52,7 +52,7 @@ public class MetricGroupTest {
     @Test
     public void tolerateMetricNameCollisions() {
         final String name = "abctestname";
-        GenericMetricGroup group = new GenericMetricGroup("testgroup");
+        GenericMetricGroup group = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
 
         Counter counter1 = group.counter(name);
 

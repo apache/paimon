@@ -25,31 +25,26 @@ import java.util.Map;
 
 /** Special {@link org.apache.paimon.metrics.MetricGroup} representing a bucket. */
 public class BucketMetricGroup extends AbstractMetricGroup {
-    public static final String GROUP_NAME_FORMAT = "table-%s-partition-%s-bucket-%s";
-
-    private final String bucket;
-    private final String partition;
-    private final String table;
+    private final String groupName;
 
     // ------------------------------------------------------------------------
 
-    BucketMetricGroup(String table, Map<String, String> tags) {
-        super(table, tags);
-        this.table = table;
-        this.bucket = tags.get("bucket");
-        this.partition = tags.get("partition");
+    BucketMetricGroup(final Map<String, String> tags, final String groupName) {
+        super(tags);
+        this.groupName = groupName;
     }
 
     public static BucketMetricGroup createBucketMetricGroup(
-            final String table, final int bucket, final String partition) {
+            final String table, final int bucket, final String partition, final String groupName) {
         Map<String, String> tags = new HashMap<>();
+        tags.put("table", table);
         tags.put("bucket", String.valueOf(bucket));
-        tags.put("partition", String.valueOf(partition));
-        return new BucketMetricGroup(table, tags);
+        tags.put("partition", partition);
+        return new BucketMetricGroup(tags, groupName);
     }
 
     @Override
     public String getGroupName() {
-        return String.format(GROUP_NAME_FORMAT, this.table, this.partition, this.bucket);
+        return this.groupName;
     }
 }

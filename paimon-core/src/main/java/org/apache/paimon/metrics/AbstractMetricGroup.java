@@ -23,8 +23,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Contains key functionality for adding metrics and carries metrics.
@@ -47,14 +48,11 @@ public abstract class AbstractMetricGroup implements MetricGroup {
     /** Flag indicating whether this group has been closed. */
     private boolean closed = false;
 
-    private final Map<String, Metric> metrics = new HashMap<>();
-
-    private final String table;
+    private final ConcurrentHashMap<String, Metric> metrics = new ConcurrentHashMap<>();
 
     // ------------------------------------------------------------------------
 
-    public AbstractMetricGroup(String table, @Nullable Map<String, String> tags) {
-        this.table = table;
+    public AbstractMetricGroup(@Nullable Map<String, String> tags) {
         this.tags = tags;
         Metrics.getInstance().addGroup(this);
     }
@@ -73,7 +71,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @return fully qualified metric name
      */
     public String getMetricIdentifier(String metricName, String delimiter) {
-        return String.join(delimiter, table, metricName);
+        return String.join(delimiter, getGroupName(), metricName);
     }
 
     /**
@@ -141,51 +139,45 @@ public abstract class AbstractMetricGroup implements MetricGroup {
             return null;
         }
         // add the metric only if the group is still open
-        synchronized (this) {
-            if (!isClosed()) {
-                switch (metric.getMetricType()) {
-                    case COUNTER:
-                    case GAUGE:
-                    case HISTOGRAM:
-                        // immediately put without a 'contains' check to optimize the common case
-                        // (no
-                        // collision)
-                        // collisions are resolved later
-                        Metric prior = metrics.put(metricName, metric);
+        if (!isClosed()) {
+            switch (metric.getMetricType()) {
+                case COUNTER:
+                case GAUGE:
+                case HISTOGRAM:
+                    // immediately put without a 'contains' check to optimize the common case
+                    // (no
+                    // collision)
+                    // collisions are resolved later
+                    Metric prior = metrics.put(metricName, metric);
 
-                        // check for collisions with other metric names
-                        if (prior != null) {
-                            // we had a collision. put back the original value
-                            metrics.put(metricName, prior);
+                    // check for collisions with other metric names
+                    if (prior != null) {
+                        // we had a collision. put back the original value
+                        metrics.put(metricName, prior);
 
-                            // we warn here, rather than failing, because metrics are tools that
-                            // should not
-                            // fail the
-                            // program when used incorrectly
-                            LOG.warn(
-                                    "Name collision: Group already contains a Metric with the name '"
-                                            + metricName
-                                            + "'. The new added Metric will not be reported.");
-                        }
-                        break;
-                    default:
+                        // we warn here, rather than failing, because metrics are tools that
+                        // should not
+                        // fail the
+                        // program when used incorrectly
                         LOG.warn(
-                                "Cannot add unknown metric type {}. This indicates that the paimon "
-                                        + "does not support this metric type.",
-                                metric.getClass().getName());
-                }
+                                "Name collision: Group already contains a Metric with the name '"
+                                        + metricName
+                                        + "'. The new added Metric will not be reported.");
+                    }
+                    break;
+                default:
+                    LOG.warn(
+                            "Cannot add unknown metric type {}. This indicates that the paimon "
+                                    + "does not support this metric type.",
+                            metric.getClass().getName());
             }
-            return metrics.get(metricName);
         }
+        return metrics.get(metricName);
     }
 
     @Override
     public Map<String, Metric> getMetrics() {
-        Map<String, Metric> metricsMap = new HashMap<>();
-        synchronized (this) {
-            metrics.forEach((k, v) -> metricsMap.put(k, v));
-        }
-        return metricsMap;
+        return Collections.unmodifiableMap(metrics);
     }
 
     /**

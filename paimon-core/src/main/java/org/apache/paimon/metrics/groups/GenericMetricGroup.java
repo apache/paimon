@@ -20,19 +20,28 @@ package org.apache.paimon.metrics.groups;
 
 import org.apache.paimon.metrics.AbstractMetricGroup;
 
+import java.util.HashMap;
+import java.util.Map;
+
 /** A simple named {@link org.apache.paimon.metrics.MetricGroup} that is untagged. */
 public class GenericMetricGroup extends AbstractMetricGroup {
 
-    public static final String GROUP_NAME_FORMAT = "table-%s";
-    private final String table;
+    private final String groupName;
 
-    public GenericMetricGroup(String table) {
-        super(table, null);
-        this.table = table;
+    GenericMetricGroup(final Map<String, String> tags, final String groupName) {
+        super(tags);
+        this.groupName = groupName;
+    }
+
+    public static GenericMetricGroup createGenericMetricGroup(
+            final String table, final String groupName) {
+        Map<String, String> tags = new HashMap<>();
+        tags.put("table", table);
+        return new GenericMetricGroup(tags, groupName);
     }
 
     @Override
     public String getGroupName() {
-        return String.format(GROUP_NAME_FORMAT, this.table);
+        return groupName;
     }
 }

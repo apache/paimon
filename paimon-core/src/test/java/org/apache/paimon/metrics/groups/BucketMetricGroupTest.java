@@ -30,11 +30,14 @@ public class BucketMetricGroupTest {
 
     @Test
     public void testGenerateScopeDefault() {
-        BucketMetricGroup group = BucketMetricGroup.createBucketMetricGroup("myTable", 1, "dt=1");
+        BucketMetricGroup group =
+                BucketMetricGroup.createBucketMetricGroup("myTable", 1, "dt=1", "commit");
 
-        assertThat(group.getAllTags().size()).isEqualTo(2);
+        assertThat(group.getAllTags().size()).isEqualTo(3);
+        assertThat(group.getAllTags().get("table")).isEqualTo("myTable");
         assertThat(group.getAllTags().get("bucket")).isEqualTo("1");
         assertThat(group.getAllTags().get("partition")).isEqualTo("dt=1");
-        assertThat(group.getMetricIdentifier("name", ".")).isEqualTo("myTable.name");
+        assertThat(group.getMetricIdentifier("myMetric", ".")).isEqualTo("commit.myMetric");
+        assertThat(group.getGroupName()).isEqualTo("commit");
     }
 }
