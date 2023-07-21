@@ -160,4 +160,21 @@ public interface ActionFactory extends Factory {
         }
         map.put(kv[0].trim(), kv[1].trim());
     }
+
+    default List<String> getOrderColumns(MultipleParameterTool params) {
+        List<String> columns = Arrays.asList(params.get("zorder-by").split(","));
+        if (columns.size() == 0) {
+            throw new IllegalArgumentException(
+                    "Please specify \"zorder-by\".");
+        }
+        return columns;
+    }
+
+    default String getSqlSelect(MultipleParameterTool params) {
+        String selectSql = params.get("sql-select");
+        if (selectSql == null) {
+            throw new IllegalArgumentException("Please specify \"sql-select\".");
+        }
+        return selectSql;
+    }
 }
