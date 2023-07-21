@@ -57,7 +57,7 @@ public class OrcBulkWriter implements FormatWriter {
         this.vectorizer.setWriter(this.writer);
         this.underlyingStream = underlyingStream;
         // TODO: Turn to access these hidden field directly after upgrade to ORC 1.7.4
-        this.treeWriter = getHiddenFiledInORC("treeWriter");
+        this.treeWriter = getHiddenFieldInORC("treeWriter");
     }
 
     @Override
@@ -97,7 +97,7 @@ public class OrcBulkWriter implements FormatWriter {
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T getHiddenFiledInORC(String fieldName) {
+    private <T> T getHiddenFieldInORC(String fieldName) {
         try {
             Field treeWriterField = writer.getClass().getDeclaredField(fieldName);
             AccessController.doPrivileged(

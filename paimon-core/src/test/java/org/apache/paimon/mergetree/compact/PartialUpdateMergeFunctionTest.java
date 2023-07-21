@@ -158,7 +158,7 @@ public class PartialUpdateMergeFunctionTest {
 
         MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
         func.reset();
-        // if sequence filed is null, the related fields should not be updated
+        // if sequence field is null, the related fields should not be updated
         add(func, 1, 1, 1, 1, 1);
         add(func, 1, null, 1, 2, 2);
         validate(func, 1, 1, 1, 2, 2);
