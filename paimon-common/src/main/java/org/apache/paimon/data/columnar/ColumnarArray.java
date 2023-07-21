@@ -246,4 +246,10 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
     private BytesColumnVector.Bytes getByteArray(int pos) {
         return ((BytesColumnVector) data).getBytes(offset + pos);
     }
+
+    @Override
+    public boolean equals(Object o) {
+        throw new UnsupportedOperationException(
+                "ColumnarArray do not support equals, please compare fields one by one!");
+    }
 }

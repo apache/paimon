@@ -106,8 +106,13 @@ public final class ParquetDataColumnReaderFactory {
         }
 
         @Override
-        public Timestamp readTimestamp() {
-            throw new RuntimeException("Unsupported operation");
+        public Timestamp readMillsTimestamp() {
+            return Timestamp.fromEpochMillis(valuesReader.readLong());
+        }
+
+        @Override
+        public Timestamp readMicrosTimestamp() {
+            return Timestamp.fromMicros(valuesReader.readLong());
         }
 
         @Override
@@ -199,7 +204,12 @@ public final class ParquetDataColumnReaderFactory {
         }
 
         @Override
-        public Timestamp readTimestamp() {
+        public Timestamp readMillsTimestamp() {
+            return convert(valuesReader.readBytes());
+        }
+
+        @Override
+        public Timestamp readMicrosTimestamp() {
             return convert(valuesReader.readBytes());
         }
     }

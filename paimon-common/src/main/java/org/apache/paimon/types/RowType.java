@@ -19,6 +19,7 @@
 package org.apache.paimon.types;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -33,6 +34,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Data type of a sequence of fields. A field consists of a field name, field type, and an optional
@@ -51,6 +53,7 @@ public final class RowType extends DataType {
     public static final String FORMAT = "ROW<%s>";
 
     private final List<DataField> fields;
+    private InternalRow.FieldGetter[] fieldGetters;
 
     public RowType(boolean isNullable, List<DataField> fields) {
         super(isNullable, DataTypeRoot.ROW);
@@ -251,5 +254,16 @@ public final class RowType extends DataType {
         public RowType build() {
             return new RowType(isNullable, fields);
         }
+    }
+
+    public InternalRow.FieldGetter[] fieldGetters() {
+        if (fieldGetters == null) {
+            fieldGetters =
+                    IntStream.range(0, getFieldCount())
+                            .mapToObj(i -> InternalRow.createFieldGetter(getTypeAt(i), i))
+                            .toArray(InternalRow.FieldGetter[]::new);
+        }
+
+        return fieldGetters;
     }
 }

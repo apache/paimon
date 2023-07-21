@@ -210,7 +210,7 @@ public class ArrayUtils {
      * @return a {@code boolean} array, {@code null} if null array input
      * @throws NullPointerException if array content is {@code null}
      */
-    public static boolean[] toPrimitive(final Boolean[] array) {
+    public static boolean[] toPrimitiveBoolean(final Object[] array) {
         if (array == null) {
             return null;
         } else if (array.length == 0) {
@@ -218,7 +218,7 @@ public class ArrayUtils {
         }
         final boolean[] result = new boolean[array.length];
         for (int i = 0; i < array.length; i++) {
-            result[i] = array[i];
+            result[i] = (boolean) array[i];
         }
         return result;
     }
@@ -232,7 +232,7 @@ public class ArrayUtils {
      * @return a {@code byte} array, {@code null} if null array input
      * @throws NullPointerException if array content is {@code null}
      */
-    public static byte[] toPrimitive(final Byte[] array) {
+    public static byte[] toPrimitiveByte(final Object[] array) {
         if (array == null) {
             return null;
         } else if (array.length == 0) {
@@ -240,7 +240,7 @@ public class ArrayUtils {
         }
         final byte[] result = new byte[array.length];
         for (int i = 0; i < array.length; i++) {
-            result[i] = array[i];
+            result[i] = (byte) array[i];
         }
         return result;
     }
@@ -254,7 +254,7 @@ public class ArrayUtils {
      * @return a {@code double} array, {@code null} if null array input
      * @throws NullPointerException if array content is {@code null}
      */
-    public static double[] toPrimitive(final Double[] array) {
+    public static double[] toPrimitiveDouble(final Object[] array) {
         if (array == null) {
             return null;
         } else if (array.length == 0) {
@@ -262,7 +262,7 @@ public class ArrayUtils {
         }
         final double[] result = new double[array.length];
         for (int i = 0; i < array.length; i++) {
-            result[i] = array[i];
+            result[i] = (double) array[i];
         }
         return result;
     }
@@ -276,7 +276,7 @@ public class ArrayUtils {
      * @return a {@code float} array, {@code null} if null array input
      * @throws NullPointerException if array content is {@code null}
      */
-    public static float[] toPrimitive(final Float[] array) {
+    public static float[] toPrimitiveFloat(final Object[] array) {
         if (array == null) {
             return null;
         } else if (array.length == 0) {
@@ -284,7 +284,7 @@ public class ArrayUtils {
         }
         final float[] result = new float[array.length];
         for (int i = 0; i < array.length; i++) {
-            result[i] = array[i];
+            result[i] = (float) array[i];
         }
         return result;
     }
@@ -298,7 +298,7 @@ public class ArrayUtils {
      * @return an {@code int} array, {@code null} if null array input
      * @throws NullPointerException if array content is {@code null}
      */
-    public static int[] toPrimitive(final Integer[] array) {
+    public static int[] toPrimitiveInteger(final Object[] array) {
         if (array == null) {
             return null;
         } else if (array.length == 0) {
@@ -306,7 +306,7 @@ public class ArrayUtils {
         }
         final int[] result = new int[array.length];
         for (int i = 0; i < array.length; i++) {
-            result[i] = array[i];
+            result[i] = (int) array[i];
         }
         return result;
     }
@@ -320,7 +320,7 @@ public class ArrayUtils {
      * @return a {@code long} array, {@code null} if null array input
      * @throws NullPointerException if array content is {@code null}
      */
-    public static long[] toPrimitive(final Long[] array) {
+    public static long[] toPrimitiveLong(final Object[] array) {
         if (array == null) {
             return null;
         } else if (array.length == 0) {
@@ -328,7 +328,7 @@ public class ArrayUtils {
         }
         final long[] result = new long[array.length];
         for (int i = 0; i < array.length; i++) {
-            result[i] = array[i];
+            result[i] = (long) array[i];
         }
         return result;
     }
@@ -342,7 +342,7 @@ public class ArrayUtils {
      * @return a {@code byte} array, {@code null} if null array input
      * @throws NullPointerException if array content is {@code null}
      */
-    public static short[] toPrimitive(final Short[] array) {
+    public static short[] toPrimitiveShort(final Object[] array) {
         if (array == null) {
             return null;
         } else if (array.length == 0) {
@@ -350,7 +350,7 @@ public class ArrayUtils {
         }
         final short[] result = new short[array.length];
         for (int i = 0; i < array.length; i++) {
-            result[i] = array[i];
+            result[i] = (short) array[i];
         }
         return result;
     }
