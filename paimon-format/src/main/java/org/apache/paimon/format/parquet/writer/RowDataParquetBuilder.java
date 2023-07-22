@@ -31,6 +31,8 @@ import org.apache.parquet.io.OutputFile;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
@@ -38,42 +40,59 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
     private final RowType rowType;
     private final Options conf;
 
+    private final List<String> disableDictionaryFields;
+
     public RowDataParquetBuilder(RowType rowType, Options conf) {
+        this(rowType, conf, new ArrayList<>());
+    }
+
+    public RowDataParquetBuilder(
+            RowType rowType, Options conf, List<String> disableDictionaryFields) {
         this.rowType = rowType;
         this.conf = conf;
+        this.disableDictionaryFields = disableDictionaryFields;
     }
 
     @Override
     public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
             throws IOException {
 
-        return new ParquetRowDataBuilder(out, rowType)
-                .withCompressionCodec(CompressionCodecName.fromConf(getCompression(compression)))
-                .withRowGroupSize(
-                        conf.getLong(
-                                ParquetOutputFormat.BLOCK_SIZE, ParquetWriter.DEFAULT_BLOCK_SIZE))
-                .withPageSize(
-                        conf.getInteger(
-                                ParquetOutputFormat.PAGE_SIZE, ParquetWriter.DEFAULT_PAGE_SIZE))
-                .withDictionaryPageSize(
-                        conf.getInteger(
-                                ParquetOutputFormat.DICTIONARY_PAGE_SIZE,
-                                ParquetProperties.DEFAULT_DICTIONARY_PAGE_SIZE))
-                .withMaxPaddingSize(
-                        conf.getInteger(
-                                ParquetOutputFormat.MAX_PADDING_BYTES,
-                                ParquetWriter.MAX_PADDING_SIZE_DEFAULT))
-                .withDictionaryEncoding(
-                        conf.getBoolean(
-                                ParquetOutputFormat.ENABLE_DICTIONARY,
-                                ParquetProperties.DEFAULT_IS_DICTIONARY_ENABLED))
-                .withValidation(conf.getBoolean(ParquetOutputFormat.VALIDATION, false))
-                .withWriterVersion(
-                        ParquetProperties.WriterVersion.fromString(
-                                conf.getString(
-                                        ParquetOutputFormat.WRITER_VERSION,
-                                        ParquetProperties.DEFAULT_WRITER_VERSION.toString())))
-                .build();
+        ParquetRowDataBuilder parquetRowDataBuilder =
+                new ParquetRowDataBuilder(out, rowType)
+                        .withCompressionCodec(
+                                CompressionCodecName.fromConf(getCompression(compression)))
+                        .withRowGroupSize(
+                                conf.getLong(
+                                        ParquetOutputFormat.BLOCK_SIZE,
+                                        ParquetWriter.DEFAULT_BLOCK_SIZE))
+                        .withPageSize(
+                                conf.getInteger(
+                                        ParquetOutputFormat.PAGE_SIZE,
+                                        ParquetWriter.DEFAULT_PAGE_SIZE))
+                        .withDictionaryPageSize(
+                                conf.getInteger(
+                                        ParquetOutputFormat.DICTIONARY_PAGE_SIZE,
+                                        ParquetProperties.DEFAULT_DICTIONARY_PAGE_SIZE))
+                        .withMaxPaddingSize(
+                                conf.getInteger(
+                                        ParquetOutputFormat.MAX_PADDING_BYTES,
+                                        ParquetWriter.MAX_PADDING_SIZE_DEFAULT))
+                        .withDictionaryEncoding(
+                                conf.getBoolean(
+                                        ParquetOutputFormat.ENABLE_DICTIONARY,
+                                        ParquetProperties.DEFAULT_IS_DICTIONARY_ENABLED))
+                        .withValidation(conf.getBoolean(ParquetOutputFormat.VALIDATION, false))
+                        .withWriterVersion(
+                                ParquetProperties.WriterVersion.fromString(
+                                        conf.getString(
+                                                ParquetOutputFormat.WRITER_VERSION,
+                                                ParquetProperties.DEFAULT_WRITER_VERSION
+                                                        .toString())));
+
+        for (String field : disableDictionaryFields) {
+            parquetRowDataBuilder = parquetRowDataBuilder.withDictionaryEncoding(field, false);
+        }
+        return parquetRowDataBuilder.build();
     }
 
     public String getCompression(@Nullable String compression) {

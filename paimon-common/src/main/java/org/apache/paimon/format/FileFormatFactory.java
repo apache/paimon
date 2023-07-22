@@ -30,15 +30,26 @@ public interface FileFormatFactory {
     /** the format context. */
     class FormatContext {
         private final Options formatOptions;
+
+        private final Options unifyOptions;
         private final int readBatchSize;
 
         public FormatContext(Options formatOptions, int readBatchSize) {
+            this(formatOptions, new Options(), readBatchSize);
+        }
+
+        public FormatContext(Options formatOptions, Options unifyOptions, int readBatchSize) {
             this.formatOptions = formatOptions;
             this.readBatchSize = readBatchSize;
+            this.unifyOptions = unifyOptions;
         }
 
         public Options formatOptions() {
             return formatOptions;
+        }
+
+        public Options getUnifyOptions() {
+            return unifyOptions;
         }
 
         public int readBatchSize() {

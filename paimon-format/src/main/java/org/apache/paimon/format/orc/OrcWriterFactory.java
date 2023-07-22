@@ -28,6 +28,8 @@ import org.apache.paimon.format.orc.writer.PhysicalWriterImpl;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.fs.PositionOutputStream;
 
+import org.apache.paimon.shade.guava30.com.google.common.base.Strings;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.orc.OrcConf;
@@ -35,7 +37,9 @@ import org.apache.orc.OrcFile;
 import org.apache.orc.impl.WriterImpl;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
@@ -56,6 +60,8 @@ public class OrcWriterFactory implements FormatWriterFactory {
     private OrcFile.WriterOptions writerOptions;
     private final CoreOptions coreOptions;
 
+    private String fieldsDisableDictionary;
+
     /**
      * Creates a new OrcBulkWriterFactory using the provided Vectorizer implementation.
      *
@@ -73,7 +79,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
      *     VectorizerRowBatch.
      */
     public OrcWriterFactory(Vectorizer<InternalRow> vectorizer, Configuration configuration) {
-        this(vectorizer, new Properties(), configuration);
+        this(vectorizer, new Properties(), configuration, new ArrayList<>());
     }
 
     /**
@@ -87,7 +93,8 @@ public class OrcWriterFactory implements FormatWriterFactory {
     public OrcWriterFactory(
             Vectorizer<InternalRow> vectorizer,
             Properties writerProperties,
-            Configuration configuration) {
+            Configuration configuration,
+            List<String> fieldsDisableDictionary) {
         this.vectorizer = checkNotNull(vectorizer);
         this.writerProperties = checkNotNull(writerProperties);
         this.confMap = new HashMap<>();
@@ -97,6 +104,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
             confMap.put(entry.getKey(), entry.getValue());
         }
         coreOptions = new CoreOptions(this.confMap);
+        this.fieldsDisableDictionary = String.join(",", fieldsDisableDictionary);
     }
 
     @Override
@@ -127,9 +135,11 @@ public class OrcWriterFactory implements FormatWriterFactory {
             for (Map.Entry<String, String> entry : confMap.entrySet()) {
                 conf.set(entry.getKey(), entry.getValue());
             }
-
             writerOptions = OrcFile.writerOptions(writerProperties, conf);
             writerOptions.setSchema(this.vectorizer.getSchema());
+            if (!Strings.isNullOrEmpty(fieldsDisableDictionary)) {
+                writerOptions.directEncodingColumns(fieldsDisableDictionary);
+            }
         }
 
         return writerOptions;

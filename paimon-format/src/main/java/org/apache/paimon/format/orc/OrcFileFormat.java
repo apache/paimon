@@ -139,7 +139,10 @@ public class OrcFileFormat extends FileFormat {
         Vectorizer<InternalRow> vectorizer =
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
 
-        return new OrcWriterFactory(vectorizer, orcProperties, writerConf);
+        List<String> fieldsDisableDictionary =
+                mergeDictionaryOptions(type, formatContext.getUnifyOptions());
+
+        return new OrcWriterFactory(vectorizer, orcProperties, writerConf, fieldsDisableDictionary);
     }
 
     private static Properties getOrcProperties(Options options) {

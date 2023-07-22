@@ -83,6 +83,8 @@ public class SchemaValidation {
 
         validateStartupMode(options);
 
+        validateFormatDictionaryOpt(schema);
+
         ChangelogProducer changelogProducer = options.changelogProducer();
         if (options.writeMode() == WriteMode.APPEND_ONLY
                 && changelogProducer != ChangelogProducer.NONE) {
@@ -325,6 +327,15 @@ public class SchemaValidation {
 
     private static String concatConfigKeys(List<ConfigOption<?>> configOptions) {
         return configOptions.stream().map(ConfigOption::key).collect(Collectors.joining(","));
+    }
+
+    private static void validateFormatDictionaryOpt(TableSchema schema) {
+        try {
+            CoreOptions coreOptions = new CoreOptions(schema.options());
+            coreOptions.getDisableDictionaryFields(schema.fieldNames());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Format dictionary option valid failed", e);
+        }
     }
 
     private static void validateDefaultValues(TableSchema schema) {

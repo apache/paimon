@@ -201,6 +201,37 @@ public class SchemaEvolutionTest {
     }
 
     @Test
+    public void testDictionaryFormatValid() {
+        {
+            Map<String, String> option = new HashMap<>();
+            option.put(
+                    String.format(
+                            "%s.%s.%s.%s",
+                            CoreOptions.FORMAT_PREFIX,
+                            CoreOptions.DICTIONARY_PREFIX,
+                            "c",
+                            "enable"),
+                    "true");
+            Schema schema =
+                    new Schema(
+                            RowType.of(
+                                            new DataType[] {
+                                                DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()),
+                                                DataTypes.BIGINT()
+                                            },
+                                            new String[] {"a", "b"})
+                                    .getFields(),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            option,
+                            "");
+            assertThatThrownBy(() -> schemaManager.createTable(schema))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasRootCauseMessage("field c not found in table");
+        }
+    }
+
+    @Test
     public void testAddField() throws Exception {
         Schema schema =
                 new Schema(

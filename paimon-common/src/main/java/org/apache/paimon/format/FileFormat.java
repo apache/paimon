@@ -120,6 +120,14 @@ public abstract class FileFormat {
         int readBatchSize = options.get(CoreOptions.READ_BATCH_SIZE);
         return FileFormat.fromIdentifier(
                 formatIdentifier,
-                new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
+                new FormatContext(
+                        options.removePrefix(formatIdentifier + "."),
+                        options.filterPrefixOptions(CoreOptions.FORMAT_PREFIX + "."),
+                        readBatchSize));
+    }
+
+    public static List<String> mergeDictionaryOptions(RowType rowType, Options options) {
+        CoreOptions coreOptions = new CoreOptions(options);
+        return coreOptions.getDisableDictionaryFields(rowType.getFieldNames());
     }
 }

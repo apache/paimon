@@ -48,7 +48,7 @@ public class Options implements Serializable {
     private static final long serialVersionUID = 1L;
 
     /** Stores the concrete key/value pairs of this configuration object. */
-    private final HashMap<String, String> data;
+    private final Map<String, String> data;
 
     /** Creates a new empty configuration. */
     public Options() {
@@ -152,6 +152,17 @@ public class Options implements Serializable {
         return new Options(newData);
     }
 
+    public synchronized Options filterPrefixOptions(String prefix) {
+        Map<String, String> newData = new HashMap<>();
+        data.forEach(
+                (k, v) -> {
+                    if (k.startsWith(prefix)) {
+                        newData.put(k, v);
+                    }
+                });
+        return new Options(newData);
+    }
+
     public synchronized boolean containsKey(String key) {
         return data.containsKey(key);
     }
@@ -167,6 +178,13 @@ public class Options implements Serializable {
 
     public synchronized boolean getBoolean(String key, boolean defaultValue) {
         return getRawValue(key).map(OptionsUtils::convertToBoolean).orElse(defaultValue);
+    }
+
+    public synchronized boolean getBoolean(String key) {
+        return getRawValue(key)
+                .map(OptionsUtils::convertToBoolean)
+                .orElseThrow(
+                        () -> new IllegalStateException(String.format("%s does not exist", key)));
     }
 
     public synchronized int getInteger(String key, int defaultValue) {

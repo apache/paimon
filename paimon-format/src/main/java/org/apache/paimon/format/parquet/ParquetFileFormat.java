@@ -62,9 +62,19 @@ public class ParquetFileFormat extends FileFormat {
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
+        List<String> disableDictionaryFields = getDisableDictionaryFields(type);
         return new ParquetWriterFactory(
                 new RowDataParquetBuilder(
-                        type, getParquetConfiguration(formatContext.formatOptions())));
+                        type,
+                        getParquetConfiguration(formatContext.formatOptions()),
+                        disableDictionaryFields));
+    }
+
+    @VisibleForTesting
+    protected List<String> getDisableDictionaryFields(RowType type) {
+        List<String> disableDictionaryFields =
+                mergeDictionaryOptions(type, formatContext.getUnifyOptions());
+        return disableDictionaryFields;
     }
 
     @Override

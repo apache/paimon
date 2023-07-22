@@ -58,6 +58,10 @@ public class CoreOptions implements Serializable {
 
     public static final String FIELDS_PREFIX = "fields";
 
+    public static final String FORMAT_PREFIX = "format";
+
+    public static final String DICTIONARY_PREFIX = "fields-dictionary";
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
@@ -785,6 +789,14 @@ public class CoreOptions implements Serializable {
                             "Parameter string for the constructor of class #. "
                                     + "Callback class should parse the parameter by itself.");
 
+    public static final ConfigOption<Boolean> FORMAT_FIELDS_DICTIONARY =
+            key("format.fields-dictionary.enable")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Enable or disable the dictionary for Parquet/Orc,"
+                                    + "'format.fields-dictionary.{fieldName}.enable' can be set to enable or disable the dictionary for a specific column.");
+
     public static final ConfigOption<Boolean> METASTORE_PARTITIONED_TABLE =
             key("metastore.partitioned-table")
                     .booleanType()
@@ -1219,6 +1231,43 @@ public class CoreOptions implements Serializable {
             }
         }
         return defaultValues;
+    }
+
+    public List<String> getDisableDictionaryFields(List<String> fieldNames) {
+        HashMap<String, Boolean> fieldDicMapping = new HashMap<>();
+
+        // set whole table dictionary option
+        boolean enableTableDict = options.get(CoreOptions.FORMAT_FIELDS_DICTIONARY);
+        for (String fieldName : fieldNames) {
+            fieldDicMapping.put(fieldName, enableTableDict);
+        }
+
+        // set field's
+        for (String key : options.keySet()) {
+            String prefix =
+                    String.format(
+                            "%s.%s.", CoreOptions.FORMAT_PREFIX, CoreOptions.DICTIONARY_PREFIX);
+            String suffix = ".enable";
+            if (key.startsWith(prefix)
+                    && key.endsWith(suffix)
+                    && !CoreOptions.FORMAT_FIELDS_DICTIONARY.key().equals(key)) {
+
+                boolean fieldDictionaryOpt = options.getBoolean(key);
+                String fieldName = key.substring(prefix.length(), key.length() - suffix.length());
+
+                if (fieldDicMapping.containsKey(fieldName)) {
+                    fieldDicMapping.put(fieldName, fieldDictionaryOpt);
+                } else {
+                    throw new RuntimeException(
+                            String.format("field %s not found in table", fieldName));
+                }
+            }
+        }
+
+        return fieldDicMapping.entrySet().stream()
+                .filter(entry -> !entry.getValue())
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
     }
 
     public Map<String, String> commitCallbacks() {
