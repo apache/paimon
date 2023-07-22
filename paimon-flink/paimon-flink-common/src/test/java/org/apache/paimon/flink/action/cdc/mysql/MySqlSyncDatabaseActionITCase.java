@@ -19,10 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -378,7 +375,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Timeout(60)
     public void testIgnoreIncompatibleTables() throws Exception {
         // create an incompatible table
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         catalog.createDatabase(database, true);
         Identifier identifier = Identifier.create(database, "incompatible");
         Schema schema =
@@ -443,7 +440,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Timeout(60)
     public void testTableAffix() throws Exception {
         // create table t1
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         catalog.createDatabase(database, true);
         Identifier identifier = Identifier.create(database, "test_prefix_t1_test_suffix");
         Schema schema =
@@ -1168,10 +1165,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         List<String> expected =
                 Arrays.asList("+I[1, 2021-09-15T15:00:10, 21]", "+I[2, 2023-03-23T16:00:20, 42]");
         waitForResult(expected, table, rowType, Arrays.asList("pk"));
-    }
-
-    private Catalog catalog() {
-        return CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
     }
 
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {

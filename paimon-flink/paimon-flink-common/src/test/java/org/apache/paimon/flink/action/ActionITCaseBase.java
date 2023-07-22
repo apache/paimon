@@ -85,7 +85,7 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         Identifier identifier = Identifier.create(database, tableName);
         catalog.createDatabase(database, true);
         catalog.createTable(
@@ -114,5 +114,9 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         recordReader.forEachRemaining(
                 row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
         return result;
+    }
+
+    protected Catalog catalog() {
+        return CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
     }
 }
