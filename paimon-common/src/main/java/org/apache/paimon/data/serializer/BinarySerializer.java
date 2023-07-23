@@ -23,6 +23,9 @@ import org.apache.paimon.io.DataOutputView;
 
 import java.io.IOException;
 
+import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
+import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
+
 /** Type serializer for {@code byte[]}. */
 public final class BinarySerializer extends SerializerSingleton<byte[]> {
 
@@ -40,13 +43,13 @@ public final class BinarySerializer extends SerializerSingleton<byte[]> {
 
     @Override
     public void serialize(byte[] record, DataOutputView target) throws IOException {
-        target.writeInt(record.length);
+        encodeInt(target, record.length);
         target.write(record);
     }
 
     @Override
     public byte[] deserialize(DataInputView source) throws IOException {
-        int len = source.readInt();
+        int len = decodeInt(source);
         byte[] result = new byte[len];
         source.readFully(result);
         return result;

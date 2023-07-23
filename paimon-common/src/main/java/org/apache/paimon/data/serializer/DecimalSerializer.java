@@ -49,8 +49,7 @@ public final class DecimalSerializer implements Serializer<Decimal> {
             target.writeLong(record.toUnscaledLong());
         } else {
             byte[] bytes = record.toUnscaledBytes();
-            target.writeInt(bytes.length);
-            target.write(bytes);
+            BinarySerializer.INSTANCE.serialize(bytes, target);
         }
     }
 
@@ -60,9 +59,7 @@ public final class DecimalSerializer implements Serializer<Decimal> {
             long longVal = source.readLong();
             return Decimal.fromUnscaledLong(longVal, precision, scale);
         } else {
-            int length = source.readInt();
-            byte[] bytes = new byte[length];
-            source.readFully(bytes);
+            byte[] bytes = BinarySerializer.INSTANCE.deserialize(source);
             return Decimal.fromUnscaledBytes(bytes, precision, scale);
         }
     }
