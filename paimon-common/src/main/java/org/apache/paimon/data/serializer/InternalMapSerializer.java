@@ -34,9 +34,6 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
-import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
-
 /** Serializer for {@link InternalMap}. */
 public class InternalMapSerializer implements Serializer<InternalMap> {
 
@@ -99,7 +96,7 @@ public class InternalMapSerializer implements Serializer<InternalMap> {
     @Override
     public void serialize(InternalMap record, DataOutputView target) throws IOException {
         BinaryMap binaryMap = toBinaryMap(record);
-        encodeInt(target, binaryMap.getSizeInBytes());
+        target.writeInt(binaryMap.getSizeInBytes());
         MemorySegmentUtils.copyToView(
                 binaryMap.getSegments(), binaryMap.getOffset(), binaryMap.getSizeInBytes(), target);
     }
@@ -164,7 +161,7 @@ public class InternalMapSerializer implements Serializer<InternalMap> {
     }
 
     private BinaryMap deserializeReuse(BinaryMap reuse, DataInputView source) throws IOException {
-        int length = decodeInt(source);
+        int length = source.readInt();
         byte[] bytes = new byte[length];
         source.readFully(bytes);
         reuse.pointTo(MemorySegment.wrap(bytes), 0, bytes.length);

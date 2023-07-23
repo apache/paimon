@@ -34,9 +34,6 @@ import java.io.IOException;
 import java.lang.reflect.Array;
 import java.util.Arrays;
 
-import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
-import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
-
 /** Serializer for {@link InternalArray}. */
 public class InternalArraySerializer implements Serializer<InternalArray> {
     private static final long serialVersionUID = 1L;
@@ -110,7 +107,7 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
     @Override
     public void serialize(InternalArray record, DataOutputView target) throws IOException {
         BinaryArray binaryArray = toBinaryArray(record);
-        encodeInt(target, binaryArray.getSizeInBytes());
+        target.writeInt(binaryArray.getSizeInBytes());
         MemorySegmentUtils.copyToView(
                 binaryArray.getSegments(),
                 binaryArray.getOffset(),
@@ -157,7 +154,7 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
 
     private BinaryArray deserializeReuse(BinaryArray reuse, DataInputView source)
             throws IOException {
-        int length = decodeInt(source);
+        int length = source.readInt();
         byte[] bytes = new byte[length];
         source.readFully(bytes);
         reuse.pointTo(MemorySegment.wrap(bytes), 0, bytes.length);
