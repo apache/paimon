@@ -26,8 +26,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
-import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
-import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
 /**
  * A serializer for {@link List Lists}. The serializer relies on an element serializer for the
@@ -94,7 +92,8 @@ public final class ListSerializer<T> implements Serializer<List<T>> {
 
     @Override
     public void serialize(List<T> list, DataOutputView target) throws IOException {
-        encodeInt(target, list.size());
+        final int size = list.size();
+        target.writeInt(size);
 
         // We iterate here rather than accessing by index, because we cannot be sure that
         // the given list supports RandomAccess.
@@ -106,7 +105,7 @@ public final class ListSerializer<T> implements Serializer<List<T>> {
 
     @Override
     public List<T> deserialize(DataInputView source) throws IOException {
-        final int size = decodeInt(source);
+        final int size = source.readInt();
         // create new list with (size + 1) capacity to prevent expensive growth when a single
         // element is added
         final List<T> list = new ArrayList<>(size + 1);
