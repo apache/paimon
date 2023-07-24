@@ -19,10 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -1032,7 +1029,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     private FileStoreTable getFileStoreTable() throws Exception {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         Identifier identifier = Identifier.create(database, tableName);
         return (FileStoreTable) catalog.getTable(identifier);
     }

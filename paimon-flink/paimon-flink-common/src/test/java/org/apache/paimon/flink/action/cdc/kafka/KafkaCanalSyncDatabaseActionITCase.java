@@ -19,10 +19,7 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
@@ -305,7 +302,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
         // create table t1
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         catalog.createDatabase(database, true);
         Identifier identifier = Identifier.create(database, "test_prefix_t1_test_suffix");
         Schema schema =
@@ -377,7 +374,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
         // create table t1
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         catalog.createDatabase(database, true);
         Identifier identifier = Identifier.create(database, "test_prefix_t1_test_suffix");
         Schema schema =
