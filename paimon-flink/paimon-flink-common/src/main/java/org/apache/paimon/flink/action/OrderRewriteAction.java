@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.flink.zorder.ZorderSorter;
+import org.apache.paimon.flink.sorter.SorterFactory;
+import org.apache.paimon.flink.sorter.TableSorter;
 
 import org.apache.flink.table.api.Table;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -31,32 +31,32 @@ import java.util.Map;
  * <p>The effect is similar to sql: "INSERT OVERWRITE target_table SELECT * FROM SOURCE ZORDER BY
  * col1,col2,... "
  *
- * <p>Example usage: zorder-rewrite --warehouse /tmp/paimon/warehouse --database my_db --table
- * Orders1 --sql-select "SELECT * FROM my_db.Orders1 WHERE f0 < 10" --zorder-by
- * f0,f1,f2,f3,f4,f7,f8,f9,f10,f11,f12,f13,f14,f15
+ * <p>Example usage: order-rewrite --warehouse /tmp/paimon/warehouse --database my_db --table
+ * Orders1 --sql-select "SELECT * FROM my_db.Orders1 WHERE f0 < 10" --sql-order-by
+ * "order(f0,f1,f2,f3,f4,f7,f8,f9,f10,f11,f12,f13,f14,f15)"
  */
-public class ZorderRewriteAction extends FlinkActionEnvironmentBase {
+public class OrderRewriteAction extends FlinkActionEnvironmentBase {
 
     private final String sqlSelect;
-    private final List<String> zOrderColNames;
+    private final String sqlOrderBy;
 
-    ZorderRewriteAction(
+    OrderRewriteAction(
             String warehouse,
             String databaseName,
             String tableName,
             String sqlSelect,
-            Map<String, String> catalogConfig,
-            List<String> orderColumns) {
+            String sqlOrderBy,
+            Map<String, String> catalogConfig) {
         super(warehouse, databaseName, tableName, catalogConfig);
         this.sqlSelect = sqlSelect;
-        this.zOrderColNames = orderColumns;
+        this.sqlOrderBy = sqlOrderBy;
     }
 
     @Override
     public void run() throws Exception {
         Table origin = batchTEnv.sqlQuery(sqlSelect);
-        ZorderSorter zorderSorter = new ZorderSorter(batchTEnv, origin, zOrderColNames);
-        Table rewritten = zorderSorter.apply();
-        rewritten.executeInsert(identifier.getFullName(), true).await();
+        TableSorter sorter = SorterFactory.getSorter(batchTEnv, origin, sqlOrderBy);
+        Table sorted = sorter.sort();
+        sorted.executeInsert(identifier.getFullName(), true).await();
     }
 }

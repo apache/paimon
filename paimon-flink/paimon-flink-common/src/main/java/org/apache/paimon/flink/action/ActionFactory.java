@@ -161,12 +161,12 @@ public interface ActionFactory extends Factory {
         map.put(kv[0].trim(), kv[1].trim());
     }
 
-    default List<String> getOrderColumns(MultipleParameterTool params) {
-        List<String> columns = Arrays.asList(params.get("zorder-by").split(","));
-        if (columns.size() == 0) {
-            throw new IllegalArgumentException("Please specify \"zorder-by\".");
+    default String getSqlOrderBy(MultipleParameterTool params) {
+        String sqlOrderBy = params.get("sql-order-by");
+        if (sqlOrderBy == null) {
+            throw new IllegalArgumentException("Please specify \"sql-order-by\".");
         }
-        return columns;
+        return sqlOrderBy;
     }
 
     default String getSqlSelect(MultipleParameterTool params) {
