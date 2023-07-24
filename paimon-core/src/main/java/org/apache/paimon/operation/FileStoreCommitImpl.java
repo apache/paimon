@@ -34,6 +34,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.metrics.commit.CommitMetrics;
+import org.apache.paimon.metrics.commit.CommitStats;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -111,6 +113,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
+    private final CommitMetrics commitMetrics;
 
     public FileStoreCommitImpl(
             FileIO fileIO,
@@ -128,7 +131,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             MemorySize manifestFullCompactionSize,
             int manifestMergeMinCount,
             boolean dynamicPartitionOverwrite,
-            @Nullable Comparator<InternalRow> keyComparator) {
+            @Nullable Comparator<InternalRow> keyComparator,
+            CommitMetrics commitMetrics) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -149,6 +153,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
+        this.commitMetrics = commitMetrics;
     }
 
     @Override
@@ -192,6 +197,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.debug("Ready to commit\n" + committable.toString());
         }
 
+        long started = System.nanoTime();
+        int generatedSnapshot = 0;
+        long attempts = 0;
         Snapshot latestSnapshot = null;
         Long safeLatestSnapshotId = null;
         List<ManifestEntry> baseEntries = new ArrayList<>();
@@ -226,19 +234,33 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 baseEntries.addAll(
                         readAllEntriesFromChangedPartitions(
                                 latestSnapshot, appendTableFiles, compactTableFiles));
-                noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
+                try {
+                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
+                } catch (RuntimeException e) {
+                    reportCommit(
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            0,
+                            0,
+                            1);
+                    throw e;
+                }
                 safeLatestSnapshotId = latestSnapshot.id();
             }
 
-            tryCommit(
-                    appendTableFiles,
-                    appendChangelog,
-                    appendIndexFiles,
-                    committable.identifier(),
-                    committable.watermark(),
-                    committable.logOffsets(),
-                    Snapshot.CommitKind.APPEND,
-                    safeLatestSnapshotId);
+            attempts +=
+                    tryCommit(
+                            appendTableFiles,
+                            appendChangelog,
+                            appendIndexFiles,
+                            committable.identifier(),
+                            committable.watermark(),
+                            committable.logOffsets(),
+                            Snapshot.CommitKind.APPEND,
+                            safeLatestSnapshotId);
+            generatedSnapshot += 1;
         }
 
         if (!compactTableFiles.isEmpty() || !compactChangelog.isEmpty()) {
@@ -250,21 +272,65 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             // This optimization is mainly used to decrease the number of times we read from files.
             if (safeLatestSnapshotId != null) {
                 baseEntries.addAll(appendTableFiles);
-                noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
+                try {
+                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
+                } catch (RuntimeException e) {
+                    long commitDuration = (System.nanoTime() - started) / 1_000_000;
+                    reportCommit(
+                            appendTableFiles,
+                            appendChangelog,
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            commitDuration,
+                            generatedSnapshot,
+                            attempts + 1);
+                    throw e;
+                }
                 // assume this compact commit follows just after the append commit created above
                 safeLatestSnapshotId += 1;
             }
 
-            tryCommit(
-                    compactTableFiles,
-                    compactChangelog,
-                    Collections.emptyList(),
-                    committable.identifier(),
-                    committable.watermark(),
-                    committable.logOffsets(),
-                    Snapshot.CommitKind.COMPACT,
-                    safeLatestSnapshotId);
+            attempts +=
+                    tryCommit(
+                            compactTableFiles,
+                            compactChangelog,
+                            Collections.emptyList(),
+                            committable.identifier(),
+                            committable.watermark(),
+                            committable.logOffsets(),
+                            Snapshot.CommitKind.COMPACT,
+                            safeLatestSnapshotId);
+            generatedSnapshot += 1;
         }
+        long commitDuration = (System.nanoTime() - started) / 1_000_000;
+        reportCommit(
+                appendTableFiles,
+                appendChangelog,
+                compactTableFiles,
+                compactChangelog,
+                commitDuration,
+                generatedSnapshot,
+                attempts);
+    }
+
+    private void reportCommit(
+            List<ManifestEntry> appendTableFiles,
+            List<ManifestEntry> appendChangelogFiles,
+            List<ManifestEntry> compactTableFiles,
+            List<ManifestEntry> compactChangelogFiles,
+            long commitDuration,
+            int generatedSnapshots,
+            long attempts) {
+        CommitStats commitStats =
+                new CommitStats(
+                        appendTableFiles,
+                        appendChangelogFiles,
+                        compactTableFiles,
+                        compactChangelogFiles,
+                        commitDuration,
+                        generatedSnapshots,
+                        attempts);
+        commitMetrics.reportCommit(commitStats);
     }
 
     @Override
@@ -481,7 +547,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 kind, commitMessage.partition(), commitMessage.bucket(), numBucket, file);
     }
 
-    private void tryCommit(
+    private long tryCommit(
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             List<IndexManifestEntry> indexFiles,
@@ -490,8 +556,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long safeLatestSnapshotId) {
+        long cnt = 0;
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            cnt++;
             if (tryCommitOnce(
                     tableFiles,
                     changelogFiles,
@@ -505,6 +573,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 break;
             }
         }
+        return cnt;
     }
 
     private void tryOverwrite(

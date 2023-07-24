@@ -39,6 +39,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** base class for Test {@link ManifestFile}. */
@@ -220,5 +221,27 @@ public abstract class ManifestFileMetaTestBase {
                         makeEntry(false, "A2", partition2),
                         makeEntry(false, "B2", partition2),
                         makeEntry(true, "D2", partition2)));
+    }
+
+    public static ManifestEntry makeEntry(
+            FileKind fileKind, int partition, int bucket, long rowCount) {
+        return new ManifestEntry(
+                fileKind,
+                row(partition),
+                bucket,
+                0, // not used
+                new DataFileMeta(
+                        "", // not used
+                        0, // not used
+                        rowCount,
+                        null, // not used
+                        null, // not used
+                        StatsTestUtils.newEmptyTableStats(), // not used
+                        StatsTestUtils.newEmptyTableStats(), // not used
+                        0, // not used
+                        0, // not used
+                        0, // not used
+                        0 // not used
+                        ));
     }
 }
