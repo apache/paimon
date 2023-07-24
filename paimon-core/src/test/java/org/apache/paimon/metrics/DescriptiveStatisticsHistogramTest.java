@@ -25,12 +25,13 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.utility.ThrowingFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.offset;
 
 /**
  * Tests for {@link DescriptiveStatisticsHistogram} and {@link
  * DescriptiveStatisticsHistogramStatistics}.
  */
-class DescriptiveStatisticsHistogramTest extends AbstractHistogramTest {
+class DescriptiveStatisticsHistogramTest {
 
     private static final double[] DATA = {1, 2, 3, 4, 5, 6, 7, 8, 9};
 
@@ -52,6 +53,38 @@ class DescriptiveStatisticsHistogramTest extends AbstractHistogramTest {
     @Test
     void testCopy() throws Exception {
         testDuplication(DescriptiveStatisticsHistogramStatistics.CommonMetricsSnapshot::copy);
+    }
+
+    private void testHistogram(int size, Histogram histogram) {
+        HistogramStatistics statistics;
+
+        for (int i = 0; i < size; i++) {
+            histogram.update(i);
+
+            statistics = histogram.getStatistics();
+            assertThat(histogram.getCount()).isEqualTo(i + 1);
+            assertThat(statistics.size()).isEqualTo(histogram.getCount());
+            assertThat(statistics.getMax()).isEqualTo(i);
+            assertThat(statistics.getMin()).isEqualTo(0);
+        }
+
+        statistics = histogram.getStatistics();
+        assertThat(statistics.size()).isEqualTo(size);
+        assertThat(statistics.getQuantile(0.5)).isCloseTo((size - 1) / 2.0, offset(0.001));
+
+        for (int i = size; i < 2 * size; i++) {
+            histogram.update(i);
+
+            statistics = histogram.getStatistics();
+            assertThat(histogram.getCount()).isEqualTo(i + 1);
+            assertThat(statistics.size()).isEqualTo(size);
+            assertThat(statistics.getMax()).isEqualTo(i);
+            assertThat(statistics.getMin()).isEqualTo(i + 1 - size);
+        }
+
+        statistics = histogram.getStatistics();
+        assertThat(statistics.size()).isEqualTo(size);
+        assertThat(statistics.getQuantile(0.5)).isCloseTo(size + (size - 1) / 2.0, offset(0.001));
     }
 
     private static void testDuplication(
