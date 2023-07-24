@@ -32,12 +32,28 @@ the status of partitions and delete expired partitions according to time.
 How to determine whether a partition has expired: compare the time extracted from the partition with the current
 time to see if survival time has exceeded the `partition.expiration-time`.
 
-An example:
+{{< hint info >}}
+__Note:__ After the partition expires, it is logically deleted and the latest snapshot cannot query its data. But the
+files in the file system are not immediately physically deleted, it depends on when the corresponding snapshot expires.
+See [Expire Snapshots]({{< ref "/maintenance/manage-snapshots#expire-snapshots" >}}).
+{{< /hint >}}
+
+An example for single partition field:
 ```sql
 CREATE TABLE T (...) PARTITIONED BY (dt) WITH (
     'partition.expiration-time' = '7 d',
     'partition.expiration-check-interval' = '1 d',
     'partition.timestamp-formatter' = 'yyyyMMdd'
+);
+```
+
+An example for multiple partition fields:
+```sql
+CREATE TABLE T (...) PARTITIONED BY (other_key, dt) WITH (
+    'partition.expiration-time' = '7 d',
+    'partition.expiration-check-interval' = '1 d',
+    'partition.timestamp-formatter' = 'yyyyMMdd',
+    'partition.timestamp-pattern' = '$dt'
 );
 ```
 
