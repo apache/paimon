@@ -55,7 +55,8 @@ public class ReassignFieldId extends DataTypeDefaultVisitor<DataType> {
     @Override
     public DataType visit(RowType rowType) {
         RowType.Builder builder = RowType.builder(rowType.isNullable(), fieldId);
-        rowType.getFields().forEach(f -> builder.field(f.name(), f.type(), f.description()));
+        rowType.getFields()
+                .forEach(f -> builder.field(f.name(), f.type().accept(this), f.description()));
         return builder.build();
     }
 
