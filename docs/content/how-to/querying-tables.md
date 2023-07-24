@@ -269,6 +269,34 @@ NOTE: The consumer will prevent expiration of the snapshot. You can specify 'con
 lifetime of consumers.
 {{< /hint >}}
 
+You can reset a consumer with a given consumer ID and next snapshot ID.
+
+{{< hint info >}}
+First, you need to stop the streaming task using this consumer ID, and then execute the reset consumer action job.
+{{< /hint >}}
+
+{{< tabs "reset-consumer" >}}
+
+{{< tab "Flink" >}}
+
+Run the following command:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    reset-consumer \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table <table-name> \
+    --consumer-id <consumer-id> \
+    --next-snapshot <next-snapshot-id> \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## Query Optimization
 
 {{< label Batch >}}{{< label Streaming >}}

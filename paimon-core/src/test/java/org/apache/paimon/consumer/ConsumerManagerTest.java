@@ -53,11 +53,11 @@ public class ConsumerManagerTest {
 
         assertThat(manager.minNextSnapshot()).isEmpty();
 
-        manager.recordConsumer("id1", new Consumer(5));
+        manager.resetConsumer("id1", new Consumer(5));
         consumer = manager.consumer("id1");
         assertThat(consumer).map(Consumer::nextSnapshot).get().isEqualTo(5L);
 
-        manager.recordConsumer("id2", new Consumer(8));
+        manager.resetConsumer("id2", new Consumer(8));
         consumer = manager.consumer("id2");
         assertThat(consumer).map(Consumer::nextSnapshot).get().isEqualTo(8L);
 
@@ -66,11 +66,11 @@ public class ConsumerManagerTest {
 
     @Test
     public void testExpire() throws Exception {
-        manager.recordConsumer("id1", new Consumer(1));
+        manager.resetConsumer("id1", new Consumer(1));
         Thread.sleep(1000);
         LocalDateTime expireDateTime = DateTimeUtils.toLocalDateTime(System.currentTimeMillis());
         Thread.sleep(1000);
-        manager.recordConsumer("id2", new Consumer(2));
+        manager.resetConsumer("id2", new Consumer(2));
 
         // check expire
         manager.expire(expireDateTime);
@@ -80,7 +80,7 @@ public class ConsumerManagerTest {
         // check last modification
         expireDateTime = DateTimeUtils.toLocalDateTime(System.currentTimeMillis());
         Thread.sleep(1000);
-        manager.recordConsumer("id2", new Consumer(3));
+        manager.resetConsumer("id2", new Consumer(3));
         manager.expire(expireDateTime);
         assertThat(manager.consumer("id2")).map(Consumer::nextSnapshot).get().isEqualTo(3L);
     }

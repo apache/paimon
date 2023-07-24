@@ -238,7 +238,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
 
         String consumerId = options.consumerId();
         if (consumerId != null) {
-            snapshotReader.consumerManager().recordConsumer(consumerId, new Consumer(nextSnapshot));
+            snapshotReader.consumerManager().resetConsumer(consumerId, new Consumer(nextSnapshot));
         }
     }
 }
