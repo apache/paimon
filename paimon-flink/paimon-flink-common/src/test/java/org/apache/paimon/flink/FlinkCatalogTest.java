@@ -70,8 +70,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
-import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -96,6 +96,7 @@ public class FlinkCatalogTest {
         String path = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
         Options conf = new Options();
         conf.setString("warehouse", path);
+        conf.set(LOG_SYSTEM_AUTO_REGISTER, true);
         catalog =
                 FlinkCatalogFactory.createCatalog(
                         "test-catalog",
@@ -492,20 +493,20 @@ public class FlinkCatalogTest {
                         .primaryKey("pk")
                         .build();
         Map<String, String> options = new HashMap<>();
-        options.put(LOG_SYSTEM_AUTO_REGISTER.key(), "true");
         CatalogTable catalogTable1 = new CatalogTableImpl(schema, options, "");
-        assertThatThrownBy(() -> catalog.createTable(path1, catalogTable1, false))
-                .hasMessage("log.system must be configured when you use log system register.");
+        catalog.createTable(path1, catalogTable1, false);
+        CatalogBaseTable storedTable1 = catalog.getTable(path1);
+        assertFalse(storedTable1.getOptions().containsKey("testing.log.store.topic"));
 
         options.put(LOG_SYSTEM.key(), TESTING_LOG_STORE);
         CatalogTable catalogTable2 = new CatalogTableImpl(schema, options, "");
-        catalog.createTable(path1, catalogTable2, false);
+        catalog.createTable(path3, catalogTable2, false);
 
-        CatalogBaseTable storedTable2 = catalog.getTable(path1);
+        CatalogBaseTable storedTable2 = catalog.getTable(path3);
         assertEquals(
-                String.format("%s-topic", path1.getObjectName()),
+                String.format("%s-topic", path3.getObjectName()),
                 storedTable2.getOptions().get("testing.log.store.topic"));
-        assertThatThrownBy(() -> catalog.dropTable(path1, true))
+        assertThatThrownBy(() -> catalog.dropTable(path3, true))
                 .hasMessage("Check unregister log store topic here.");
     }
 

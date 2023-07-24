@@ -23,13 +23,10 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.options.Options;
 
-import java.util.Collections;
 import java.util.Map;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
-import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.NONE;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * {@link LogStoreRegister} will register and unregister topic for a Paimon table, you can implement
@@ -42,39 +39,26 @@ public interface LogStoreRegister {
     /** Unregister topic in log system for the table. */
     void unRegisterTopic();
 
-    static Map<String, String> registerLogSystem(
+    static void registerLogSystem(
             Catalog catalog,
             Identifier identifier,
             Map<String, String> options,
             ClassLoader classLoader) {
         Options tableOptions = Options.fromMap(options);
-        if (tableOptions.get(LOG_SYSTEM_AUTO_REGISTER)) {
-            String logStore = tableOptions.get(LOG_SYSTEM);
-            checkArgument(
-                    !tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE),
-                    String.format(
-                            "%s must be configured when you use log system register.",
-                            LOG_SYSTEM.key()));
-            if (catalog.tableExists(identifier)) {
-                return Collections.emptyMap();
-            }
+        String logStore = tableOptions.get(LOG_SYSTEM);
+        if (!tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)
+                && !catalog.tableExists(identifier)) {
             LogStoreRegister logStoreRegister =
                     getLogStoreRegister(identifier, classLoader, tableOptions, logStore);
-            return logStoreRegister.registerTopic();
+            options.putAll(logStoreRegister.registerTopic());
         }
-        return Collections.emptyMap();
     }
 
     static void unRegisterLogSystem(
             Identifier identifier, Map<String, String> options, ClassLoader classLoader) {
         Options tableOptions = Options.fromMap(options);
-        if (tableOptions.get(LOG_SYSTEM_AUTO_REGISTER)) {
-            String logStore = tableOptions.get(LOG_SYSTEM);
-            checkArgument(
-                    !tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE),
-                    String.format(
-                            "%s must be configured when you use log system register.",
-                            LOG_SYSTEM.key()));
+        String logStore = tableOptions.get(LOG_SYSTEM);
+        if (!tableOptions.get(LOG_SYSTEM).equalsIgnoreCase(NONE)) {
             LogStoreRegister logStoreRegister =
                     getLogStoreRegister(identifier, classLoader, tableOptions, logStore);
             logStoreRegister.unRegisterTopic();

@@ -106,12 +106,18 @@ public class FlinkCatalog extends AbstractCatalog {
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
+    private final boolean logStoreAutoRegister;
 
     public FlinkCatalog(
-            Catalog catalog, String name, String defaultDatabase, ClassLoader classLoader) {
+            Catalog catalog,
+            String name,
+            String defaultDatabase,
+            ClassLoader classLoader,
+            boolean logStoreAutoRegister) {
         super(name, defaultDatabase);
         this.catalog = catalog;
         this.classLoader = classLoader;
+        this.logStoreAutoRegister = logStoreAutoRegister;
         try {
             this.catalog.createDatabase(defaultDatabase, true);
         } catch (Catalog.DatabaseAlreadyExistException ignore) {
@@ -219,11 +225,11 @@ public class FlinkCatalog extends AbstractCatalog {
         Identifier identifier = toIdentifier(tablePath);
         Table table = null;
         try {
-            if (catalog.tableExists(identifier)) {
+            if (logStoreAutoRegister && catalog.tableExists(identifier)) {
                 table = catalog.getTable(identifier);
             }
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
-            if (table != null) {
+            if (logStoreAutoRegister && table != null) {
                 unRegisterLogSystem(identifier, table.options(), classLoader);
             }
         } catch (Catalog.TableNotExistException e) {
@@ -250,12 +256,12 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         Identifier identifier = toIdentifier(tablePath);
-        Map<String, String> logSystemOptions =
-                registerLogSystem(catalog, identifier, options, classLoader);
+        if (logStoreAutoRegister) {
+            registerLogSystem(catalog, identifier, options, classLoader);
+        }
         // remove table path
         String specific = options.remove(PATH.key());
-        if (specific != null || !logSystemOptions.isEmpty()) {
-            options.putAll(logSystemOptions);
+        if (specific != null || logStoreAutoRegister) {
             catalogTable = catalogTable.copy(options);
         }
 
@@ -270,7 +276,7 @@ public class FlinkCatalog extends AbstractCatalog {
             unRegisterLogSystem = true;
             throw new DatabaseNotExistException(getName(), e.database());
         } finally {
-            if (unRegisterLogSystem && !logSystemOptions.isEmpty()) {
+            if (logStoreAutoRegister && unRegisterLogSystem) {
                 unRegisterLogSystem(identifier, options, classLoader);
             }
         }

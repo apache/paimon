@@ -20,7 +20,6 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
-import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
@@ -68,16 +67,6 @@ public class FlinkConnectorOptions {
                                                             + StreamingReadMode.FILE.getValue()
                                                             + "."))
                                     .build());
-
-    @Documentation.Immutable
-    public static final ConfigOption<Boolean> LOG_SYSTEM_AUTO_REGISTER =
-            ConfigOptions.key("log.system.auto-register")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "If true, the register will automatically create and delete a topic in log system for Paimon table. Default kafka log store register "
-                                    + "is supported, users can implement customized register for log system, for example, create a new class which extends "
-                                    + "KafkaLogStoreFactory and return a customized LogStoreRegister for their kafka cluster to create/delete topics.");
 
     public static final ConfigOption<Integer> SINK_PARALLELISM =
             ConfigOptions.key("sink.parallelism")

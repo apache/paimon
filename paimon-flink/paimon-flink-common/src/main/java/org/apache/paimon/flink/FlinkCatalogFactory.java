@@ -21,22 +21,18 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 
 import java.util.Collections;
 import java.util.Set;
 
+import static org.apache.paimon.flink.FlinkCatalogOptions.DEFAULT_DATABASE;
+import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
+
 /** Factory for {@link FlinkCatalog}. */
 public class FlinkCatalogFactory implements org.apache.flink.table.factories.CatalogFactory {
 
     public static final String IDENTIFIER = "paimon";
-
-    public static final ConfigOption<String> DEFAULT_DATABASE =
-            ConfigOptions.key("default-database")
-                    .stringType()
-                    .defaultValue(Catalog.DEFAULT_DATABASE);
 
     @Override
     public String factoryIdentifier() {
@@ -68,15 +64,17 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
                 CatalogFactory.createCatalog(context, classLoader),
                 catalogName,
                 context.options().get(DEFAULT_DATABASE),
-                classLoader);
+                classLoader,
+                context.options().get(LOG_SYSTEM_AUTO_REGISTER));
     }
 
-    public static FlinkCatalog createCatalog(String catalogName, Catalog catalog) {
+    public static FlinkCatalog createCatalog(String catalogName, Catalog catalog, Options options) {
         return new FlinkCatalog(
                 catalog,
                 catalogName,
                 Catalog.DEFAULT_DATABASE,
-                FlinkCatalogFactory.class.getClassLoader());
+                FlinkCatalogFactory.class.getClassLoader(),
+                options.get(LOG_SYSTEM_AUTO_REGISTER));
     }
 
     public static Catalog createPaimonCatalog(Options catalogOptions) {
