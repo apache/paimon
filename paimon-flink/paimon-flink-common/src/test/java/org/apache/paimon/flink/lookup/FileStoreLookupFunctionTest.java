@@ -42,6 +42,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -60,6 +61,40 @@ public class FileStoreLookupFunctionTest {
     private FileStoreTable fileStoreTable;
     @TempDir private Path tempDir;
 
+    @BeforeEach
+    public void before() throws Exception {
+        org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(tempDir.toString());
+        SchemaManager schemaManager = new SchemaManager(fileIO, path);
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 2);
+        conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
+        conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
+        conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
+        conf.set(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL, Duration.ZERO);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"pt", "k", "v"});
+
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "k"),
+                        conf.toMap(),
+                        "");
+        TableSchema tableSchema = schemaManager.createTable(schema);
+        fileStoreTable =
+                FileStoreTableFactory.create(
+                        fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
+
+        fileStoreLookupFunction =
+                new FileStoreLookupFunction(fileStoreTable, new int[] {0, 1}, new int[] {1}, null);
+        fileStoreLookupFunction.open(tempDir.toString());
+    }
+
     @Test
     public void testLookupScanLeak() throws Exception {
         commit(writeCommit(1));
@@ -77,31 +112,16 @@ public class FileStoreLookupFunctionTest {
                 0);
     }
 
-    @BeforeEach
-    public void before() throws Exception {
-        createFileStoreTable();
-        fileStoreLookupFunction =
-                new FileStoreLookupFunction(fileStoreTable, new int[] {0, 1}, new int[] {1}, null);
-        fileStoreLookupFunction.open(tempDir.toString());
-    }
+    @Test
+    public void testLookupExpiredSnapshot() throws Exception {
+        commit(writeCommit(1));
+        fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
 
-    private static final RowType ROW_TYPE =
-            RowType.of(
-                    new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
-                    new String[] {"pt", "k", "v"});
-
-    private static Schema schema() {
-        Options conf = new Options();
-        conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
-        conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
-
-        return new Schema(
-                ROW_TYPE.getFields(),
-                Collections.singletonList("pt"),
-                Arrays.asList("pt", "k"),
-                conf.toMap(),
-                "");
+        commit(writeCommit(2));
+        commit(writeCommit(3));
+        commit(writeCommit(4));
+        commit(writeCommit(5));
+        fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
     }
 
     private void commit(List<CommitMessage> messages) {
@@ -120,14 +140,5 @@ public class FileStoreLookupFunctionTest {
 
     private InternalRow randomRow() {
         return GenericRow.of(RANDOM.nextInt(100), RANDOM.nextInt(100), RANDOM.nextLong());
-    }
-
-    public void createFileStoreTable() throws Exception {
-        org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(tempDir.toString());
-        SchemaManager schemaManager = new SchemaManager(fileIO, path);
-        TableSchema tableSchema = schemaManager.createTable(schema());
-        fileStoreTable =
-                FileStoreTableFactory.create(
-                        fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
     }
 }
