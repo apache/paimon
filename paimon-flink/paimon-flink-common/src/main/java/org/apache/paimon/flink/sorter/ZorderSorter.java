@@ -16,9 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.zorder;
+package org.apache.paimon.flink.sorter;
 
-import org.apache.paimon.flink.action.ZorderRewriteAction;
+import org.apache.paimon.flink.action.OrderRewriteAction;
 import org.apache.paimon.utils.ByteBuffers;
 import org.apache.paimon.utils.ZOrderByteUtils;
 
@@ -54,7 +54,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static org.apache.flink.table.api.Expressions.$;
 import static org.apache.paimon.utils.ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE;
@@ -64,7 +63,7 @@ import static org.apache.paimon.utils.ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE;
  * in a way mixed by table api and stream api. By sql select, it constructs the input stream, then
  * compute the z-order-index using stream api. After add the column of z-order, it transfers the
  * data stream back to table, and use the sql clause "order by" to sort. Finally, {@link
- * ZorderRewriteAction} will remove the "z-order" column and insert sorted record to the target
+ * OrderRewriteAction} will remove the "z-order" column and insert sorted record to the target
  * table.
  *
  * <pre>
@@ -72,43 +71,20 @@ import static org.apache.paimon.utils.ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE;
  * Table(sql select) ----------------> DataStream[Row] -------------------> DataStream[Row] -----------------> Table(with z-order) -----------------> Table(sorted)
  * </pre>
  */
-public class ZorderSorter {
+public class ZorderSorter extends TableSorter {
 
     private static final String Z_ORDER_COLUMN_NAME = "Z_ORDER";
 
-    private final StreamTableEnvironment batchTEnv;
-    private final Table origin;
-    private final List<String> zOrderColNames;
-
     public ZorderSorter(
             StreamTableEnvironment batchTEnv, Table origin, List<String> zOrderColNames) {
-        this.batchTEnv = batchTEnv;
-        this.origin = origin;
-        this.zOrderColNames = zOrderColNames;
-        checkColNames();
+        super(batchTEnv, origin, zOrderColNames);
     }
 
-    public Table apply() {
+    @Override
+    public Table sort() {
         return convertTable(origin)
                 .orderBy($(Z_ORDER_COLUMN_NAME))
                 .dropColumns($(Z_ORDER_COLUMN_NAME));
-    }
-
-    private void checkColNames() {
-        List<String> columnNames =
-                origin.getResolvedSchema().getColumns().stream()
-                        .map(Column::getName)
-                        .collect(Collectors.toList());
-        for (String zColumn : zOrderColNames) {
-            if (!columnNames.contains(zColumn)) {
-                throw new RuntimeException(
-                        "Can't find column "
-                                + zColumn
-                                + " in table columns. Possible columns are ["
-                                + columnNames.stream().reduce((a, b) -> a + "," + b).get()
-                                + "]");
-            }
-        }
     }
 
     // This method convert source table to z-order-added table
@@ -138,7 +114,7 @@ public class ZorderSorter {
             dataTypes.add(column.getDataType());
             rowFields.add(
                     new RowType.RowField(column.getName(), column.getDataType().getLogicalType()));
-            if (zOrderColNames.contains(column.getName())) {
+            if (orderColNames.contains(column.getName())) {
                 zorderFunctionMap.put(columnIndex, zmapColumnToCalculator(column));
             }
         }
