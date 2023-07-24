@@ -25,6 +25,9 @@ import org.apache.paimon.memory.MemorySegmentUtils;
 
 import java.io.IOException;
 
+import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
+import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
+
 /** Serializer for {@link BinaryString}. */
 public final class BinaryStringSerializer extends SerializerSingleton<BinaryString> {
 
@@ -42,7 +45,7 @@ public final class BinaryStringSerializer extends SerializerSingleton<BinaryStri
 
     @Override
     public void serialize(BinaryString string, DataOutputView target) throws IOException {
-        target.writeInt(string.getSizeInBytes());
+        encodeInt(target, string.getSizeInBytes());
         MemorySegmentUtils.copyToView(
                 string.getSegments(), string.getOffset(), string.getSizeInBytes(), target);
     }
@@ -53,7 +56,7 @@ public final class BinaryStringSerializer extends SerializerSingleton<BinaryStri
     }
 
     public static BinaryString deserializeInternal(DataInputView source) throws IOException {
-        int length = source.readInt();
+        int length = decodeInt(source);
         byte[] bytes = new byte[length];
         source.readFully(bytes);
         return BinaryString.fromBytes(bytes);
