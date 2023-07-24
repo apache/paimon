@@ -88,13 +88,16 @@ Example
     --mysql-conf username=root \
     --mysql-conf password=123456 \
     --mysql-conf database-name=source_db \
-    --mysql-conf table-name='source_table_.*' \
+    --mysql-conf table-name='source_table' \
     --catalog-conf metastore=hive \
     --catalog-conf uri=thrift://hive-metastore:9083 \
     --table-conf bucket=4 \
     --table-conf changelog-producer=input \
     --table-conf sink.parallelism=4
 ```
+
+The mysql-conf table-name also supports regular expressions to monitor multiple tables that satisfy
+the regular expressions.
 
 ### Synchronizing Databases
 

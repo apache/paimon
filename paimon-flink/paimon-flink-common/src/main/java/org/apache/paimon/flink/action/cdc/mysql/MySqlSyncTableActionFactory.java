@@ -147,7 +147,7 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
                         + "    --mysql-conf username=root \\\n"
                         + "    --mysql-conf password=123456 \\\n"
                         + "    --mysql-conf database-name=source_db \\\n"
-                        + "    --mysql-conf table-name='source_table_.*' \\\n"
+                        + "    --mysql-conf table-name='source_table' \\\n"
                         + "    --catalog-conf metastore=hive \\\n"
                         + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
                         + "    --table-conf bucket=4 \\\n"
