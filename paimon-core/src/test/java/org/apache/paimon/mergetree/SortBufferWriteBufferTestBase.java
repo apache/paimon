@@ -23,8 +23,8 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
-import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
+import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionTestUtils;
@@ -285,9 +285,9 @@ public abstract class SortBufferWriteBufferTestBase {
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
             return FirstRowMergeFunction.factory(
-                    new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
-                    new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))))
-                .create();
+                            new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
+                            new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))))
+                    .create();
         }
     }
 }
