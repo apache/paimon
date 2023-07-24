@@ -104,7 +104,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    // @Timeout(60)
+    @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
 
         final String topic = "schema_evolution";

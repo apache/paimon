@@ -244,13 +244,11 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
             JsonNode primaryKeyColumnNames = tableChange.get("table").get("primaryKeyColumnNames");
             if (primaryKeyColumnNames.size() == 0) {
-                String id = tableChange.get("id").asText();
-                String tableName = id.replaceAll("\"", "").split("\\.")[1];
                 LOG.debug(
                         "Didn't find primary keys from MySQL DDL for table '{}'. "
                                 + "This table won't be synchronized.",
-                        tableName);
-                excludedTables.add(tableName);
+                        currentTable);
+                excludedTables.add(currentTable);
                 shouldSynchronizeCurrentTable = false;
                 return Optional.empty();
             }

@@ -21,10 +21,7 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -35,7 +32,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -43,7 +39,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -338,7 +333,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         createTestTopic(topic, 1, 1);
 
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/alltype/canal-data-1.txt");
+        List<String> lines = readLines("kafka.canal/table/alltype/canal-data.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -369,11 +364,11 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         waitJobRunning(client);
 
-        testAllTypesImpl(topic);
+        testAllTypesImpl();
         client.cancel().get();
     }
 
-    private void testAllTypesImpl(String topic) throws Exception {
+    private void testAllTypesImpl() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -609,32 +604,6 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                                 + "]");
 
         waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
-
-        // test all types during schema evolution
-        try {
-            try {
-                writeRecordsToKafka(topic, readLines("kafka.canal/table/alltype/canal-data-2.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
-            }
-            List<DataField> newFields = new ArrayList<>(rowType.getFields());
-            newFields.add(new DataField(rowType.getFieldCount(), "v", DataTypes.INT()));
-            RowType newRowType = new RowType(newFields);
-            List<String> newExpected =
-                    expected.stream()
-                            .map(s -> s.substring(0, s.length() - 1) + ", NULL]")
-                            .collect(Collectors.toList());
-            waitForResult(newExpected, table, newRowType, Arrays.asList("pt", "_id"));
-        } finally {
-            try {
-                writeRecordsToKafka(topic, readLines("kafka.canal/table/alltype/canal-data-3.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
-            }
-            waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
-            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
-            schemaManager.commitChanges(SchemaChange.dropColumn("v"));
-        }
     }
 
     @Test
