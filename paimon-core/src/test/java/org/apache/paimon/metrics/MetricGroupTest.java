@@ -22,6 +22,8 @@ import org.apache.paimon.metrics.groups.GenericMetricGroup;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,13 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Tests for the {@link MetricGroup}. */
 public class MetricGroupTest {
     @Test
-    public void closedGroupDoesNotRegisterMetrics() {
+    public void groupRegisterMetrics() {
         GenericMetricGroup group = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
         assertFalse(group.isClosed());
-
-        group.close();
-        assertTrue(group.isClosed());
-
         // these will fail is the registration is propagated
         group.counter("testcounter");
         group.gauge(
@@ -46,7 +44,18 @@ public class MetricGroupTest {
                         return null;
                     }
                 });
-        assertThat(group.getMetrics().size()).isEqualTo(0);
+        assertThat(group.getGroupName()).isEqualTo("commit");
+        assertThat(group.getAllTags().size()).isEqualTo(1);
+        assertThat(group.getAllTags())
+                .containsExactlyEntriesOf(
+                        new HashMap<String, String>() {
+                            {
+                                put("table", "myTable");
+                            }
+                        });
+        assertThat(group.getMetrics().size()).isEqualTo(2);
+        group.close();
+        assertTrue(group.isClosed());
     }
 
     @Test
@@ -57,6 +66,6 @@ public class MetricGroupTest {
         Counter counter1 = group.counter(name);
 
         // return the old one with the metric name collision
-        assertThat(group.counter(name)).isEqualTo(counter1);
+        assertThat(group.counter(name)).isSameAs(counter1);
     }
 }

@@ -81,7 +81,7 @@ public interface MetricGroup {
 
     /**
      * Returns the name for this group, meaning what kind of entity it represents, for example
-     * "bucket".
+     * "commit".
      */
     String getGroupName();
 

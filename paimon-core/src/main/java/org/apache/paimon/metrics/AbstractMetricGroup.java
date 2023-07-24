@@ -64,7 +64,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
     /**
      * Returns the fully qualified metric name using the configured delimiter for the reporter with
-     * the given index, for example {@code "myTable.bucket-1.metricName"}.
+     * the given index, for example {@code "commit.metricName"}.
      *
      * @param metricName metric name
      * @param delimiter delimiter to use
@@ -94,8 +94,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @return the given counter
      */
     public <C extends Counter> C counter(String name, C counter) {
-        Metric metric = addMetric(name, counter);
-        return (C) metric;
+        return (C) addMetric(name, counter);
     }
 
     /**
@@ -107,8 +106,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @return the given gauge
      */
     public <T, G extends Gauge<T>> G gauge(String name, G gauge) {
-        Metric metric = addMetric(name, gauge);
-        return (G) metric;
+        return (G) addMetric(name, gauge);
     }
 
     /**
@@ -120,8 +118,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
      * @return the registered histogram
      */
     public <H extends Histogram> H histogram(String name, H histogram) {
-        Metric metric = addMetric(name, histogram);
-        return (H) metric;
+        return (H) addMetric(name, histogram);
     }
 
     /**
@@ -145,9 +142,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
                 case GAUGE:
                 case HISTOGRAM:
                     // immediately put without a 'contains' check to optimize the common case
-                    // (no
-                    // collision)
-                    // collisions are resolved later
+                    // (no collision), collisions are resolved later
                     Metric prior = metrics.put(metricName, metric);
 
                     // check for collisions with other metric names
@@ -156,9 +151,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
                         metrics.put(metricName, prior);
 
                         // we warn here, rather than failing, because metrics are tools that
-                        // should not
-                        // fail the
-                        // program when used incorrectly
+                        // should not fail the program when used incorrectly
                         LOG.warn(
                                 "Name collision: Group already contains a Metric with the name '"
                                         + metricName
@@ -182,7 +175,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
     /**
      * Returns the name for this group, meaning what kind of entity it represents, for example
-     * "bucket".
+     * "commit".
      *
      * @return logical name for this group
      */

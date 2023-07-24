@@ -40,12 +40,12 @@ public class Metrics {
      * Add a metric group. Which is called by metrics instances, like commit / compaction metrics
      * instances.
      */
-    public synchronized void addGroup(AbstractMetricGroup group) {
+    public void addGroup(AbstractMetricGroup group) {
         metricGroups.add(group);
     }
 
     /** Get metric groups. */
-    public synchronized ConcurrentLinkedQueue<MetricGroup> getMetricGroups() {
+    public ConcurrentLinkedQueue<MetricGroup> getMetricGroups() {
         return metricGroups;
     }
 }
