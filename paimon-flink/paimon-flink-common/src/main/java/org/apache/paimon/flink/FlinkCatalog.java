@@ -25,10 +25,8 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.table.api.Schema.UnresolvedColumn;
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.WatermarkSpec;
@@ -557,40 +555,40 @@ public class FlinkCatalog extends AbstractCatalog {
     public static Schema fromCatalogTable(CatalogTable catalogTable) {
         TableSchema schema = catalogTable.getSchema();
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
-        List<String> primaryKeys = new ArrayList<>();
-        if (schema.getPrimaryKey().isPresent()) {
-            primaryKeys = schema.getPrimaryKey().get().getColumns();
-        }
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
-
         // Serialize virtual columns and watermark to the options
         // This is what Flink SQL needs, the storage itself does not need them
         options.putAll(columnOptions(schema));
 
-        return new Schema(
-                addColumnComments(toDataType(rowType).getFields(), getColumnComments(catalogTable)),
-                catalogTable.getPartitionKeys(),
-                primaryKeys,
-                options,
-                catalogTable.getComment());
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .comment(catalogTable.getComment())
+                        .options(options)
+                        .primaryKey(
+                                schema.getPrimaryKey()
+                                        .map(pk -> pk.getColumns())
+                                        .orElse(Collections.emptyList()))
+                        .partitionKeys(catalogTable.getPartitionKeys());
+        Map<String, String> columnComments = getColumnComments(catalogTable);
+        rowType.getFields()
+                .forEach(
+                        field ->
+                                schemaBuilder.column(
+                                        field.getName(),
+                                        toDataType(field.getType()),
+                                        columnComments.get(field.getName())));
+
+        return schemaBuilder.build();
     }
 
     private static Map<String, String> getColumnComments(CatalogTable catalogTable) {
         return catalogTable.getUnresolvedSchema().getColumns().stream()
                 .filter(c -> c.getComment().isPresent())
-                .collect(Collectors.toMap(UnresolvedColumn::getName, c -> c.getComment().get()));
-    }
-
-    private static List<DataField> addColumnComments(
-            List<DataField> fields, Map<String, String> columnComments) {
-        return fields.stream()
-                .map(
-                        field -> {
-                            String comment = columnComments.get(field.name());
-                            return comment == null ? field : field.newDescription(comment);
-                        })
-                .collect(Collectors.toList());
+                .collect(
+                        Collectors.toMap(
+                                org.apache.flink.table.api.Schema.UnresolvedColumn::getName,
+                                c -> c.getComment().get()));
     }
 
     /** Only reserve necessary options. */

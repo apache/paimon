@@ -96,7 +96,16 @@ public class FlinkCatalogTest {
                 Arrays.asList(
                         Column.physical("first", DataTypes.STRING()),
                         Column.physical("second", DataTypes.INT()),
-                        Column.physical("third", DataTypes.STRING())),
+                        Column.physical("third", DataTypes.STRING()),
+                        Column.physical(
+                                "four",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD("f1", DataTypes.STRING()),
+                                        DataTypes.FIELD("f2", DataTypes.INT()),
+                                        DataTypes.FIELD(
+                                                "f3",
+                                                DataTypes.MAP(
+                                                        DataTypes.STRING(), DataTypes.INT()))))),
                 Collections.emptyList(),
                 null);
     }
