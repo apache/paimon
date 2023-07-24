@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Tests for the {@link MetricGroup}. */
 public class MetricGroupTest {
     @Test
-    public void groupRegisterMetrics() {
+    public void testGroupRegisterMetrics() {
         GenericMetricGroup group = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
         assertFalse(group.isClosed());
         // these will fail is the registration is propagated
@@ -59,7 +59,7 @@ public class MetricGroupTest {
     }
 
     @Test
-    public void tolerateMetricNameCollisions() {
+    public void testTolerateMetricNameCollisions() {
         final String name = "abctestname";
         GenericMetricGroup group = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
 

@@ -21,8 +21,6 @@ package org.apache.paimon.metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,7 +40,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
     // ------------------------------------------------------------------------
 
-    /** The map containing all tags and their associated values, lazily computed. */
+    /** The map containing all tags and their associated values. */
     protected Map<String, String> tags;
 
     /** Flag indicating whether this group has been closed. */
@@ -52,7 +50,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
     // ------------------------------------------------------------------------
 
-    public AbstractMetricGroup(@Nullable Map<String, String> tags) {
+    public AbstractMetricGroup(Map<String, String> tags) {
         this.tags = tags;
         Metrics.getInstance().addGroup(this);
     }
