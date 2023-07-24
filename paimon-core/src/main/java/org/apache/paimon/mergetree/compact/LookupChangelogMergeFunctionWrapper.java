@@ -99,6 +99,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
 
         // 2. With level 0, with the latest high level, return changelog
         if (highLevel != null) {
+            // For first row, we should just return old value. And produce no changelog.
             if (!isFirstRow) {
                 setChangelog(highLevel, result);
             }
@@ -109,11 +110,11 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         highLevel = lookup.apply(result.key());
 
         if (highLevel != null) {
+            mergeFunction2.reset();
+            mergeFunction2.add(highLevel);
+            mergeFunction2.add(result);
+            result = mergeFunction2.getResult();
             if (!isFirstRow) {
-                mergeFunction2.reset();
-                mergeFunction2.add(highLevel);
-                mergeFunction2.add(result);
-                result = mergeFunction2.getResult();
                 setChangelog(highLevel, result);
             }
         } else {

@@ -110,11 +110,14 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
                     reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
                 }
             } else {
+                // For first row, we should just return old value. And produce no changelog.
+                if (isFirstRow) {
+                    return reusedResult.setResultIfNotRetract(merged);
+                }
                 if (merged == null || !isAdd(merged)) {
                     reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
-                } else if (!isFirstRow
-                        && (!changelogRowDeduplicate
-                                || !valueEqualiser.equals(topLevelKv.value(), merged.value()))) {
+                } else if (!changelogRowDeduplicate
+                        || !valueEqualiser.equals(topLevelKv.value(), merged.value())) {
                     reusedResult
                             .addChangelog(replace(reusedBefore, RowKind.UPDATE_BEFORE, topLevelKv))
                             .addChangelog(replace(reusedAfter, RowKind.UPDATE_AFTER, merged));

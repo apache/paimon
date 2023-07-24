@@ -89,7 +89,7 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
     protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
         return new LookupChangelogMergeFunctionWrapper(
                 mfFactory,
-                (key) -> {
+                key -> {
                     try {
                         return lookupLevels.lookup(key, outputLevel + 1);
                     } catch (IOException e) {

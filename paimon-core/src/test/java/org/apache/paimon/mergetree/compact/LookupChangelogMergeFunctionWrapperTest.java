@@ -290,6 +290,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @Test
     public void testFirstRow() {
+        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(
@@ -305,9 +306,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                                         1, "f1", new IntType())))),
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
-                        key -> null,
+                        highLevel::get,
                         EQUALISER,
-                        true); // force to true for first_row merge engine.
+                        false);
 
         // Without level-0
         function.reset();
@@ -357,5 +358,18 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv).isNotNull();
         assertThat(kv.value().getInt(0)).isEqualTo(0);
+
+        // with high level value
+        function.reset();
+        highLevel.put(row(1), new KeyValue().replace(row(1), INSERT, row(10)));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(0)).setLevel(0));
+
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(0);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(10);
     }
 }
