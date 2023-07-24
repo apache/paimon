@@ -58,7 +58,7 @@ public class ConsumerManager implements Serializable {
         return Consumer.fromPath(fileIO, consumerPath(consumerId));
     }
 
-    public void recordConsumer(String consumerId, Consumer consumer) {
+    public void resetConsumer(String consumerId, Consumer consumer) {
         try (PositionOutputStream out = fileIO.newOutputStream(consumerPath(consumerId), true)) {
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
             writer.write(consumer.toJson());

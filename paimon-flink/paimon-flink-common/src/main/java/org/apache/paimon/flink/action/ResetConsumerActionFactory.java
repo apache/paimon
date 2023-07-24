@@ -58,12 +58,12 @@ public class ResetConsumerActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"reset-consumer\" record a consumer from the given next snapshot.");
+                "Action \"reset-consumer\" reset a consumer from the given next snapshot.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  record-consumer --warehouse <warehouse-path> --database <database-name> "
+                "  reset-consumer --warehouse <warehouse-path> --database <database-name> "
                         + "--table <table-name> --consumer-id <consumer-id> --next-snapshot <next-snapshot-id>");
         System.out.println();
     }

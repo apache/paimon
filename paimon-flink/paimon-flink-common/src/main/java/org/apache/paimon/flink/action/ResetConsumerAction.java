@@ -47,6 +47,6 @@ public class ResetConsumerAction extends TableActionBase {
         FileStoreTable dataTable = (FileStoreTable) table;
         ConsumerManager consumerManager =
                 new ConsumerManager(dataTable.fileIO(), dataTable.location());
-        consumerManager.recordConsumer(consumerId, new Consumer(nextSnapshotId));
+        consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
     }
 }
