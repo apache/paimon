@@ -159,6 +159,18 @@ metadata.stats-mode = none
 The collection of statistical information for row storage is a bit expensive, so I suggest turning off statistical
 information as well.
 
+If you don't want to modify all files to Avro format, at least you can consider modifying the files in the previous
+layers to Avro format. You can use `'file.format.per.level' = '0:avro,1:avro'` to specify the files in the first two
+layers to be in Avro format.
+
+## File Compression
+
+By default, Paimon uses high-performance compression algorithms such as LZ4 and SNAPPY. But their compression rate
+will be not so good. If you can reduce the write/read performance, you can modify the compression algorithm:
+
+1. `'file.compression'`: Default file compression format. If you need a higher compression rate, I recommend using `'ZSTD'`.
+2. `'file.compression.per.level'`: Define different compression policies for different level. For example `'0:lz4,1:zstd'`.
+
 ## Stability
 
 If there are too few buckets, or too few resources, full-compaction may cause checkpoint to timeout, Flink's default
