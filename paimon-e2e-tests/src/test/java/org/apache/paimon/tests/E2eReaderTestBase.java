@@ -100,7 +100,7 @@ public abstract class E2eReaderTestBase extends E2eTestBase {
                 "1\t10\t10\n" + "1\t10\t100\n" + "1\t100\t10\n" + "1\t100\t100\n" + "2\t20\t20\n");
     }
 
-    private void checkQueryResult(E2eQueryExecutor executor, String query, String result)
+    protected void checkQueryResult(E2eQueryExecutor executor, String query, String result)
             throws Exception {
         final String file = "pk.hql";
         writeSharedFile(file, query);
