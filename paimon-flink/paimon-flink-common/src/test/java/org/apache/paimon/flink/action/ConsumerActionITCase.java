@@ -42,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class ConsumerActionITCase extends ActionITCaseBase {
 
     @Test
-    public void testRecordConsumer() throws Exception {
+    public void testResetConsumer() throws Exception {
         init(warehouse);
 
         RowType rowType =
@@ -80,10 +80,10 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);
 
         // reset consumer
-        RecordConsumerAction recordConsumerAction =
-                new RecordConsumerAction(
+        ResetConsumerAction resetConsumerAction =
+                new ResetConsumerAction(
                         warehouse, database, tableName, Collections.emptyMap(), "myid", 1);
-        recordConsumerAction.run();
+        resetConsumerAction.run();
 
         Optional<Consumer> consumer2 = consumerManager.consumer("myid");
         assertThat(consumer2).isPresent();

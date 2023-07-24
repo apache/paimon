@@ -118,12 +118,4 @@ public interface ReadonlyTable extends InnerTable {
                         "Readonly Table %s does not support rollbackTo tag.",
                         this.getClass().getSimpleName()));
     }
-
-    @Override
-    default void recordConsumer(String consumerId, long nextSnapshotId) {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support record consumer.",
-                        this.getClass().getSimpleName()));
-    }
 }

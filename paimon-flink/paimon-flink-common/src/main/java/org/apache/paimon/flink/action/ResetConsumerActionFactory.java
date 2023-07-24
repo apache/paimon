@@ -24,10 +24,10 @@ import org.apache.flink.api.java.utils.MultipleParameterTool;
 import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link RecordConsumerAction}. */
-public class RecordConsumerActionFactory implements ActionFactory {
+/** Factory to create {@link ResetConsumerAction}. */
+public class ResetConsumerActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "record-consumer";
+    public static final String IDENTIFIER = "reset-consumer";
 
     @Override
     public String identifier() {
@@ -44,8 +44,8 @@ public class RecordConsumerActionFactory implements ActionFactory {
         String consumerId = params.get("consumer-id");
         long nextSnapshotId = Long.parseLong(params.get("next-snapshot"));
 
-        RecordConsumerAction action =
-                new RecordConsumerAction(
+        ResetConsumerAction action =
+                new ResetConsumerAction(
                         tablePath.f0,
                         tablePath.f1,
                         tablePath.f2,
@@ -58,7 +58,7 @@ public class RecordConsumerActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"record-consumer\" record a consumer from the given next snapshot.");
+                "Action \"reset-consumer\" record a consumer from the given next snapshot.");
         System.out.println();
 
         System.out.println("Syntax:");

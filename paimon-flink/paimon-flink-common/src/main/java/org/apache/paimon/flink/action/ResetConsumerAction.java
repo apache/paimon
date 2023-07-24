@@ -18,15 +18,19 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.consumer.Consumer;
+import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.table.FileStoreTable;
+
 import java.util.Map;
 
-/** Record consumer action for Flink. */
-public class RecordConsumerAction extends TableActionBase {
+/** Reset consumer action for Flink. */
+public class ResetConsumerAction extends TableActionBase {
 
     private final String consumerId;
     private final long nextSnapshotId;
 
-    protected RecordConsumerAction(
+    protected ResetConsumerAction(
             String warehouse,
             String databaseName,
             String tableName,
@@ -40,6 +44,9 @@ public class RecordConsumerAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        table.recordConsumer(consumerId, nextSnapshotId);
+        FileStoreTable dataTable = (FileStoreTable) table;
+        ConsumerManager consumerManager =
+                new ConsumerManager(dataTable.fileIO(), dataTable.location());
+        consumerManager.recordConsumer(consumerId, new Consumer(nextSnapshotId));
     }
 }
