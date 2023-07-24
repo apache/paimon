@@ -25,7 +25,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
