@@ -22,16 +22,10 @@ import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
-import com.alibaba.druid.sql.ast.SQLDataType;
-import com.alibaba.druid.sql.ast.SQLExpr;
-import com.alibaba.druid.sql.ast.SQLName;
-import com.alibaba.druid.sql.ast.expr.SQLCharExpr;
-import com.alibaba.druid.sql.ast.expr.SQLIntegerExpr;
-import com.alibaba.druid.sql.ast.statement.SQLColumnDefinition;
-import com.alibaba.druid.sql.ast.statement.SQLTableElement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
-import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +36,7 @@ import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CO
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Schema builder for MySQL cdc. */
-public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<MySqlCreateTableStatement> {
+public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> {
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
@@ -53,50 +47,41 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<MySqlCreat
     }
 
     @Override
-    public Optional<Schema> build(MySqlCreateTableStatement statement) {
-        List<SQLTableElement> columns = statement.getTableElementList();
-        LinkedHashMap<String, Tuple2<DataType, String>> fields = new LinkedHashMap<>();
+    public Optional<Schema> build(JsonNode tableChange) {
+        JsonNode jsonTable = tableChange.get("table");
+        String tableName = tableChange.get("id").asText();
+        ArrayNode columns = (ArrayNode) jsonTable.get("columns");
+        LinkedHashMap<String, DataType> fields = new LinkedHashMap<>();
 
-        for (SQLTableElement element : columns) {
-            if (element instanceof SQLColumnDefinition) {
-                SQLColumnDefinition column = (SQLColumnDefinition) element;
-                SQLName name = column.getName();
-                SQLDataType dataType = column.getDataType();
-                List<SQLExpr> arguments = dataType.getArguments();
-                Integer precision = null;
-                Integer scale = null;
-                if (arguments.size() >= 1) {
-                    precision = (int) (((SQLIntegerExpr) arguments.get(0)).getValue());
-                }
-
-                if (arguments.size() >= 2) {
-                    scale = (int) (((SQLIntegerExpr) arguments.get(1)).getValue());
-                }
-
-                SQLCharExpr comment = (SQLCharExpr) column.getComment();
-                fields.put(
-                        name.getSimpleName(),
-                        Tuple2.of(
-                                MySqlTypeUtils.toDataType(
-                                        column.getDataType().getName(),
-                                        precision,
-                                        scale,
-                                        MYSQL_CONVERTER_TINYINT1_BOOL.defaultValue()),
-                                comment == null ? null : String.valueOf(comment.getValue())));
-            }
+        for (JsonNode element : columns) {
+            Integer precision = element.has("length") ? element.get("length").asInt() : null;
+            Integer scale = element.has("scale") ? element.get("scale").asInt() : null;
+            fields.put(
+                    element.get("name").asText(),
+                    // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
+                    MySqlTypeUtils.toDataType(
+                                    element.get("typeExpression").asText(),
+                                    precision,
+                                    scale,
+                                    MYSQL_CONVERTER_TINYINT1_BOOL.defaultValue())
+                            .copy(element.get("optional").asBoolean()));
         }
 
-        List<String> primaryKeys = statement.getPrimaryKeyNames();
+        ArrayNode arrayNode = (ArrayNode) jsonTable.get("primaryKeyColumnNames");
+        List<String> primaryKeys = new ArrayList<>();
+        for (JsonNode primary : arrayNode) {
+            primaryKeys.add(primary.asText());
+        }
 
         if (!caseSensitive) {
-            LinkedHashMap<String, Tuple2<DataType, String>> tmp = new LinkedHashMap<>();
-            for (Map.Entry<String, Tuple2<DataType, String>> entry : fields.entrySet()) {
+            LinkedHashMap<String, DataType> tmp = new LinkedHashMap<>();
+            for (Map.Entry<String, DataType> entry : fields.entrySet()) {
                 String fieldName = entry.getKey();
                 checkArgument(
                         !tmp.containsKey(fieldName.toLowerCase()),
                         "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
                         fieldName,
-                        statement.getTableName());
+                        tableName);
                 tmp.put(fieldName.toLowerCase(), entry.getValue());
             }
             fields = tmp;
@@ -107,8 +92,8 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<MySqlCreat
 
         Schema.Builder builder = Schema.newBuilder();
         builder.options(tableConfig);
-        for (Map.Entry<String, Tuple2<DataType, String>> entry : fields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue().f0, entry.getValue().f1);
+        for (Map.Entry<String, DataType> entry : fields.entrySet()) {
+            builder.column(entry.getKey(), entry.getValue());
         }
         Schema schema = builder.primaryKey(primaryKeys).build();
 

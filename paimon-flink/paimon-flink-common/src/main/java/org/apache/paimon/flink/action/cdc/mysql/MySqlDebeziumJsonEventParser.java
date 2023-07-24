@@ -35,15 +35,11 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.guava30.com.google.common.base.Strings;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import com.alibaba.druid.sql.SQLUtils;
-import com.alibaba.druid.sql.ast.SQLStatement;
-import com.alibaba.druid.sql.dialect.mysql.ast.statement.MySqlCreateTableStatement;
-import com.alibaba.druid.util.JdbcConstants;
+import io.debezium.relational.history.TableChanges;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,7 +74,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
-    private final NewTableSchemaBuilder<MySqlCreateTableStatement> schemaBuilder;
+    private final NewTableSchemaBuilder<JsonNode> schemaBuilder;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final Set<String> includedTables = new HashSet<>();
@@ -111,7 +107,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             ZoneId serverTimeZone,
             boolean caseSensitive,
             TableNameConverter tableNameConverter,
-            NewTableSchemaBuilder<MySqlCreateTableStatement> schemaBuilder,
+            NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
             boolean convertTinyint1ToBool) {
@@ -131,7 +127,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TableNameConverter tableNameConverter,
-            NewTableSchemaBuilder<MySqlCreateTableStatement> schemaBuilder,
+            NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
             boolean convertTinyint1ToBool) {
@@ -231,20 +227,25 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
         try {
             String historyRecordString = historyRecord.asText();
-            String ddl = objectMapper.readTree(historyRecordString).get("ddl").asText();
-            if (Strings.isNullOrEmpty(ddl)) {
+            JsonNode tableChanges = objectMapper.readTree(historyRecordString).get("tableChanges");
+            if (tableChanges.size() != 1) {
+                throw new IllegalArgumentException(
+                        "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
+                                + historyRecord.asText());
+            }
+
+            JsonNode tableChange = tableChanges.get(0);
+            if (!tableChange
+                    .get("type")
+                    .asText()
+                    .equals(TableChanges.TableChangeType.CREATE.name())) {
                 return Optional.empty();
             }
 
-            SQLStatement statement = SQLUtils.parseSingleStatement(ddl, JdbcConstants.MYSQL);
-            if (!(statement instanceof MySqlCreateTableStatement)) {
-                return Optional.empty();
-            }
-
-            MySqlCreateTableStatement createTableStatement = (MySqlCreateTableStatement) statement;
-            List<String> primaryKeys = createTableStatement.getPrimaryKeyNames();
-            String tableName = createTableStatement.getTableName();
-            if (primaryKeys.isEmpty()) {
+            JsonNode primaryKeyColumnNames = tableChange.get("table").get("primaryKeyColumnNames");
+            if (primaryKeyColumnNames.size() == 0) {
+                String id = tableChange.get("id").asText();
+                String tableName = id.replaceAll("\"", "").split("\\.")[1];
                 LOG.debug(
                         "Didn't find primary keys from MySQL DDL for table '{}'. "
                                 + "This table won't be synchronized.",
@@ -254,7 +255,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 return Optional.empty();
             }
 
-            return schemaBuilder.build(createTableStatement);
+            return schemaBuilder.build(tableChange);
         } catch (Exception e) {
             LOG.info("Failed to parse history record for schema changes", e);
             return Optional.empty();
