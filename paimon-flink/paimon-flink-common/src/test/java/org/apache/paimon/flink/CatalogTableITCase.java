@@ -87,6 +87,19 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testOptionsTable2() throws Exception {
+        sql("CREATE TABLE T (a INT, b INT) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
+        sql("ALTER TABLE T SET ('c.cc.ccc' = 'val3')");
+
+        List<Row> result = sql("SELECT * FROM system$all_table_options");
+        assertThat(result)
+                .containsExactly(
+                        Row.of("default", "T", "a.aa.aaa", "val1"),
+                        Row.of("default", "T", "b.bb.bbb", "val2"),
+                        Row.of("default", "T", "c.cc.ccc", "val3"));
+    }
+
+    @Test
     public void testCreateSystemTable() {
         assertThatThrownBy(() -> sql("CREATE TABLE T$snapshots (a INT, b INT)"))
                 .hasRootCauseMessage(
