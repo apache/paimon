@@ -160,9 +160,10 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            return new FirstRowMergeFunction(
-                    new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
-                    new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))));
+            RowType keyType = new RowType(Lists.list(new DataField(0, "f0", new IntType())));
+            RowType valueType = new RowType(Lists.list(new DataField(1, "f1", new BigIntType())));
+            return new LookupMergeFunction(
+                    new FirstRowMergeFunction(keyType, valueType), keyType, valueType);
         }
     }
 }
