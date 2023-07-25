@@ -51,6 +51,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
@@ -129,7 +130,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         try {
             return paimonCatalog.loadTable(ident);
         } catch (NoSuchTableException e) {
-            return getSessionCatalog().loadTable(ident);
+            return throwsOldIfExceptionHappens(() -> getSessionCatalog().loadTable(ident), e);
         }
     }
 
@@ -138,7 +139,8 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         try {
             return paimonCatalog.loadTable(ident, version);
         } catch (NoSuchTableException e) {
-            return getSessionCatalog().loadTable(ident, version);
+            return throwsOldIfExceptionHappens(
+                    () -> getSessionCatalog().loadTable(ident, version), e);
         }
     }
 
@@ -147,7 +149,8 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         try {
             return paimonCatalog.loadTable(ident, timestamp);
         } catch (NoSuchTableException e) {
-            return getSessionCatalog().loadTable(ident, timestamp);
+            return throwsOldIfExceptionHappens(
+                    () -> getSessionCatalog().loadTable(ident, timestamp), e);
         }
     }
 
@@ -282,5 +285,14 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
 
     private static boolean isSystemNamespace(String[] namespace) {
         return namespace.length == 1 && namespace[0].equalsIgnoreCase("system");
+    }
+
+    private Table throwsOldIfExceptionHappens(Callable<Table> call, NoSuchTableException e)
+            throws NoSuchTableException {
+        try {
+            return call.call();
+        } catch (Exception exception) {
+            throw e;
+        }
     }
 }
