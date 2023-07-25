@@ -135,6 +135,7 @@ public abstract class MergeTreeTestBase {
         configuration.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         configuration.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
         configuration.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
+        configuration.set(CoreOptions.SORT_ENGINE, getSortEngine());
         options = new CoreOptions(configuration);
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
         RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
