@@ -408,8 +408,8 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         for (StructField field : schema.fields()) {
             schemaBuilder.column(
                     field.name(),
-                    toPaimonType(field.dataType()),
-                    field.getComment().getOrElse(() -> ""));
+                    toPaimonType(field.dataType()).copy(field.nullable()),
+                    field.getComment().getOrElse(() -> null));
         }
         return schemaBuilder.build();
     }
