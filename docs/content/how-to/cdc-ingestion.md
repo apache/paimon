@@ -341,7 +341,7 @@ Synchronization from multiple Kafka topics to Paimon database.
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
-    --kafka-conf topic=order,logistic_order,user \
+    --kafka-conf topic=order\;logistic_order\;user \
     --kafka-conf properties.group.id=123456 \
     --kafka-conf value.format=canal-json \
     --catalog-conf metastore=hive \
