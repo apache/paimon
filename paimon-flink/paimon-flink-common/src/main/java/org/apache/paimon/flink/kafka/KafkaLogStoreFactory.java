@@ -20,6 +20,7 @@ package org.apache.paimon.flink.kafka;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.factories.FlinkFactoryUtil.FlinkTableFactoryHelper;
+import org.apache.paimon.flink.log.LogStoreRegister;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
 
@@ -127,6 +128,11 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                 options.get(LOG_CONSISTENCY),
                 options.get(LOG_CHANGELOG_MODE),
                 options.get(BUCKET));
+    }
+
+    @Override
+    public LogStoreRegister createRegister(RegisterContext context) {
+        throw new UnsupportedOperationException();
     }
 
     private int[] getPrimaryKeyIndexes(ResolvedSchema schema) {

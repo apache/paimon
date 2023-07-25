@@ -46,7 +46,7 @@ public abstract class ActionBase implements Action {
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
 
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
-        flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog);
+        flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
     }
 
     protected void execute(StreamExecutionEnvironment env, String defaultName) throws Exception {

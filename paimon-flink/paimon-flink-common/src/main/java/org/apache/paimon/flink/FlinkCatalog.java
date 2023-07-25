@@ -25,7 +25,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
@@ -91,21 +90,33 @@ import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDa
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.flink.log.LogStoreRegister.registerLogSystem;
+import static org.apache.paimon.flink.log.LogStoreRegister.unRegisterLogSystem;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeWatermarkSpec;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNonPhysicalColumns;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeWatermarkSpec;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
+    private final ClassLoader classLoader;
 
     private final Catalog catalog;
+    private final boolean logStoreAutoRegister;
 
-    public FlinkCatalog(Catalog catalog, String name, String defaultDatabase) {
+    public FlinkCatalog(
+            Catalog catalog,
+            String name,
+            String defaultDatabase,
+            ClassLoader classLoader,
+            boolean logStoreAutoRegister) {
         super(name, defaultDatabase);
         this.catalog = catalog;
+        this.classLoader = classLoader;
+        this.logStoreAutoRegister = logStoreAutoRegister;
         try {
             this.catalog.createDatabase(defaultDatabase, true);
         } catch (Catalog.DatabaseAlreadyExistException ignore) {
@@ -210,8 +221,16 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
+        Identifier identifier = toIdentifier(tablePath);
+        Table table = null;
         try {
+            if (logStoreAutoRegister && catalog.tableExists(identifier)) {
+                table = catalog.getTable(identifier);
+            }
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
+            if (logStoreAutoRegister && table != null) {
+                unRegisterLogSystem(identifier, table.options(), classLoader);
+            }
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
         }
@@ -235,21 +254,30 @@ public class FlinkCatalog extends AbstractCatalog {
                             + " You can create TEMPORARY table instead if you want to create the table of other connector.");
         }
 
+        Identifier identifier = toIdentifier(tablePath);
+        if (logStoreAutoRegister) {
+            registerLogSystem(catalog, identifier, options, classLoader);
+        }
         // remove table path
         String specific = options.remove(PATH.key());
-        if (specific != null) {
+        if (specific != null || logStoreAutoRegister) {
             catalogTable = catalogTable.copy(options);
         }
 
+        boolean unRegisterLogSystem = false;
         try {
             catalog.createTable(
-                    toIdentifier(tablePath),
-                    FlinkCatalog.fromCatalogTable(catalogTable),
-                    ignoreIfExists);
+                    identifier, FlinkCatalog.fromCatalogTable(catalogTable), ignoreIfExists);
         } catch (Catalog.TableAlreadyExistException e) {
+            unRegisterLogSystem = true;
             throw new TableAlreadyExistException(getName(), tablePath);
         } catch (Catalog.DatabaseNotExistException e) {
+            unRegisterLogSystem = true;
             throw new DatabaseNotExistException(getName(), e.database());
+        } finally {
+            if (logStoreAutoRegister && unRegisterLogSystem) {
+                unRegisterLogSystem(identifier, options, classLoader);
+            }
         }
     }
 
@@ -611,7 +639,7 @@ public class FlinkCatalog extends AbstractCatalog {
         // watermark
         List<WatermarkSpec> watermarkSpecs = schema.getWatermarkSpecs();
         if (!watermarkSpecs.isEmpty()) {
-            Preconditions.checkArgument(watermarkSpecs.size() == 1);
+            checkArgument(watermarkSpecs.size() == 1);
             columnOptions.putAll(serializeWatermarkSpec(watermarkSpecs.get(0)));
         }
 
