@@ -23,7 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
-import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -51,7 +51,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     private final boolean ignorePreviousFiles;
     private final boolean waitCompaction;
     private final boolean isStreamingMode;
-    @Nullable private final MemorySegmentPool memoryPool;
+    @Nullable private final MemoryPoolFactory memoryPoolFactory;
 
     protected TableWriteImpl<?> write;
 
@@ -63,14 +63,14 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean ignorePreviousFiles,
             boolean waitCompaction,
             boolean isStreamingMode,
-            @Nullable MemorySegmentPool memoryPool) {
+            @Nullable MemoryPoolFactory memoryPoolFactory) {
         this.commitUser = commitUser;
         this.state = state;
         this.ioManager = ioManager;
         this.ignorePreviousFiles = ignorePreviousFiles;
         this.waitCompaction = waitCompaction;
         this.isStreamingMode = isStreamingMode;
-        this.memoryPool = memoryPool;
+        this.memoryPoolFactory = memoryPoolFactory;
         this.write = newTableWrite(table);
     }
 
@@ -80,12 +80,13 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                         (part, bucket) ->
                                 state.stateValueFilter().filter(table.name(), part, bucket))
                 .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
-                .withMemoryPool(
-                        memoryPool != null
-                                ? memoryPool
-                                : new HeapMemorySegmentPool(
-                                        table.coreOptions().writeBufferSize(),
-                                        table.coreOptions().pageSize()))
+                .withMemoryPoolFactory(
+                        memoryPoolFactory != null
+                                ? memoryPoolFactory
+                                : new MemoryPoolFactory(
+                                        new HeapMemorySegmentPool(
+                                                table.coreOptions().writeBufferSize(),
+                                                table.coreOptions().pageSize())))
                 .withIgnorePreviousFiles(ignorePreviousFiles)
                 .isStreamingMode(isStreamingMode);
     }

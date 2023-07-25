@@ -27,6 +27,7 @@ import org.apache.paimon.flink.sink.StateUtils;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -58,6 +59,8 @@ public class CdcRecordStoreMultiWriteOperator
     private final StoreSinkWrite.Provider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final Catalog.Loader catalogLoader;
+
+    private MemoryPoolFactory memoryPoolFactory;
 
     protected Catalog catalog;
     protected Map<Identifier, FileStoreTable> tables;
@@ -107,12 +110,17 @@ public class CdcRecordStoreMultiWriteOperator
 
         // TODO set executor service to write
 
-        // avoid allocating memory pool for every sink write
-        // the options of all tables should be the same in CDC
-        if (memoryPool == null) {
-            memoryPool =
-                    new HeapMemorySegmentPool(
-                            table.coreOptions().writeBufferSize(), table.coreOptions().pageSize());
+        // all table write should share one write buffer so that writers can preempt memory
+        // from those of other tables
+        if (memoryPoolFactory == null) {
+            memoryPoolFactory =
+                    new MemoryPoolFactory(
+                            memoryPool != null
+                                    ? memoryPool
+                                    // currently, the options of all tables are the same in CDC
+                                    : new HeapMemorySegmentPool(
+                                            table.coreOptions().writeBufferSize(),
+                                            table.coreOptions().pageSize()));
         }
 
         StoreSinkWrite write =
@@ -124,7 +132,7 @@ public class CdcRecordStoreMultiWriteOperator
                                         commitUser,
                                         state,
                                         getContainingTask().getEnvironment().getIOManager(),
-                                        memoryPool));
+                                        memoryPoolFactory));
 
         Optional<GenericRow> optionalConverted =
                 toGenericRow(record.record(), table.schema().fields());

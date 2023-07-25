@@ -30,8 +30,8 @@ public class MemoryPoolFactoryTest {
     @Test
     public void testFreePages() {
         MemoryPoolFactory factory =
-                new MemoryPoolFactory(
-                        new HeapMemorySegmentPool(1024 * 10, 1024), new ArrayList<>());
+                new MemoryPoolFactory(new HeapMemorySegmentPool(1024 * 10, 1024))
+                        .addOwners(new ArrayList<>());
         MemorySegmentPool pool1 = factory.createSubPool(new TestMemoryOwner());
         MemorySegmentPool pool2 = factory.createSubPool(new TestMemoryOwner());
         assertThat(pool1.nextSegment()).isNotNull();

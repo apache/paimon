@@ -608,3 +608,12 @@ CREATE TABLE schema_evolution_5 (
     v2 TINYINT(1) comment 'tinyint(1)',
     PRIMARY KEY (_id)
 );
+
+CREATE DATABASE many_table_sync_test;
+USE many_table_sync_test;
+
+CREATE TABLE a (
+    k INT,
+    v VARCHAR(10),
+    PRIMARY KEY (k)
+);

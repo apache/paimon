@@ -65,9 +65,16 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     private StoreSinkWrite.Provider createWriteProvider() {
         // for now, no compaction for multiplexed sink
-        return (table, commitUser, state, ioManager, memoryPool) ->
+        return (table, commitUser, state, ioManager, memoryPoolFactory) ->
                 new StoreSinkWriteImpl(
-                        table, commitUser, state, ioManager, isOverwrite, false, true, memoryPool);
+                        table,
+                        commitUser,
+                        state,
+                        ioManager,
+                        isOverwrite,
+                        false,
+                        true,
+                        memoryPoolFactory);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<CdcMultiplexRecord> input) {
