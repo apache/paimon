@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.DataFileMeta;
@@ -31,9 +32,10 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
 
-import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
-import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
-import org.apache.paimon.shade.guava30.com.google.common.cache.RemovalNotification;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import javax.annotation.Nullable;
 
@@ -43,15 +45,15 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Comparator;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Provide contains key. */
 public class ContainsLevels implements Levels.DropFileCallback, Closeable {
 
-    private static final byte[] EMPTY_VALUE = new byte[] {};
+    private static final byte[] EMPTY_VALUE = new byte[0];
 
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
@@ -78,13 +80,19 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
         this.containsFiles =
-                CacheBuilder.newBuilder()
+                Caffeine.newBuilder()
                         .expireAfterAccess(fileRetention)
                         .maximumWeight(maxDiskSize.getKibiBytes())
                         .weigher(this::fileWeigh)
                         .removalListener(this::removalCallback)
+                        .executor(MoreExecutors.directExecutor())
                         .build();
         levels.addDropFileCallback(this);
+    }
+
+    @VisibleForTesting
+    Cache<String, ContainsFile> containsFiles() {
+        return containsFiles;
     }
 
     @Override
@@ -102,25 +110,27 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
         return LookupUtils.lookup(keyComparator, key, level, this::contains);
     }
 
-    private boolean contains(InternalRow key, DataFileMeta file) throws IOException {
-        ContainsFile containsFile;
-        try {
-            containsFile = containsFiles.get(file.fileName(), () -> createContainsFile(file));
-        } catch (ExecutionException e) {
-            throw new IOException(e);
+    @Nullable
+    private Boolean contains(InternalRow key, DataFileMeta file) throws IOException {
+        ContainsFile containsFile = containsFiles.getIfPresent(file.fileName());
+        while (containsFile == null || containsFile.isClosed) {
+            containsFile = createContainsFile(file);
+            containsFiles.put(file.fileName(), containsFile);
         }
-        return containsFile.get(keySerializer.serializeToBytes(key)) != null;
+        if (containsFile.get(keySerializer.serializeToBytes(key)) != null) {
+            return true;
+        }
+        return null;
     }
 
     private int fileWeigh(String file, ContainsFile containsFile) {
         return fileKibiBytes(containsFile.localFile);
     }
 
-    private void removalCallback(RemovalNotification<String, ContainsFile> notification) {
-        ContainsFile reader = notification.getValue();
-        if (reader != null) {
+    private void removalCallback(String key, ContainsFile file, RemovalCause cause) {
+        if (file != null) {
             try {
-                reader.close();
+                file.close();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -161,6 +171,8 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
         private final File localFile;
         private final LookupStoreReader reader;
 
+        private boolean isClosed = false;
+
         public ContainsFile(File localFile, LookupStoreReader reader) {
             this.localFile = localFile;
             this.reader = reader;
@@ -168,12 +180,14 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
 
         @Nullable
         public byte[] get(byte[] key) throws IOException {
+            checkArgument(!isClosed);
             return reader.lookup(key);
         }
 
         @Override
         public void close() throws IOException {
             reader.close();
+            isClosed = true;
             FileIOUtils.deleteFileOrDirectory(localFile);
         }
     }

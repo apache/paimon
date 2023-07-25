@@ -35,9 +35,10 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
 
-import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
-import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
-import org.apache.paimon.shade.guava30.com.google.common.cache.RemovalNotification;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.RemovalCause;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import javax.annotation.Nullable;
 
@@ -47,10 +48,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Comparator;
-import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Provide lookup by key. */
 public class LookupLevels implements Levels.DropFileCallback, Closeable {
@@ -83,11 +84,12 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
         this.lookupFiles =
-                CacheBuilder.newBuilder()
+                Caffeine.newBuilder()
                         .expireAfterAccess(fileRetention)
                         .maximumWeight(maxDiskSize.getKibiBytes())
                         .weigher(this::fileWeigh)
                         .removalListener(this::removalCallback)
+                        .executor(MoreExecutors.directExecutor())
                         .build();
         levels.addDropFileCallback(this);
     }
@@ -114,12 +116,12 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
 
     @Nullable
     private KeyValue lookup(InternalRow key, DataFileMeta file) throws IOException {
-        LookupFile lookupFile;
-        try {
-            lookupFile = lookupFiles.get(file.fileName(), () -> createLookupFile(file));
-        } catch (ExecutionException e) {
-            throw new IOException(e);
+        LookupFile lookupFile = lookupFiles.getIfPresent(file.fileName());
+        while (lookupFile == null || lookupFile.isClosed) {
+            lookupFile = createLookupFile(file);
+            lookupFiles.put(file.fileName(), lookupFile);
         }
+
         byte[] keyBytes = keySerializer.serializeToBytes(key);
         byte[] valueBytes = lookupFile.get(keyBytes);
         if (valueBytes == null) {
@@ -137,11 +139,10 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         return fileKibiBytes(lookupFile.localFile);
     }
 
-    private void removalCallback(RemovalNotification<String, LookupFile> notification) {
-        LookupFile reader = notification.getValue();
-        if (reader != null) {
+    private void removalCallback(String key, LookupFile file, RemovalCause cause) {
+        if (file != null) {
             try {
-                reader.close();
+                file.close();
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -189,6 +190,8 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         private final DataFileMeta remoteFile;
         private final LookupStoreReader reader;
 
+        private boolean isClosed = false;
+
         public LookupFile(File localFile, DataFileMeta remoteFile, LookupStoreReader reader) {
             this.localFile = localFile;
             this.remoteFile = remoteFile;
@@ -197,6 +200,7 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
 
         @Nullable
         public byte[] get(byte[] key) throws IOException {
+            checkArgument(!isClosed);
             return reader.lookup(key);
         }
 
@@ -207,6 +211,7 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         @Override
         public void close() throws IOException {
             reader.close();
+            isClosed = true;
             FileIOUtils.deleteFileOrDirectory(localFile);
         }
     }

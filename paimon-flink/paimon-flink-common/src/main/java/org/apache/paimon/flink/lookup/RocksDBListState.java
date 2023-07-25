@@ -28,7 +28,6 @@ import org.rocksdb.RocksDBException;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 
 /** RocksDB state for key -> List of value. */
 public class RocksDBListState extends RocksDBState<List<InternalRow>> {
@@ -59,21 +58,22 @@ public class RocksDBListState extends RocksDBState<List<InternalRow>> {
 
     public List<InternalRow> get(InternalRow key) throws IOException {
         byte[] keyBytes = serializeKey(key);
-        try {
-            return cache.get(
-                    wrap(keyBytes),
-                    () -> {
-                        byte[] valueBytes = db.get(columnFamily, keyBytes);
-                        List<InternalRow> rows =
-                                listSerializer.deserializeList(valueBytes, valueSerializer);
-                        if (rows == null) {
-                            return EMPTY;
-                        }
-                        return rows;
-                    });
-        } catch (ExecutionException e) {
-            throw new IOException(e);
-        }
+        return cache.get(
+                wrap(keyBytes),
+                k -> {
+                    byte[] valueBytes;
+                    try {
+                        valueBytes = db.get(columnFamily, keyBytes);
+                    } catch (RocksDBException e) {
+                        throw new RuntimeException(e);
+                    }
+                    List<InternalRow> rows =
+                            listSerializer.deserializeList(valueBytes, valueSerializer);
+                    if (rows == null) {
+                        return EMPTY;
+                    }
+                    return rows;
+                });
     }
 
     private byte[] serializeValue(InternalRow value) throws IOException {

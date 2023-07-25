@@ -23,8 +23,9 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 
-import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
-import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
@@ -70,7 +71,11 @@ public abstract class RocksDBState<CacheV> {
         this.valueInputView = new DataInputDeserializer();
         this.valueOutputView = new DataOutputSerializer(32);
         this.writeOptions = new WriteOptions().setDisableWAL(true);
-        this.cache = CacheBuilder.newBuilder().maximumSize(lruCacheSize).build();
+        this.cache =
+                Caffeine.newBuilder()
+                        .maximumSize(lruCacheSize)
+                        .executor(MoreExecutors.directExecutor())
+                        .build();
     }
 
     protected byte[] serializeKey(InternalRow key) throws IOException {
