@@ -157,6 +157,18 @@ public class KeyValueFileReaderFactory {
             applyProjection();
         }
 
+        public Builder copyWithoutProjection() {
+            return new Builder(
+                    fileIO,
+                    schemaManager,
+                    schemaId,
+                    keyType,
+                    valueType,
+                    formatDiscover,
+                    pathFactory,
+                    extractor);
+        }
+
         public Builder withKeyProjection(int[][] projection) {
             keyProjection = projection;
             applyProjection();

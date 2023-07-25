@@ -221,7 +221,12 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         options.changelogRowDeduplicate());
             case LOOKUP:
                 if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
-                    ContainsLevels containsLevels = createContainsLevels(levels, readerFactory);
+                    KeyValueFileReaderFactory keyOnlyReader =
+                            readerFactoryBuilder
+                                    .copyWithoutProjection()
+                                    .withValueProjection(new int[0][])
+                                    .build(partition, bucket);
+                    ContainsLevels containsLevels = createContainsLevels(levels, keyOnlyReader);
                     return new FirstRowMergeTreeCompactRewriter(
                             containsLevels,
                             readerFactory,
