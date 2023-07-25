@@ -41,7 +41,6 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
     private final int maxLevel;
     private final RecordEqualiser valueEqualiser;
     private final boolean changelogRowDeduplicate;
-    private final boolean isFirstRow;
 
     // only full compaction will write files into maxLevel, see UniversalCompaction class
     private KeyValue topLevelKv;
@@ -62,7 +61,6 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
                 "Value count merge function does not need to produce changelog from full compaction. "
                         + "Please set changelog producer to 'input'.");
         this.mergeFunction = mergeFunction;
-        this.isFirstRow = mergeFunction instanceof FirstRowMergeFunction;
         this.maxLevel = maxLevel;
         this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
@@ -110,10 +108,6 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
                     reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
                 }
             } else {
-                // For first row, we should just return old value. And produce no changelog.
-                if (isFirstRow) {
-                    return reusedResult.setResultIfNotRetract(merged);
-                }
                 if (merged == null || !isAdd(merged)) {
                     reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
                 } else if (!changelogRowDeduplicate

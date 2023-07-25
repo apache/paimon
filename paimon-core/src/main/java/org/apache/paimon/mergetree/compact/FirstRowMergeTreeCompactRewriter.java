@@ -24,25 +24,28 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
-import org.apache.paimon.mergetree.LookupLevels;
+import org.apache.paimon.mergetree.ContainsLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.utils.Filter;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /**
- * A {@link MergeTreeCompactRewriter} which produces changelog files by lookup for the compaction
- * involving level 0 files.
+ * A {@link MergeTreeCompactRewriter} for first row merge engine which produces changelog files by
+ * contains for the compaction involving level 0 files.
  */
-public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
+public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
 
-    private final LookupLevels lookupLevels;
+    private final ContainsLevels containsLevels;
 
-    public LookupMergeTreeCompactRewriter(
-            LookupLevels lookupLevels,
+    public FirstRowMergeTreeCompactRewriter(
+            ContainsLevels containsLevels,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
@@ -58,7 +61,7 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
                 mergeSorter,
                 valueEqualiser,
                 changelogRowDeduplicate);
-        this.lookupLevels = lookupLevels;
+        this.containsLevels = containsLevels;
     }
 
     @Override
@@ -74,21 +77,66 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
 
     @Override
     protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
-        return new LookupChangelogMergeFunctionWrapper(
+        return new FistRowMergeFunctionWrapper(
                 mfFactory,
                 key -> {
                     try {
-                        return lookupLevels.lookup(key, outputLevel + 1);
+                        return containsLevels.contains(key, outputLevel + 1);
                     } catch (IOException e) {
                         throw new UncheckedIOException(e);
                     }
-                },
-                valueEqualiser,
-                changelogRowDeduplicate);
+                });
     }
 
     @Override
     public void close() throws IOException {
-        lookupLevels.close();
+        containsLevels.close();
+    }
+
+    private static class FistRowMergeFunctionWrapper
+            implements MergeFunctionWrapper<ChangelogResult> {
+
+        private final Filter<InternalRow> contains;
+        private final FirstRowMergeFunction mergeFunction;
+        private final ChangelogResult reusedResult = new ChangelogResult();
+
+        public FistRowMergeFunctionWrapper(
+                MergeFunctionFactory<KeyValue> mergeFunctionFactory, Filter<InternalRow> contains) {
+            this.contains = contains;
+            MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
+            checkArgument(
+                    mergeFunction instanceof FirstRowMergeFunction,
+                    "Merge function should be a FirstRowMergeFunction, but is %s, there is a bug.",
+                    mergeFunction.getClass().getName());
+            this.mergeFunction = (FirstRowMergeFunction) mergeFunction;
+        }
+
+        @Override
+        public void reset() {
+            mergeFunction.reset();
+        }
+
+        @Override
+        public void add(KeyValue kv) {
+            mergeFunction.add(kv);
+        }
+
+        @Override
+        public ChangelogResult getResult() {
+            reusedResult.reset();
+            KeyValue result = mergeFunction.getResult();
+            checkArgument(result != null);
+            if (contains.test(result.key())) {
+                // empty
+                return reusedResult;
+            }
+
+            reusedResult.setResult(result);
+            if (result.level() == 0) {
+                // new record, output changelog
+                return reusedResult.addChangelog(result);
+            }
+            return reusedResult;
+        }
     }
 }
