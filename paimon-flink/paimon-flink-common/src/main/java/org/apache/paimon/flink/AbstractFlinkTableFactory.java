@@ -203,9 +203,7 @@ public abstract class AbstractFlinkTableFactory
 
     static CatalogContext createCatalogContext(DynamicTableFactory.Context context) {
         return CatalogContext.create(
-                Options.fromMap(context.getCatalogTable().getOptions()),
-                new FlinkFileIOLoader(),
-                context.getClassLoader());
+                Options.fromMap(context.getCatalogTable().getOptions()), new FlinkFileIOLoader());
     }
 
     static Table buildPaimonTable(DynamicTableFactory.Context context) {

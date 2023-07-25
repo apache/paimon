@@ -35,12 +35,12 @@ public class FileSystemCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
+    public Catalog create(
+            FileIO fileIO, Path warehouse, CatalogContext context, ClassLoader classLoader) {
         if (!TableType.MANAGED.equals(context.options().get(TABLE_TYPE))) {
             throw new IllegalArgumentException(
                     "Only managed table is supported in File system catalog.");
         }
-        return new FileSystemCatalog(
-                fileIO, warehouse, context.options().toMap(), context.lineageMeta());
+        return new FileSystemCatalog(fileIO, warehouse, context.options().toMap(), classLoader);
     }
 }

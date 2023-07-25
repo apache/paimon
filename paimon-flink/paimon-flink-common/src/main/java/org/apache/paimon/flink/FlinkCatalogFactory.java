@@ -54,9 +54,7 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
         return createCatalog(
                 context.getName(),
                 CatalogContext.create(
-                        Options.fromMap(context.getOptions()),
-                        new FlinkFileIOLoader(),
-                        context.getClassLoader()),
+                        Options.fromMap(context.getOptions()), new FlinkFileIOLoader()),
                 context.getClassLoader());
     }
 
@@ -81,9 +79,6 @@ public class FlinkCatalogFactory implements org.apache.flink.table.factories.Cat
 
     public static Catalog createPaimonCatalog(Options catalogOptions) {
         return CatalogFactory.createCatalog(
-                CatalogContext.create(
-                        catalogOptions,
-                        new FlinkFileIOLoader(),
-                        ClassLoader.getSystemClassLoader()));
+                CatalogContext.create(catalogOptions, new FlinkFileIOLoader()));
     }
 }

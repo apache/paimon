@@ -25,7 +25,6 @@ import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.lineage.LineageMeta;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.OptionsUtils;
@@ -109,7 +108,13 @@ public class HiveCatalog extends AbstractCatalog {
     private final LocationHelper locationHelper;
 
     public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName, String warehouse) {
-        this(fileIO, hiveConf, clientClassName, Collections.emptyMap(), warehouse, null);
+        this(
+                fileIO,
+                hiveConf,
+                clientClassName,
+                Collections.emptyMap(),
+                warehouse,
+                HiveCatalog.class.getClassLoader());
     }
 
     public HiveCatalog(
@@ -118,8 +123,8 @@ public class HiveCatalog extends AbstractCatalog {
             String clientClassName,
             Map<String, String> options,
             String warehouse,
-            @Nullable LineageMeta lineageMeta) {
-        super(fileIO, options, lineageMeta);
+            ClassLoader classLoader) {
+        super(fileIO, options, classLoader);
         this.hiveConf = hiveConf;
         this.clientClassName = clientClassName;
         this.warehouse = warehouse;

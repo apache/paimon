@@ -53,7 +53,8 @@ public class HiveCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
+    public Catalog create(
+            FileIO fileIO, Path warehouse, CatalogContext context, ClassLoader classLoader) {
         String uri =
                 Preconditions.checkNotNull(
                         context.options().get(CatalogOptions.URI),
@@ -78,6 +79,6 @@ public class HiveCatalogFactory implements CatalogFactory {
                 clientClassName,
                 context.options().toMap(),
                 warehouse.toUri().toString(),
-                context.lineageMeta());
+                classLoader);
     }
 }

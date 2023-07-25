@@ -40,7 +40,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Public
 public interface CatalogFactory extends Factory {
 
-    Catalog create(FileIO fileIO, Path warehouse, CatalogContext context);
+    Catalog create(FileIO fileIO, Path warehouse, CatalogContext context, ClassLoader classLoader);
 
     static Path warehouse(CatalogContext context) {
         String warehouse =
@@ -86,6 +86,6 @@ public interface CatalogFactory extends Factory {
             throw new UncheckedIOException(e);
         }
 
-        return catalogFactory.create(fileIO, warehousePath, context);
+        return catalogFactory.create(fileIO, warehousePath, context, classLoader);
     }
 }
