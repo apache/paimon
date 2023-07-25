@@ -30,6 +30,7 @@ import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
 import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
+import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
@@ -49,6 +50,8 @@ public class SystemTableLoader {
                 return new OptionsTable(fileIO, location);
             case SCHEMAS:
                 return new SchemasTable(fileIO, location);
+            case PARTITIONS:
+                return new PartitionsTable(dataTable);
             case AUDIT_LOG:
                 return new AuditLogTable(dataTable);
             case FILES:
