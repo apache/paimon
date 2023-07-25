@@ -127,7 +127,7 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
                         + "    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \\\n"
-                        + "    --kafka-conf topic=order,logistic,user \\\n"
+                        + "    --kafka-conf topic=order\\;logistic\\;user \\\n"
                         + "    --kafka-conf properties.group.id=123456 \\\n"
                         + "    --kafka-conf value.format=canal-json \\\n"
                         + "    --catalog-conf metastore=hive \\\n"
