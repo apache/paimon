@@ -467,7 +467,11 @@ public abstract class MergeTreeTestBase {
                     rewriter);
         }
 
-        protected CompactResult obtainCompactResult() throws ExecutionException {
+        protected CompactResult obtainCompactResult()
+                throws InterruptedException, ExecutionException {
+            if (taskFuture != null && !taskFuture.isDone()) {
+                taskFuture.get();
+            }
             OutOfMemoryError outOfMemoryError = new OutOfMemoryError();
             throw new ExecutionException("mock", outOfMemoryError);
         }
