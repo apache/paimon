@@ -36,8 +36,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.types.RowKind.DELETE;
@@ -50,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class LookupChangelogMergeFunctionWrapperTest {
 
     private static final RecordEqualiser EQUALISER =
-            (RecordEqualiser) (row1, row2) -> row1.getInt(0) == row2.getInt(0);
+            (row1, row2) -> row1.getInt(0) == row2.getInt(0);
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -290,25 +292,16 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @Test
     public void testFirstRow() {
-        Map<InternalRow, KeyValue> highLevel = new HashMap<>();
-        LookupChangelogMergeFunctionWrapper function =
-                new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(
-                                projection ->
-                                        new FirstRowMergeFunction(
-                                                new RowType(
-                                                        Lists.list(
-                                                                new DataField(
-                                                                        0, "f0", new IntType()))),
-                                                new RowType(
-                                                        Lists.list(
-                                                                new DataField(
-                                                                        1, "f1", new IntType())))),
-                                RowType.of(DataTypes.INT()),
-                                RowType.of(DataTypes.INT())),
-                        highLevel::get,
-                        EQUALISER,
-                        false);
+        Set<InternalRow> highLevel = new HashSet<>();
+        FirstRowMergeTreeCompactRewriter.FistRowMergeFunctionWrapper function =
+                new FirstRowMergeTreeCompactRewriter.FistRowMergeFunctionWrapper(
+                        projection ->
+                                new FirstRowMergeFunction(
+                                        new RowType(
+                                                Lists.list(new DataField(0, "f0", new IntType()))),
+                                        new RowType(
+                                                Lists.list(new DataField(1, "f1", new IntType())))),
+                        highLevel::contains);
 
         // Without level-0
         function.reset();
@@ -361,7 +354,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
         // with high level value
         function.reset();
-        highLevel.put(row(1), new KeyValue().replace(row(1), INSERT, row(10)));
+        highLevel.add(row(1));
         function.add(new KeyValue().replace(row(1), 2, INSERT, row(0)).setLevel(0));
 
         result = function.getResult();
@@ -369,7 +362,6 @@ public class LookupChangelogMergeFunctionWrapperTest {
         changelogs = result.changelogs();
         assertThat(changelogs).hasSize(0);
         kv = result.result();
-        assertThat(kv).isNotNull();
-        assertThat(kv.value().getInt(0)).isEqualTo(10);
+        assertThat(kv).isNull();
     }
 }

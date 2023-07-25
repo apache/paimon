@@ -19,6 +19,7 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -93,8 +94,8 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
         containsLevels.close();
     }
 
-    private static class FistRowMergeFunctionWrapper
-            implements MergeFunctionWrapper<ChangelogResult> {
+    @VisibleForTesting
+    static class FistRowMergeFunctionWrapper implements MergeFunctionWrapper<ChangelogResult> {
 
         private final Filter<InternalRow> contains;
         private final FirstRowMergeFunction mergeFunction;
