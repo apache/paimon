@@ -313,10 +313,10 @@ public class HiveCatalog extends AbstractCatalog {
                     e);
         }
         Table table = newHmsTable(identifier);
-        updateHmsTable(table, identifier, tableSchema);
         try {
+            updateHmsTable(table, identifier, tableSchema);
             client.createTable(table);
-        } catch (TException e) {
+        } catch (Exception e) {
             Path path = getDataTableLocation(identifier);
             try {
                 fileIO.deleteDirectoryQuietly(path);
@@ -381,7 +381,7 @@ public class HiveCatalog extends AbstractCatalog {
             Table table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
             updateHmsTable(table, identifier, schema);
             client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
-        } catch (TException te) {
+        } catch (Exception te) {
             schemaManager.deleteSchema(schema.id());
             throw new RuntimeException(te);
         }
