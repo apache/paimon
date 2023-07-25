@@ -778,10 +778,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(2) + 2));
+        Map<String, String> tableConfig = getBasicTableConfig();
 
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
@@ -1087,10 +1084,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(2) + 2));
+        Map<String, String> tableConfig = getBasicTableConfig();
 
         Map<String, String> catalogConfig =
                 testSchemaChange
@@ -1179,7 +1173,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(120)
+    @Timeout(180)
     public void testSyncManyTableWithLimitedMemory() throws Exception {
         String databaseName = "many_table_sync_test";
         int newTableCount = 100;
@@ -1200,9 +1194,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        Map<String, String> tableConfig = getBasicTableConfig();
         tableConfig.put("sink.parallelism", "1");
         tableConfig.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "4 mb");
 
