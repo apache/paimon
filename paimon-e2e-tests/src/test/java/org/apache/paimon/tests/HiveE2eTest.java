@@ -21,9 +21,13 @@ package org.apache.paimon.tests;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.Container;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -34,6 +38,8 @@ import java.util.UUID;
  */
 @DisabledIfSystemProperty(named = "test.flink.version", matches = "1.14.*")
 public class HiveE2eTest extends E2eReaderTestBase {
+
+    private static final Logger LOG = LoggerFactory.getLogger(HiveE2eTest.class);
 
     public HiveE2eTest() {
         super(false, true, false);
@@ -123,6 +129,61 @@ public class HiveE2eTest extends E2eReaderTestBase {
         checkQueryResults(table, this::executeQuery);
     }
 
+    @Test
+    public void testMetastorePartitionedTable() throws Exception {
+        String warehouse = HDFS_ROOT + "/" + UUID.randomUUID() + ".warehouse";
+
+        String createTableSql =
+                String.join(
+                        "\n",
+                        "CREATE TABLE t (",
+                        "    pta INT,",
+                        "    ptb STRING,",
+                        "    k BIGINT,",
+                        "    v STRING,",
+                        "    PRIMARY KEY (pta, ptb, k) NOT ENFORCED",
+                        ") PARTITIONED BY (pta, ptb) WITH (",
+                        "    'bucket' = '2',",
+                        "    'metastore.partitioned-table' = 'true'",
+                        ");");
+        List<String> values = new ArrayList<>();
+        for (int pta = 0; pta <= 1; pta++) {
+            for (int ptb = 0; ptb <= 1; ptb++) {
+                for (int k = 0; k <= 2; k++) {
+                    values.add(
+                            String.format("(%d, '%d', %d, '%d-%d-%d')", pta, ptb, k, pta, ptb, k));
+                }
+            }
+        }
+
+        runSql(
+                "INSERT INTO t VALUES " + String.join(", ", values) + ";",
+                createCatalogSql(
+                        "my_hive",
+                        warehouse,
+                        "'metastore' = 'hive'",
+                        "'uri' = 'thrift://hive-metastore:9083'"),
+                createTableSql);
+
+        checkQueryResult(
+                this::executeQuery,
+                "SHOW PARTITIONS t;",
+                "pta=0/ptb=0\n" + "pta=0/ptb=1\n" + "pta=1/ptb=0\n" + "pta=1/ptb=1\n");
+        checkQueryResult(
+                this::executeQuery,
+                "SELECT v, ptb FROM t WHERE pta = 1 AND ptb >= 0 ORDER BY v;",
+                "1-0-0\t0\n"
+                        + "1-0-1\t0\n"
+                        + "1-0-2\t0\n"
+                        + "1-1-0\t1\n"
+                        + "1-1-1\t1\n"
+                        + "1-1-2\t1\n");
+        checkQueryResult(
+                this::executeQuery,
+                "SELECT count(*) FROM t WHERE pta < 1 AND ptb >= 0 AND k % 2 = 0;",
+                "4\n");
+    }
+
     private String executeQuery(String sql) throws Exception {
         Container.ExecResult execResult =
                 getHive()
@@ -132,6 +193,8 @@ public class HiveE2eTest extends E2eReaderTestBase {
                                 "hive.root.logger=INFO,console",
                                 "-f",
                                 TEST_DATA_DIR + "/" + sql);
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
         if (execResult.getExitCode() != 0) {
             throw new AssertionError("Failed when running hive sql.");
         }

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.hive.mapred;
 
-import org.apache.paimon.hive.LocationKeyExtractor;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -28,6 +27,7 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
 
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.ql.io.IOConstants;
 import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
@@ -41,9 +41,11 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.hive.utils.HiveUtils.createFileStoreTable;
 import static org.apache.paimon.hive.utils.HiveUtils.createPredicate;
@@ -57,7 +59,8 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) {
         FileStoreTable table = createFileStoreTable(jobConf);
-        InnerTableScan scan = table.newScan();
+        List<Predicate> predicates = new ArrayList<>();
+        createPredicate(table.schema(), jobConf, false).ifPresent(predicates::add);
 
         // If the path of the Paimon table is moved from the location of the Hive table to
         // properties (see HiveCatalogOptions#LOCATION_IN_PROPERTIES), Hive will add a location for
@@ -65,33 +68,35 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
         // Hive, an exception may occur because the specified path for split for Paimon may not
         // match the location of Hive. To work around this problem, we specify the path for split as
         // the location of Hive.
-        String location = LocationKeyExtractor.getMetastoreLocation(jobConf, table.partitionKeys());
+        String locations = jobConf.get(FileInputFormat.INPUT_DIR);
 
-        List<Predicate> predicates = new ArrayList<>();
-        String inputDir = jobConf.get(FileInputFormat.INPUT_DIR);
-        createPartitionPredicate(table.schema().logicalRowType(), location, inputDir)
-                .ifPresent(predicates::add);
-        createPredicate(table.schema(), jobConf, false).ifPresent(predicates::add);
-        if (predicates.size() > 0) {
-            scan.withFilter(PredicateBuilder.and(predicates));
+        List<PaimonInputSplit> splits = new ArrayList<>();
+        // locations may contain multiple partitions
+        for (String location : locations.split(",")) {
+            List<Predicate> predicatePerPartition = new ArrayList<>(predicates);
+            createPartitionPredicate(
+                            table.schema().logicalRowType(),
+                            table.schema().partitionKeys(),
+                            location)
+                    .ifPresent(predicatePerPartition::add);
+
+            InnerTableScan scan = table.newScan();
+            if (predicatePerPartition.size() > 0) {
+                scan.withFilter(PredicateBuilder.and(predicatePerPartition));
+            }
+            scan.plan()
+                    .splits()
+                    .forEach(
+                            split -> splits.add(new PaimonInputSplit(location, (DataSplit) split)));
         }
-
-        return scan.plan().splits().stream()
-                .map(split -> new PaimonInputSplit(location, (DataSplit) split))
-                .toArray(PaimonInputSplit[]::new);
+        return splits.toArray(new InputSplit[0]);
     }
 
     private Optional<Predicate> createPartitionPredicate(
-            RowType rowType, String tablePath, String inputDir) {
-        while (tablePath.length() > 0 && tablePath.endsWith("/")) {
-            tablePath = tablePath.substring(0, tablePath.length() - 1);
-        }
-        if (inputDir.length() < tablePath.length()) {
-            return Optional.empty();
-        }
-
+            RowType rowType, List<String> partitionKeys, String partitionDir) {
+        Set<String> partitionKeySet = new HashSet<>(partitionKeys);
         LinkedHashMap<String, String> partition = new LinkedHashMap<>();
-        for (String s : inputDir.substring(tablePath.length()).split("/")) {
+        for (String s : partitionDir.split("/")) {
             s = s.trim();
             if (s.isEmpty()) {
                 continue;
@@ -100,9 +105,15 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
             if (kv.length != 2) {
                 continue;
             }
-            partition.put(kv[0].trim(), kv[1].trim());
+            if (partitionKeySet.contains(kv[0])) {
+                partition.put(kv[0], kv[1]);
+            }
         }
-        return Optional.ofNullable(PredicateBuilder.partition(partition, rowType));
+        if (partition.isEmpty() || partition.size() != partitionKeys.size()) {
+            return Optional.empty();
+        } else {
+            return Optional.ofNullable(PredicateBuilder.partition(partition, rowType));
+        }
     }
 
     @Override
@@ -117,12 +128,15 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
                 readBuilder,
                 split,
                 paimonColumns,
-                getSchemaEvolutionColumns(jobConf).orElse(paimonColumns),
+                getHiveColumns(jobConf).orElse(paimonColumns),
                 Arrays.asList(getSelectedColumns(jobConf)));
     }
 
-    private Optional<List<String>> getSchemaEvolutionColumns(JobConf jobConf) {
+    private Optional<List<String>> getHiveColumns(JobConf jobConf) {
         String columns = jobConf.get(IOConstants.SCHEMA_EVOLUTION_COLUMNS);
+        if (columns == null) {
+            columns = jobConf.get(hive_metastoreConstants.META_TABLE_COLUMNS);
+        }
         String delimiter =
                 jobConf.get(
                         // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive

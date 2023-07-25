@@ -31,7 +31,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
@@ -139,59 +138,6 @@ public class LocationKeyExtractor {
                 }
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
-            }
-            if (path != null) {
-                try {
-                    return getDnsPath(path, conf).toString();
-                } catch (MetaException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Get the path stated in metastore. It is not necessary the real path of Paimon table.
-     *
-     * <p>If the path of the Paimon table is moved from the location of the Hive table to properties
-     * (see HiveCatalogOptions#LOCATION_IN_PROPERTIES), Hive will add a location for this table
-     * based on the warehouse, database, and table automatically. When querying by Hive, an
-     * exception may occur because the specified path for split for Paimon may not match the
-     * location of Hive. To work around this problem, we specify the path for split as the location
-     * of Hive.
-     */
-    public static String getMetastoreLocation(Configuration conf, List<String> partitionKeys) {
-        // read what metastore tells us
-        String location = conf.get(hive_metastoreConstants.META_TABLE_LOCATION);
-        if (location != null) {
-            try {
-                return getDnsPath(new Path(location), conf).toString();
-            } catch (MetaException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        // for some Hive compatible systems
-        location = conf.get("table.original.path");
-        if (location != null) {
-            return location;
-        }
-
-        // read the input dir of this Hive job
-        //
-        // it is possible that input dir is the directory of a partition,
-        // so we should find the root of table by removing the partition directory
-        location = conf.get(FileInputFormat.INPUT_DIR);
-        if (location != null) {
-            Path path = new Path(location);
-            int numPartitionKeys = partitionKeys.size();
-            if (numPartitionKeys > 0
-                    && path.getName().startsWith(partitionKeys.get(numPartitionKeys - 1) + "=")) {
-                for (int i = 0; i < numPartitionKeys; i++) {
-                    path = path.getParent();
-                }
             }
             if (path != null) {
                 try {
