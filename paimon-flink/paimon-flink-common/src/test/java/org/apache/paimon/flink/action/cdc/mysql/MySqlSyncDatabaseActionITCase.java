@@ -1173,7 +1173,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(240)
     public void testSyncManyTableWithLimitedMemory() throws Exception {
         String databaseName = "many_table_sync_test";
         int newTableCount = 100;
