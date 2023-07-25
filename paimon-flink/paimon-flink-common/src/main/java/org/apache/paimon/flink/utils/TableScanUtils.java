@@ -35,6 +35,7 @@ public class TableScanUtils {
                     {
                         put(CoreOptions.MergeEngine.PARTIAL_UPDATE, "Partial update");
                         put(CoreOptions.MergeEngine.AGGREGATE, "Pre-aggregate");
+                        put(CoreOptions.MergeEngine.FIRST_ROW, "First row");
                     }
                 };
         if (table.primaryKeys().size() > 0 && mergeEngineDesc.containsKey(mergeEngine)) {

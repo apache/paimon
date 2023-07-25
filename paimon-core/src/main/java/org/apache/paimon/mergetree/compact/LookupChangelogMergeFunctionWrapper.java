@@ -53,6 +53,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
     private final KeyValue reusedAfter = new KeyValue();
     private final RecordEqualiser valueEqualiser;
     private final boolean changelogRowDeduplicate;
+    private final boolean isFirstRow;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
@@ -65,6 +66,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
                 "Merge function should be a LookupMergeFunction, but is %s, there is a bug.",
                 mergeFunction.getClass().getName());
         this.mergeFunction = (LookupMergeFunction) mergeFunction;
+        this.isFirstRow = this.mergeFunction.isFirstRow;
         this.mergeFunction2 = mergeFunctionFactory.create();
         this.lookup = lookup;
         this.valueEqualiser = valueEqualiser;
@@ -97,18 +99,24 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
 
         // 2. With level 0, with the latest high level, return changelog
         if (highLevel != null) {
-            setChangelog(highLevel, result);
+            // For first row, we should just return old value. And produce no changelog.
+            if (!isFirstRow) {
+                setChangelog(highLevel, result);
+            }
             return reusedResult.setResult(result);
         }
 
         // 3. Lookup to find the latest high level record
         highLevel = lookup.apply(result.key());
+
         if (highLevel != null) {
             mergeFunction2.reset();
             mergeFunction2.add(highLevel);
             mergeFunction2.add(result);
             result = mergeFunction2.getResult();
-            setChangelog(highLevel, result);
+            if (!isFirstRow) {
+                setChangelog(highLevel, result);
+            }
         } else {
             setChangelog(null, result);
         }

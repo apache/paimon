@@ -121,6 +121,20 @@ public class MergeFunctionTestUtils {
         return expected;
     }
 
+    public static List<ReusingTestData> getExpectedForFirstRow(List<ReusingTestData> input) {
+        input = new ArrayList<>(input);
+        Collections.sort(input);
+
+        List<ReusingTestData> expected = new ArrayList<>();
+        for (int i = 0; i < input.size(); i++) {
+            if (i == 0 || input.get(i).key != input.get(i - 1).key) {
+                expected.add(input.get(i));
+            }
+        }
+
+        return expected;
+    }
+
     public static void assertKvsEquals(List<KeyValue> expected, List<KeyValue> actual) {
         assertThat(actual).hasSize(expected.size());
         for (int i = 0; i < actual.size(); i++) {

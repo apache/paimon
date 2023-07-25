@@ -99,7 +99,8 @@ public class SchemaValidation {
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
 
-        // Only changelog tables with primary keys support full compaction or lookup changelog
+        // Only changelog tables with primary keys support full compaction or lookup
+        // changelog
         // producer
         if (options.writeMode() == WriteMode.CHANGE_LOG) {
             switch (options.changelogProducer()) {
@@ -170,6 +171,12 @@ public class SchemaValidation {
                                 schema.fieldNames().contains(field),
                                 "Nonexistent sequence field: '%s'",
                                 field));
+
+        CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
+        if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW && sequenceField.isPresent()) {
+            throw new IllegalArgumentException(
+                    "Do not support use sequence field on FIRST_MERGE merge engine");
+        }
     }
 
     private static void validatePrimaryKeysType(List<DataField> fields, List<String> primaryKeys) {
