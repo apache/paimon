@@ -303,16 +303,3 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
 - Conversion between Spark's `UserDefinedType` and Paimon's `UserDefinedType` is not supported.
 
 {{< /hint >}}
-
-## Notice
-
-
-### Rename Table
-We can rename paimon table in spark:
-```sql
-alter table paimon.default.test1 rename to [default.]test2;
-```
-We can't put catalog name before the renamed-to table, it will throw an error if we write sql like this:
-```sql
-alter table paimon.default.test1 rename to paimon.default.test2;
-```

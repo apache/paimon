@@ -80,9 +80,19 @@ ALTER TABLE my_table RENAME TO my_table_new;
 
 {{< tab "Spark3" >}}
 
+The simplest sql to call is:
 ```sql
 ALTER TABLE my_table RENAME TO my_table_new;
 ```
+{{< hint info >}}
+We can rename paimon table in spark this way:
+```sql
+ALTER TABLE [catalog.[database.]]test1 RENAME to [database.]test2;
+```
+But we can't put catalog name before the renamed-to table, it will throw an error if we write sql like this:
+```sql
+ALTER TABLE catalog.database.test1 RENAME to catalog.database.test2;
+{{< /hint >}}
 
 {{< /tab >}}
 
