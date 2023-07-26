@@ -111,7 +111,7 @@ public class ManifestsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new ManifestsTable(fileIO, location, dataTable);
+        return new ManifestsTable(fileIO, location, dataTable.copy(dynamicOptions));
     }
 
     private class ManifestsScan extends ReadOnceTableScan {
@@ -225,12 +225,20 @@ public class ManifestsTable implements ReadonlyTable {
 
     private static List<ManifestFileMeta> allManifests(
             FileIO fileIO, Path location, Table dataTable) {
-        Snapshot snapshot = new SnapshotManager(fileIO, location).latestSnapshot();
+        CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
+        SnapshotManager snapshotManager = new SnapshotManager(fileIO, location);
+        Long snapshotId = coreOptions.scanSnapshotId();
+        Snapshot snapshot = null;
+        if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)) {
+            snapshot = snapshotManager.snapshot(snapshotId);
+        } else if (snapshotId == null) {
+            snapshot = snapshotManager.latestSnapshot();
+        }
+
         if (snapshot == null) {
             return Collections.emptyList();
         }
         FileStorePathFactory fileStorePathFactory = new FileStorePathFactory(location);
-        CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
         FileFormat fileFormat = coreOptions.manifestFormat();
         ManifestList manifestList =
                 new ManifestList.Factory(fileIO, fileFormat, fileStorePathFactory, null).create();
