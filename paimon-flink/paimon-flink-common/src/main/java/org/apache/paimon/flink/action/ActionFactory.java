@@ -151,7 +151,7 @@ public interface ActionFactory extends Factory {
     }
 
     static void parseKeyValueString(Map<String, String> map, String kvString) {
-        String[] kv = kvString.split("=");
+        String[] kv = kvString.split("=", 2);
         if (kv.length != 2) {
             throw new IllegalArgumentException(
                     String.format(
