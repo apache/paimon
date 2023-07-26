@@ -56,7 +56,7 @@ public class CdcRecordStoreMultiWriteOperator
 
     private static final long serialVersionUID = 1L;
 
-    private final StoreSinkWrite.Provider storeSinkWriteProvider;
+    private final StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final Catalog.Loader catalogLoader;
 
@@ -70,7 +70,7 @@ public class CdcRecordStoreMultiWriteOperator
 
     public CdcRecordStoreMultiWriteOperator(
             Catalog.Loader catalogLoader,
-            StoreSinkWrite.Provider storeSinkWriteProvider,
+            StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider,
             String initialCommitUser,
             Options options) {
         super(options);

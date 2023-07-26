@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.utils.RecordWriter;
@@ -38,6 +39,15 @@ import java.util.List;
 public interface FileStoreWrite<T> {
 
     FileStoreWrite<T> withIOManager(IOManager ioManager);
+
+    /**
+     * With memory pool for the current file store write.
+     *
+     * @param memoryPool the given memory pool.
+     */
+    default FileStoreWrite<T> withMemoryPool(MemorySegmentPool memoryPool) {
+        return withMemoryPoolFactory(new MemoryPoolFactory(memoryPool));
+    }
 
     /**
      * With memory pool factory for the current file store write.

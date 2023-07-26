@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -94,7 +93,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         commitUser,
                         state,
                         getContainingTask().getEnvironment().getIOManager(),
-                        memoryPool == null ? null : new MemoryPoolFactory(memoryPool));
+                        memoryPool);
     }
 
     @Override

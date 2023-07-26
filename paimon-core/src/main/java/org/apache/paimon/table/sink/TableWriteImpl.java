@@ -75,7 +75,7 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public TableWriteImpl<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
+    public TableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         write.withMemoryPoolFactory(memoryPoolFactory);
         return this;
     }

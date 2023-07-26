@@ -93,7 +93,7 @@ public abstract class FlinkSink<T> implements Serializable {
 
             if (changelogProducer == ChangelogProducer.FULL_COMPACTION || deltaCommits >= 0) {
                 int finalDeltaCommits = Math.max(deltaCommits, 1);
-                return (table, commitUser, state, ioManager, memoryPoolFactory) ->
+                return (table, commitUser, state, ioManager, memoryPool) ->
                         new GlobalFullCompactionSinkWrite(
                                 table,
                                 commitUser,
@@ -103,11 +103,11 @@ public abstract class FlinkSink<T> implements Serializable {
                                 waitCompaction,
                                 finalDeltaCommits,
                                 isStreaming,
-                                memoryPoolFactory);
+                                memoryPool);
             }
         }
 
-        return (table, commitUser, state, ioManager, memoryPoolFactory) ->
+        return (table, commitUser, state, ioManager, memoryPool) ->
                 new StoreSinkWriteImpl(
                         table,
                         commitUser,
@@ -116,7 +116,7 @@ public abstract class FlinkSink<T> implements Serializable {
                         ignorePreviousFiles,
                         waitCompaction,
                         isStreaming,
-                        memoryPoolFactory);
+                        memoryPool);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<T> input) {

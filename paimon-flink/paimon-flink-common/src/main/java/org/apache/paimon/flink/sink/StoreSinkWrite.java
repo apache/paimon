@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -68,6 +69,18 @@ public interface StoreSinkWrite {
     /** Provider of {@link StoreSinkWrite}. */
     @FunctionalInterface
     interface Provider extends Serializable {
+
+        StoreSinkWrite provide(
+                FileStoreTable table,
+                String commitUser,
+                StoreSinkWriteState state,
+                IOManager ioManager,
+                @Nullable MemorySegmentPool memoryPool);
+    }
+
+    /** Provider of {@link StoreSinkWrite} that using given write buffer. */
+    @FunctionalInterface
+    interface WithWriteBufferProvider extends Serializable {
 
         StoreSinkWrite provide(
                 FileStoreTable table,

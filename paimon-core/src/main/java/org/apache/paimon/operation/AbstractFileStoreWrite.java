@@ -93,7 +93,7 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public FileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPool) {
+    public FileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         return this;
     }
 

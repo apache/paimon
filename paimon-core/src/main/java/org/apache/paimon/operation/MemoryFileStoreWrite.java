@@ -67,10 +67,8 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
     }
 
     @Override
-    public MemoryFileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
-        if (memoryPoolFactory != null) {
-            this.writeBufferPool = memoryPoolFactory.addOwners(this::memoryOwners);
-        }
+    public FileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
+        this.writeBufferPool = memoryPoolFactory.addOwners(this::memoryOwners);
         return this;
     }
 
