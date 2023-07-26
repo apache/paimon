@@ -197,16 +197,30 @@ SELECT * FROM MyTable$consumers;
 
 ## Manifests Table
 
-You can query all manifest files contained in the latest snapshot of the current table.
+You can query all manifest files contained in the latest snapshot or the specified snapshot of the current table.
 
 ```sql
+-- Query the manifest of latest snapshot
 SELECT * FROM MyTable$manifests;
 
 /*
 +--------------------------------+-------------+------------------+-------------------+---------------+
 |                      file_name |   file_size |  num_added_files | num_deleted_files |     schema_id |
 +--------------------------------+-------------+------------------+-------------------+---------------+
+| manifest-f4dcab43-ef6b-4713... |        12365|               40 |                 0 |             0 |
 | manifest-f4dcab43-ef6b-4713... |        1648 |                1 |                 0 |             0 |
 +--------------------------------+-------------+------------------+-------------------+---------------+
+2 rows in set
+*/
+
+-- You can also query the manifest with specified snapshot
+SELECT * FROM MyTable$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
+/*
++--------------------------------+-------------+------------------+-------------------+---------------+
+|                      file_name |   file_size |  num_added_files | num_deleted_files |     schema_id |
++--------------------------------+-------------+------------------+-------------------+---------------+
+| manifest-f4dcab43-ef6b-4713... |        12365|               40 |                 0 |             0 |
++--------------------------------+-------------+------------------+-------------------+---------------+
+1 rows in set
 */
 ```
