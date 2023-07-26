@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -99,12 +98,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
                         commitUser,
                         state,
                         ioManager,
-                        new MemoryPoolFactory(
-                                memoryPool != null
-                                        ? memoryPool
-                                        : new HeapMemorySegmentPool(
-                                                table.coreOptions().writeBufferSize(),
-                                                table.coreOptions().pageSize())));
+                        memoryPool == null ? null : new MemoryPoolFactory(memoryPool));
     }
 
     protected abstract boolean containLogSystem();

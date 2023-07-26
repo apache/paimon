@@ -18,6 +18,8 @@
 
 package org.apache.paimon.memory;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import java.util.List;
@@ -53,6 +55,11 @@ public class MemoryPoolFactory {
     public void notifyNewOwner(MemoryOwner owner) {
         checkNotNull(owners);
         owner.setMemoryPool(createSubPool(owner));
+    }
+
+    @VisibleForTesting
+    public Iterable<MemoryOwner> memoryOwners() {
+        return owners;
     }
 
     MemorySegmentPool createSubPool(MemoryOwner owner) {

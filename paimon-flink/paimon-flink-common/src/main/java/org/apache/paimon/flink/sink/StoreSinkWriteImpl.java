@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
@@ -80,13 +79,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                         (part, bucket) ->
                                 state.stateValueFilter().filter(table.name(), part, bucket))
                 .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
-                .withMemoryPoolFactory(
-                        memoryPoolFactory != null
-                                ? memoryPoolFactory
-                                : new MemoryPoolFactory(
-                                        new HeapMemorySegmentPool(
-                                                table.coreOptions().writeBufferSize(),
-                                                table.coreOptions().pageSize())))
+                .withMemoryPoolFactory(memoryPoolFactory)
                 .withIgnorePreviousFiles(ignorePreviousFiles)
                 .isStreamingMode(isStreamingMode);
     }

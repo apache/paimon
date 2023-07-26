@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -95,12 +94,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                         commitUser,
                         state,
                         getContainingTask().getEnvironment().getIOManager(),
-                        new MemoryPoolFactory(
-                                memoryPool != null
-                                        ? memoryPool
-                                        : new HeapMemorySegmentPool(
-                                                table.coreOptions().writeBufferSize(),
-                                                table.coreOptions().pageSize())));
+                        memoryPool == null ? null : new MemoryPoolFactory(memoryPool));
     }
 
     @Override
