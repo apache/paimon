@@ -41,12 +41,10 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     KeyValue highLevel;
     boolean containLevel0;
-    protected final boolean isFirstRow;
 
     public LookupMergeFunction(
             MergeFunction<KeyValue> mergeFunction, RowType keyType, RowType valueType) {
         this.mergeFunction = mergeFunction;
-        this.isFirstRow = mergeFunction instanceof FirstRowMergeFunction;
         this.keySerializer = new InternalRowSerializer(keyType);
         this.valueSerializer = new InternalRowSerializer(valueType);
     }
@@ -66,9 +64,7 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public KeyValue getResult() {
         // 1. Find the latest high level record
-        // For the first row, the candidates should in the highest level.
-        Iterator<KeyValue> descending =
-                isFirstRow ? candidates.iterator() : candidates.descendingIterator();
+        Iterator<KeyValue> descending = candidates.descendingIterator();
         while (descending.hasNext()) {
             KeyValue kv = descending.next();
             if (kv.level() > 0) {
@@ -90,6 +86,11 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     public static MergeFunctionFactory<KeyValue> wrap(
             MergeFunctionFactory<KeyValue> wrapped, RowType keyType, RowType valueType) {
+        if (wrapped.create() instanceof FirstRowMergeFunction) {
+            // don't wrap first row, it is already OK
+            return wrapped;
+        }
+
         return new Factory(wrapped, keyType, valueType);
     }
 

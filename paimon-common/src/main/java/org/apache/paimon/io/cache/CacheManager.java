@@ -61,17 +61,15 @@ public class CacheManager {
     public MemorySegment getPage(
             RandomAccessFile file, int pageNumber, Consumer<Integer> cleanCallback) {
         CacheKey key = new CacheKey(file, pageNumber);
-        CacheValue value;
-        value =
-                cache.get(
-                        key,
-                        cacheKey -> {
-                            try {
-                                return createValue(key, cleanCallback);
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }
-                        });
+        CacheValue value = cache.getIfPresent(key);
+        while (value == null || value.isClosed) {
+            try {
+                value = createValue(key, cleanCallback);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            cache.put(key, value);
+        }
         return value.segment;
     }
 
@@ -84,6 +82,7 @@ public class CacheManager {
     }
 
     private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
+        value.isClosed = true;
         value.cleanCallback.accept(key.pageNumber);
     }
 
@@ -134,6 +133,8 @@ public class CacheManager {
 
         private final MemorySegment segment;
         private final Consumer<Integer> cleanCallback;
+
+        private boolean isClosed = false;
 
         private CacheValue(MemorySegment segment, Consumer<Integer> cleanCallback) {
             this.segment = segment;

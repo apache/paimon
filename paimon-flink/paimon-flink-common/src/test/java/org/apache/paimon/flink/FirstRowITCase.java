@@ -26,26 +26,32 @@ import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for first row merge engine. */
 public class FirstRowITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
-        return Arrays.asList(
+        return Collections.singletonList(
                 "CREATE TABLE IF NOT EXISTS T ("
                         + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
-                        + " WITH ('merge-engine'='first-row');",
-                "CREATE TABLE IF NOT EXISTS T1 ("
-                        + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
-                        + " WITH ('merge-engine'='first-row', 'changelog-producer' = 'lookup');",
-                "CREATE TABLE IF NOT EXISTS T2 ("
-                        + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
-                        + " WITH ('merge-engine'='first-row', 'changelog-producer' = 'full-compaction', 'full-compaction.delta-commits' = '3');");
+                        + " WITH ('merge-engine'='first-row', 'file.format'='avro', 'changelog-producer' = 'lookup');");
+    }
+
+    @Test
+    public void testIllegal() {
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "CREATE TABLE ILLEGAL_T (a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
+                                                + " WITH ('merge-engine'='first-row')"))
+                .hasRootCauseMessage(
+                        "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
     }
 
     @Test
@@ -59,48 +65,27 @@ public class FirstRowITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testReadAfterFullCompaction() {
-        batchSql("ALTER TABLE T SET ('full-compaction.delta-commits'='1')");
+    public void testStreamingRead() throws Exception {
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
 
-        batchSql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
-        List<Row> result = batchSql("SELECT * FROM T");
-        assertThat(result).containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 1, 1, "1"));
-
-        batchSql("INSERT INTO T VALUES (1, 1, '1'), (2, 2, '2')");
-        result = batchSql("SELECT * FROM T");
-        assertThat(result)
-                .containsExactlyInAnyOrder(
-                        Row.ofKind(RowKind.INSERT, 1, 1, "1"),
-                        Row.ofKind(RowKind.INSERT, 2, 2, "2"));
-    }
-
-    @Test
-    public void testStreamingReadOnFullCompaction() throws Exception {
-        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T2");
-
-        sql("INSERT INTO T2 VALUES(1, 1, '1'), (2, 2, '2'), (1, 3, '3'), (1, 4, '4')");
+        sql("INSERT INTO T VALUES(1, 1, '1'), (2, 2, '2'), (1, 3, '3'), (1, 4, '4')");
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(
                         Row.ofKind(RowKind.INSERT, 1, 1, "1"),
                         Row.ofKind(RowKind.INSERT, 2, 2, "2"));
 
-        sql("INSERT INTO T2 VALUES(1, 1, '1'), (2, 2, '2'), (1, 3, '3'), (3, 3, '3')");
-        assertThat(iterator.collect(1))
-                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 3, 3, "3"));
-    }
-
-    @Test
-    public void testStreamingReadOnLookup() throws Exception {
-        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T1");
-
-        sql("INSERT INTO T1 VALUES(1, 1, '1'), (2, 2, '2'), (1, 3, '3'), (1, 4, '4')");
-        assertThat(iterator.collect(2))
+        sql(
+                "INSERT INTO T VALUES(1, 1, '1'), (2, 2, '2'), (1, 3, '3'), (3, 3, '3'), (4, 4, '4'), (5, 5, '5'), (6, 6, '6'), (7, 7, '7')");
+        assertThat(iterator.collect(5))
                 .containsExactlyInAnyOrder(
-                        Row.ofKind(RowKind.INSERT, 1, 1, "1"),
-                        Row.ofKind(RowKind.INSERT, 2, 2, "2"));
+                        Row.ofKind(RowKind.INSERT, 3, 3, "3"),
+                        Row.ofKind(RowKind.INSERT, 4, 4, "4"),
+                        Row.ofKind(RowKind.INSERT, 5, 5, "5"),
+                        Row.ofKind(RowKind.INSERT, 6, 6, "6"),
+                        Row.ofKind(RowKind.INSERT, 7, 7, "7"));
 
-        sql("INSERT INTO T1 VALUES(1, 1, '1'), (2, 2, '2'), (1, 3, '3'), (3, 3, '3')");
+        sql("INSERT INTO T VALUES(7, 7, '8'), (8, 8, '8')");
         assertThat(iterator.collect(1))
-                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 3, 3, "3"));
+                .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 8, 8, "8"));
     }
 }

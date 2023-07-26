@@ -72,8 +72,11 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.CoreOptions.WRITE_MODE;
@@ -1482,6 +1485,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         Map<String, String> options = new HashMap<>();
         options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        if (mergeEngine == FIRST_ROW) {
+            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+        }
         String table =
                 createTable(
                         Arrays.asList(
@@ -1576,6 +1582,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         options.put(
                 CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        if (mergeEngine == FIRST_ROW) {
+            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+        }
         String table =
                 createTable(
                         Arrays.asList(
@@ -1656,6 +1665,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         Map<String, String> options = new HashMap<>();
         options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        if (mergeEngine == FIRST_ROW) {
+            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+        }
         String table =
                 createTable(
                         Arrays.asList(
@@ -1746,6 +1758,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         Map<String, String> options = new HashMap<>();
         options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        if (mergeEngine == FIRST_ROW) {
+            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+        }
         String table =
                 createTable(
                         Arrays.asList(
@@ -1824,6 +1839,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         Map<String, String> options = new HashMap<>();
         options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        if (mergeEngine == FIRST_ROW) {
+            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+        }
         String table =
                 createTable(
                         Arrays.asList(

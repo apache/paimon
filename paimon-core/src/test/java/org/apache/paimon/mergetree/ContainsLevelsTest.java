@@ -60,12 +60,11 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
-import static org.apache.paimon.KeyValue.UNKNOWN_SEQUENCE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test {@link LookupLevels}. */
-public class LookupLevelsTest {
+/** Test {@link ContainsLevels}. */
+public class ContainsLevelsTest {
 
     private static final String LOOKUP_FILE_PREFIX = "lookup-";
 
@@ -88,35 +87,22 @@ public class LookupLevelsTest {
                                 newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
                                 newFile(2, kv(2, 22), kv(5, 55))),
                         3);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        ContainsLevels containsLevels = createContainsLevels(levels, MemorySize.ofMebiBytes(10));
 
         // only in level 1
-        KeyValue kv = lookupLevels.lookup(row(1), 1);
-        assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
-        assertThat(kv.level()).isEqualTo(1);
-        assertThat(kv.value().getInt(1)).isEqualTo(11);
+        assertThat(containsLevels.contains(row(1), 1)).isTrue();
 
         // only in level 2
-        kv = lookupLevels.lookup(row(2), 1);
-        assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
-        assertThat(kv.level()).isEqualTo(2);
-        assertThat(kv.value().getInt(1)).isEqualTo(22);
+        assertThat(containsLevels.contains(row(2), 1)).isTrue();
 
         // both in level 1 and level 2
-        kv = lookupLevels.lookup(row(5), 1);
-        assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
-        assertThat(kv.level()).isEqualTo(1);
-        assertThat(kv.value().getInt(1)).isEqualTo(5);
+        assertThat(containsLevels.contains(row(5), 1)).isTrue();
 
         // no exists
-        kv = lookupLevels.lookup(row(4), 1);
-        assertThat(kv).isNull();
+        assertThat(containsLevels.contains(row(4), 1)).isFalse();
 
-        lookupLevels.close();
-        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
+        containsLevels.close();
+        assertThat(containsLevels.containsFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -130,7 +116,7 @@ public class LookupLevelsTest {
                                 newFile(1, kv(7, 77), kv(8, 88)),
                                 newFile(1, kv(10, 1010), kv(11, 1111))),
                         1);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        ContainsLevels containsLevels = createContainsLevels(levels, MemorySize.ofMebiBytes(10));
 
         Map<Integer, Integer> contains =
                 new HashMap<Integer, Integer>() {
@@ -146,28 +132,23 @@ public class LookupLevelsTest {
                     }
                 };
         for (Map.Entry<Integer, Integer> entry : contains.entrySet()) {
-            KeyValue kv = lookupLevels.lookup(row(entry.getKey()), 1);
-            assertThat(kv).isNotNull();
-            assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
-            assertThat(kv.level()).isEqualTo(1);
-            assertThat(kv.value().getInt(1)).isEqualTo(entry.getValue());
+            assertThat(containsLevels.contains(row(entry.getKey()), 1)).isTrue();
         }
 
         int[] notContains = new int[] {0, 3, 6, 9, 12};
         for (int key : notContains) {
-            KeyValue kv = lookupLevels.lookup(row(key), 1);
-            assertThat(kv).isNull();
+            assertThat(containsLevels.contains(row(key), 1)).isFalse();
         }
 
-        lookupLevels.close();
-        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
+        containsLevels.close();
+        assertThat(containsLevels.containsFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
     public void testMaxDiskSize() throws IOException {
         List<DataFileMeta> files = new ArrayList<>();
         int fileNum = 10;
-        int recordInFile = 100;
+        int recordInFile = 1000;
         for (int i = 0; i < fileNum; i++) {
             List<KeyValue> kvs = new ArrayList<>();
             for (int j = 0; j < recordInFile; j++) {
@@ -177,33 +158,28 @@ public class LookupLevelsTest {
             files.add(newFile(1, kvs.toArray(new KeyValue[0])));
         }
         Levels levels = new Levels(comparator, files, 1);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofKibiBytes(20));
+        ContainsLevels lookupLevels = createContainsLevels(levels, MemorySize.ofKibiBytes(50));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
-            KeyValue kv = lookupLevels.lookup(row(i), 1);
-            assertThat(kv).isNotNull();
-            assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
-            assertThat(kv.level()).isEqualTo(1);
-            assertThat(kv.value().getInt(1)).isEqualTo(i);
+            assertThat(lookupLevels.contains(row(i), 1)).isTrue();
         }
 
         // some files are invalided
-        long fileNumber = lookupLevels.lookupFiles().estimatedSize();
+        long fileNumber = lookupLevels.containsFiles().estimatedSize();
         String[] lookupFiles =
                 tempDir.toFile().list((dir, name) -> name.startsWith(LOOKUP_FILE_PREFIX));
         assertThat(lookupFiles).isNotNull();
         assertThat(fileNumber).isNotEqualTo(fileNum).isEqualTo(lookupFiles.length);
 
         lookupLevels.close();
-        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
+        assertThat(lookupLevels.containsFiles().estimatedSize()).isEqualTo(0);
     }
 
-    private LookupLevels createLookupLevels(Levels levels, MemorySize maxDiskSize) {
-        return new LookupLevels(
+    private ContainsLevels createContainsLevels(Levels levels, MemorySize maxDiskSize) {
+        return new ContainsLevels(
                 levels,
                 comparator,
                 keyType,
-                rowType,
                 file -> createReaderFactory().createRecordReader(0, file.fileName(), file.level()),
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(new CacheManager(2048, MemorySize.ofMebiBytes(1)), 0.75),

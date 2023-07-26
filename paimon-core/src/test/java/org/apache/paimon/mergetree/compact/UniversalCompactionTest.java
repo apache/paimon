@@ -195,6 +195,32 @@ public class UniversalCompactionTest {
                 .isEqualTo(new long[] {27});
     }
 
+    @Test
+    public void testLookup() {
+        LookupCompaction compaction = new LookupCompaction(new UniversalCompaction(25, 1, 3));
+
+        // level 0 to max level
+        Optional<CompactUnit> pick = compaction.pick(3, level0(1, 2, 2, 2));
+        assertThat(pick.isPresent()).isTrue();
+        long[] results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {1, 2, 2, 2});
+        assertThat(pick.get().outputLevel()).isEqualTo(2);
+
+        // level 0 force pick
+        pick = compaction.pick(3, Arrays.asList(level(0, 1), level(1, 2), level(2, 2)));
+        assertThat(pick.isPresent()).isTrue();
+        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {1, 2, 2});
+        assertThat(pick.get().outputLevel()).isEqualTo(2);
+
+        // level 0 to empty level
+        pick = compaction.pick(3, Arrays.asList(level(0, 1), level(2, 2)));
+        assertThat(pick.isPresent()).isTrue();
+        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {1});
+        assertThat(pick.get().outputLevel()).isEqualTo(1);
+    }
+
     private List<LevelSortedRun> createLevels(int... levels) {
         List<LevelSortedRun> runs = new ArrayList<>();
         for (int size : levels) {

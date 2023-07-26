@@ -23,14 +23,11 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.lookup.LookupStoreWriter;
-import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
@@ -53,24 +50,24 @@ import java.util.function.Supplier;
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Provide lookup by key. */
-public class LookupLevels implements Levels.DropFileCallback, Closeable {
+/** Provide contains key. */
+public class ContainsLevels implements Levels.DropFileCallback, Closeable {
+
+    private static final byte[] EMPTY_VALUE = new byte[0];
 
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
     private final RowCompactedSerializer keySerializer;
-    private final RowCompactedSerializer valueSerializer;
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Supplier<File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
 
-    private final Cache<String, LookupFile> lookupFiles;
+    private final Cache<String, ContainsFile> containsFiles;
 
-    public LookupLevels(
+    public ContainsLevels(
             Levels levels,
             Comparator<InternalRow> keyComparator,
             RowType keyType,
-            RowType valueType,
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Supplier<File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
@@ -79,11 +76,10 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
-        this.valueSerializer = new RowCompactedSerializer(valueType);
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
-        this.lookupFiles =
+        this.containsFiles =
                 Caffeine.newBuilder()
                         .expireAfterAccess(fileRetention)
                         .maximumWeight(maxDiskSize.getKibiBytes())
@@ -95,51 +91,43 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     }
 
     @VisibleForTesting
-    Cache<String, LookupFile> lookupFiles() {
-        return lookupFiles;
+    Cache<String, ContainsFile> containsFiles() {
+        return containsFiles;
     }
 
     @Override
     public void notifyDropFile(String file) {
-        lookupFiles.invalidate(file);
+        containsFiles.invalidate(file);
+    }
+
+    public boolean contains(InternalRow key, int startLevel) throws IOException {
+        Boolean result = LookupUtils.lookup(levels, key, startLevel, this::contains);
+        return result != null && result;
     }
 
     @Nullable
-    public KeyValue lookup(InternalRow key, int startLevel) throws IOException {
-        return LookupUtils.lookup(levels, key, startLevel, this::lookup);
+    private Boolean contains(InternalRow key, SortedRun level) throws IOException {
+        return LookupUtils.lookup(keyComparator, key, level, this::contains);
     }
 
     @Nullable
-    private KeyValue lookup(InternalRow key, SortedRun level) throws IOException {
-        return LookupUtils.lookup(keyComparator, key, level, this::lookup);
-    }
-
-    @Nullable
-    private KeyValue lookup(InternalRow key, DataFileMeta file) throws IOException {
-        LookupFile lookupFile = lookupFiles.getIfPresent(file.fileName());
-        while (lookupFile == null || lookupFile.isClosed) {
-            lookupFile = createLookupFile(file);
-            lookupFiles.put(file.fileName(), lookupFile);
+    private Boolean contains(InternalRow key, DataFileMeta file) throws IOException {
+        ContainsFile containsFile = containsFiles.getIfPresent(file.fileName());
+        while (containsFile == null || containsFile.isClosed) {
+            containsFile = createContainsFile(file);
+            containsFiles.put(file.fileName(), containsFile);
         }
-
-        byte[] keyBytes = keySerializer.serializeToBytes(key);
-        byte[] valueBytes = lookupFile.get(keyBytes);
-        if (valueBytes == null) {
-            return null;
+        if (containsFile.get(keySerializer.serializeToBytes(key)) != null) {
+            return true;
         }
-        InternalRow value = valueSerializer.deserialize(valueBytes);
-        long sequenceNumber = MemorySegment.wrap(valueBytes).getLong(valueBytes.length - 9);
-        RowKind rowKind = RowKind.fromByteValue(valueBytes[valueBytes.length - 1]);
-        return new KeyValue()
-                .replace(key, sequenceNumber, rowKind, value)
-                .setLevel(lookupFile.remoteFile().level());
+        return null;
     }
 
-    private int fileWeigh(String file, LookupFile lookupFile) {
-        return fileKibiBytes(lookupFile.localFile);
+    private int fileWeigh(String file, ContainsFile containsFile) {
+        return fileKibiBytes(containsFile.localFile);
     }
 
-    private void removalCallback(String key, LookupFile file, RemovalCause cause) {
+    private void removalCallback(String key, ContainsFile file, RemovalCause cause) {
         if (file != null) {
             try {
                 file.close();
@@ -149,25 +137,19 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         }
     }
 
-    private LookupFile createLookupFile(DataFileMeta file) throws IOException {
+    private ContainsFile createContainsFile(DataFileMeta file) throws IOException {
         File localFile = localFileFactory.get();
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
         try (LookupStoreWriter kvWriter = lookupStoreFactory.createWriter(localFile);
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
-            DataOutputSerializer valueOut = new DataOutputSerializer(32);
             RecordReader.RecordIterator<KeyValue> batch;
             KeyValue kv;
             while ((batch = reader.readBatch()) != null) {
                 while ((kv = batch.next()) != null) {
                     byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
-                    valueOut.clear();
-                    valueOut.write(valueSerializer.serializeToBytes(kv.value()));
-                    valueOut.writeLong(kv.sequenceNumber());
-                    valueOut.writeByte(kv.valueKind().toByteValue());
-                    byte[] valueBytes = valueOut.getCopyOfBuffer();
-                    kvWriter.put(keyBytes, valueBytes);
+                    kvWriter.put(keyBytes, EMPTY_VALUE);
                 }
                 batch.releaseBatch();
             }
@@ -176,25 +158,23 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
             throw e;
         }
 
-        return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile));
+        return new ContainsFile(localFile, lookupStoreFactory.createReader(localFile));
     }
 
     @Override
     public void close() throws IOException {
-        lookupFiles.invalidateAll();
+        containsFiles.invalidateAll();
     }
 
-    private static class LookupFile implements Closeable {
+    private static class ContainsFile implements Closeable {
 
         private final File localFile;
-        private final DataFileMeta remoteFile;
         private final LookupStoreReader reader;
 
         private boolean isClosed = false;
 
-        public LookupFile(File localFile, DataFileMeta remoteFile, LookupStoreReader reader) {
+        public ContainsFile(File localFile, LookupStoreReader reader) {
             this.localFile = localFile;
-            this.remoteFile = remoteFile;
             this.reader = reader;
         }
 
@@ -202,10 +182,6 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         public byte[] get(byte[] key) throws IOException {
             checkArgument(!isClosed);
             return reader.lookup(key);
-        }
-
-        public DataFileMeta remoteFile() {
-            return remoteFile;
         }
 
         @Override

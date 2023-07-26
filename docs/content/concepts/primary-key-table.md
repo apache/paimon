@@ -216,15 +216,12 @@ For streaming queries, `aggregation` merge engine must be used together with `lo
 
 ### First Row
 
-By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the `deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog. 
+By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the
+`deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog. 
 
-{{< hint info >}}
-For streaming queries, `first-row` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
-{{< /hint >}}
-
-{{< hint info >}}
-Currently, only the first row of insert order supported, so you can not specify `sequence.field` for this merge engine. And also not accept `DELETE` and `UPDATE_BEFORE` message.
-{{< /hint>}}
+1. `first-row` merge engine must be used together with `lookup` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
+2. You can not specify `sequence.field`.
+3. Not accept `DELETE` and `UPDATE_BEFORE` message.
 
 ## Changelog Producers
 
