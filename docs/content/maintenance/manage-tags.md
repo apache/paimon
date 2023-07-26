@@ -58,6 +58,35 @@ If you need to wait for late data, you can configure a delay time: `'tag.creatio
 
 You can configure `'tag.num-retained-max'` to delete tags automatically.
 
+Example, configure table to create a tag at 0:10 every day, with a maximum retention time of 3 months:
+
+```sql
+-- Flink SQL
+CREATE TABLE T (
+    k INT PRIMARY KEY NOT ENFORCED,
+    f0 INT,
+    ...
+) WITH (
+    'tag.automatic-creation' = 'process-time',
+    'tag.creation-period' = 'daily',
+    'tag.creation-delay' = '10 m',
+    'tag.num-retained-max' = '90'
+);
+
+INSERT INTO T SELECT ...;
+
+-- Spark SQL
+
+-- Read latest snapshot
+SELECT * FROM T;
+
+-- Read Tag snapshot
+SELECT * FROM T VERSION AS OF '2023-07-26';
+
+-- Read Incremental between Tags
+SELECT * FROM T paimon_incremental_query('T', '2023-07-25', '2023-07-26');
+```
+
 ## Create Tags
 
 You can create a tag with given name (cannot be number) and snapshot ID.
