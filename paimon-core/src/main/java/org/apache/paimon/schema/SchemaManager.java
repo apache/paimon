@@ -291,7 +291,7 @@ public class SchemaManager implements Serializable {
                                                                 field.type(), update.newDataType())
                                                         != null,
                                         String.format(
-                                                "Column type %s[%s] cannot be converted to %s without loosing information.",
+                                                "Column type %s[%s] cannot be converted to %s without losing information.",
                                                 field.name(), field.type(), update.newDataType()));
                                 AtomicInteger dummyId = new AtomicInteger(0);
                                 if (dummyId.get() != 0) {
