@@ -532,7 +532,7 @@ public class ContinuousFileSplitEnumeratorTest {
 
         // empty plan
         context.runInCoordinatorThread(
-                () -> checkpoint.set(enumerator.snapshotState(1L))); // checkpoint
+                () -> checkpoint.set(checkpointWithoutException(enumerator, 1L))); // checkpoint
         context.triggerAlCoordinatorAction();
         state = checkpoint.getAndSet(null);
         assertThat(state).isNotNull();
@@ -543,7 +543,7 @@ public class ContinuousFileSplitEnumeratorTest {
         context.triggerAllWorkerAction(); // scan next plan
         context.triggerAlCoordinatorAction(); // processDiscoveredSplits
         context.runInCoordinatorThread(
-                () -> checkpoint.set(enumerator.snapshotState(1L))); // snapshotState
+                () -> checkpoint.set(checkpointWithoutException(enumerator, 2L))); // snapshotState
         context.triggerAlCoordinatorAction();
         state = checkpoint.getAndSet(null);
         assertThat(state).isNotNull();
@@ -557,7 +557,7 @@ public class ContinuousFileSplitEnumeratorTest {
         // multiple plans happen before processDiscoveredSplits
         context.triggerAllWorkerAction(); // scan next plan
         context.runInCoordinatorThread(
-                () -> checkpoint.set(enumerator.snapshotState(2L))); // snapshotState
+                () -> checkpoint.set(checkpointWithoutException(enumerator, 3L))); // snapshotState
         context.triggerAllWorkerAction(); // scan next plan
         context.triggerNextCoordinatorAction(); // process first discovered splits
         context.triggerNextCoordinatorAction(); // checkpoint
@@ -565,6 +565,15 @@ public class ContinuousFileSplitEnumeratorTest {
         assertThat(state).isNotNull();
         assertThat(state.currentSnapshotId()).isEqualTo(3L);
         assertThat(toDataSplits(state.splits())).containsExactlyElementsOf(expectedResults.get(2L));
+    }
+
+    private static PendingSplitsCheckpoint checkpointWithoutException(
+            ContinuousFileSplitEnumerator enumerator, long checkpointId) {
+        try {
+            return enumerator.snapshotState(checkpointId);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static List<DataSplit> toDataSplits(Collection<FileStoreSourceSplit> splits) {

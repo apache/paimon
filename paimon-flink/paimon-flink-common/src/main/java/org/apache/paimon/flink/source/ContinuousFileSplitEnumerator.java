@@ -56,23 +56,23 @@ public class ContinuousFileSplitEnumerator
 
     private static final Logger LOG = LoggerFactory.getLogger(ContinuousFileSplitEnumerator.class);
 
-    private final SplitEnumeratorContext<FileStoreSourceSplit> context;
+    protected final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
-    private final long discoveryInterval;
+    protected final long discoveryInterval;
 
-    private final Set<Integer> readersAwaitingSplit;
+    protected final Set<Integer> readersAwaitingSplit;
 
-    private final FileStoreSourceSplitGenerator splitGenerator;
+    protected final FileStoreSourceSplitGenerator splitGenerator;
 
-    private final StreamTableScan scan;
+    protected final StreamTableScan scan;
 
-    private final SplitAssigner splitAssigner;
+    protected final SplitAssigner splitAssigner;
 
-    private final BucketMode bucketMode;
+    protected final BucketMode bucketMode;
 
-    @Nullable private Long nextSnapshotId;
+    @Nullable protected Long nextSnapshotId;
 
-    private boolean finished = false;
+    protected boolean finished = false;
 
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
@@ -89,14 +89,11 @@ public class ContinuousFileSplitEnumerator
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
         this.bucketMode = bucketMode;
-        this.splitAssigner =
-                bucketMode == BucketMode.UNAWARE
-                        ? new FIFOSplitAssigner(Collections.emptyList())
-                        : new PreAssignSplitAssigner(1, context, Collections.emptyList());
+        this.splitAssigner = createSplitAssigner();
         addSplits(remainSplits);
     }
 
-    private void addSplits(Collection<FileStoreSourceSplit> splits) {
+    protected void addSplits(Collection<FileStoreSourceSplit> splits) {
         splits.forEach(this::addSplit);
     }
 
@@ -138,7 +135,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     @Override
-    public PendingSplitsCheckpoint snapshotState(long checkpointId) {
+    public PendingSplitsCheckpoint snapshotState(long checkpointId) throws Exception {
         List<FileStoreSourceSplit> splits = new ArrayList<>(splitAssigner.remainingSplits());
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(splits, nextSnapshotId);
@@ -149,13 +146,13 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
-    private PlanWithNextSnapshotId scanNextSnapshot() {
+    protected PlanWithNextSnapshotId scanNextSnapshot() {
         TableScan.Plan plan = scan.plan();
         Long nextSnapshotId = scan.checkpoint();
         return new PlanWithNextSnapshotId(plan, nextSnapshotId);
     }
 
-    private void processDiscoveredSplits(
+    protected void processDiscoveredSplits(
             PlanWithNextSnapshotId planWithNextSnapshotId, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
@@ -184,9 +181,9 @@ public class ContinuousFileSplitEnumerator
      * Method should be synchronized because {@link #handleSplitRequest} and {@link
      * #processDiscoveredSplits} have thread conflicts.
      */
-    private synchronized void assignSplits() {
+    protected synchronized void assignSplits() {
         Map<Integer, List<FileStoreSourceSplit>> assignment = createAssignment();
-        if (finished) {
+        if (noMoreSplits()) {
             Iterator<Integer> iterator = readersAwaitingSplit.iterator();
             while (iterator.hasNext()) {
                 Integer reader = iterator.next();
@@ -217,7 +214,7 @@ public class ContinuousFileSplitEnumerator
         return assignment;
     }
 
-    private int assignTask(int bucket) {
+    protected int assignTask(int bucket) {
         if (bucketMode == BucketMode.UNAWARE) {
             // we just assign task 0 when bucket unaware
             return 0;
@@ -228,13 +225,32 @@ public class ContinuousFileSplitEnumerator
         }
     }
 
-    private static class PlanWithNextSnapshotId {
+    protected SplitAssigner createSplitAssigner() {
+        return bucketMode == BucketMode.UNAWARE
+                ? new FIFOSplitAssigner(Collections.emptyList())
+                : new PreAssignSplitAssigner(1, context, Collections.emptyList());
+    }
+
+    protected boolean noMoreSplits() {
+        return finished;
+    }
+
+    /** The result of scan. */
+    protected static class PlanWithNextSnapshotId {
         private final TableScan.Plan plan;
         private final Long nextSnapshotId;
 
         public PlanWithNextSnapshotId(TableScan.Plan plan, Long nextSnapshotId) {
             this.plan = plan;
             this.nextSnapshotId = nextSnapshotId;
+        }
+
+        public TableScan.Plan plan() {
+            return plan;
+        }
+
+        public Long nextSnapshotId() {
+            return nextSnapshotId;
         }
     }
 }

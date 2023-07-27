@@ -210,6 +210,20 @@ public class FlinkConnectorOptions {
                             "If true, flink will push down projection, filters, limit to the source. "
                                     + "The cost is that it is difficult to reuse the source in a job.");
 
+    public static final ConfigOption<Boolean> SOURCE_CHECKPOINT_ALIGN_ENABLED =
+            ConfigOptions.key("source.checkpoint-align.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to align the flink checkpoint with the snapshot of the paimon table, If true, a checkpoint will only be made if a snapshot is consumed.");
+
+    public static final ConfigOption<Duration> SOURCE_CHECKPOINT_ALIGN_TIMEOUT =
+            ConfigOptions.key("source.checkpoint-align.timeout")
+                    .durationType()
+                    .defaultValue(Duration.ofSeconds(30))
+                    .withDescription(
+                            "If the new snapshot has not been generated when the checkpoint starts to trigger, the enumerator will block the checkpoint and wait for the new snapshot. Set the maximum waiting time to avoid infinite waiting, if timeout, the checkpoint will fail. Note that it should be set smaller than the checkpoint timeout.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);
