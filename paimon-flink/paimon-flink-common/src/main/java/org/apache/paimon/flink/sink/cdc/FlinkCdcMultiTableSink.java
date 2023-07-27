@@ -63,11 +63,18 @@ public class FlinkCdcMultiTableSink implements Serializable {
         this.catalogLoader = catalogLoader;
     }
 
-    private StoreSinkWrite.Provider createWriteProvider() {
+    private StoreSinkWrite.WithWriteBufferProvider createWriteProvider() {
         // for now, no compaction for multiplexed sink
-        return (table, commitUser, state, ioManager, memoryPool) ->
+        return (table, commitUser, state, ioManager, memoryPoolFactory) ->
                 new StoreSinkWriteImpl(
-                        table, commitUser, state, ioManager, isOverwrite, false, true, memoryPool);
+                        table,
+                        commitUser,
+                        state,
+                        ioManager,
+                        isOverwrite,
+                        false,
+                        true,
+                        memoryPoolFactory);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<CdcMultiplexRecord> input) {
@@ -83,7 +90,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
     public DataStreamSink<?> sinkFrom(
             DataStream<CdcMultiplexRecord> input,
             String commitUser,
-            StoreSinkWrite.Provider sinkProvider) {
+            StoreSinkWrite.WithWriteBufferProvider sinkProvider) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         assertStreamingConfiguration(env);
         MultiTableCommittableTypeInfo typeInfo = new MultiTableCommittableTypeInfo();
@@ -109,7 +116,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
     }
 
     protected OneInputStreamOperator<CdcMultiplexRecord, MultiTableCommittable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, String commitUser) {
+            StoreSinkWrite.WithWriteBufferProvider writeProvider, String commitUser) {
         return new CdcRecordStoreMultiWriteOperator(
                 catalogLoader, writeProvider, commitUser, new Options());
     }

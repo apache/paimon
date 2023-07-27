@@ -21,6 +21,9 @@ package org.apache.paimon.memory;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -30,8 +33,8 @@ public class MemoryPoolFactoryTest {
     @Test
     public void testFreePages() {
         MemoryPoolFactory factory =
-                new MemoryPoolFactory(
-                        new HeapMemorySegmentPool(1024 * 10, 1024), new ArrayList<>());
+                new MemoryPoolFactory(new HeapMemorySegmentPool(1024 * 10, 1024))
+                        .addOwners(new ArrayList<>());
         MemorySegmentPool pool1 = factory.createSubPool(new TestMemoryOwner());
         MemorySegmentPool pool2 = factory.createSubPool(new TestMemoryOwner());
         assertThat(pool1.nextSegment()).isNotNull();
@@ -40,6 +43,37 @@ public class MemoryPoolFactoryTest {
 
         assertThat(pool1.freePages()).isEqualTo(9);
         assertThat(pool2.freePages()).isEqualTo(8);
+    }
+
+    @Test
+    public void testAddOwners() {
+        MemoryPoolFactory factory =
+                new MemoryPoolFactory(new HeapMemorySegmentPool(1024 * 10, 1024));
+
+        List<List<MemoryOwner>> ownerList = new ArrayList<>();
+        Random random = ThreadLocalRandom.current();
+
+        // prepare empty owners lists
+        int numList = random.nextInt(5);
+        for (int i = 0; i < numList; i++) {
+            List<MemoryOwner> owners = new ArrayList<>();
+            factory.addOwners(owners);
+            ownerList.add(owners);
+        }
+        assertThat(factory.memoryOwners()).isEmpty();
+
+        // add owners
+        List<MemoryOwner> allAddedOwners = new ArrayList<>();
+        for (int i = 0; i < numList; i++) {
+            List<MemoryOwner> owners = ownerList.get(i);
+            int numOwners = random.nextInt(10);
+            for (int j = 0; j < numOwners; j++) {
+                MemoryOwner owner = new TestMemoryOwner();
+                owners.add(owner);
+                allAddedOwners.add(owner);
+            }
+        }
+        assertThat(factory.memoryOwners()).containsExactlyInAnyOrderElementsOf(allAddedOwners);
     }
 
     private static class TestMemoryOwner implements MemoryOwner {
