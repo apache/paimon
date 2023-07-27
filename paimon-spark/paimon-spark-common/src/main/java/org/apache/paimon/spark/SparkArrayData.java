@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 
@@ -35,7 +36,6 @@ import org.apache.spark.unsafe.types.UTF8String;
 
 import static org.apache.paimon.spark.SparkInternalRow.fromPaimon;
 import static org.apache.paimon.utils.InternalRowUtils.copyArray;
-import static org.apache.paimon.utils.TypeUtils.timestampPrecision;
 
 /** Spark {@link ArrayData} to wrap Paimon {@link InternalArray}. */
 public class SparkArrayData extends ArrayData {
@@ -117,7 +117,7 @@ public class SparkArrayData extends ArrayData {
     }
 
     private long getTimestampMicros(int ordinal) {
-        return fromPaimon(array.getTimestamp(ordinal, timestampPrecision(elementType)));
+        return fromPaimon(array.getTimestamp(ordinal, DataTypeChecks.getPrecision(elementType)));
     }
 
     @Override

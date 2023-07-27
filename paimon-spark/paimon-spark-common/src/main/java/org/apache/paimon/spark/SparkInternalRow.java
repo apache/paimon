@@ -23,14 +23,15 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
-
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData;
 import org.apache.spark.sql.catalyst.util.ArrayData;
 import org.apache.spark.sql.catalyst.util.DateTimeUtils;
@@ -40,7 +41,6 @@ import org.apache.spark.unsafe.types.CalendarInterval;
 import org.apache.spark.unsafe.types.UTF8String;
 
 import static org.apache.paimon.utils.InternalRowUtils.copyInternalRow;
-import static org.apache.paimon.utils.TypeUtils.timestampPrecision;
 
 /** Spark {@link org.apache.spark.sql.catalyst.InternalRow} to wrap {@link InternalRow}. */
 public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow {
@@ -114,7 +114,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
     private long getTimestampMicros(int ordinal) {
         DataType type = rowType.getTypeAt(ordinal);
-        return fromPaimon(row.getTimestamp(ordinal, timestampPrecision(type)));
+        return fromPaimon(row.getTimestamp(ordinal, DataTypeChecks.getPrecision(type)));
     }
 
     @Override

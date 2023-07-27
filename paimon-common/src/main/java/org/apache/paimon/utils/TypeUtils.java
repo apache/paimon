@@ -135,16 +135,6 @@ public class TypeUtils {
         }
     }
 
-    public static int timestampPrecision(DataType type) {
-        if (type instanceof TimestampType) {
-            return ((TimestampType) type).getPrecision();
-        } else if (type instanceof LocalZonedTimestampType) {
-            return ((LocalZonedTimestampType) type).getPrecision();
-        }
-
-        throw new UnsupportedOperationException("Unsupported type: " + type);
-    }
-
     public static boolean isPrimitive(DataType type) {
         return isPrimitive(type.getTypeRoot());
     }
