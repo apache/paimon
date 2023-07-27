@@ -583,5 +583,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
             assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]");
             assertThat((long) row.getField(2)).isGreaterThan(0L); // check file size
         }
+
+        sql(String.format("INSERT INTO %s VALUES (3, 4, 4, 'S3'), (1, 3, 2, 'S4')", tableName));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
+
+        List<Row> rows2 = sql(String.format("SELECT * FROM %s$partitions", tableName));
+        for (Row row : rows2) {
+            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]", "[3]", "[4]");
+        }
     }
 }
