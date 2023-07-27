@@ -28,7 +28,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
@@ -54,13 +53,6 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
     private static final String USER = "paimonuser";
     private static final String PASSWORD = "paimonpw";
 
-    @BeforeAll
-    public static void startContainers() {
-        LOG.info("Starting containers...");
-        Startables.deepStart(Stream.of(MYSQL_CONTAINER)).join();
-        LOG.info("Containers are started.");
-    }
-
     @AfterAll
     public static void stopContainers() {
         LOG.info("Stopping containers...");
@@ -72,11 +64,16 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
         return (MySqlContainer)
                 new MySqlContainer(version)
                         .withConfigurationOverride("mysql/my.cnf")
-                        .withSetupSQL("mysql/setup.sql")
                         .withUsername(USER)
                         .withPassword(PASSWORD)
                         .withEnv("TZ", "America/Los_Angeles")
                         .withLogConsumer(new Slf4jLogConsumer(LOG));
+    }
+
+    protected static void start() {
+        LOG.info("Starting containers...");
+        Startables.deepStart(Stream.of(MYSQL_CONTAINER)).join();
+        LOG.info("Containers are started.");
     }
 
     protected void waitForResult(
