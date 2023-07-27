@@ -45,7 +45,7 @@ Primary Key Table supports two bucket mode:
    - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
    - Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
    - Dynamic Bucket requires more memory, 100 million entries in a partition takes up 1 GB more memory, partitions that are no longer active do not take up memory.
-   - Dynamic Bucket only support single writer. Please do not start multiple writers to write to the same partition.
+   - Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition.
 
 ## Merge Engines
 
