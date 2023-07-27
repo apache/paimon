@@ -228,7 +228,7 @@ public class HiveCatalog extends AbstractCatalog {
                                 // tables.
                                 // so we just check the schema file first
                                 return schemaFileExists(identifier)
-                                        && paimonTableExists(identifier, false);
+                                        && paimonTableExists(identifier);
                             })
                     .collect(Collectors.toList());
         } catch (UnknownDBException e) {
@@ -532,15 +532,11 @@ public class HiveCatalog extends AbstractCatalog {
                 dataField.description());
     }
 
-    private boolean paimonTableExists(Identifier identifier) {
-        return paimonTableExists(identifier, true);
-    }
-
     private boolean schemaFileExists(Identifier identifier) {
         return new SchemaManager(fileIO, getDataTableLocation(identifier)).latest().isPresent();
     }
 
-    private boolean paimonTableExists(Identifier identifier, boolean throwException) {
+    private boolean paimonTableExists(Identifier identifier) {
         Table table;
         try {
             table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
@@ -552,17 +548,7 @@ public class HiveCatalog extends AbstractCatalog {
                     e);
         }
 
-        boolean isPaimonTable = isPaimonTable(table) || LegacyHiveClasses.isPaimonTable(table);
-        if (!isPaimonTable && throwException) {
-            throw new IllegalArgumentException(
-                    "Table "
-                            + identifier.getFullName()
-                            + " is not a paimon table. It's input format is "
-                            + table.getSd().getInputFormat()
-                            + " and its output format is "
-                            + table.getSd().getOutputFormat());
-        }
-        return isPaimonTable;
+        return isPaimonTable(table) || LegacyHiveClasses.isPaimonTable(table);
     }
 
     private static boolean isPaimonTable(Table table) {

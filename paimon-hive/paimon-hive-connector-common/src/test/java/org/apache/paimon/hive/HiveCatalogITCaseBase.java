@@ -237,7 +237,7 @@ public abstract class HiveCatalogITCaseBase {
             Assert.fail("No exception is thrown");
         } catch (Throwable t) {
             ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table test_db.hive_table is not a paimon table");
+                    t, "Table with identifier 'my_hive.test_db.hive_table' does not exist.");
         }
 
         // alter table
@@ -262,7 +262,8 @@ public abstract class HiveCatalogITCaseBase {
             Assert.fail("No exception is thrown");
         } catch (Throwable t) {
             ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table test_db.hive_table is not a paimon table");
+                    t,
+                    "Table `my_hive`.`test_db`.`hive_table` doesn't exist or is a temporary table.");
         }
     }
 
@@ -334,7 +335,8 @@ public abstract class HiveCatalogITCaseBase {
             Assert.fail("No exception is thrown");
         } catch (Throwable t) {
             ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table test_db.hive_table is not a paimon table");
+                    t,
+                    "Cannot find table '`my_hive`.`test_db`.`hive_table`' in any of the catalogs [default_catalog, my_hive], nor as a temporary table.");
         }
     }
 
