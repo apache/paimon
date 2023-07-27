@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.utils.Restorable;
@@ -75,7 +76,12 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public TableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
+    public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
+        write.withMemoryPool(memoryPool);
+        return this;
+    }
+
+    public TableWriteImpl<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         write.withMemoryPoolFactory(memoryPoolFactory);
         return this;
     }

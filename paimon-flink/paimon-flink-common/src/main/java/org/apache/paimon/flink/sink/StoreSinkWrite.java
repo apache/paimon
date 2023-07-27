@@ -78,7 +78,7 @@ public interface StoreSinkWrite {
                 @Nullable MemorySegmentPool memoryPool);
     }
 
-    /** Provider of {@link StoreSinkWrite} that using given write buffer. */
+    /** Provider of {@link StoreSinkWrite} that uses given write buffer. */
     @FunctionalInterface
     interface WithWriteBufferProvider extends Serializable {
 

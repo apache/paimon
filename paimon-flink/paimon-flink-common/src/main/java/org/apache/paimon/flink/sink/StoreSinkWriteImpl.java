@@ -132,20 +132,19 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                 commitUser,
                                 (part, bucket) ->
                                         state.stateValueFilter().filter(table.name(), part, bucket))
+                        .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .isStreamingMode(isStreamingMode)
-                        .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()));
+                        .isStreamingMode(isStreamingMode);
 
         if (memoryPoolFactory != null) {
-            return (TableWriteImpl<?>) tableWrite.withMemoryPoolFactory(memoryPoolFactory);
+            return tableWrite.withMemoryPoolFactory(memoryPoolFactory);
         } else {
-            return (TableWriteImpl<?>)
-                    tableWrite.withMemoryPool(
-                            memoryPool != null
-                                    ? memoryPool
-                                    : new HeapMemorySegmentPool(
-                                            table.coreOptions().writeBufferSize(),
-                                            table.coreOptions().pageSize()));
+            return tableWrite.withMemoryPool(
+                    memoryPool != null
+                            ? memoryPool
+                            : new HeapMemorySegmentPool(
+                                    table.coreOptions().writeBufferSize(),
+                                    table.coreOptions().pageSize()));
         }
     }
 

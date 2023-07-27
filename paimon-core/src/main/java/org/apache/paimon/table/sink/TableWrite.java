@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.table.Table;
 
@@ -37,19 +36,8 @@ public interface TableWrite extends AutoCloseable {
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);
 
-    /**
-     * With {@link MemorySegmentPool} for the current table write. Cannot be called with {@link
-     * #withMemoryPoolFactory} together.
-     */
-    default TableWrite withMemoryPool(MemorySegmentPool memoryPool) {
-        return withMemoryPoolFactory(new MemoryPoolFactory(memoryPool));
-    }
-
-    /**
-     * With {@link MemoryPoolFactory} for the current table write. Cannot be called with {@link
-     * #withMemoryPool} together.
-     */
-    TableWrite withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory);
+    /** With {@link MemorySegmentPool} for the current table write. */
+    TableWrite withMemoryPool(MemorySegmentPool memoryPool);
 
     /** Calculate which partition {@code row} belongs to. */
     BinaryRow getPartition(InternalRow row);
