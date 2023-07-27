@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -1036,8 +1034,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     private FileStoreTable getFileStoreTable() throws Exception {
-        Catalog catalog = catalog();
-        Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog.getTable(identifier);
+        return getFileStoreTable(tableName);
     }
 }

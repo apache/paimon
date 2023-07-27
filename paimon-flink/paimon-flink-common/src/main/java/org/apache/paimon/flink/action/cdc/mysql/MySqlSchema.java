@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
 
@@ -39,17 +40,6 @@ public class MySqlSchema {
 
     private final LinkedHashMap<String, Tuple2<DataType, String>> fields;
     private final List<String> primaryKeys;
-
-    public MySqlSchema(
-            String databaseName,
-            String tableName,
-            LinkedHashMap<String, Tuple2<DataType, String>> fields,
-            List<String> primaryKeys) {
-        this.databaseName = databaseName;
-        this.tableName = tableName;
-        this.fields = fields;
-        this.primaryKeys = primaryKeys;
-    }
 
     public MySqlSchema(
             DatabaseMetaData metaData,
@@ -93,12 +83,12 @@ public class MySqlSchema {
         }
     }
 
-    public String databaseName() {
-        return databaseName;
-    }
-
     public String tableName() {
         return tableName;
+    }
+
+    public Identifier identifier() {
+        return Identifier.create(databaseName, tableName);
     }
 
     public LinkedHashMap<String, Tuple2<DataType, String>> fields() {
