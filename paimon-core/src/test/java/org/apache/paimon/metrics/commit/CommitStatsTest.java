@@ -18,8 +18,6 @@
 
 package org.apache.paimon.metrics.commit;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 
@@ -28,9 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.manifest.ManifestFileMetaTestBase.makeEntry;
@@ -62,66 +58,6 @@ public class CommitStatsTest {
     }
 
     @Test
-    public void testGroupByBucket() {
-        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> bucketedFiles =
-                CommitStats.groupByBucket(files);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(1), new HashMap<>())
-                                .getOrDefault(1, new ArrayList<>())
-                                .size())
-                .isEqualTo(4);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(1), new HashMap<>())
-                                .getOrDefault(3, new ArrayList<>())
-                                .size())
-                .isEqualTo(0);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(1), new HashMap<>())
-                                .getOrDefault(5, new ArrayList<>())
-                                .size())
-                .isEqualTo(0);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(2), new HashMap<>())
-                                .getOrDefault(1, new ArrayList<>())
-                                .size())
-                .isEqualTo(0);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(2), new HashMap<>())
-                                .getOrDefault(3, new ArrayList<>())
-                                .size())
-                .isEqualTo(4);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(2), new HashMap<>())
-                                .getOrDefault(5, new ArrayList<>())
-                                .size())
-                .isEqualTo(0);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(3), new HashMap<>())
-                                .getOrDefault(1, new ArrayList<>())
-                                .size())
-                .isEqualTo(0);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(3), new HashMap<>())
-                                .getOrDefault(3, new ArrayList<>())
-                                .size())
-                .isEqualTo(0);
-        assertThat(
-                        bucketedFiles
-                                .getOrDefault(row(3), new HashMap<>())
-                                .getOrDefault(5, new ArrayList<>())
-                                .size())
-                .isEqualTo(1);
-    }
-
-    @Test
     public void testCalcChangedPartitionsAndBuckets() {
         assertThat(CommitStats.numChangedBuckets(files)).isEqualTo(3);
         assertThat(CommitStats.numChangedPartitions(files)).isEqualTo(3);
@@ -144,20 +80,16 @@ public class CommitStatsTest {
                         0,
                         1);
         assertThat(commitStats.getTableFilesAdded()).isEqualTo(0);
-        assertThat(commitStats.getBucketedTableFilesAdded(row(1), 2)).isEqualTo(0);
         assertThat(commitStats.getTableFilesDeleted()).isEqualTo(0);
-        assertThat(commitStats.getBucketedTableFilesDeleted(row(1), 2)).isEqualTo(0);
-        assertThat(commitStats.getBucketedTableFilesAppended(row(1), 2)).isEqualTo(0);
-        assertThat(commitStats.getBucketedTableFilesCompacted(row(1), 2)).isEqualTo(0);
-        assertThat(commitStats.getChangelogFilesCommitAppended()).isEqualTo(0);
-        assertThat(commitStats.getBucketedChangelogFilesAppended(row(1), 2)).isEqualTo(0);
+        assertThat(commitStats.getTableFilesAppended()).isEqualTo(0);
+        assertThat(commitStats.getTableFilesCompacted()).isEqualTo(0);
+        assertThat(commitStats.getChangelogFilesAppended()).isEqualTo(0);
         assertThat(commitStats.getChangelogFilesCompacted()).isEqualTo(0);
-        assertThat(commitStats.getBucketedChangelogFilesCompacted(row(1), 2)).isEqualTo(0);
         assertThat(commitStats.getGeneratedSnapshots()).isEqualTo(0);
-        assertThat(commitStats.getBucketedDeltaRecordsAppended(row(1), 2)).isEqualTo(0);
-        assertThat(commitStats.getBucketedChangelogRecordsAppended(row(1), 2)).isEqualTo(0);
-        assertThat(commitStats.getBucketedDeltaRecordsCompacted(row(1), 2)).isEqualTo(0);
-        assertThat(commitStats.getBucketedChangelogRecordsCompacted(row(1), 2)).isEqualTo(0);
+        assertThat(commitStats.getDeltaRecordsAppended()).isEqualTo(0);
+        assertThat(commitStats.getChangelogRecordsAppended()).isEqualTo(0);
+        assertThat(commitStats.getDeltaRecordsCompacted()).isEqualTo(0);
+        assertThat(commitStats.getChangelogRecordsCompacted()).isEqualTo(0);
         assertThat(commitStats.getNumPartitionsWritten()).isEqualTo(0);
         assertThat(commitStats.getNumBucketsWritten()).isEqualTo(0);
         assertThat(commitStats.getDuration()).isEqualTo(0);
@@ -176,20 +108,16 @@ public class CommitStatsTest {
                         1,
                         2);
         assertThat(commitStats.getTableFilesAdded()).isEqualTo(2);
-        assertThat(commitStats.getBucketedTableFilesAdded(row(1), 1)).isEqualTo(1);
         assertThat(commitStats.getTableFilesDeleted()).isEqualTo(0);
-        assertThat(commitStats.getBucketedTableFilesDeleted(row(1), 1)).isEqualTo(0);
-        assertThat(commitStats.getBucketedTableFilesAppended(row(2), 3)).isEqualTo(1);
-        assertThat(commitStats.getBucketedTableFilesCompacted(row(1), 1)).isEqualTo(0);
-        assertThat(commitStats.getChangelogFilesCommitAppended()).isEqualTo(2);
-        assertThat(commitStats.getBucketedChangelogFilesAppended(row(2), 3)).isEqualTo(1);
+        assertThat(commitStats.getTableFilesAppended()).isEqualTo(2);
+        assertThat(commitStats.getTableFilesCompacted()).isEqualTo(0);
+        assertThat(commitStats.getChangelogFilesAppended()).isEqualTo(2);
         assertThat(commitStats.getChangelogFilesCompacted()).isEqualTo(0);
-        assertThat(commitStats.getBucketedChangelogFilesCompacted(row(1), 1)).isEqualTo(0);
         assertThat(commitStats.getGeneratedSnapshots()).isEqualTo(1);
-        assertThat(commitStats.getBucketedDeltaRecordsAppended(row(1), 1)).isEqualTo(201);
-        assertThat(commitStats.getBucketedChangelogRecordsAppended(row(1), 1)).isEqualTo(202);
-        assertThat(commitStats.getBucketedDeltaRecordsCompacted(row(2), 3)).isEqualTo(0);
-        assertThat(commitStats.getBucketedChangelogRecordsCompacted(row(2), 3)).isEqualTo(0);
+        assertThat(commitStats.getDeltaRecordsAppended()).isEqualTo(503);
+        assertThat(commitStats.getChangelogRecordsAppended()).isEqualTo(503);
+        assertThat(commitStats.getDeltaRecordsCompacted()).isEqualTo(0);
+        assertThat(commitStats.getChangelogRecordsCompacted()).isEqualTo(0);
         assertThat(commitStats.getNumPartitionsWritten()).isEqualTo(2);
         assertThat(commitStats.getNumBucketsWritten()).isEqualTo(2);
         assertThat(commitStats.getDuration()).isEqualTo(3000);
@@ -208,20 +136,16 @@ public class CommitStatsTest {
                         2,
                         2);
         assertThat(commitStats.getTableFilesAdded()).isEqualTo(4);
-        assertThat(commitStats.getBucketedTableFilesAdded(row(1), 1)).isEqualTo(2);
         assertThat(commitStats.getTableFilesDeleted()).isEqualTo(1);
-        assertThat(commitStats.getBucketedTableFilesDeleted(row(1), 1)).isEqualTo(0);
-        assertThat(commitStats.getBucketedTableFilesAppended(row(2), 3)).isEqualTo(1);
-        assertThat(commitStats.getBucketedTableFilesCompacted(row(1), 1)).isEqualTo(1);
-        assertThat(commitStats.getChangelogFilesCommitAppended()).isEqualTo(2);
-        assertThat(commitStats.getBucketedChangelogFilesAppended(row(2), 3)).isEqualTo(1);
+        assertThat(commitStats.getTableFilesAppended()).isEqualTo(2);
+        assertThat(commitStats.getTableFilesCompacted()).isEqualTo(3);
+        assertThat(commitStats.getChangelogFilesAppended()).isEqualTo(2);
         assertThat(commitStats.getChangelogFilesCompacted()).isEqualTo(2);
-        assertThat(commitStats.getBucketedChangelogFilesCompacted(row(1), 1)).isEqualTo(1);
         assertThat(commitStats.getGeneratedSnapshots()).isEqualTo(2);
-        assertThat(commitStats.getBucketedDeltaRecordsAppended(row(1), 1)).isEqualTo(201);
-        assertThat(commitStats.getBucketedChangelogRecordsAppended(row(1), 1)).isEqualTo(202);
-        assertThat(commitStats.getBucketedDeltaRecordsCompacted(row(2), 3)).isEqualTo(304);
-        assertThat(commitStats.getBucketedChangelogRecordsCompacted(row(2), 3)).isEqualTo(307);
+        assertThat(commitStats.getDeltaRecordsAppended()).isEqualTo(503);
+        assertThat(commitStats.getChangelogRecordsAppended()).isEqualTo(503);
+        assertThat(commitStats.getDeltaRecordsCompacted()).isEqualTo(613);
+        assertThat(commitStats.getChangelogRecordsCompacted()).isEqualTo(512);
         assertThat(commitStats.getNumPartitionsWritten()).isEqualTo(3);
         assertThat(commitStats.getNumBucketsWritten()).isEqualTo(3);
         assertThat(commitStats.getDuration()).isEqualTo(3000);

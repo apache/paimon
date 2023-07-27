@@ -19,28 +19,17 @@
 package org.apache.paimon.metrics.commit;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.metrics.Counter;
 import org.apache.paimon.metrics.DescriptiveStatisticsHistogram;
-import org.apache.paimon.metrics.Gauge;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.MetricGroup;
-import org.apache.paimon.metrics.groups.BucketMetricGroup;
 import org.apache.paimon.metrics.groups.GenericMetricGroup;
 import org.apache.paimon.utils.FileStorePathFactory;
-
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
 
 /** Metrics to measure a commit. */
 public class CommitMetrics {
     private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
     protected static final String GROUP_NAME = "commit";
-
-    private static final String groupKeyFormat = "%s-%s";
-    private final Map<String, BucketMetricGroup> bucketMetricGroups = new HashMap<>();
 
     private final MetricGroup genericMetricGroup;
     private final FileStorePathFactory pathFactory;
@@ -51,10 +40,6 @@ public class CommitMetrics {
                 GenericMetricGroup.createGenericMetricGroup(
                         pathFactory.root().getName(), GROUP_NAME);
         registerGenericCommitMetrics();
-    }
-
-    public Map<String, BucketMetricGroup> getBucketMetricGroups() {
-        return bucketMetricGroups;
     }
 
     public MetricGroup getGenericMetricGroup() {
@@ -104,149 +89,84 @@ public class CommitMetrics {
     transient Counter totalChangelogFilesCounter;
 
     private void registerGenericCommitMetrics() {
-        genericMetricGroup.gauge(LAST_COMMIT_DURATION, new LatestDurationGauge());
-        genericMetricGroup.gauge(LAST_COMMIT_ATTEMPTS, new LatestAttemptsGauge());
-        genericMetricGroup.gauge(LAST_GENERATED_SNAPSHOTS, new LatestGeneratedSnapshotGauge());
-        genericMetricGroup.gauge(LAST_PARTITIONS_WRITTEN, new LatestPartitionsWrittenGauge());
-        genericMetricGroup.gauge(LAST_BUCKETS_WRITTEN, new LatestBucketsWrittenGauge());
+        genericMetricGroup.gauge(
+                LAST_COMMIT_DURATION,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getDuration();
+                });
+        genericMetricGroup.gauge(
+                LAST_COMMIT_ATTEMPTS,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getAttempts();
+                });
+        genericMetricGroup.gauge(
+                LAST_GENERATED_SNAPSHOTS,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getGeneratedSnapshots();
+                });
+        genericMetricGroup.gauge(
+                LAST_PARTITIONS_WRITTEN,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getNumPartitionsWritten();
+                });
+        genericMetricGroup.gauge(
+                LAST_BUCKETS_WRITTEN,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getNumBucketsWritten();
+                });
         genericMetricGroup.histogram(COMMIT_DURATION, durationHistogram);
+        genericMetricGroup.gauge(
+                LAST_TABLE_FILES_ADDED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getTableFilesAdded();
+                });
+        genericMetricGroup.gauge(
+                LAST_TABLE_FILES_DELETED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getTableFilesDeleted();
+                });
+        genericMetricGroup.gauge(
+                LAST_TABLE_FILES_APPENDED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getTableFilesAppended();
+                });
+        genericMetricGroup.gauge(
+                LAST_TABLE_FILES_COMMIT_COMPACTED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getTableFilesCompacted();
+                });
+        genericMetricGroup.gauge(
+                LAST_CHANGELOG_FILES_APPENDED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getChangelogFilesAppended();
+                });
+        genericMetricGroup.gauge(
+                LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getChangelogFilesCompacted();
+                });
+        genericMetricGroup.gauge(
+                LAST_DELTA_RECORDS_APPENDED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getDeltaRecordsAppended();
+                });
+        genericMetricGroup.gauge(
+                LAST_CHANGELOG_RECORDS_APPENDED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getChangelogRecordsAppended();
+                });
+        genericMetricGroup.gauge(
+                LAST_DELTA_RECORDS_COMMIT_COMPACTED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getDeltaRecordsCompacted();
+                });
+        genericMetricGroup.gauge(
+                LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
+                () -> {
+                    return latestCommit == null ? 0L : latestCommit.getChangelogRecordsCompacted();
+                });
         totalTableFilesCounter = genericMetricGroup.counter(TOTAL_TABLE_FILES);
         totalChangelogFilesCounter = genericMetricGroup.counter(TOTAL_CHANGELOG_FILES);
-    }
-
-    private void registerBucketCommitMetrics() {
-        if (latestCommit != null) {
-            Map<BinaryRow, Set<Integer>> partBuckets = latestCommit.getPartBucketsWritten();
-            for (Map.Entry<BinaryRow, Set<Integer>> kv : partBuckets.entrySet()) {
-                BinaryRow partition = kv.getKey();
-                String partitionStr = getPartitionString(partition);
-                for (Integer bucket : kv.getValue()) {
-                    String groupKey = String.format(groupKeyFormat, partitionStr, bucket);
-                    if (!bucketMetricGroups.containsKey(groupKey)) {
-                        BucketMetricGroup group =
-                                bucketMetricGroups.compute(
-                                        groupKey,
-                                        (k, v) ->
-                                                BucketMetricGroup.createBucketMetricGroup(
-                                                        pathFactory.root().getName(),
-                                                        bucket,
-                                                        partitionStr,
-                                                        GROUP_NAME));
-                        group.gauge(
-                                LAST_TABLE_FILES_ADDED,
-                                () -> latestCommit.getBucketedTableFilesAdded(partition, bucket));
-                        group.gauge(
-                                LAST_TABLE_FILES_DELETED,
-                                () -> latestCommit.getBucketedTableFilesDeleted(partition, bucket));
-                        group.gauge(
-                                LAST_TABLE_FILES_APPENDED,
-                                () ->
-                                        latestCommit.getBucketedTableFilesAppended(
-                                                partition, bucket));
-                        group.gauge(
-                                LAST_TABLE_FILES_COMMIT_COMPACTED,
-                                () ->
-                                        latestCommit.getBucketedTableFilesCompacted(
-                                                partition, bucket));
-                        group.gauge(
-                                LAST_CHANGELOG_FILES_APPENDED,
-                                () ->
-                                        latestCommit.getBucketedChangelogFilesAppended(
-                                                partition, bucket));
-                        group.gauge(
-                                LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
-                                () ->
-                                        latestCommit.getBucketedChangelogFilesCompacted(
-                                                partition, bucket));
-                        group.gauge(
-                                LAST_DELTA_RECORDS_APPENDED,
-                                () ->
-                                        latestCommit.getBucketedDeltaRecordsAppended(
-                                                partition, bucket));
-                        group.gauge(
-                                LAST_CHANGELOG_RECORDS_APPENDED,
-                                () ->
-                                        latestCommit.getBucketedChangelogRecordsAppended(
-                                                partition, bucket));
-                        group.gauge(
-                                LAST_DELTA_RECORDS_COMMIT_COMPACTED,
-                                () ->
-                                        latestCommit.getBucketedDeltaRecordsCompacted(
-                                                partition, bucket));
-                        group.gauge(
-                                LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
-                                () ->
-                                        latestCommit.getBucketedChangelogRecordsCompacted(
-                                                partition, bucket));
-                    }
-                }
-            }
-        }
-    }
-
-    private String getPartitionString(BinaryRow partition) {
-        String partitionStr = pathFactory.getPartitionString(partition);
-        return partitionStr.replace(Path.SEPARATOR, "-").substring(0, partitionStr.length() - 1);
-    }
-
-    private class LatestDurationGauge implements Gauge<Long> {
-        @Override
-        public Long getValue() {
-            CommitStats commit = latestCommit;
-            if (commit != null) {
-                return commit.getDuration();
-            } else {
-                return 0L;
-            }
-        }
-    }
-
-    private class LatestAttemptsGauge implements Gauge<Long> {
-        @Override
-        public Long getValue() {
-            CommitStats commit = latestCommit;
-            if (commit != null) {
-                return commit.getAttempts();
-            } else {
-                return 0L;
-            }
-        }
-    }
-
-    private class LatestGeneratedSnapshotGauge implements Gauge<Long> {
-        @Override
-        public Long getValue() {
-            CommitStats commit = latestCommit;
-            if (commit != null) {
-                return commit.getGeneratedSnapshots();
-            } else {
-                return 0L;
-            }
-        }
-    }
-
-    private class LatestPartitionsWrittenGauge implements Gauge<Long> {
-        @Override
-        public Long getValue() {
-            CommitStats commit = latestCommit;
-            if (commit != null) {
-                return commit.getNumPartitionsWritten();
-            } else {
-                return 0L;
-            }
-        }
-    }
-
-    private class LatestBucketsWrittenGauge implements Gauge<Long> {
-        @Override
-        public Long getValue() {
-            CommitStats commit = latestCommit;
-            if (commit != null) {
-                return commit.getNumBucketsWritten();
-            } else {
-                return 0L;
-            }
-        }
     }
 
     public void reportCommit(CommitStats commitStats) {
@@ -254,9 +174,7 @@ public class CommitMetrics {
         totalTableFilesCounter.inc(
                 commitStats.getTableFilesAdded() - commitStats.getTableFilesDeleted());
         totalChangelogFilesCounter.inc(
-                commitStats.getChangelogFilesCommitAppended()
-                        + commitStats.getChangelogFilesCompacted());
+                commitStats.getChangelogFilesAppended() + commitStats.getChangelogFilesCompacted());
         durationHistogram.update(commitStats.getDuration());
-        registerBucketCommitMetrics();
     }
 }
