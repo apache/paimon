@@ -48,13 +48,10 @@ import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.fieldDefaultValueKey;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 
 /** Spark {@link TableCatalog} for paimon. */
@@ -274,7 +271,9 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
     public org.apache.spark.sql.connector.catalog.Table alterTable(
             Identifier ident, TableChange... changes) throws NoSuchTableException {
         List<SchemaChange> schemaChanges =
-                Arrays.stream(changes).map(this::toSchemaChange).collect(Collectors.toList());
+                Arrays.stream(changes)
+                        .flatMap(change -> this.toSchemaChange(change).stream())
+                        .collect(Collectors.toList());
         try {
             catalog.alterTable(toIdentifier(ident), schemaChanges, false);
             return loadTable(ident);
@@ -315,48 +314,77 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         }
     }
 
-    private SchemaChange toSchemaChange(TableChange change) {
+    private List<SchemaChange> toSchemaChange(TableChange change) {
+        final List<SchemaChange> schemaChanges = new ArrayList<>();
         if (change instanceof TableChange.SetProperty) {
             TableChange.SetProperty set = (TableChange.SetProperty) change;
             validateAlterProperty(set.property());
-            return SchemaChange.setOption(set.property(), set.value());
+            schemaChanges.add(SchemaChange.setOption(set.property(), set.value()));
+            return schemaChanges;
         } else if (change instanceof TableChange.RemoveProperty) {
             TableChange.RemoveProperty remove = (TableChange.RemoveProperty) change;
             validateAlterProperty(remove.property());
-            return SchemaChange.removeOption(remove.property());
+            schemaChanges.add(SchemaChange.removeOption(remove.property()));
+            return schemaChanges;
         } else if (change instanceof TableChange.AddColumn) {
             TableChange.AddColumn add = (TableChange.AddColumn) change;
             validateAlterNestedField(add.fieldNames());
             SchemaChange.Move move = getMove(add.position(), add.fieldNames());
-            return SchemaChange.addColumn(
-                    add.fieldNames()[0],
-                    toPaimonType(add.dataType()).copy(add.isNullable()),
-                    add.comment(),
-                    move);
+            schemaChanges.add(
+                    SchemaChange.addColumn(
+                            add.fieldNames()[0],
+                            toPaimonType(add.dataType()).copy(add.isNullable()),
+                            add.comment(),
+                            move));
+            if (Objects.nonNull(add.defaultValue())) {
+                schemaChanges.add(
+                        SchemaChange.setOption(
+                                fieldDefaultValueKey(add.fieldNames()[0]),
+                                add.defaultValue().getValue().value().toString()));
+            }
+            return schemaChanges;
         } else if (change instanceof TableChange.RenameColumn) {
             TableChange.RenameColumn rename = (TableChange.RenameColumn) change;
             validateAlterNestedField(rename.fieldNames());
-            return SchemaChange.renameColumn(rename.fieldNames()[0], rename.newName());
+            schemaChanges.add(SchemaChange.renameColumn(rename.fieldNames()[0], rename.newName()));
+            return schemaChanges;
         } else if (change instanceof TableChange.DeleteColumn) {
             TableChange.DeleteColumn delete = (TableChange.DeleteColumn) change;
             validateAlterNestedField(delete.fieldNames());
-            return SchemaChange.dropColumn(delete.fieldNames()[0]);
+            schemaChanges.add(SchemaChange.dropColumn(delete.fieldNames()[0]));
+            return schemaChanges;
         } else if (change instanceof TableChange.UpdateColumnType) {
             TableChange.UpdateColumnType update = (TableChange.UpdateColumnType) change;
             validateAlterNestedField(update.fieldNames());
-            return SchemaChange.updateColumnType(
-                    update.fieldNames()[0], toPaimonType(update.newDataType()));
+            schemaChanges.add(
+                    SchemaChange.updateColumnType(
+                            update.fieldNames()[0], toPaimonType(update.newDataType())));
+            return schemaChanges;
         } else if (change instanceof TableChange.UpdateColumnNullability) {
             TableChange.UpdateColumnNullability update =
                     (TableChange.UpdateColumnNullability) change;
-            return SchemaChange.updateColumnNullability(update.fieldNames(), update.nullable());
+            schemaChanges.add(
+                    SchemaChange.updateColumnNullability(update.fieldNames(), update.nullable()));
+            return schemaChanges;
         } else if (change instanceof TableChange.UpdateColumnComment) {
             TableChange.UpdateColumnComment update = (TableChange.UpdateColumnComment) change;
-            return SchemaChange.updateColumnComment(update.fieldNames(), update.newComment());
+            schemaChanges.add(
+                    SchemaChange.updateColumnComment(update.fieldNames(), update.newComment()));
+            return schemaChanges;
         } else if (change instanceof TableChange.UpdateColumnPosition) {
             TableChange.UpdateColumnPosition update = (TableChange.UpdateColumnPosition) change;
             SchemaChange.Move move = getMove(update.position(), update.fieldNames());
-            return SchemaChange.updateColumnPosition(move);
+            schemaChanges.add(SchemaChange.updateColumnPosition(move));
+            return schemaChanges;
+        } else if (change instanceof TableChange.UpdateColumnDefaultValue) {
+            TableChange.UpdateColumnDefaultValue update =
+                    (TableChange.UpdateColumnDefaultValue) change;
+            validateAlterNestedField(update.fieldNames());
+            schemaChanges.add(
+                    SchemaChange.setOption(
+                            fieldDefaultValueKey(update.fieldNames()[0]),
+                            update.newDefaultValue()));
+            return schemaChanges;
         } else {
             throw new UnsupportedOperationException(
                     "Change is not supported: " + change.getClass());

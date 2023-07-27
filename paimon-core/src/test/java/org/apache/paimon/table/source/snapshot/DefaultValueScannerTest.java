@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -34,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import java.util.Arrays;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.fieldDefaultValueKey;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** test default value on streaming scan. */
@@ -79,11 +79,7 @@ public class DefaultValueScannerTest extends ScannerTestBase {
 
     protected FileStoreTable createFileStoreTable() throws Exception {
         Options options = new Options();
-        options.set(
-                String.format(
-                        "%s.%s.%s",
-                        CoreOptions.FIELDS_PREFIX, "b", CoreOptions.DEFAULT_VALUE_SUFFIX),
-                "100");
+        options.set(fieldDefaultValueKey("b"), "100");
         return createFileStoreTable(options);
     }
 }

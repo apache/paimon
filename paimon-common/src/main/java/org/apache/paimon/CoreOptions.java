@@ -51,9 +51,13 @@ import static org.apache.paimon.options.description.TextElement.text;
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
 
-    public static final String DEFAULT_VALUE_SUFFIX = "default-value";
+    private static final String DEFAULT_VALUE_SUFFIX = "default-value";
 
     public static final String FIELDS_PREFIX = "fields";
+
+    public static String fieldDefaultValueKey(String fieldName) {
+        return FIELDS_PREFIX + "." + fieldName + "." + DEFAULT_VALUE_SUFFIX;
+    }
 
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")

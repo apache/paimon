@@ -73,16 +73,20 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         List<Row> beforeAdd = spark.sql("SHOW CREATE TABLE testAddColumn").collectAsList();
         assertThat(beforeAdd.toString()).contains(defaultShowCreateString("testAddColumn"));
 
-        spark.sql("ALTER TABLE testAddColumn ADD COLUMN d STRING");
+        spark.sql("ALTER TABLE testAddColumn ADD COLUMN d STRING DEFAULT 0 COMMENT 'd field'");
 
         List<Row> afterAdd = spark.sql("SHOW CREATE TABLE testAddColumn").collectAsList();
         assertThat(afterAdd.toString())
                 .contains(
                         showCreateString(
-                                "testAddColumn", "a INT", "b BIGINT", "c STRING", "d STRING"));
+                                "testAddColumn",
+                                "a INT",
+                                "b BIGINT",
+                                "c STRING",
+                                "d STRING COMMENT 'd field'"));
 
         assertThat(spark.table("testAddColumn").collectAsList().toString())
-                .isEqualTo("[[1,2,1,null], [5,6,3,null]]");
+                .isEqualTo("[[1,2,1,0], [5,6,3,0]]");
     }
 
     @Test
@@ -418,6 +422,29 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .isEqualTo("a double type");
         assertThat(getNestedField(getNestedField(getField(schema2(), 2), 0), 1).description())
                 .isEqualTo("a boolean array");
+    }
+
+    @Test
+    public void testAlterColumnDefaultValue() {
+        createTable("testAlterColumnDefaultValue");
+        writeTable("testAlterColumnDefaultValue", "(1, 2L, '1')", "(5, 6L, null)");
+
+        List<Row> beforeAlter =
+                spark.sql("SHOW CREATE TABLE testAlterColumnDefaultValue").collectAsList();
+        assertThat(beforeAlter.toString())
+                .contains(defaultShowCreateString("testAlterColumnDefaultValue"));
+
+        spark.sql("ALTER TABLE testAlterColumnDefaultValue ALTER COLUMN c SET DEFAULT 100");
+
+        List<Row> afterAdd =
+                spark.sql("SHOW CREATE TABLE testAlterColumnDefaultValue").collectAsList();
+        assertThat(afterAdd.toString())
+                .contains(
+                        showCreateString(
+                                "testAlterColumnDefaultValue", "a INT", "b BIGINT", "c STRING"));
+
+        assertThat(spark.table("testAlterColumnDefaultValue").collectAsList().toString())
+                .isEqualTo("[[1,2,1], [5,6,100]]");
     }
 
     /**

@@ -72,6 +72,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.fieldDefaultValueKey;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -733,13 +734,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 createFileStoreTable(
                         conf -> {
                             conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT);
-                            conf.set(
-                                    String.format(
-                                            "%s.%s.%s",
-                                            CoreOptions.FIELDS_PREFIX,
-                                            "b",
-                                            CoreOptions.DEFAULT_VALUE_SUFFIX),
-                                    "0");
+                            conf.set(fieldDefaultValueKey("b"), "0");
                         });
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);

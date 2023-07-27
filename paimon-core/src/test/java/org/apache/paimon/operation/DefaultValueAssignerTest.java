@@ -18,7 +18,6 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -42,6 +41,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.fieldDefaultValueKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class DefaultValueAssignerTest {
@@ -54,16 +54,8 @@ class DefaultValueAssignerTest {
         Path tablePath = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         Map<String, String> options = new HashMap<>();
-        options.put(
-                String.format(
-                        "%s.%s.%s",
-                        CoreOptions.FIELDS_PREFIX, "col4", CoreOptions.DEFAULT_VALUE_SUFFIX),
-                "0");
-        options.put(
-                String.format(
-                        "%s.%s.%s",
-                        CoreOptions.FIELDS_PREFIX, "col5", CoreOptions.DEFAULT_VALUE_SUFFIX),
-                "1");
+        options.put(fieldDefaultValueKey("col4"), "0");
+        options.put(fieldDefaultValueKey("col5"), "1");
         Schema schema =
                 new Schema(
                         Lists.newArrayList(

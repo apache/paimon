@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.DataFormatTestUtil;
@@ -57,6 +56,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
+import static org.apache.paimon.CoreOptions.fieldDefaultValueKey;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -84,11 +84,7 @@ public class SchemaEvolutionTest {
     public void testDefaultValue() throws Exception {
         {
             Map<String, String> option = new HashMap<>();
-            option.put(
-                    String.format(
-                            "%s.%s.%s",
-                            CoreOptions.FIELDS_PREFIX, "a", CoreOptions.DEFAULT_VALUE_SUFFIX),
-                    "1");
+            option.put(fieldDefaultValueKey("a"), "1");
             Schema schema =
                     new Schema(
                             RowType.of(
@@ -112,11 +108,7 @@ public class SchemaEvolutionTest {
 
         {
             Map<String, String> option = new HashMap<>();
-            option.put(
-                    String.format(
-                            "%s.%s.%s",
-                            CoreOptions.FIELDS_PREFIX, "a", CoreOptions.DEFAULT_VALUE_SUFFIX),
-                    "abcxxxx");
+            option.put(fieldDefaultValueKey("a"), "abcxxxx");
             Schema schema =
                     new Schema(
                             RowType.of(
@@ -157,13 +149,7 @@ public class SchemaEvolutionTest {
                                     schemaManager.commitChanges(
                                             Collections.singletonList(
                                                     SchemaChange.setOption(
-                                                            String.format(
-                                                                    "%s.%s.%s",
-                                                                    CoreOptions.FIELDS_PREFIX,
-                                                                    "b",
-                                                                    CoreOptions
-                                                                            .DEFAULT_VALUE_SUFFIX),
-                                                            "abcxxxx"))))
+                                                            fieldDefaultValueKey("b"), "abcxxxx"))))
                     .hasCauseInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining(
                             "The default value %s of the column b can not be cast to datatype: %s",
@@ -173,13 +159,7 @@ public class SchemaEvolutionTest {
                                     schemaManager.commitChanges(
                                             Collections.singletonList(
                                                     SchemaChange.setOption(
-                                                            String.format(
-                                                                    "%s.%s.%s",
-                                                                    CoreOptions.FIELDS_PREFIX,
-                                                                    "a",
-                                                                    CoreOptions
-                                                                            .DEFAULT_VALUE_SUFFIX),
-                                                            "abc"))))
+                                                            fieldDefaultValueKey("a"), "abc"))))
                     .hasCauseInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Primary key a should not be assign default column.");
 
@@ -188,13 +168,7 @@ public class SchemaEvolutionTest {
                                     schemaManager.commitChanges(
                                             Collections.singletonList(
                                                     SchemaChange.setOption(
-                                                            String.format(
-                                                                    "%s.%s.%s",
-                                                                    CoreOptions.FIELDS_PREFIX,
-                                                                    "c",
-                                                                    CoreOptions
-                                                                            .DEFAULT_VALUE_SUFFIX),
-                                                            "abc"))))
+                                                            fieldDefaultValueKey("c"), "abc"))))
                     .hasCauseInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Partition key c should not be assign default column.");
         }

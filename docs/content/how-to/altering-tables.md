@@ -152,8 +152,8 @@ ALTER TABLE my_table ADD (c1 INT, c2 STRING);
 
 ```sql
 ALTER TABLE my_table ADD COLUMNS (
-    c1 INT,
-    c2 STRING
+    c1 INT [DEFAULT default_value] [COMMENT field_comment],
+    c2 STRING [DEFAULT default_value] [COMMENT field_comment]
 );
 ```
 
@@ -412,6 +412,48 @@ ALTER TABLE my_table ALTER COLUMN col_a SET DATA TYPE DOUBLE;
 Supported Type Conversions.
 
 {{< generated/column_type_conversion >}}
+
+## Changing Column Default Value
+
+The following SQL changes default value of column `col_a` to `0`.
+
+{{< tabs "change-column-default-value" >}}
+
+{{< tab "Flink" >}}
+
+```sql
+ALTER TABLE my_table SET (
+    'fields.col_a.default-value' = '0'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+-- alter column
+ALTER TABLE my_table ALTER COLUMN col_a SET DEFAULT 0;
+
+-- or set properties
+ALTER TABLE my_table SET TBLPROPERTIES (
+    'fields.col_a.default-value' = '0'
+);
+```
+
+{{< /tab >}}
+
+{{< tab "Trino" >}}
+
+```sql
+ALTER TABLE my_table SET PROPERTIES fields.col_a.default-value = '0';
+```
+
+> NOTE: Versions below Trino 368 do not support changing/adding table properties.
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 ## Adding watermark
 

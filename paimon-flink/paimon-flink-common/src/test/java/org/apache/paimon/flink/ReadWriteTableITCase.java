@@ -71,15 +71,10 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.paimon.CoreOptions.BUCKET;
-import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.*;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
-import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
-import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
-import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
-import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildPaimonTable;
 import static org.apache.paimon.flink.FlinkConnectorOptions.INFER_SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
@@ -1543,8 +1538,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     public void testDefaultValueWithoutPrimaryKey() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(WRITE_MODE.key(), WriteMode.AUTO.name());
-        options.put(
-                CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
+        options.put(fieldDefaultValueKey("rate"), "1000");
 
         String table =
                 createTable(
@@ -1579,8 +1573,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(WRITE_MODE.key(), WriteMode.AUTO.name());
-        options.put(
-                CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
+        options.put(fieldDefaultValueKey("rate"), "1000");
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
             options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
