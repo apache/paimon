@@ -71,7 +71,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
-import static org.apache.paimon.CoreOptions.*;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
@@ -533,7 +532,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
                         Collections.emptyList(),
                         Collections.singletonList("dt"),
-                        ImmutableMap.of(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
+                        ImmutableMap.of(
+                                CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
 
         insertIntoFromTable(temporaryTable, table);
 
@@ -678,7 +678,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         Arrays.asList("currency STRING", "rate BIGINT"),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        ImmutableMap.of(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
+                        ImmutableMap.of(
+                                CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
 
         insertIntoFromTable(temporaryTable, table);
 
@@ -1187,9 +1188,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         Collections.emptyList(),
                         new HashMap<String, String>() {
                             {
-                                put(SOURCE_SPLIT_OPEN_FILE_COST.key(), "1KB");
-                                put(SOURCE_SPLIT_TARGET_SIZE.key(), "1KB");
-                                put(BUCKET.key(), "2");
+                                put(CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST.key(), "1KB");
+                                put(CoreOptions.SOURCE_SPLIT_TARGET_SIZE.key(), "1KB");
+                                put(CoreOptions.BUCKET.key(), "2");
                             }
                         });
         // Empty table, infer parallelism should be at least 1
@@ -1478,10 +1479,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         supportUpdateEngines.add(CoreOptions.MergeEngine.PARTIAL_UPDATE);
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
-        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
-            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+            options.put(CoreOptions.CHANGELOG_PRODUCER.key(), LOOKUP.toString());
         }
         String table =
                 createTable(
@@ -1537,8 +1538,8 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     @Test
     public void testDefaultValueWithoutPrimaryKey() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.AUTO.name());
-        options.put(fieldDefaultValueKey("rate"), "1000");
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.AUTO.name());
+        options.put(CoreOptions.fieldDefaultValueKey("rate"), "1000");
 
         String table =
                 createTable(
@@ -1572,11 +1573,11 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     public void testDefaultValueWithPrimaryKey(CoreOptions.MergeEngine mergeEngine)
             throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.AUTO.name());
-        options.put(fieldDefaultValueKey("rate"), "1000");
-        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.AUTO.name());
+        options.put(CoreOptions.fieldDefaultValueKey("rate"), "1000");
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
-            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+            options.put(CoreOptions.CHANGELOG_PRODUCER.key(), LOOKUP.toString());
         }
         String table =
                 createTable(
@@ -1608,8 +1609,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     public void testUpdateWithoutPrimaryKey(WriteMode writeMode) throws Exception {
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), writeMode.toString());
-        options.put(MERGE_ENGINE.key(), MERGE_ENGINE.defaultValue().toString());
+        options.put(CoreOptions.WRITE_MODE.key(), writeMode.toString());
+        options.put(
+                CoreOptions.MERGE_ENGINE.key(), CoreOptions.MERGE_ENGINE.defaultValue().toString());
         String table =
                 createTable(
                         Arrays.asList(
@@ -1656,10 +1658,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
-        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
-            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+            options.put(CoreOptions.CHANGELOG_PRODUCER.key(), LOOKUP.toString());
         }
         String table =
                 createTable(
@@ -1702,8 +1704,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     public void testDeleteWithoutPrimaryKey(WriteMode writeMode) throws Exception {
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), writeMode.toString());
-        options.put(MERGE_ENGINE.key(), MERGE_ENGINE.defaultValue().toString());
+        options.put(CoreOptions.WRITE_MODE.key(), writeMode.toString());
+        options.put(
+                CoreOptions.MERGE_ENGINE.key(), CoreOptions.MERGE_ENGINE.defaultValue().toString());
         String table =
                 createTable(
                         Arrays.asList(
@@ -1749,10 +1752,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
-        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
-            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+            options.put(CoreOptions.CHANGELOG_PRODUCER.key(), LOOKUP.toString());
         }
         String table =
                 createTable(
@@ -1830,10 +1833,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
-        options.put(MERGE_ENGINE.key(), mergeEngine.toString());
+        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+        options.put(CoreOptions.MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
-            options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
+            options.put(CoreOptions.CHANGELOG_PRODUCER.key(), LOOKUP.toString());
         }
         String table =
                 createTable(
