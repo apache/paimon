@@ -37,6 +37,7 @@ import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -74,6 +75,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     private static final String DATABASE_NAME_TINYINT = "paimon_sync_database_tinyint";
     @TempDir java.nio.file.Path tempDir;
+
+    @BeforeAll
+    public static void startContainers() {
+        MYSQL_CONTAINER.withSetupSQL("mysql/sync_database_setup.sql");
+        start();
+    }
 
     @Test
     @Timeout(60)
