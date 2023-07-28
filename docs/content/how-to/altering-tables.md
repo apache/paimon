@@ -443,16 +443,6 @@ ALTER TABLE my_table SET TBLPROPERTIES (
 
 {{< /tab >}}
 
-{{< tab "Trino" >}}
-
-```sql
-ALTER TABLE my_table SET PROPERTIES fields.col_a.default-value = '0';
-```
-
-> NOTE: Versions below Trino 368 do not support changing/adding table properties.
-
-{{< /tab >}}
-
 {{< /tabs >}}
 
 ## Adding watermark
