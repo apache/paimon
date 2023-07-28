@@ -40,8 +40,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-
 /** {@link StreamTableScan} implementation for streaming planning. */
 public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         implements InnerStreamTableScan {
@@ -107,6 +105,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
             nextSnapshotId = currentSnapshotId + 1;
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
+            return DataFilePlan.fromResult(result);
         } else if (result instanceof StartingScanner.NextSnapshot) {
             nextSnapshotId = ((StartingScanner.NextSnapshot) result).nextSnapshotId();
             isFullPhaseEnd =
@@ -114,7 +113,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                             && boundedChecker.shouldEndInput(
                                     snapshotManager.snapshot(nextSnapshotId - 1));
         }
-        return DataFilePlan.fromResult(result);
+        return SnapshotNotExistPlan.INSTANCE;
     }
 
     private Plan nextPlan() {
@@ -136,7 +135,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 LOG.debug(
                         "Next snapshot id {} does not exist, wait for the snapshot generation.",
                         nextSnapshotId);
-                return new DataFilePlan(Collections.emptyList());
+                return SnapshotNotExistPlan.INSTANCE;
             }
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);

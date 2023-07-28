@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
@@ -36,6 +37,7 @@ import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -46,6 +48,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -72,6 +75,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     private static final String DATABASE_NAME_TINYINT = "paimon_sync_database_tinyint";
     @TempDir java.nio.file.Path tempDir;
+
+    @BeforeAll
+    public static void startContainers() {
+        MYSQL_CONTAINER.withSetupSQL("mysql/sync_database_setup.sql");
+        start();
+    }
 
     @Test
     @Timeout(60)
@@ -776,10 +785,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(2) + 2));
+        Map<String, String> tableConfig = getBasicTableConfig();
 
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
@@ -1085,10 +1091,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(2) + 2));
+        Map<String, String> tableConfig = getBasicTableConfig();
 
         Map<String, String> catalogConfig =
                 testSchemaChange
@@ -1176,6 +1179,84 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         waitForResult(expected, table, rowType, Arrays.asList("pk"));
     }
 
+    @Test
+    @Timeout(240)
+    public void testSyncManyTableWithLimitedMemory() throws Exception {
+        String databaseName = "many_table_sync_test";
+        int newTableCount = 100;
+        int recordsCount = 100;
+        List<Tuple2<Integer, String>> newTableRecords = new ArrayList<>();
+        List<String> expectedRecords = new ArrayList<>();
+
+        for (int i = 0; i < recordsCount; i++) {
+            newTableRecords.add(Tuple2.of(i, "string_" + i));
+            expectedRecords.add(String.format("+I[%d, %s]", i, "string_" + i));
+        }
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", databaseName);
+        mySqlConfig.put("scan.incremental.snapshot.chunk.size", "1");
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(1);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.put("sink.parallelism", "1");
+        tableConfig.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "4 mb");
+
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        false,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Collections.emptyMap(),
+                        tableConfig,
+                        COMBINED);
+        action.build(env);
+
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(databaseName),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+            // wait checkpointing to step into incremental phase
+            Thread.sleep(2_000);
+
+            List<String> tables = new ArrayList<>();
+            tables.add("a");
+            for (int i = 0; i < newTableCount; i++) {
+                tables.add("t" + i);
+                Thread thread = new Thread(new SyncNewTableJob(i, statement, newTableRecords));
+                thread.start();
+            }
+
+            Catalog catalog = catalog();
+            while (!catalog.listTables(database).containsAll(tables)) {
+                Thread.sleep(100);
+            }
+
+            RowType newTableRowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new String[] {"k", "v1"});
+            List<String> newTablePrimaryKeys = Collections.singletonList("k");
+            for (int i = 0; i < newTableCount; i++) {
+                FileStoreTable newTable = getFileStoreTable("t" + i);
+                waitForResult(expectedRecords, newTable, newTableRowType, newTablePrimaryKeys);
+            }
+        }
+    }
+
     private FileStoreTable getFileStoreTable(String tableName) throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
         return (FileStoreTable) catalog().getTable(identifier);
@@ -1194,6 +1275,40 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         for (String tableName : tableNames) {
             Identifier identifier = Identifier.create(database, tableName);
             assertThat(catalog.tableExists(identifier)).isFalse();
+        }
+    }
+
+    private class SyncNewTableJob implements Runnable {
+
+        private final int ith;
+        private final Statement statement;
+        private final List<Tuple2<Integer, String>> records;
+
+        SyncNewTableJob(int ith, Statement statement, List<Tuple2<Integer, String>> records) {
+            this.ith = ith;
+            this.statement = statement;
+            this.records = records;
+        }
+
+        @Override
+        public void run() {
+            String newTableName = "t" + ith;
+            try {
+                createNewTable(statement, newTableName);
+                String sql =
+                        String.format(
+                                "INSERT INTO %s VALUES %s",
+                                newTableName,
+                                records.stream()
+                                        .map(
+                                                tuple ->
+                                                        String.format(
+                                                                "(%d, '%s')", tuple.f0, tuple.f1))
+                                        .collect(Collectors.joining(", ")));
+                statement.executeUpdate(sql);
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 }
