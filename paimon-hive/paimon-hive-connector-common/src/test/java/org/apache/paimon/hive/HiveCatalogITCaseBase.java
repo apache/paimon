@@ -27,6 +27,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.s3.MinioTestContainer;
+import org.apache.paimon.table.FileStoreTable;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -60,6 +61,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -749,6 +751,30 @@ public abstract class HiveCatalogITCaseBase {
         Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
         Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
         Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
+    }
+
+    @Test
+    public void testClearSchemaAfterUnSupportType()
+            throws InterruptedException, ExecutionException, Catalog.TableNotExistException {
+        try {
+            tEnv.executeSql("CREATE TABLE t001(id INT PRIMARY KEY NOT ENFORCED , d TIME)").await();
+        } catch (Throwable t) {
+            ExceptionUtils.assertThrowableWithMessage(t, "Unsupported logical type TIME(0)");
+        }
+        Identifier identifier = new Identifier("test_db", "t001");
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        Assert.assertFalse(catalog.tableExists(identifier));
+
+        tEnv.executeSql("CREATE TABLE  t002(id INT PRIMARY KEY NOT ENFORCED , b STRING)").await();
+        try {
+            tEnv.executeSql("ALTER TABLE t002 MODIFY b TIME").await();
+        } catch (Throwable t) {
+            ExceptionUtils.assertThrowableWithMessage(t, "Unsupported logical type TIME(0)");
+        }
+        identifier = new Identifier("test_db", "t002");
+        FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
+        Assert.assertEquals("[`id` INT NOT NULL, `b` STRING]", table.schema().fields().toString());
     }
 
     @Test
