@@ -121,9 +121,7 @@ public class HiveSchema {
                 properties.getProperty(hive_metastoreConstants.META_TABLE_COLUMN_TYPES);
         List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
         List<DataType> dataTypes =
-                typeInfos.stream()
-                        .map(HiveTypeUtils::typeInfoToLogicalType)
-                        .collect(Collectors.toList());
+                typeInfos.stream().map(HiveTypeUtils::toPaimonType).collect(Collectors.toList());
 
         // Partitions are only used for checking. They are not contained in the fields of a Hive
         // table.
@@ -218,7 +216,7 @@ public class HiveSchema {
                     isPartitionedTable && schemaPartitionKeySet.contains(field.name());
             if (!isPartitionColumn) {
                 schemaFieldNames.add(field.name());
-                schemaFieldTypeInfos.add(HiveTypeUtils.logicalTypeToTypeInfo(field.type()));
+                schemaFieldTypeInfos.add(HiveTypeUtils.toTypeInfo(field.type()));
             }
         }
 
@@ -275,7 +273,7 @@ public class HiveSchema {
         List<String> schemaPartitionKeys = tableSchema.partitionKeys();
         List<TypeInfo> schemaPartitionTypeInfos =
                 tableSchema.logicalPartitionType().getFields().stream()
-                        .map(f -> HiveTypeUtils.logicalTypeToTypeInfo(f.type()))
+                        .map(f -> HiveTypeUtils.toTypeInfo(f.type()))
                         .collect(Collectors.toList());
 
         if (schemaPartitionKeys.size() != hivePartitionKeys.size()) {

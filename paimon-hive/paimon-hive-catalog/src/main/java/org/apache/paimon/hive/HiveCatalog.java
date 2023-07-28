@@ -528,7 +528,7 @@ public class HiveCatalog extends AbstractCatalog {
     private FieldSchema convertToFieldSchema(DataField dataField) {
         return new FieldSchema(
                 dataField.name(),
-                HiveTypeUtils.logicalTypeToTypeInfo(dataField.type()).getTypeName(),
+                HiveTypeUtils.toTypeInfo(dataField.type()).getTypeName(),
                 dataField.description());
     }
 

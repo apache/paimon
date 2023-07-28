@@ -47,7 +47,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.apache.hadoop.hive.metastore.Warehouse.getDnsPath;
-import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
+import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
 /**
  * {@link HiveMetaHook} for paimon. Currently this class is only used to set input and output
@@ -115,7 +115,7 @@ public class PaimonMetaHook implements HiveMetaHook {
                         fieldSchema ->
                                 schemaBuilder.column(
                                         fieldSchema.getName().toLowerCase(),
-                                        typeInfoToLogicalType(fieldSchema.getType()),
+                                        toPaimonType(fieldSchema.getType()),
                                         fieldSchema.getComment()));
         try {
             schemaManager.createTable(schemaBuilder.build());

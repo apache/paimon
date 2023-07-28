@@ -50,7 +50,7 @@ public class PaimonObjectInspectorFactory {
             case BINARY:
             case VARBINARY:
                 return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(
-                        (PrimitiveTypeInfo) HiveTypeUtils.logicalTypeToTypeInfo(logicalType));
+                        (PrimitiveTypeInfo) HiveTypeUtils.toTypeInfo(logicalType));
             case DECIMAL:
                 DecimalType decimalType = (DecimalType) logicalType;
                 return new PaimonDecimalObjectInspector(
