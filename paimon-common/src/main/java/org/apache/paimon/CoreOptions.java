@@ -823,7 +823,7 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
-                            "If true, automatic merge the data schema and the table schema.");
+                            "If true, merge the data schema and the table schema automatically before write data.");
 
     private final Options options;
 
