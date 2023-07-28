@@ -75,12 +75,13 @@ public class SchemaMergingUtils {
      * cast to the new type.
      */
     static DataType merge(DataType base0, DataType update0, AtomicInteger highestFieldId) {
-        // Here we ignore the nullability.
+        // Here we try t0 merge the base0 and update0 without regard to the nullability,
+        // and set the base0's nullability to the return's.
         DataType base = base0.copy(true);
         DataType update = update0.copy(true);
 
         if (base.equals(update)) {
-            return base;
+            return base0;
         } else if (base instanceof RowType && update instanceof RowType) {
             List<DataField> baseFields = ((RowType) base).getFields();
             List<DataField> updateFields = ((RowType) update).getFields();
@@ -148,7 +149,7 @@ public class SchemaMergingUtils {
                             highestFieldId));
         } else if (base instanceof DecimalType && update instanceof DecimalType) {
             if (base.equals(update)) {
-                return base;
+                return base0;
             } else {
                 throw new UnsupportedOperationException(
                         String.format(
@@ -160,7 +161,7 @@ public class SchemaMergingUtils {
                 // this will check and merge types which has a `length` attribute, like BinaryType,
                 // CharType, VarBinaryType, VarCharType.
                 if (((ILength) base).getLength() <= ((ILength) update).getLength()) {
-                    return update;
+                    return update.copy(base0.isNullable());
                 } else {
                     throw new UnsupportedOperationException(
                             String.format(
@@ -171,7 +172,7 @@ public class SchemaMergingUtils {
                 // this will check and merge types which has a `precision` attribute, like
                 // LocalZonedTimestampType, TimeType, TimestampType.
                 if (((IPrecision) base).getPrecision() <= ((IPrecision) update).getPrecision()) {
-                    return update;
+                    return update.copy(base0.isNullable());
                 } else {
                     throw new UnsupportedOperationException(
                             String.format(
@@ -179,7 +180,7 @@ public class SchemaMergingUtils {
                                     base, update));
                 }
             } else {
-                return update;
+                return update.copy(base0.isNullable());
             }
         } else {
             throw new UnsupportedOperationException(
