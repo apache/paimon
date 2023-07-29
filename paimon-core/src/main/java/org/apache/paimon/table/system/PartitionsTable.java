@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -27,7 +26,6 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -58,7 +56,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -106,7 +103,7 @@ public class PartitionsTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new PartitionsRead(new SchemaManager(storeTable.fileIO(), storeTable.location()));
+        return new PartitionsRead();
     }
 
     @Override
@@ -140,9 +137,6 @@ public class PartitionsTable implements ReadonlyTable {
 
         private final FileStoreTable storeTable;
 
-        private Map<BinaryRow, Long> partitionRowCountMap =
-                new ConcurrentHashMap<BinaryRow, Long>();
-
         private PartitionsSplit(FileStoreTable storeTable) {
             this.storeTable = storeTable;
         }
@@ -150,15 +144,10 @@ public class PartitionsTable implements ReadonlyTable {
         @Override
         public long rowCount() {
             TableScan.Plan plan = plan();
-            Map<BinaryRow, Long> currentPartitionMap =
-                    plan.splits().stream()
-                            .collect(
-                                    Collectors.groupingBy(
-                                            s -> ((DataSplit) s).partition(),
-                                            Collectors.summingLong(
-                                                    s -> ((DataSplit) s).dataFiles().size())));
-            currentPartitionMap.forEach((k, v) -> partitionRowCountMap.merge(k, v, Long::sum));
-            return partitionRowCountMap.values().stream().mapToLong(v -> v).sum();
+            return plan.splits().stream()
+                    .map(s -> ((DataSplit) s).partition())
+                    .collect(Collectors.toSet())
+                    .size();
         }
 
         private TableScan.Plan plan() {
@@ -185,13 +174,7 @@ public class PartitionsTable implements ReadonlyTable {
 
     private static class PartitionsRead implements InnerTableRead {
 
-        private final SchemaManager schemaManager;
-
         private int[][] projection;
-
-        private PartitionsRead(SchemaManager schemaManager) {
-            this.schemaManager = schemaManager;
-        }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
@@ -319,7 +302,7 @@ public class PartitionsTable implements ReadonlyTable {
     }
 
     static class Partition {
-        private BinaryString partition;
+        private final BinaryString partition;
         private long recordCount;
         private long fileSizeInBytes;
 
