@@ -34,77 +34,74 @@ public class HiveTypeUtilsTest {
 
     @Test
     public void testLogicalTypeToTypeInfo() {
-        TypeInfo boolTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.BOOLEAN());
+        TypeInfo boolTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.BOOLEAN());
         assertThat(boolTypeInfo.getTypeName()).isEqualTo("boolean");
 
-        TypeInfo tinyintTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.TINYINT());
+        TypeInfo tinyintTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.TINYINT());
         assertThat(tinyintTypeInfo.getTypeName()).isEqualTo("tinyint");
 
-        TypeInfo smallintTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.SMALLINT());
+        TypeInfo smallintTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.SMALLINT());
         assertThat(smallintTypeInfo.getTypeName()).isEqualTo("smallint");
 
-        TypeInfo intTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.INT());
+        TypeInfo intTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.INT());
         assertThat(intTypeInfo.getTypeName()).isEqualTo("int");
 
-        TypeInfo bigintTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.BIGINT());
+        TypeInfo bigintTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.BIGINT());
         assertThat(bigintTypeInfo.getTypeName()).isEqualTo("bigint");
 
-        TypeInfo floatTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.FLOAT());
+        TypeInfo floatTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.FLOAT());
         assertThat(floatTypeInfo.getTypeName()).isEqualTo("float");
 
-        TypeInfo doubleTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.DOUBLE());
+        TypeInfo doubleTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.DOUBLE());
         assertThat(doubleTypeInfo.getTypeName()).isEqualTo("double");
 
-        TypeInfo decimalTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.DECIMAL(38, 0));
+        TypeInfo decimalTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.DECIMAL(38, 0));
         assertThat(decimalTypeInfo.getTypeName()).isEqualTo("decimal(38,0)");
 
-        TypeInfo decimal1TypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.DECIMAL(2, 2));
+        TypeInfo decimal1TypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.DECIMAL(2, 2));
         assertThat(decimal1TypeInfo.getTypeName()).isEqualTo("decimal(2,2)");
 
-        TypeInfo charTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.CHAR(1));
+        TypeInfo charTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.CHAR(1));
         assertThat(charTypeInfo.getTypeName()).isEqualTo("char(1)");
 
-        TypeInfo maxLengthCharType =
-                HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.CHAR(CharType.MAX_LENGTH));
+        TypeInfo maxLengthCharType = HiveTypeUtils.toTypeInfo(DataTypes.CHAR(CharType.MAX_LENGTH));
         assertThat(maxLengthCharType.getTypeName()).isEqualTo("string");
 
-        TypeInfo varcharTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.VARCHAR(10));
+        TypeInfo varcharTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.VARCHAR(10));
         assertThat(varcharTypeInfo.getTypeName()).isEqualTo("varchar(10)");
 
         TypeInfo maxLengthVarcharType =
-                HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.VARCHAR(VarCharType.MAX_LENGTH));
+                HiveTypeUtils.toTypeInfo(DataTypes.VARCHAR(VarCharType.MAX_LENGTH));
         assertThat(maxLengthVarcharType.getTypeName()).isEqualTo("string");
 
-        TypeInfo binaryTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.BINARY(10));
+        TypeInfo binaryTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.BINARY(10));
         assertThat(binaryTypeInfo.getTypeName()).isEqualTo("binary");
 
-        TypeInfo varbinaryTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.VARBINARY(10));
+        TypeInfo varbinaryTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.VARBINARY(10));
         assertThat(varbinaryTypeInfo.getTypeName()).isEqualTo("binary");
 
-        TypeInfo dateTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.DATE());
+        TypeInfo dateTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.DATE());
         assertThat(dateTypeInfo.getTypeName()).isEqualTo("date");
 
-        TypeInfo timestampTypeInfo = HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.TIMESTAMP());
+        TypeInfo timestampTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.TIMESTAMP());
         assertThat(timestampTypeInfo.getTypeName()).isEqualTo("timestamp");
 
-        TypeInfo arrayTypeInfo =
-                HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.ARRAY(DataTypes.INT()));
+        TypeInfo arrayTypeInfo = HiveTypeUtils.toTypeInfo(DataTypes.ARRAY(DataTypes.INT()));
         assertThat(arrayTypeInfo.getTypeName()).isEqualTo("array<int>");
 
         TypeInfo mapTypeInfo =
-                HiveTypeUtils.logicalTypeToTypeInfo(
-                        DataTypes.MAP(DataTypes.BIGINT(), DataTypes.STRING()));
+                HiveTypeUtils.toTypeInfo(DataTypes.MAP(DataTypes.BIGINT(), DataTypes.STRING()));
         assertThat(mapTypeInfo.getTypeName()).isEqualTo("map<bigint,string>");
 
         TypeInfo rowTypeInfo =
-                HiveTypeUtils.logicalTypeToTypeInfo(
+                HiveTypeUtils.toTypeInfo(
                         DataTypes.ROW(
                                 new DataField(0, "id", new IntType()),
                                 new DataField(1, "name", new VarCharType(Integer.MAX_VALUE))));
         assertThat(rowTypeInfo.getTypeName()).isEqualTo("struct<id:int,name:string>");
 
         TypeInfo timestampWithLocalZoneTypeInfo =
-                HiveTypeUtils.logicalTypeToTypeInfo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
+                HiveTypeUtils.toTypeInfo(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE());
         assertThat(timestampWithLocalZoneTypeInfo.getTypeName()).isEqualTo("timestamp");
     }
 }
