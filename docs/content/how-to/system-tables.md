@@ -230,3 +230,19 @@ SELECT * FROM MyTable$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
 1 rows in set
 */
 ```
+
+## Partitions Table
+
+You can query the partition files of the table.
+
+```sql
+SELECT * FROM MyTable$partitions;
+
+/*
++---------------+----------------+--------------------+
+|  partition    |   record_count |  file_size_in_bytes|
++---------------+----------------+--------------------+
+|  [1]          |           1    |             645    |
++---------------+----------------+--------------------+
+*/
+```

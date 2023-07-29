@@ -547,4 +547,49 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         List<Row> result = sql("SELECT * FROM T$consumers");
         assertThat(result).containsExactly(Row.of("my1", 3L));
     }
+
+    @Test
+    public void testPartitionsTable() throws Exception {
+        sql(
+                "CREATE TABLE T_VALUE_COUNT (a INT, p INT, b BIGINT, c STRING) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='change-log')"); // change log with value count table
+        assertFilesTable("T_VALUE_COUNT");
+
+        sql(
+                "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='change-log')"); // change log with key table
+        assertFilesTable("T_WITH_KEY");
+
+        sql(
+                "CREATE TABLE T_APPEND_ONLY (a INT, p INT, b BIGINT, c STRING) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='append-only')"); // append only table
+        assertPartitionsTable("T_APPEND_ONLY");
+    }
+
+    private void assertPartitionsTable(String tableName) throws Exception {
+        assertThat(sql(String.format("SELECT * FROM %s$partitions", tableName))).isEmpty();
+        // TODO should use sql for schema evolution after flink supports it.
+        SchemaManager schemaManager =
+                new SchemaManager(
+                        LocalFileIO.create(),
+                        new Path(path, String.format("default.db/%s", tableName)));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S2'), (1, 2, 2, 'S1')", tableName));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
+        List<Row> rows1 = sql(String.format("SELECT * FROM %s$partitions", tableName));
+        for (Row row : rows1) {
+            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]");
+            assertThat((long) row.getField(2)).isGreaterThan(0L); // check file size
+        }
+
+        sql(String.format("INSERT INTO %s VALUES (3, 4, 4, 'S3'), (1, 3, 2, 'S4')", tableName));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
+
+        List<Row> rows2 = sql(String.format("SELECT * FROM %s$partitions", tableName));
+        for (Row row : rows2) {
+            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]", "[3]", "[4]");
+        }
+    }
 }
