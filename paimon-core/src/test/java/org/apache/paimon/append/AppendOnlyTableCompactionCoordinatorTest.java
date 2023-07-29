@@ -73,6 +73,14 @@ public class AppendOnlyTableCompactionCoordinatorTest {
     }
 
     @Test
+    public void testFilterMiddleFile() {
+        List<DataFileMeta> files =
+                generateNewFiles(
+                        100, appendOnlyFileStoreTable.coreOptions().targetFileSize() / 10 * 8);
+        assertTasks(files, 0);
+    }
+
+    @Test
     public void testEliminatePartitionCoordinator() {
         List<DataFileMeta> files = generateNewFiles(1, 0);
         compactionCoordinator.notifyNewFiles(partition, files);
