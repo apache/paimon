@@ -194,6 +194,10 @@ CREATE TABLE MyTable (
 
 ## Append For Scalable Table
 
+{{< hint info >}}
+This is an experimental feature.
+{{< /hint >}}
+
 ### Definition
 
 By defining `'bucket' = '-1'` in table properties, you can assign a special mode (we call it "unaware-bucket mode") to this 
