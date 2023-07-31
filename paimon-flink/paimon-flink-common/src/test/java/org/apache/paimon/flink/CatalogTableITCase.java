@@ -119,7 +119,6 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("USE sys");
         assertThatCode(() -> sql("ALTER TABLE all_table_options SET ('bucket-num' = '5')"))
                 .hasRootCauseMessage("Can't alter system table.");
-        ;
     }
 
     @Test
