@@ -40,7 +40,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     public static final String DB_SUFFIX = ".db";
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    protected static final List<String> globalTables =
+    protected static final List<String> GLOBAL_TABLES =
             Arrays.asList(AllTableOptionsTable.ALL_TABLE_OPTIONS);
 
     protected final FileIO fileIO;

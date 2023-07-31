@@ -229,7 +229,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
-            return globalTables;
+            return GLOBAL_TABLES;
         }
         try {
             return client.getAllTables(databaseName).stream()
