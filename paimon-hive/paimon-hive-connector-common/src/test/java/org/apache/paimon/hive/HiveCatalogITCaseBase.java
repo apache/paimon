@@ -34,12 +34,12 @@ import com.klarna.hiverunner.annotations.HiveSQL;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
+import org.apache.flink.table.catalog.exceptions.*;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.apache.flink.util.ExceptionUtils;
-import org.assertj.core.api.Assertions;
-import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -153,30 +153,23 @@ public abstract class HiveCatalogITCaseBase {
     public void testDatabaseOperations() throws Exception {
         // create database
         tEnv.executeSql("CREATE DATABASE test_db2").await();
-        Assert.assertEquals(
-                Arrays.asList(Row.of("default"), Row.of("test_db"), Row.of("test_db2")),
-                collect("SHOW DATABASES"));
+        assertThat(collect("SHOW DATABASES"))
+                .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db"), Row.of("test_db2")));
         tEnv.executeSql("CREATE DATABASE IF NOT EXISTS test_db2").await();
-        try {
-            tEnv.executeSql("CREATE DATABASE test_db2").await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t, "Database test_db2 already exists in Catalog my_hive");
-        }
+
+        assertThatThrownBy(() -> tEnv.executeSql("CREATE DATABASE test_db2").await())
+                .hasRootCauseInstanceOf(DatabaseAlreadyExistException.class)
+                .hasRootCauseMessage("Database test_db2 already exists in Catalog my_hive.");
 
         // drop database
         tEnv.executeSql("DROP DATABASE test_db2").await();
-        Assert.assertEquals(
-                Arrays.asList(Row.of("default"), Row.of("test_db")), collect("SHOW DATABASES"));
+        assertThat(collect("SHOW DATABASES"))
+                .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db")));
         tEnv.executeSql("DROP DATABASE IF EXISTS test_db2").await();
-        try {
-            tEnv.executeSql("DROP DATABASE test_db2").await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t, "Database test_db2 does not exist in Catalog my_hive");
-        }
+
+        assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
+                .hasRootCauseInstanceOf(DatabaseNotExistException.class)
+                .hasRootCauseMessage("Database test_db2 does not exist in Catalog my_hive.");
 
         // drop non-empty database
         tEnv.executeSql("CREATE DATABASE test_db2").await();
@@ -185,18 +178,15 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("INSERT INTO t VALUES (1, 'Hi'), (2, 'Hello')").await();
         Path tablePath = new Path(path, "test_db2.db/t");
-        Assert.assertTrue(tablePath.getFileSystem().exists(tablePath));
-        try {
-            tEnv.executeSql("DROP DATABASE test_db2").await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t, "Database test_db2 in catalog my_hive is not empty");
-        }
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
+        assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
+                .hasRootCauseInstanceOf(DatabaseNotEmptyException.class)
+                .hasRootCauseMessage("Database test_db2 in catalog my_hive is not empty.");
+
         tEnv.executeSql("DROP DATABASE test_db2 CASCADE").await();
-        Assert.assertEquals(
-                Arrays.asList(Row.of("default"), Row.of("test_db")), collect("SHOW DATABASES"));
-        Assert.assertFalse(tablePath.getFileSystem().exists(tablePath));
+        assertThat(collect("SHOW DATABASES"))
+                .isEqualTo(Arrays.asList(Row.of("default"), Row.of("test_db")));
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
     }
 
     @Test
@@ -206,67 +196,63 @@ public abstract class HiveCatalogITCaseBase {
                 .await();
         tEnv.executeSql("CREATE TABLE s ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        Assert.assertEquals(Arrays.asList(Row.of("s"), Row.of("t")), collect("SHOW TABLES"));
+        assertThat(collect("SHOW TABLES")).isEqualTo(Arrays.asList(Row.of("s"), Row.of("t")));
+
         tEnv.executeSql(
                         "CREATE TABLE IF NOT EXISTS s ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        try {
-            tEnv.executeSql("CREATE TABLE s ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
-                    .await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table (or view) test_db.s already exists in Catalog my_hive");
-        }
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "CREATE TABLE s ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
+                                        .await())
+                .hasRootCauseInstanceOf(TableAlreadyExistException.class)
+                .hasRootCauseMessage(
+                        "Table (or view) test_db.s already exists in Catalog my_hive.");
 
         // drop table
         tEnv.executeSql("INSERT INTO s VALUES (1, 'Hi'), (2, 'Hello')").await();
         Path tablePath = new Path(path, "test_db.db/s");
-        Assert.assertTrue(tablePath.getFileSystem().exists(tablePath));
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
         tEnv.executeSql("DROP TABLE s").await();
-        Assert.assertEquals(Collections.singletonList(Row.of("t")), collect("SHOW TABLES"));
-        Assert.assertFalse(tablePath.getFileSystem().exists(tablePath));
+        assertThat(collect("SHOW TABLES")).isEqualTo(Collections.singletonList(Row.of("t")));
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
         tEnv.executeSql("DROP TABLE IF EXISTS s").await();
-        try {
-            tEnv.executeSql("DROP TABLE s").await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table with identifier 'my_hive.test_db.s' does not exist");
-        }
-        try {
-            tEnv.executeSql("DROP TABLE hive_table").await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table with identifier 'my_hive.test_db.hive_table' does not exist.");
-        }
+        assertThatThrownBy(() -> tEnv.executeSql("DROP TABLE s").await())
+                .isInstanceOf(ValidationException.class)
+                .hasMessage("Table with identifier 'my_hive.test_db.s' does not exist.");
+
+        assertThatThrownBy(() -> tEnv.executeSql("DROP TABLE hive_table").await())
+                .isInstanceOf(ValidationException.class)
+                .hasMessage("Table with identifier 'my_hive.test_db.hive_table' does not exist.");
 
         // alter table
         tEnv.executeSql("ALTER TABLE t SET ( 'manifest.target-file-size' = '16MB' )").await();
         List<Row> actual = collect("SHOW CREATE TABLE t");
-        Assert.assertEquals(1, actual.size());
-        Assert.assertTrue(
-                actual.get(0)
-                        .getField(0)
-                        .toString()
-                        .contains("'manifest.target-file-size' = '16MB'"));
-        try {
-            tEnv.executeSql("ALTER TABLE s SET ( 'manifest.target-file-size' = '16MB' )").await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t, "Table `my_hive`.`test_db`.`s` doesn't exist or is a temporary table");
-        }
-        try {
-            tEnv.executeSql("ALTER TABLE hive_table SET ( 'manifest.target-file-size' = '16MB' )")
-                    .await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t,
-                    "Table `my_hive`.`test_db`.`hive_table` doesn't exist or is a temporary table.");
-        }
+        assertThat(actual.size()).isEqualTo(1);
+        assertThat(
+                        actual.get(0)
+                                .getField(0)
+                                .toString()
+                                .contains("'manifest.target-file-size' = '16MB'"))
+                .isTrue();
+
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "ALTER TABLE s SET ( 'manifest.target-file-size' = '16MB' )")
+                                        .await())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Table `my_hive`.`test_db`.`s` doesn't exist or is a temporary table.");
+
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "ALTER TABLE hive_table SET ( 'manifest.target-file-size' = '16MB' )")
+                                        .await())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage(
+                        "Table `my_hive`.`test_db`.`hive_table` doesn't exist or is a temporary table.");
     }
 
     @Test
@@ -287,13 +273,14 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("USE test_db").await();
         tEnv.executeSql("CREATE TABLE t ( a INT, b STRING ) WITH ( 'file.format' = 'avro' )")
                 .await();
-        Assert.assertTrue(
-                hiveShell
-                        .executeQuery("DESC FORMATTED t")
-                        .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"));
+        assertThat(
+                        hiveShell
+                                .executeQuery("DESC FORMATTED t")
+                                .contains("Table Type:         \tEXTERNAL_TABLE      \tNULL"))
+                .isTrue();
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        Assert.assertFalse(tablePath.getFileSystem().exists(tablePath));
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
     }
 
     @Test
@@ -325,21 +312,22 @@ public abstract class HiveCatalogITCaseBase {
                                 + "(true, CAST(1 AS TINYINT), CAST(1 AS SMALLINT), 1, 1234567890123456789, 1.23, 3.14159, CAST('1234.56' AS DECIMAL(10, 2)), 'ABC', 'v1', 'Hello, World!', X'010203', X'010203', DATE '2023-01-01', TIMESTAMP '2023-01-01 12:00:00.123', ARRAY['value1', 'value2', 'value3'], MAP['key1', 'value1', 'key2', 'value2'], ROW('v1', 1)), "
                                 + "(false, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), 2, 234567890123456789, 2.34, 2.111111, CAST('2345.67' AS DECIMAL(10, 2)), 'DEF', 'v2', 'Apache Paimon', X'040506',X'040506', DATE '2023-02-01', TIMESTAMP '2023-02-01 12:00:00.456', ARRAY['value4', 'value5', 'value6'], MAP['key1', 'value11', 'key2', 'value22'], ROW('v2', 2))")
                 .await();
-        Assert.assertEquals(
-                Arrays.asList(
-                        "true\t1\t1\t1\t1234567890123456789\t1.23\t3.14159\t1234.56\tABC\tv1\tHello, World!\t01\t010203\t2023-01-01\t2023-01-01 12:00:00.123\t[\"value1\",\"value2\",\"value3\"]\tvalue1\tvalue1\tvalue2\t{\"f0\":\"v1\",\"f1\":1}\tv1\t1",
-                        "false\t2\t2\t2\t234567890123456789\t2.34\t2.111111\t2345.67\tDEF\tv2\tApache Paimon\t04\t040506\t2023-02-01\t2023-02-01 12:00:00.456\t[\"value4\",\"value5\",\"value6\"]\tvalue4\tvalue11\tvalue22\t{\"f0\":\"v2\",\"f1\":2}\tv2\t2"),
-                hiveShell.executeQuery(
-                        "SELECT f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, hex(f11), hex(f12), f13, f14, f15, f15[0] as f15a, f16['key1'] as f16a, f16['key2'] as f16b, f17, f17.f0, f17.f1 FROM t ORDER BY f3"));
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, hex(f11), hex(f12), f13, f14, f15, f15[0] as f15a, f16['key1'] as f16a, f16['key2'] as f16b, f17, f17.f0, f17.f1 FROM t ORDER BY f3"))
+                .isEqualTo(
+                        Arrays.asList(
+                                "true\t1\t1\t1\t1234567890123456789\t1.23\t3.14159\t1234.56\tABC\tv1\tHello, World!\t01\t010203\t2023-01-01\t2023-01-01 12:00:00.123\t[\"value1\",\"value2\",\"value3\"]\tvalue1\tvalue1\tvalue2\t{\"f0\":\"v1\",\"f1\":1}\tv1\t1",
+                                "false\t2\t2\t2\t234567890123456789\t2.34\t2.111111\t2345.67\tDEF\tv2\tApache Paimon\t04\t040506\t2023-02-01\t2023-02-01 12:00:00.456\t[\"value4\",\"value5\",\"value6\"]\tvalue4\tvalue11\tvalue22\t{\"f0\":\"v2\",\"f1\":2}\tv2\t2"));
 
-        try {
-            tEnv.executeSql("INSERT INTO hive_table VALUES (1, 'Hi'), (2, 'Hello')").await();
-            Assert.fail("No exception is thrown");
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(
-                    t,
-                    "Cannot find table '`my_hive`.`test_db`.`hive_table`' in any of the catalogs [default_catalog, my_hive], nor as a temporary table.");
-        }
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT INTO hive_table VALUES (1, 'Hi'), (2, 'Hello')")
+                                        .await())
+                .isInstanceOf(TableException.class)
+                .hasMessage(
+                        "Cannot find table '`my_hive`.`test_db`.`hive_table`' in any of the catalogs [default_catalog, my_hive], nor as a temporary table.");
     }
 
     @Test
@@ -352,7 +340,7 @@ public abstract class HiveCatalogITCaseBase {
                         + "'");
         hiveShell.execute("INSERT INTO hive_test_table VALUES (1, 'Apache'), (2, 'Paimon')");
         List<Row> actual = collect("SELECT * FROM hive_test_table");
-        Assertions.assertThat(actual).contains(Row.of(1, "Apache"), Row.of(2, "Paimon"));
+        assertThat(actual).contains(Row.of(1, "Apache"), Row.of(2, "Paimon"));
     }
 
     @Test
@@ -361,10 +349,10 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("INSERT INTO t VALUES(1)").await();
         tEnv.executeSql("CREATE TABLE t1 AS SELECT * FROM t").await();
         List<Row> result = collect("SELECT * FROM t1$schemas s");
-        Assertions.assertThat(result.toString())
+        assertThat(result.toString())
                 .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
         List<Row> data = collect("SELECT * FROM t1");
-        Assertions.assertThat(data).contains(Row.of(1));
+        assertThat(data).contains(Row.of(1));
 
         // change option
         tEnv.executeSql("CREATE TABLE t_option (a INT)").await();
@@ -373,9 +361,9 @@ public abstract class HiveCatalogITCaseBase {
                         "CREATE TABLE t1_option WITH ('file.format' = 'parquet') AS SELECT * FROM t_option")
                 .await();
         List<Row> resultOption = collect("SELECT * FROM t1_option$options");
-        Assertions.assertThat(resultOption).containsExactly(Row.of("file.format", "parquet"));
+        assertThat(resultOption).containsExactly(Row.of("file.format", "parquet"));
         List<Row> dataOption = collect("SELECT * FROM t1_option");
-        Assertions.assertThat(dataOption).contains(Row.of(1));
+        assertThat(dataOption).contains(Row.of(1));
 
         // partition table
         tEnv.executeSql(
@@ -389,12 +377,12 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("INSERT INTO t_p  SELECT 1,2,'a','2023-02-19','12'").await();
         tEnv.executeSql("CREATE TABLE t1_p WITH ('partition' = 'dt') AS SELECT * FROM t_p").await();
         List<Row> resultPartition = collect("SELECT * FROM t1_p$schemas s");
-        Assertions.assertThat(resultPartition.toString())
+        assertThat(resultPartition.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"user_id\",\"type\":\"BIGINT\"},{\"id\":1,\"name\":\"item_id\",\"type\":\"BIGINT\"},{\"id\":2,\"name\":\"behavior\",\"type\":\"STRING\"}"
                                 + ",{\"id\":3,\"name\":\"dt\",\"type\":\"STRING\"},{\"id\":4,\"name\":\"hh\",\"type\":\"STRING\"}], [\"dt\"], [], {}, ]]");
         List<Row> dataPartition = collect("SELECT * FROM t1_p");
-        Assertions.assertThat(dataPartition.toString()).isEqualTo("[+I[1, 2, a, 2023-02-19, 12]]");
+        assertThat(dataPartition.toString()).isEqualTo("[+I[1, 2, a, 2023-02-19, 12]]");
 
         // primary key
         tEnv.executeSql(
@@ -411,9 +399,9 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("CREATE TABLE t_pk_as WITH ('primary-key' = 'dt') AS SELECT * FROM t_pk")
                 .await();
         List<Row> resultPk = collect("SHOW CREATE TABLE t_pk_as");
-        Assertions.assertThat(resultPk.toString()).contains("PRIMARY KEY (`dt`)");
+        assertThat(resultPk.toString()).contains("PRIMARY KEY (`dt`)");
         List<Row> dataPk = collect("SELECT * FROM t_pk_as");
-        Assertions.assertThat(dataPk.toString()).isEqualTo("[+I[1, 2, aaa, 2020-01-02, 09]]");
+        assertThat(dataPk.toString()).isEqualTo("[+I[1, 2, aaa, 2020-01-02, 09]]");
 
         // primary key + partition
         tEnv.executeSql(
@@ -431,10 +419,10 @@ public abstract class HiveCatalogITCaseBase {
                         "CREATE TABLE t_all_as WITH ('primary-key' = 'dt,hh' , 'partition' = 'dt' ) AS SELECT * FROM t_all")
                 .await();
         List<Row> resultAll = collect("SHOW CREATE TABLE t_all_as");
-        Assertions.assertThat(resultAll.toString()).contains("PRIMARY KEY (`dt`, `hh`)");
-        Assertions.assertThat(resultAll.toString()).contains("PARTITIONED BY (`dt`)");
+        assertThat(resultAll.toString()).contains("PRIMARY KEY (`dt`, `hh`)");
+        assertThat(resultAll.toString()).contains("PARTITIONED BY (`dt`)");
         List<Row> dataAll = collect("SELECT * FROM t_all_as");
-        Assertions.assertThat(dataAll.toString()).isEqualTo("[+I[1, 2, login, 2020-01-02, 09]]");
+        assertThat(dataAll.toString()).isEqualTo("[+I[1, 2, login, 2020-01-02, 09]]");
 
         // primary key do not exist.
         tEnv.executeSql(
@@ -448,7 +436,7 @@ public abstract class HiveCatalogITCaseBase {
                                 + ")")
                 .await();
 
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist")
@@ -456,7 +444,7 @@ public abstract class HiveCatalogITCaseBase {
                 .hasRootCauseMessage("Primary key column '[aaa]' is not defined in the schema.");
 
         // primary key in option and DDL.
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_pk_ddl_option ("
@@ -482,7 +470,7 @@ public abstract class HiveCatalogITCaseBase {
                                 + ") PARTITIONED BY (dt, hh) ")
                 .await();
 
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist")
@@ -490,7 +478,7 @@ public abstract class HiveCatalogITCaseBase {
                 .hasRootCauseMessage("Partition column '[aaa]' is not defined in the schema.");
 
         // partition in option and DDL.
-        Assertions.assertThatThrownBy(
+        assertThatThrownBy(
                         () ->
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_partition_ddl_option ("
@@ -527,15 +515,15 @@ public abstract class HiveCatalogITCaseBase {
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
         List<String> tables = hiveShell.executeQuery("SHOW TABLES");
-        Assert.assertTrue(tables.contains("t3"));
-        Assert.assertFalse(tables.contains("t1"));
+        assertThat(tables.contains("t3")).isTrue();
+        assertThat(tables.contains("t1")).isFalse();
 
         Identifier identifier = new Identifier("test_db", "t3");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         org.apache.paimon.fs.Path tablePath =
                 ((AbstractCatalog) catalog).getDataTableLocation(identifier);
-        Assert.assertEquals(tablePath.toString(), path + "test_db.db" + File.separator + "t3");
+        assertThat(tablePath.toString()).isEqualTo(path + "test_db.db" + File.separator + "t3");
 
         // TODO: the hiverunner (4.0) has a bug ,it can not rename the table path correctly ,
         // we should upgrade it to the 6.0 later ,and  update the test case for query.
@@ -702,11 +690,11 @@ public abstract class HiveCatalogITCaseBase {
     public void testQuickPathInShowTables() throws Exception {
         collect("CREATE TABLE t ( a INT, b STRING )");
         List<Row> tables = collect("SHOW TABLES");
-        Assert.assertEquals("[+I[t]]", tables.toString());
+        assertThat(tables.toString()).isEqualTo("[+I[t]]");
 
         new LocalFileIO().delete(new org.apache.paimon.fs.Path(path, "test_db.db/t"), true);
         tables = collect("SHOW TABLES");
-        Assert.assertEquals("[]", tables.toString());
+        assertThat(tables.toString()).isEqualTo("[]");
     }
 
     @Test
@@ -735,10 +723,10 @@ public abstract class HiveCatalogITCaseBase {
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         Map<String, String> tableOptions = catalog.getTable(identifier).options();
 
-        Assertions.assertThat(tableOptions).containsEntry("opt1", "value1");
-        Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
-        Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
-        Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
+        assertThat(tableOptions).containsEntry("opt1", "value1");
+        assertThat(tableOptions).containsEntry("opt2", "value2");
+        assertThat(tableOptions).containsEntry("opt3", "value3");
+        assertThat(tableOptions).doesNotContainKey("lock.enabled");
 
         // check override
         tEnv.executeSql(
@@ -747,34 +735,34 @@ public abstract class HiveCatalogITCaseBase {
         identifier = new Identifier("default", "table_with_options");
         tableOptions = catalog.getTable(identifier).options();
 
-        Assertions.assertThat(tableOptions).containsEntry("opt1", "new_value");
-        Assertions.assertThat(tableOptions).containsEntry("opt2", "value2");
-        Assertions.assertThat(tableOptions).containsEntry("opt3", "value3");
-        Assertions.assertThat(tableOptions).doesNotContainKey("lock.enabled");
+        assertThat(tableOptions).containsEntry("opt1", "new_value");
+        assertThat(tableOptions).containsEntry("opt2", "value2");
+        assertThat(tableOptions).containsEntry("opt3", "value3");
+        assertThat(tableOptions).doesNotContainKey("lock.enabled");
     }
 
     @Test
     public void testClearSchemaAfterUnSupportType()
             throws InterruptedException, ExecutionException, Catalog.TableNotExistException {
-        try {
-            tEnv.executeSql("CREATE TABLE t001(id INT PRIMARY KEY NOT ENFORCED , d TIME)").await();
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(t, "Unsupported type: TIME(0)");
-        }
+        assertThatThrownBy(
+                        () ->
+                                tEnv.executeSql(
+                                                "CREATE TABLE t001(id INT PRIMARY KEY NOT ENFORCED , d TIME)")
+                                        .await())
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                .hasRootCauseMessage("Unsupported type: TIME(0)");
         Identifier identifier = new Identifier("test_db", "t001");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        Assert.assertFalse(catalog.tableExists(identifier));
+        assertThat(catalog.tableExists(identifier)).isFalse();
 
         tEnv.executeSql("CREATE TABLE  t002(id INT PRIMARY KEY NOT ENFORCED , b STRING)").await();
-        try {
-            tEnv.executeSql("ALTER TABLE t002 MODIFY b TIME").await();
-        } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(t, "Unsupported type: TIME(0)");
-        }
+        assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t002 MODIFY b TIME").await())
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
+                .hasRootCauseMessage("Unsupported type: TIME(0)");
         identifier = new Identifier("test_db", "t002");
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
-        Assert.assertEquals("[`id` INT NOT NULL, `b` STRING]", table.schema().fields().toString());
+        assertThat(table.schema().fields().toString()).isEqualTo("[`id` INT NOT NULL, `b` STRING]");
     }
 
     @Test
