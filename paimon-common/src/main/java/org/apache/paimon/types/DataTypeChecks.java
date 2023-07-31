@@ -21,6 +21,7 @@ package org.apache.paimon.types;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.OptionalInt;
 
 import static org.apache.paimon.types.DataTypeRoot.ROW;
 
@@ -145,48 +146,31 @@ public final class DataTypeChecks {
     }
 
     private static class LengthExtractor extends Extractor<Integer> {
-
         @Override
-        public Integer visit(CharType charType) {
-            return charType.getLength();
-        }
-
-        @Override
-        public Integer visit(VarCharType varCharType) {
-            return varCharType.getLength();
-        }
-
-        @Override
-        public Integer visit(BinaryType binaryType) {
-            return binaryType.getLength();
-        }
-
-        @Override
-        public Integer visit(VarBinaryType varBinaryType) {
-            return varBinaryType.getLength();
+        protected Integer defaultMethod(DataType dataType) {
+            OptionalInt length = DataTypes.getLength(dataType);
+            if (length.isPresent()) {
+                return length.getAsInt();
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid use of extractor %s. Called on logical type: %s",
+                            this.getClass().getName(), dataType));
         }
     }
 
     private static class PrecisionExtractor extends Extractor<Integer> {
 
         @Override
-        public Integer visit(DecimalType decimalType) {
-            return decimalType.getPrecision();
-        }
-
-        @Override
-        public Integer visit(TimeType timeType) {
-            return timeType.getPrecision();
-        }
-
-        @Override
-        public Integer visit(TimestampType timestampType) {
-            return timestampType.getPrecision();
-        }
-
-        @Override
-        public Integer visit(LocalZonedTimestampType localZonedTimestampType) {
-            return localZonedTimestampType.getPrecision();
+        protected Integer defaultMethod(DataType dataType) {
+            OptionalInt precision = DataTypes.getPrecision(dataType);
+            if (precision.isPresent()) {
+                return precision.getAsInt();
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid use of extractor %s. Called on logical type: %s",
+                            this.getClass().getName(), dataType));
         }
     }
 
