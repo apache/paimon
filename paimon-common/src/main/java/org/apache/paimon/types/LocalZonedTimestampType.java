@@ -38,7 +38,7 @@ import java.util.Objects;
  * @since 0.4.0
  */
 @Public
-public final class LocalZonedTimestampType extends DataType implements IPrecision {
+public final class LocalZonedTimestampType extends DataType {
 
     private static final long serialVersionUID = 1L;
 
@@ -71,7 +71,6 @@ public final class LocalZonedTimestampType extends DataType implements IPrecisio
         this(DEFAULT_PRECISION);
     }
 
-    @Override
     public int getPrecision() {
         return precision;
     }

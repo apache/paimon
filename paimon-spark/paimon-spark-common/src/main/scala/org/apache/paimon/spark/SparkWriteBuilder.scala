@@ -17,13 +17,13 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.options.Options
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.connector.write.{SupportsDynamicOverwrite, SupportsOverwrite, WriteBuilder}
+import org.apache.spark.sql.connector.write.{SupportsOverwrite, WriteBuilder}
 import org.apache.spark.sql.sources.{And, Filter}
 
-private class SparkWriteBuilder(table: FileStoreTable, options: CoreOptions)
+private class SparkWriteBuilder(table: FileStoreTable, options: Options)
   extends WriteBuilder
   with SupportsOverwrite {
 

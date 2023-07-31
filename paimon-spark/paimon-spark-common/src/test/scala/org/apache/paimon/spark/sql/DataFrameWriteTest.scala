@@ -22,6 +22,8 @@ import org.apache.paimon.WriteMode._
 import org.apache.spark.sql.Row
 import org.scalactic.source.Position
 
+import java.sql.Date
+
 class DataFrameWriteTest extends PaimonSparkTestBase {
 
   writeModes.foreach {
@@ -157,6 +159,114 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
                 Map("k" -> 44.4)) :: Nil
             }
             checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected3)
+
+          }
+      }
+  }
+
+  writeModes.foreach {
+    writeMode =>
+      bucketModes.foreach {
+        bucket =>
+          test(
+            s"Schema evolution: write data into Paimon with allowExplicitCast = true: $writeMode, bucket: $bucket") {
+            val _spark = spark
+            import _spark.implicits._
+
+            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+              "'primary-key'='a',"
+            } else {
+              ""
+            }
+
+            spark.sql(
+              s"""
+                 |CREATE TABLE T (a INT, b STRING)
+                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
+                 |""".stripMargin)
+
+            val paimonTable = loadTable("T")
+            val location = paimonTable.location().getPath
+
+            val df1 = Seq((1, "2023-08-01"), (2, "2023-08-02")).toDF("a", "b")
+            df1.write.format("paimon").mode("append").save(location)
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a, b"),
+              Row(1, "2023-08-01") :: Row(2, "2023-08-02") :: Nil)
+
+            // Case 1: two additional fields: DoubleType and TimestampType
+            val ts = java.sql.Timestamp.valueOf("2023-08-01 10:00:00.0")
+            val df2 = Seq((1, "2023-08-01", 12.3d, ts), (3, "2023-08-03", 34.5d, ts))
+              .toDF("a", "b", "c", "d")
+            df2.write
+              .format("paimon")
+              .mode("append")
+              .option("write.merge-schema", "true")
+              .save(location)
+            val expected2 = if (writeMode == CHANGE_LOG) {
+              Row(1, "2023-08-01", 12.3d, ts) ::
+                Row(2, "2023-08-02", null, null) :: Row(3, "2023-08-03", 34.5d, ts) :: Nil
+            } else {
+              Row(1, "2023-08-01", null, null) :: Row(1, "2023-08-01", 12.3d, ts) :: Row(
+                2,
+                "2023-08-02",
+                null,
+                null) :: Row(3, "2023-08-03", 34.5d, ts) :: Nil
+            }
+            checkAnswer(spark.sql("SELECT * FROM T ORDER BY a, b"), expected2)
+
+            // Case 2: a: Int -> Long, b: String -> Date, c: Long -> Int, d: Map -> String
+            val date = java.sql.Date.valueOf("2023-07-31")
+            val df3 = Seq((2L, date, 234, null), (4L, date, 456, "2023-08-01 11:00:00.0")).toDF(
+              "a",
+              "b",
+              "c",
+              "d")
+
+            // throw UnsupportedOperationException if write.merge-schema.explicit-cast = false
+            assertThrows[UnsupportedOperationException] {
+              df3.write
+                .format("paimon")
+                .mode("append")
+                .option("write.merge-schema", "true")
+                .save(location)
+            }
+            // merge schema and write data when write.merge-schema.explicit-cast = true
+            df3.write
+              .format("paimon")
+              .mode("append")
+              .option("write.merge-schema", "true")
+              .option("write.merge-schema.explicit-cast", "true")
+              .save(location)
+            df3.schema.printTreeString()
+            val expected3 = if (writeMode == CHANGE_LOG) {
+              Row(1L, Date.valueOf("2023-08-01"), 12, ts.toString) :: Row(
+                2L,
+                date,
+                234,
+                null) :: Row(3L, Date.valueOf("2023-08-03"), 34, ts.toString) :: Row(
+                4L,
+                date,
+                456,
+                "2023-08-01 11:00:00.0") :: Nil
+            } else {
+              Row(1L, Date.valueOf("2023-08-01"), null, null) :: Row(
+                1L,
+                Date.valueOf("2023-08-01"),
+                12,
+                ts.toString) :: Row(2L, date, 234, null) :: Row(
+                2L,
+                Date.valueOf("2023-08-02"),
+                null,
+                null) :: Row(3L, Date.valueOf("2023-08-03"), 34, ts.toString) :: Row(
+                4L,
+                date,
+                456,
+                "2023-08-01 11:00:00.0") :: Nil
+            }
+            checkAnswer(
+              spark.sql("SELECT a, b, c, substring(d, 0, 21) FROM T ORDER BY a, b"),
+              expected3)
 
           }
       }

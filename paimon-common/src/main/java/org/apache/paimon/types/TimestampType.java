@@ -33,7 +33,7 @@ import java.util.Objects;
  * @since 0.4.0
  */
 @Public
-public class TimestampType extends DataType implements IPrecision {
+public class TimestampType extends DataType {
 
     private static final long serialVersionUID = 1L;
 
@@ -66,7 +66,6 @@ public class TimestampType extends DataType implements IPrecision {
         this(DEFAULT_PRECISION);
     }
 
-    @Override
     public int getPrecision() {
         return precision;
     }

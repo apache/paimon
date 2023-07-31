@@ -818,13 +818,6 @@ public class CoreOptions implements Serializable {
                                     + " the value should be the user configured local time zone. The option value is either a full name"
                                     + " such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.");
 
-    public static final ConfigOption<Boolean> MERGE_SCHEMA =
-            key("write.merge-schema")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "If true, merge the data schema and the table schema automatically before write data.");
-
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1224,10 +1217,6 @@ public class CoreOptions implements Serializable {
 
     public int orcWriteBatch() {
         return options.getInteger(ORC_WRITE_BATCH_SIZE.key(), ORC_WRITE_BATCH_SIZE.defaultValue());
-    }
-
-    public boolean mergeSchema() {
-        return options.get(MERGE_SCHEMA);
     }
 
     /** Specifies the merge engine for table with primary key. */

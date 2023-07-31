@@ -17,11 +17,11 @@
  */
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.CoreOptions
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.index.PartitionIndex
-import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkRow}
+import org.apache.paimon.options.Options
+import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkConnectorOptions, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
@@ -34,7 +34,6 @@ import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.StructType
 
 import java.util.function.IntPredicate
 
@@ -46,7 +45,7 @@ case class WriteIntoPaimonTable(
     override val originTable: FileStoreTable,
     saveMode: SaveMode,
     data: DataFrame,
-    options: CoreOptions)
+    options: Options)
   extends RunnableCommand
   with PaimonCommand
   with SchemaHelper
@@ -56,14 +55,15 @@ case class WriteIntoPaimonTable(
 
   private lazy val serializer = new CommitMessageSerializer
 
-  private lazy val mergeSchema = options.mergeSchema()
+  private lazy val mergeSchema = options.get(SparkConnectorOptions.MERGE_SCHEMA)
 
   /** \1. 2. */
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
     if (mergeSchema) {
-      mergeAndCommitSchema(data.schema)
+      val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST)
+      mergeAndCommitSchema(data.schema, allowExplicitCast)
     }
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()

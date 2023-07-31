@@ -28,7 +28,6 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.types.RowType;
@@ -80,5 +79,5 @@ public interface FileStore<T> extends Serializable {
     @Nullable
     TagAutoCreation newTagCreationManager();
 
-    boolean commitSchema(TableSchema tableSchema);
+    boolean mergeSchema(RowType rowType, Boolean allowExplicitCast);
 }

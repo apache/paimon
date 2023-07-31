@@ -28,7 +28,7 @@ import java.util.Objects;
  * @since 0.4.0
  */
 @Public
-public class DecimalType extends DataType implements IPrecision {
+public class DecimalType extends DataType {
 
     private static final long serialVersionUID = 1L;
 
@@ -78,7 +78,6 @@ public class DecimalType extends DataType implements IPrecision {
         this(DEFAULT_PRECISION);
     }
 
-    @Override
     public int getPrecision() {
         return precision;
     }

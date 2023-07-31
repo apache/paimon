@@ -388,11 +388,21 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    public boolean commitSchema(TableSchema tableSchema) {
-        try {
-            return commit(tableSchema);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to commit the schema.", e);
+    public boolean mergeSchema(RowType rowType, Boolean allowExplicitCast) {
+        TableSchema current =
+                latest().orElseThrow(
+                                () ->
+                                        new RuntimeException(
+                                                "It requires that the current schema to exist when calling 'mergeSchema'"));
+        TableSchema update = SchemaMergingUtils.mergeSchemas(current, rowType, allowExplicitCast);
+        if (current.equals(update)) {
+            return false;
+        } else {
+            try {
+                return commit(update);
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to commit the schema.", e);
+            }
         }
     }
 

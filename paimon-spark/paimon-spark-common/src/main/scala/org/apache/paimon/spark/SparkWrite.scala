@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.options.Options
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.table.FileStoreTable
 
@@ -26,8 +26,7 @@ import org.apache.spark.sql.connector.write.V1Write
 import org.apache.spark.sql.sources.InsertableRelation
 
 /** Spark [[V1Write]], it is required to use v1 write for grouping by bucket. */
-class SparkWrite(val table: FileStoreTable, saveMode: SaveMode, options: CoreOptions)
-  extends V1Write {
+class SparkWrite(val table: FileStoreTable, saveMode: SaveMode, options: Options) extends V1Write {
 
   override def toInsertableRelation: InsertableRelation = {
     (data: DataFrame, overwrite: Boolean) =>

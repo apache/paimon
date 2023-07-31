@@ -30,7 +30,7 @@ import java.util.Objects;
  * @since 0.4.0
  */
 @Public
-public class CharType extends DataType implements ILength {
+public class CharType extends DataType {
 
     private static final long serialVersionUID = 1L;
 
@@ -63,7 +63,6 @@ public class CharType extends DataType implements ILength {
         this(DEFAULT_LENGTH);
     }
 
-    @Override
     public int getLength() {
         return length;
     }

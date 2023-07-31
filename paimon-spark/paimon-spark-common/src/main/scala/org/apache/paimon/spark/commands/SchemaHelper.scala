@@ -36,10 +36,9 @@ trait SchemaHelper {
 
   def tableSchema: TableSchema = table.schema
 
-  def mergeAndCommitSchema(dataSchema: StructType): Unit = {
+  def mergeAndCommitSchema(dataSchema: StructType, allowExplicitCast: Boolean): Unit = {
     val dataRowType = SparkTypeUtils.toPaimonType(dataSchema).asInstanceOf[RowType]
-    val newTableSchema = SchemaMergingUtils.mergeSchemas(table.schema(), dataRowType);
-    if (table.store().commitSchema(newTableSchema)) {
+    if (table.store().mergeSchema(dataRowType, allowExplicitCast)) {
       newTable = Some(table.copyWithLatestSchema())
     }
   }
