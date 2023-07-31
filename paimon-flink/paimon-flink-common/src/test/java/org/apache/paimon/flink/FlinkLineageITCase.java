@@ -69,12 +69,12 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
         assertThatThrownBy(
                         () -> tEnv.executeSql("INSERT INTO T VALUES (1, 2, 3),(4, 5, 6);").await())
                 .hasCauseExactlyInstanceOf(UnsupportedOperationException.class)
-                .hasRootCauseMessage("Method storeSinkTableLineage is not supported");
+                .hasRootCauseMessage("Method saveSinkTableLineage is not supported");
 
         tEnv.getConfig().getConfiguration().set(PipelineOptions.NAME, "select_t_job");
         assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM T").collect().close())
                 .hasCauseExactlyInstanceOf(UnsupportedOperationException.class)
-                .hasRootCauseMessage("Method storeSourceTableLineage is not supported");
+                .hasRootCauseMessage("Method saveSourceTableLineage is not supported");
     }
 
     /** Factory to create throwing lineage meta. */
@@ -96,9 +96,9 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
         private static final long serialVersionUID = 1L;
 
         @Override
-        public void storeSourceTableLineage(TableLineageEntity entity) {
+        public void saveSourceTableLineage(TableLineageEntity entity) {
             throw new UnsupportedOperationException(
-                    "Method storeSourceTableLineage is not supported");
+                    "Method saveSourceTableLineage is not supported");
         }
 
         @Override
@@ -112,12 +112,11 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
         }
 
         @Override
-        public void storeSinkTableLineage(TableLineageEntity entity) {
+        public void saveSinkTableLineage(TableLineageEntity entity) {
             assertEquals("insert_t_job", entity.getJob());
             assertEquals("T", entity.getTable());
             assertEquals("default", entity.getDatabase());
-            throw new UnsupportedOperationException(
-                    "Method storeSinkTableLineage is not supported");
+            throw new UnsupportedOperationException("Method saveSinkTableLineage is not supported");
         }
 
         @Override
@@ -131,12 +130,11 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
         }
 
         @Override
-        public void storeSourceDataLineage(DataLineageEntity entity) {
+        public void saveSourceDataLineage(DataLineageEntity entity) {
             assertEquals("select_t_job", entity.getJob());
             assertEquals("T", entity.getTable());
             assertEquals("default", entity.getDatabase());
-            throw new UnsupportedOperationException(
-                    "Method storeSinkTableLineage is not supported");
+            throw new UnsupportedOperationException("Method saveSinkTableLineage is not supported");
         }
 
         @Override
@@ -145,7 +143,7 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
         }
 
         @Override
-        public void storeSinkDataLineage(DataLineageEntity entity) {
+        public void saveSinkDataLineage(DataLineageEntity entity) {
             throw new UnsupportedOperationException();
         }
 

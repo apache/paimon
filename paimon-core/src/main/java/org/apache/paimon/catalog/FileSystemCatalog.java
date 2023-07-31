@@ -42,9 +42,8 @@ public class FileSystemCatalog extends AbstractCatalog {
         this.warehouse = warehouse;
     }
 
-    public FileSystemCatalog(
-            FileIO fileIO, Path warehouse, Map<String, String> options, ClassLoader classLoader) {
-        super(fileIO, options, classLoader);
+    public FileSystemCatalog(FileIO fileIO, Path warehouse, Map<String, String> options) {
+        super(fileIO, options);
         this.warehouse = warehouse;
     }
 

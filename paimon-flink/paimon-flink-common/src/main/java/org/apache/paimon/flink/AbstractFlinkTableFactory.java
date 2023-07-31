@@ -95,7 +95,7 @@ public abstract class AbstractFlinkTableFactory
                 storeTableLineage(
                         ((FileStoreTable) table).catalogEnvironment().lineageMeta(),
                         context,
-                        (entity, lineage) -> lineage.storeSourceTableLineage(entity));
+                        (entity, lineage) -> lineage.saveSourceTableLineage(entity));
             }
             DataTableSource source =
                     new DataTableSource(
@@ -117,7 +117,7 @@ public abstract class AbstractFlinkTableFactory
             storeTableLineage(
                     ((FileStoreTable) table).catalogEnvironment().lineageMeta(),
                     context,
-                    (entity, lineage) -> lineage.storeSinkTableLineage(entity));
+                    (entity, lineage) -> lineage.saveSinkTableLineage(entity));
         }
         return new FlinkTableSink(
                 context.getObjectIdentifier(),

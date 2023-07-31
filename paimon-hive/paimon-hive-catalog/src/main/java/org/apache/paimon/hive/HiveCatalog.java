@@ -108,13 +108,7 @@ public class HiveCatalog extends AbstractCatalog {
     private final LocationHelper locationHelper;
 
     public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName, String warehouse) {
-        this(
-                fileIO,
-                hiveConf,
-                clientClassName,
-                Collections.emptyMap(),
-                warehouse,
-                HiveCatalog.class.getClassLoader());
+        this(fileIO, hiveConf, clientClassName, Collections.emptyMap(), warehouse);
     }
 
     public HiveCatalog(
@@ -122,9 +116,8 @@ public class HiveCatalog extends AbstractCatalog {
             HiveConf hiveConf,
             String clientClassName,
             Map<String, String> options,
-            String warehouse,
-            ClassLoader classLoader) {
-        super(fileIO, options, classLoader);
+            String warehouse) {
+        super(fileIO, options);
         this.hiveConf = hiveConf;
         this.clientClassName = clientClassName;
         this.warehouse = warehouse;

@@ -63,9 +63,11 @@ public abstract class AbstractCatalog implements Catalog {
         this.tableDefaultOptions = new HashMap<>();
     }
 
-    protected AbstractCatalog(FileIO fileIO, Map<String, String> options, ClassLoader classLoader) {
+    protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
         this.fileIO = fileIO;
-        this.lineageMeta = findAndCreateLineageMeta(Options.fromMap(options), classLoader);
+        this.lineageMeta =
+                findAndCreateLineageMeta(
+                        Options.fromMap(options), AbstractCatalog.class.getClassLoader());
         this.tableDefaultOptions = new HashMap<>();
 
         options.keySet().stream()

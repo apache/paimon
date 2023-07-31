@@ -28,11 +28,11 @@ import java.util.Iterator;
 /** Metadata store will manage table lineage and data lineage information for the catalog. */
 public interface LineageMeta extends Serializable {
     /**
-     * Store the source table and job lineage.
+     * Save the source table and job lineage.
      *
      * @param entity the table lineage entity
      */
-    void storeSourceTableLineage(TableLineageEntity entity);
+    void saveSourceTableLineage(TableLineageEntity entity);
 
     /**
      * Delete the source table lineage for given job.
@@ -50,17 +50,17 @@ public interface LineageMeta extends Serializable {
     Iterator<TableLineageEntity> sourceTableLineages(@Nullable Predicate predicate);
 
     /**
-     * Store the sink table and job lineage.
+     * Save the sink table and job lineage.
      *
      * @param entity the table lineage entity
      */
-    void storeSinkTableLineage(TableLineageEntity entity);
+    void saveSinkTableLineage(TableLineageEntity entity);
 
     /**
      * Get sink table and job lineages.
      *
      * @param predicate the predicate for the table lineages
-     * @return the iterator for source table and job lineages
+     * @return the iterator for sink table and job lineages
      */
     Iterator<TableLineageEntity> sinkTableLineages(@Nullable Predicate predicate);
 
@@ -72,11 +72,11 @@ public interface LineageMeta extends Serializable {
     void deleteSinkTableLineage(String job);
 
     /**
-     * Store the source table and job lineage.
+     * Save the source table and job lineage.
      *
      * @param entity the data lineage entity
      */
-    void storeSourceDataLineage(DataLineageEntity entity);
+    void saveSourceDataLineage(DataLineageEntity entity);
 
     /**
      * Get source data and job lineages.
@@ -87,17 +87,17 @@ public interface LineageMeta extends Serializable {
     Iterator<DataLineageEntity> sourceDataLineages(@Nullable Predicate predicate);
 
     /**
-     * Store the source table and job lineage.
+     * Save the sink table and job lineage.
      *
      * @param entity the data lineage entity
      */
-    void storeSinkDataLineage(DataLineageEntity entity);
+    void saveSinkDataLineage(DataLineageEntity entity);
 
     /**
      * Get sink data and job lineages.
      *
      * @param predicate the predicate for the table lineages
-     * @return the iterator for source table and job lineages
+     * @return the iterator for sink table and job lineages
      */
     Iterator<DataLineageEntity> sinkDataLineages(@Nullable Predicate predicate);
 }
