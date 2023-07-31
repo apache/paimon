@@ -87,8 +87,8 @@ Example
     --mysql-conf hostname=127.0.0.1 \
     --mysql-conf username=root \
     --mysql-conf password=123456 \
-    --mysql-conf database-name=source_db \
-    --mysql-conf table-name='source_table' \
+    --mysql-conf database-name='source_db1|source_db2' \
+    --mysql-conf table-name='source_table1|source_table2' \
     --catalog-conf metastore=hive \
     --catalog-conf uri=thrift://hive-metastore:9083 \
     --table-conf bucket=4 \
@@ -96,8 +96,8 @@ Example
     --table-conf sink.parallelism=4
 ```
 
-The mysql-conf table-name also supports regular expressions to monitor multiple tables that satisfy
-the regular expressions.
+As example shows, the mysql-conf's database-name and table-name also support regular expressions to monitor multiple 
+tables that satisfy the regular expressions.
 
 ### Synchronizing Databases
 
