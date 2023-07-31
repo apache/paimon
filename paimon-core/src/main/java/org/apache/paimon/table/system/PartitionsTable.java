@@ -72,8 +72,8 @@ public class PartitionsTable implements ReadonlyTable {
             new RowType(
                     Arrays.asList(
                             new DataField(0, "partition", SerializationUtils.newStringType(true)),
-                            new DataField(2, "record_count", new BigIntType(false)),
-                            new DataField(3, "file_size_in_bytes", new BigIntType(false))));
+                            new DataField(1, "record_count", new BigIntType(false)),
+                            new DataField(2, "file_size_in_bytes", new BigIntType(false))));
 
     private final FileStoreTable storeTable;
 
@@ -93,7 +93,7 @@ public class PartitionsTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.singletonList("file_path");
+        return Collections.singletonList("partition");
     }
 
     @Override
@@ -272,14 +272,12 @@ public class PartitionsTable implements ReadonlyTable {
                 long fileSizeInBytes = row.getLong(2);
 
                 // Grouping and summing
-                if (groupedData.containsKey(partitionId)) {
-                    Partition rowData = groupedData.get(partitionId);
-                    rowData.recordCount += recordCount;
-                    rowData.fileSizeInBytes += fileSizeInBytes;
-                } else {
-                    groupedData.put(
-                            partitionId, new Partition(partitionId, recordCount, fileSizeInBytes));
-                }
+                Partition rowData =
+                        groupedData.computeIfAbsent(
+                                partitionId,
+                                key -> new Partition(partitionId, recordCount, fileSizeInBytes));
+                rowData.recordCount += recordCount;
+                rowData.fileSizeInBytes += fileSizeInBytes;
             }
             resultIterator = groupedData.values().iterator();
         }
