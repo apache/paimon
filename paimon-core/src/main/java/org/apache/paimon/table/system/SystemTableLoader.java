@@ -67,8 +67,8 @@ public class SystemTableLoader {
 
     @Nullable
     public static Table loadGlobal(
-            String type, FileIO fileIO, Map<String, Map<String, Path>> allTablePaths) {
-        switch (type.toLowerCase()) {
+            String tableName, FileIO fileIO, Map<String, Map<String, Path>> allTablePaths) {
+        switch (tableName.toLowerCase()) {
             case ALL_TABLE_OPTIONS:
                 return new AllTableOptionsTable(fileIO, allTablePaths);
             default:

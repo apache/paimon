@@ -42,8 +42,7 @@ public interface Catalog extends AutoCloseable {
     String DEFAULT_DATABASE = "default";
 
     String SYSTEM_TABLE_SPLITTER = "$";
-
-    String SYSTEM_GLOBAL_TABLE = "system";
+    String SYSTEM_DATABASE_NAME = "sys";
 
     /**
      * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
@@ -270,6 +269,15 @@ public interface Catalog extends AutoCloseable {
 
         public String database() {
             return database;
+        }
+    }
+
+    /** Exception for trying to operate on a system database. */
+    class ProcessSystemDatabaseException extends IllegalArgumentException {
+        private static final String MSG = "Can't do operation on system database.";
+
+        public ProcessSystemDatabaseException() {
+            super(MSG);
         }
     }
 

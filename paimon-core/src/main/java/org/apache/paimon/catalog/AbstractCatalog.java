@@ -40,7 +40,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     public static final String DB_SUFFIX = ".db";
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    private static final List<String> globalTables =
+    protected static final List<String> globalTables =
             Arrays.asList(AllTableOptionsTable.ALL_TABLE_OPTIONS);
 
     protected final FileIO fileIO;
@@ -66,21 +66,20 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        if (isSpecifiedSystemTable(identifier)) {
+        if (isSystemDatabase(identifier.getDatabaseName())) {
+            String tableName = identifier.getObjectName();
+            Table table = SystemTableLoader.loadGlobal(tableName, fileIO, allTablePaths());
+            if (table == null) {
+                throw new TableNotExistException(identifier);
+            }
+            return table;
+        } else if (isSpecifiedSystemTable(identifier)) {
             String[] splits = tableAndSystemName(identifier);
             String tableName = splits[0];
             String type = splits[1];
-            Table table;
-            switch (tableName) {
-                case Catalog.SYSTEM_GLOBAL_TABLE:
-                    table = SystemTableLoader.loadGlobal(type, fileIO, allTablePaths());
-                    break;
-                default:
-                    FileStoreTable originTable =
-                            getDataTable(new Identifier(identifier.getDatabaseName(), tableName));
-                    table = SystemTableLoader.load(type, fileIO, originTable);
-                    break;
-            }
+            FileStoreTable originTable =
+                    getDataTable(new Identifier(identifier.getDatabaseName(), tableName));
+            Table table = SystemTableLoader.load(type, fileIO, originTable);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
@@ -138,7 +137,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     protected void checkNotSystemTable(Identifier identifier, String method) {
-        if (isSpecifiedSystemTable(identifier)) {
+        if (isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot '%s' for system table '%s', please use data table.",
@@ -173,5 +172,9 @@ public abstract class AbstractCatalog implements Catalog {
 
     public static Path databasePath(String warehouse, String database) {
         return new Path(warehouse, database + DB_SUFFIX);
+    }
+
+    protected boolean isSystemDatabase(String database) {
+        return SYSTEM_DATABASE_NAME.equals(database);
     }
 }

@@ -51,15 +51,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.catalog.Catalog.SYSTEM_GLOBAL_TABLE;
-import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-
 /**
  * This is a system table to display all the database-table properties.
  *
  * <pre>
  *  For example:
- *     If we select * from system$all_table_options, we will get
+ *     If we select * from sys.all_table_options, we will get
  *     databasename       tablename       key      value
  *         default           test0         a         b
  *         my_db             test1         c         d
@@ -82,7 +79,7 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
     @Override
     public String name() {
-        return SYSTEM_GLOBAL_TABLE + SYSTEM_TABLE_SPLITTER + ALL_TABLE_OPTIONS;
+        return ALL_TABLE_OPTIONS;
     }
 
     @Override

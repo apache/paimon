@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -36,6 +38,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for catalog tables. */
@@ -87,16 +90,42 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testOptionsTable2() throws Exception {
+    public void testAllTableOptions() {
         sql("CREATE TABLE T (a INT, b INT) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
         sql("ALTER TABLE T SET ('c.cc.ccc' = 'val3')");
 
-        List<Row> result = sql("SELECT * FROM system$all_table_options");
+        List<Row> result = sql("SELECT * FROM sys.all_table_options");
         assertThat(result)
                 .containsExactly(
                         Row.of("default", "T", "a.aa.aaa", "val1"),
                         Row.of("default", "T", "b.bb.bbb", "val2"),
                         Row.of("default", "T", "c.cc.ccc", "val3"));
+    }
+
+    @Test
+    public void testDropSystemDatabase() {
+        assertThatCode( ()->
+        sql("DROP DATABASE sys")).hasRootCauseMessage("Can't do operation on system database.");
+    }
+
+    @Test
+    public void testCreateSystemDatabase() {
+        assertThatCode( ()->
+                sql("CREATE DATABASE sys")).hasRootCauseMessage("Can't do operation on system database.");
+    }
+
+    @Test
+    public void testChangeTableInSystemDatabase() {
+        sql("USE sys");
+        assertThatCode( ()->
+        sql("ALTER TABLE all_table_options SET ('bucket-num' = '5')")).hasRootCauseMessage("Can't alter system table.");;
+    }
+
+    @Test
+    public void testSystemDatabase() {
+        sql("USE " + Catalog.SYSTEM_DATABASE_NAME);
+        assertThat(sql("SHOW TABLES"))
+                .containsExactly(Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS));
     }
 
     @Test
@@ -286,23 +315,23 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         + ")");
 
         assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist"))
+                () ->
+                        sql(
+                                "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist"))
                 .hasRootCauseMessage("Primary key column '[aaa]' is not defined in the schema.");
 
         // primary key in option and DDL.
         assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CREATE TABLE t_pk_ddl_option ("
-                                                + "user_id BIGINT,"
-                                                + "item_id BIGINT,"
-                                                + "behavior STRING,"
-                                                + "dt STRING,"
-                                                + "hh STRING,"
-                                                + "PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
-                                                + ") WITH ('primary-key' = 'dt')"))
+                () ->
+                        sql(
+                                "CREATE TABLE t_pk_ddl_option ("
+                                        + "user_id BIGINT,"
+                                        + "item_id BIGINT,"
+                                        + "behavior STRING,"
+                                        + "dt STRING,"
+                                        + "hh STRING,"
+                                        + "PRIMARY KEY (dt, hh, user_id) NOT ENFORCED"
+                                        + ") WITH ('primary-key' = 'dt')"))
                 .hasRootCauseMessage(
                         "Cannot define primary key on DDL and table options at the same time.");
 
@@ -317,22 +346,22 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         + ") PARTITIONED BY (dt, hh) ");
 
         assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist"))
+                () ->
+                        sql(
+                                "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist"))
                 .hasRootCauseMessage("Partition column '[aaa]' is not defined in the schema.");
 
         // partition in option and DDL.
         assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CREATE TABLE t_partition_ddl_option ("
-                                                + "user_id BIGINT,"
-                                                + "item_id BIGINT,"
-                                                + "behavior STRING,"
-                                                + "dt STRING,"
-                                                + "hh STRING"
-                                                + ") PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')"))
+                () ->
+                        sql(
+                                "CREATE TABLE t_partition_ddl_option ("
+                                        + "user_id BIGINT,"
+                                        + "item_id BIGINT,"
+                                        + "behavior STRING,"
+                                        + "dt STRING,"
+                                        + "hh STRING"
+                                        + ") PARTITIONED BY (dt, hh)  WITH ('partition' = 'dt')"))
                 .hasRootCauseMessage(
                         "Cannot define partition on DDL and table options at the same time.");
     }
@@ -340,9 +369,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testConflictOption() {
         assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CREATE TABLE T (a INT) WITH ('write-mode' = 'append-only', 'changelog-producer' = 'input')"))
+                () ->
+                        sql(
+                                "CREATE TABLE T (a INT) WITH ('write-mode' = 'append-only', 'changelog-producer' = 'input')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
@@ -451,31 +480,31 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                         // value count table use all fields as min/max key
                                         ? "[23, 2, 24, 25, 26],[27, 2, 28, 29, 30]"
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
-                                                // append only table has no min/max key
-                                                ? ","
-                                                // with key table use primary key trimmed partition
-                                                : "[23],[27]")),
+                                        // append only table has no min/max key
+                                        ? ","
+                                        // with key table use primary key trimmed partition
+                                        : "[23],[27]")),
                         String.format(
                                 "[1],0,orc,0,0,2,%s,{a=0, bb=0, dd=2, f=2, p=0},{a=1, bb=2, dd=null, f=null, p=1},{a=3, bb=4, dd=null, f=null, p=1}",
                                 StringUtils.endsWith(tableName, "VALUE_COUNT")
                                         ? "[1, 1, 2, S1],[3, 1, 4, S2]"
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
-                                                ? ","
-                                                : "[1],[3]")),
+                                        ? ","
+                                        : "[1],[3]")),
                         String.format(
                                 "[1],0,orc,1,0,2,%s,{a=0, bb=0, dd=0, f=0, p=0},{a=5, bb=6, dd=7, f=9, p=1},{a=10, bb=11, dd=12, f=14, p=1}",
                                 StringUtils.endsWith(tableName, "VALUE_COUNT")
                                         ? "[5, 1, 6, S3, 7, 8, 9],[10, 1, 11, S4, 12, 13, 14]"
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
-                                                ? ","
-                                                : "[5],[10]")),
+                                        ? ","
+                                        : "[5],[10]")),
                         String.format(
                                 "[1],0,orc,2,0,2,%s,{a=0, bb=0, dd=0, f=0, p=0},{a=15, bb=16, dd=17, f=18, p=1},{a=19, bb=20, dd=21, f=22, p=1}",
                                 StringUtils.endsWith(tableName, "VALUE_COUNT")
                                         ? "[15, 1, 16, 17, 18],[19, 1, 20, 21, 22]"
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
-                                                ? ","
-                                                : "[15],[19]")));
+                                        ? ","
+                                        : "[15],[19]")));
 
         // Get files with snapshot id 2
         List<Row> rows2 =
@@ -495,15 +524,15 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 StringUtils.endsWith(tableName, "VALUE_COUNT")
                                         ? "[1, 1, 2, S1],[3, 1, 4, S2]"
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
-                                                ? ","
-                                                : "[1],[3]")),
+                                        ? ","
+                                        : "[1],[3]")),
                         String.format(
                                 "[1],0,orc,1,0,2,%s,{a=0, b=0, c=0, d=0, e=0, f=0, p=0},{a=5, b=6, c=S3, d=7, e=8, f=9, p=1},{a=10, b=11, c=S4, d=12, e=13, f=14, p=1}",
                                 StringUtils.endsWith(tableName, "VALUE_COUNT")
                                         ? "[5, 1, 6, S3, 7, 8, 9],[10, 1, 11, S4, 12, 13, 14]"
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
-                                                ? ","
-                                                : "[5],[10]")));
+                                        ? ","
+                                        : "[5],[10]")));
     }
 
     @Nonnull
@@ -513,17 +542,17 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         v ->
                                 StringUtils.join(
                                         new Object[] {
-                                            v.getField(0),
-                                            v.getField(1),
-                                            v.getField(3),
-                                            v.getField(4),
-                                            v.getField(5),
-                                            v.getField(6),
-                                            v.getField(8),
-                                            v.getField(9),
-                                            v.getField(10),
-                                            v.getField(11),
-                                            v.getField(12)
+                                                v.getField(0),
+                                                v.getField(1),
+                                                v.getField(3),
+                                                v.getField(4),
+                                                v.getField(5),
+                                                v.getField(6),
+                                                v.getField(8),
+                                                v.getField(9),
+                                                v.getField(10),
+                                                v.getField(11),
+                                                v.getField(12)
                                         },
                                         ","))
                 .collect(Collectors.toList());
