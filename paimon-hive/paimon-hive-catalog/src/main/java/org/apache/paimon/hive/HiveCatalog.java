@@ -171,6 +171,9 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public boolean databaseExists(String databaseName) {
+        if (isSystemDatabase(databaseName)) {
+            return true;
+        }
         try {
             client.getDatabase(databaseName);
             return true;
@@ -185,6 +188,9 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void createDatabase(String name, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException {
+        if (isSystemDatabase(name)) {
+            throw new ProcessSystemDatabaseException();
+        }
         try {
             client.createDatabase(convertToDatabase(name));
 
@@ -201,6 +207,9 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
+        if (isSystemDatabase(name)) {
+            throw new ProcessSystemDatabaseException();
+        }
         try {
             if (!cascade && client.getAllTables(name).size() > 0) {
                 throw new DatabaseNotEmptyException(name);
@@ -219,6 +228,9 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            return GLOBAL_TABLES;
+        }
         try {
             return client.getAllTables(databaseName).stream()
                     .filter(

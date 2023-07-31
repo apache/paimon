@@ -66,12 +66,18 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public boolean databaseExists(String databaseName) {
+        if (isSystemDatabase(databaseName)) {
+            return true;
+        }
         return uncheck(() -> fileIO.exists(databasePath(databaseName)));
     }
 
     @Override
     public void createDatabase(String name, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException {
+        if (isSystemDatabase(name)) {
+            throw new ProcessSystemDatabaseException();
+        }
         if (databaseExists(name)) {
             if (ignoreIfExists) {
                 return;
@@ -84,6 +90,9 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException {
+        if (isSystemDatabase(name)) {
+            throw new ProcessSystemDatabaseException();
+        }
         if (!databaseExists(name)) {
             if (ignoreIfNotExists) {
                 return;
@@ -101,6 +110,9 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            return GLOBAL_TABLES;
+        }
         if (!databaseExists(databaseName)) {
             throw new DatabaseNotExistException(databaseName);
         }
