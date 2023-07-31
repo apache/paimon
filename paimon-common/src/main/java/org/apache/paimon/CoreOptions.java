@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Core options for paimon. */
 public class CoreOptions implements Serializable {
@@ -936,6 +937,7 @@ public class CoreOptions implements Serializable {
             int stopNum = numSortedRunStopTrigger();
             maxSortedRunNum = Math.max(stopNum, stopNum + 1);
         }
+        checkArgument(maxSortedRunNum > 1, "The sort spill threshold cannot be smaller than 2.");
         return maxSortedRunNum;
     }
 
