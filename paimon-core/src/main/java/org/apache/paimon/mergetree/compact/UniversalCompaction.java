@@ -20,14 +20,18 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactUnit;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.SortedRun;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /**
  * Universal Compaction Style is a compaction style, targeting the use cases requiring lower write
@@ -101,10 +105,41 @@ public class UniversalCompaction implements CompactStrategy {
 
         // size amplification = percentage of additional size
         if (candidateSize * 100 > maxSizeAmp * earliestRunSize) {
-            return CompactUnit.fromLevelRuns(maxLevel, runs);
+            return CompactUnit.fromLevelRuns(
+                    maxLevel, selectRuns(runs, earliestRunSize, candidateSize));
         }
 
         return null;
+    }
+
+    private List<LevelSortedRun> selectRuns(
+            List<LevelSortedRun> runs, long earliestRunSize, long candidateSize) {
+        List<DataFileMeta> files = new ArrayList<>();
+        long totalSize = 0;
+
+        // Search in reverse order until the size amplification condition is met
+        OUT:
+        for (int i = runs.size() - 2; i >= 0; i--) {
+            List<DataFileMeta> dataFileMetas = runs.get(i).run().files();
+
+            for (DataFileMeta dataFileMeta : dataFileMetas) {
+                totalSize += dataFileMeta.fileSize();
+                files.add(dataFileMeta);
+                if ((candidateSize - totalSize) * 100
+                        > maxSizeAmp * (earliestRunSize + totalSize)) {
+                    break OUT;
+                }
+            }
+        }
+
+        Map<Integer, List<DataFileMeta>> map =
+                files.stream().collect(Collectors.groupingBy(DataFileMeta::level));
+        List<LevelSortedRun> levelSortedRuns = new ArrayList<>();
+        map.forEach(
+                (key, value) ->
+                        levelSortedRuns.add(new LevelSortedRun(key, SortedRun.fromSorted(value))));
+        levelSortedRuns.add(runs.get(runs.size() - 1));
+        return levelSortedRuns;
     }
 
     @VisibleForTesting

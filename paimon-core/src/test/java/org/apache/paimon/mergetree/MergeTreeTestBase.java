@@ -246,7 +246,7 @@ public abstract class MergeTreeTestBase {
 
         assertThat(increment.newFilesIncrement().newFiles().size()).isEqualTo(1);
 
-        assertThat(increment.compactIncrement().compactBefore().size()).isEqualTo(11);
+        assertThat(increment.compactIncrement().compactBefore().size()).isEqualTo(2);
         assertThat(increment.compactIncrement().compactAfter().size()).isEqualTo(1);
     }
 
