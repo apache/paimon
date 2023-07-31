@@ -33,7 +33,7 @@ public class DropPartitionAction extends TableActionBase {
     private final List<Map<String, String>> partitions;
     private final FileStoreCommit commit;
 
-    DropPartitionAction(
+    public DropPartitionAction(
             String warehouse,
             String databaseName,
             String tableName,
