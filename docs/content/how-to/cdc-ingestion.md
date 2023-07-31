@@ -196,6 +196,37 @@ The command to recover from previous snapshot and add new tables to synchronize 
     --including-tables 'product|user|address|order|custom'
 ```
 
+{{< hint info >}}
+You can set `--mode combined` to enable synchronizing newly added tables without restarting job.
+{{< /hint >}}
+
+Example 3: synchronize and merge multiple shards
+
+Let's say you have multiple database shards `db1`, `db2`, ... and each database has tables `tbl1`, `tbl2`, .... You can 
+synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... by following command:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mysql-sync-database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --mysql-conf hostname=127.0.0.1 \
+    --mysql-conf username=root \
+    --mysql-conf password=123456 \
+    --mysql-conf database-name='db.+' \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4 \
+    --including-tables 'tbl.+'
+```
+
+By setting database-name to a regular expression, the synchronization job will capture all tables under matched databases 
+and merge tables of the same name into one table.
+
+
 ## Kafka
 
 ### Prepare Kafka Bundled Jar
