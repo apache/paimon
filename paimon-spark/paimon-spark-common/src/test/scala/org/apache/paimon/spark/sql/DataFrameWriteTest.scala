@@ -127,7 +127,6 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
             val df3 = Seq(
               (2L, "b2", BigDecimal.decimal(234), Map("k" -> 22.2)),
               (4L, "d", BigDecimal.decimal(456), Map("k" -> 44.4))).toDF("a", "b", "c", "d")
-            df3.schema.printTreeString()
             df3.write
               .format("paimon")
               .mode("append")
@@ -238,7 +237,6 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
               .option("write.merge-schema", "true")
               .option("write.merge-schema.explicit-cast", "true")
               .save(location)
-            df3.schema.printTreeString()
             val expected3 = if (writeMode == CHANGE_LOG) {
               Row(1L, Date.valueOf("2023-08-01"), 12, ts.toString) :: Row(
                 2L,
