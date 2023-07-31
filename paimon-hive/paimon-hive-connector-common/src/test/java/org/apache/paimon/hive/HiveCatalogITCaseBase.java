@@ -759,7 +759,7 @@ public abstract class HiveCatalogITCaseBase {
         try {
             tEnv.executeSql("CREATE TABLE t001(id INT PRIMARY KEY NOT ENFORCED , d TIME)").await();
         } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(t, "Unsupported logical type TIME(0)");
+            ExceptionUtils.assertThrowableWithMessage(t, "Unsupported type: TIME(0)");
         }
         Identifier identifier = new Identifier("test_db", "t001");
         Catalog catalog =
@@ -770,7 +770,7 @@ public abstract class HiveCatalogITCaseBase {
         try {
             tEnv.executeSql("ALTER TABLE t002 MODIFY b TIME").await();
         } catch (Throwable t) {
-            ExceptionUtils.assertThrowableWithMessage(t, "Unsupported logical type TIME(0)");
+            ExceptionUtils.assertThrowableWithMessage(t, "Unsupported type: TIME(0)");
         }
         identifier = new Identifier("test_db", "t002");
         FileStoreTable table = (FileStoreTable) catalog.getTable(identifier);
