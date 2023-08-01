@@ -17,14 +17,12 @@
  */
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.predicate.PredicateBuilder
 import org.apache.paimon.spark.SparkFilterConverter
-import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
+import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageSerializer}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.catalyst.analysis.Resolver
-import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter, Not, Or}
+import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
 import java.io.IOException
 
@@ -33,9 +31,9 @@ trait PaimonCommand {
 
   val BUCKET_COL = "_bucket_"
 
-  def getTable: Table
+  def table: FileStoreTable
 
-  lazy val bucketMode: BucketMode = getTable match {
+  lazy val bucketMode: BucketMode = table match {
     case fileStoreTable: FileStoreTable =>
       fileStoreTable.bucketMode
     case _ =>

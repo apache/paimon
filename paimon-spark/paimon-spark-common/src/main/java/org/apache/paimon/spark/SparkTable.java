@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
@@ -96,7 +97,7 @@ public class SparkTable
     @Override
     public WriteBuilder newWriteBuilder(LogicalWriteInfo info) {
         try {
-            return new SparkWriteBuilder((FileStoreTable) table);
+            return new SparkWriteBuilder((FileStoreTable) table, Options.fromMap(info.options()));
         } catch (Exception e) {
             throw new RuntimeException("Only FileStoreTable can be written.");
         }

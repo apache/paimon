@@ -20,13 +20,15 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.index.PartitionIndex
-import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkRow}
+import org.apache.paimon.options.Options
+import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkConnectorOptions, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.table.{BucketMode, FileStoreTable, Table}
+import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -39,29 +41,35 @@ import scala.collection.JavaConverters._
 import scala.collection.mutable
 
 /** Used to write a [[DataFrame]] into a paimon table. */
-case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data: DataFrame)
+case class WriteIntoPaimonTable(
+    override val originTable: FileStoreTable,
+    saveMode: SaveMode,
+    data: DataFrame,
+    options: Options)
   extends RunnableCommand
-  with PaimonCommand {
+  with PaimonCommand
+  with SchemaHelper
+  with Logging {
 
   import WriteIntoPaimonTable._
 
-  private var table = _table
-
-  private lazy val tableSchema = table.schema()
-
-  private lazy val rowType = table.rowType()
-
-  private lazy val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
-
   private lazy val serializer = new CommitMessageSerializer
 
+  private lazy val mergeSchema = options.get(SparkConnectorOptions.MERGE_SCHEMA)
+
+  /** \1. 2. */
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
+    if (mergeSchema) {
+      val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST)
+      mergeAndCommitSchema(data.schema, allowExplicitCast)
+    }
+
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()
     // use the extra options to rebuild the table object
-    table = table.copy(
-      Map(DYNAMIC_PARTITION_OVERWRITE.key() -> dynamicPartitionOverwriteMode.toString).asJava)
+    updateTableWithOptions(
+      Map(DYNAMIC_PARTITION_OVERWRITE.key -> dynamicPartitionOverwriteMode.toString))
 
     val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala.map(col)
     val partitionCols = tableSchema.partitionKeys().asScala.map(col)
@@ -79,6 +87,9 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
     def repartitionByBucket(ds: Dataset[Row]) = {
       ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
     }
+
+    val rowType = table.rowType()
+    val writeBuilder = table.newBatchWriteBuilder()
 
     val df =
       bucketMode match {
@@ -153,7 +164,7 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
         } else if (isTruncate(filter.get)) {
           Map.empty[String, String]
         } else {
-          convertFilterToMap(filter.get, tableSchema.logicalPartitionType())
+          convertFilterToMap(filter.get, table.schema.logicalPartitionType())
         }
       case DynamicOverWrite =>
         dynamicPartitionOverwriteMode = true
@@ -167,7 +178,6 @@ case class WriteIntoPaimonTable(_table: FileStoreTable, saveMode: SaveMode, data
   override def withNewChildrenInternal(newChildren: IndexedSeq[LogicalPlan]): LogicalPlan =
     this.asInstanceOf[WriteIntoPaimonTable]
 
-  override def getTable: Table = table
 }
 
 object WriteIntoPaimonTable {
