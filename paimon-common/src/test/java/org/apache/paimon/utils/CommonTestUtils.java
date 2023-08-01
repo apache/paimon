@@ -25,10 +25,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.instanceOf;
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** This class contains reusable utility methods for unit tests. */
 public class CommonTestUtils {
@@ -80,13 +77,7 @@ public class CommonTestUtils {
     /** Checks whether an exception with a message occurs when running a piece of code. */
     public static void assertThrows(
             String msg, Class<? extends Exception> expected, Callable<?> code) {
-        try {
-            Object result = code.call();
-            fail("Previous method call should have failed but it returned: " + result);
-        } catch (Exception e) {
-            assertThat(e, instanceOf(expected));
-            assertThat(e.getMessage(), containsString(msg));
-        }
+        assertThatThrownBy(code::call).isInstanceOf(expected).hasMessageContaining(msg);
     }
 
     /**

@@ -32,13 +32,12 @@ import java.nio.file.Path;
 import static org.apache.paimon.security.SecurityConfiguration.KERBEROS_LOGIN_KEYTAB;
 import static org.apache.paimon.security.SecurityConfiguration.KERBEROS_LOGIN_PRINCIPAL;
 import static org.apache.paimon.security.SecurityConfiguration.KERBEROS_LOGIN_USETICKETCACHE;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Test for {@link KerberosLoginProvider}.
@@ -57,7 +56,7 @@ public class KerberosLoginProviderITCase {
             UserGroupInformation userGroupInformation = mock(UserGroupInformation.class);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertFalse(kerberosLoginProvider.isLoginPossible());
+            assertThat(kerberosLoginProvider.isLoginPossible()).isFalse();
         }
     }
 
@@ -71,7 +70,7 @@ public class KerberosLoginProviderITCase {
             ugi.when(UserGroupInformation::isSecurityEnabled).thenReturn(false);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertFalse(kerberosLoginProvider.isLoginPossible());
+            assertThat(kerberosLoginProvider.isLoginPossible()).isFalse();
         }
     }
 
@@ -88,7 +87,7 @@ public class KerberosLoginProviderITCase {
             ugi.when(UserGroupInformation::isSecurityEnabled).thenReturn(true);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertTrue(kerberosLoginProvider.isLoginPossible());
+            assertThat(kerberosLoginProvider.isLoginPossible()).isTrue();
         }
     }
 
@@ -104,7 +103,7 @@ public class KerberosLoginProviderITCase {
             ugi.when(UserGroupInformation::isSecurityEnabled).thenReturn(true);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertTrue(kerberosLoginProvider.isLoginPossible());
+            assertThat(kerberosLoginProvider.isLoginPossible()).isTrue();
         }
     }
 
@@ -120,8 +119,8 @@ public class KerberosLoginProviderITCase {
             ugi.when(UserGroupInformation::isSecurityEnabled).thenReturn(true);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertThrows(
-                    UnsupportedOperationException.class, kerberosLoginProvider::isLoginPossible);
+            assertThatThrownBy(kerberosLoginProvider::isLoginPossible)
+                    .isInstanceOf(UnsupportedOperationException.class);
         }
     }
 
@@ -169,7 +168,7 @@ public class KerberosLoginProviderITCase {
                     .thenReturn(UserGroupInformation.AuthenticationMethod.PROXY);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertThrows(UnsupportedOperationException.class, kerberosLoginProvider::doLogin);
+            assertThatThrownBy(kerberosLoginProvider::doLogin).isInstanceOf(UnsupportedOperationException.class);
         }
     }
 }

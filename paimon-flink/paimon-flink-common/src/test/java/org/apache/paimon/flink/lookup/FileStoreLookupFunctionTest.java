@@ -50,6 +50,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /** Tests for {@link FileStoreLookupFunction}. */
 public class FileStoreLookupFunctionTest {
 
@@ -99,17 +101,15 @@ public class FileStoreLookupFunctionTest {
     public void testLookupScanLeak() throws Exception {
         commit(writeCommit(1));
         fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
-        Assertions.assertEquals(
+        assertThat(
                 TraceableFileIO.openInputStreams(s -> s.toString().contains(tempDir.toString()))
-                        .size(),
-                0);
+                        .size()).isEqualTo(0);
 
         commit(writeCommit(10));
         fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
-        Assertions.assertEquals(
+        assertThat(
                 TraceableFileIO.openInputStreams(s -> s.toString().contains(tempDir.toString()))
-                        .size(),
-                0);
+                        .size()).isEqualTo(0);
     }
 
     @Test

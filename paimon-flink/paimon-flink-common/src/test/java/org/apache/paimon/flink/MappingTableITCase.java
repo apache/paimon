@@ -34,7 +34,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for mapping table api. */
 public class MappingTableITCase extends AbstractTestBase {
@@ -55,10 +55,9 @@ public class MappingTableITCase extends AbstractTestBase {
                         "CREATE TABLE T (i INT, j INT) WITH ("
                                 + "'connector'='paimon', 'path'='%s')",
                         path));
-        assertThrows(
-                ValidationException.class,
-                () -> tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await(),
-                "Schema file not found in location");
+        assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await())
+                .isInstanceOf(ValidationException.class)
+                        .hasMessage("Schema file not found in location");
     }
 
     @Test
@@ -110,9 +109,8 @@ public class MappingTableITCase extends AbstractTestBase {
                                 + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
                         path));
 
-        assertThrows(
-                ValidationException.class,
-                () -> tEnv.executeSql("SELECT * FROM T").collect().close(),
-                "Flink schema and store schema are not the same");
+        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM T").collect().close())
+                .isInstanceOf(ValidationException.class)
+                .hasMessage("Flink schema and store schema are not the same");
     }
 }

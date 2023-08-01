@@ -194,7 +194,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         result.addAll(write.prepareCommit(true, 0));
         commit.commit(0, result);
         result.clear();
-        Assertions.assertEquals(scan.plan().splits().size(), 3);
+        assertThat(scan.plan().splits().size()).isEqualTo(3);
 
         write.write(rowData(3, 33, 303L));
         result.addAll(write.prepareCommit(true, 1));
@@ -203,7 +203,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(2, 22, 202L));
         result.addAll(write.prepareCommit(true, 1));
         commit.commit(1, result);
-        Assertions.assertEquals(scan.plan().splits().size(), 3);
+        assertThat(scan.plan().splits().size()).isEqualTo(3);
 
         write.close();
     }

@@ -36,6 +36,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /** Test for {@link StatsCollectorFactories}. */
 public class StatsCollectorFactoriesTest {
     @Test
@@ -56,9 +58,9 @@ public class StatsCollectorFactoriesTest {
                 StatsCollectorFactories.createStatsFactories(
                         new CoreOptions(options), type.getFieldNames());
         FieldStatsCollector[] stats = FieldStatsCollector.create(statsFactories);
-        Assertions.assertEquals(3, stats.length);
-        Assertions.assertEquals(16, ((TruncateFieldStatsCollector) stats[0]).getLength());
-        Assertions.assertEquals(12, ((TruncateFieldStatsCollector) stats[1]).getLength());
-        Assertions.assertTrue(stats[2] instanceof FullFieldStatsCollector);
+        assertThat(stats.length).isEqualTo(3);
+        assertThat(((TruncateFieldStatsCollector) stats[0]).getLength()).isEqualTo(16);
+        assertThat(((TruncateFieldStatsCollector) stats[1]).getLength()).isEqualTo(12);
+        assertThat(stats[2] instanceof FullFieldStatsCollector).isTrue();
     }
 }

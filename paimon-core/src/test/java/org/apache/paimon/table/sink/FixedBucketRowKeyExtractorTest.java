@@ -36,7 +36,7 @@ import java.util.Map;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link FixedBucketRowKeyExtractor}. */
 public class FixedBucketRowKeyExtractorTest {

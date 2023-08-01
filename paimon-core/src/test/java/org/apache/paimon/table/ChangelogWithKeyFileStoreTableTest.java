@@ -75,7 +75,6 @@ import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** Tests for {@link ChangelogWithKeyFileStoreTable}. */
 public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
@@ -188,8 +187,8 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row1).sequenceNumber();
         long sequenceNumber2 =
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row2).sequenceNumber();
-        assertEquals(1685530987, TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS));
-        assertEquals(1685530987, TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS));
+        assertThat(TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS)).isEqualTo(1685530987);
+        assertThat(TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS)).isEqualTo(1685530987);
         write.close();
 
         // Do not check results, they are unstable

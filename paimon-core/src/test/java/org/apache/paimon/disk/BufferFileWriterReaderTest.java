@@ -33,7 +33,7 @@ import java.util.Random;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.fail;
 
 /** Test for {@link BufferFileReader} and {@link BufferFileWriter}. */
 public class BufferFileWriterReaderTest {

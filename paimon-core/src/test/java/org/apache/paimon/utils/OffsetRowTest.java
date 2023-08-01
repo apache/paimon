@@ -36,10 +36,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link OffsetRow}. */
 public class OffsetRowTest {
@@ -115,33 +112,33 @@ public class OffsetRowTest {
     }
 
     private void testGetters(InternalRow row) {
-        assertEquals(19, row.getFieldCount());
+        assertThat(row.getFieldCount()).isEqualTo(19);
 
         // test header
-        assertEquals(RowKind.INSERT, row.getRowKind());
+        assertThat(row.getRowKind()).isEqualTo(RowKind.INSERT);
         row.setRowKind(RowKind.DELETE);
-        assertEquals(RowKind.DELETE, row.getRowKind());
+        assertThat(row.getRowKind()).isEqualTo(RowKind.DELETE);
 
         // test get
-        assertTrue(row.getBoolean(0));
-        assertEquals(1, row.getByte(1));
-        assertEquals(2, row.getShort(2));
-        assertEquals(3, row.getInt(3));
-        assertEquals(4, row.getLong(4));
-        assertEquals(5, (int) row.getFloat(5));
-        assertEquals(6, (int) row.getDouble(6));
-        assertEquals(str, row.getString(8));
-        assertEquals(decimal1, row.getDecimal(9, 5, 0));
-        assertEquals(decimal2, row.getDecimal(10, 20, 0));
-        assertEquals(array, row.getArray(11));
-        assertEquals(map, row.getMap(12));
-        assertEquals(15, row.getRow(13, 2).getInt(0));
-        assertEquals(16, row.getRow(13, 2).getInt(1));
-        assertArrayEquals(bytes, row.getBinary(14));
-        assertEquals(timestamp1, row.getTimestamp(15, 3));
-        assertEquals(timestamp2, row.getTimestamp(16, 9));
+        assertThat(row.getBoolean(0)).isTrue();
+        assertThat(row.getByte(1)).isEqualTo(1);
+        assertThat(row.getShort(2)).isEqualTo(2);
+        assertThat(row.getInt(3)).isEqualTo(3);
+        assertThat(row.getLong(4)).isEqualTo(4);
+        assertThat((int) row.getFloat(5)).isEqualTo(5);
+        assertThat((int) row.getDouble(6)).isEqualTo(6);
+        assertThat(row.getString(8)).isEqualTo(str);
+        assertThat(row.getDecimal(9, 5, 0)).isEqualTo(decimal1);
+        assertThat(row.getDecimal(10, 20, 0)).isEqualTo(decimal2);
+        assertThat(row.getArray(11)).isEqualTo(array);
+        assertThat(row.getMap(12)).isEqualTo(map);
+        assertThat(row.getRow(13, 2).getInt(0)).isEqualTo(15);
+        assertThat(row.getRow(13, 2).getInt(1)).isEqualTo(16);
+        assertThat(row.getBinary(14)).containsExactlyInAnyOrder(bytes);
+        assertThat(row.getTimestamp(15, 3)).isEqualTo(timestamp1);
+        assertThat(row.getTimestamp(16, 9)).isEqualTo(timestamp2);
 
-        assertFalse(row.isNullAt(0));
-        assertTrue(row.isNullAt(17));
+        assertThat(row.isNullAt(0)).isFalse();
+        assertThat(row.isNullAt(17)).isTrue();
     }
 }

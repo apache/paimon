@@ -46,6 +46,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /** Test for {@link AppendOnlyTableCompactionCoordinator}. */
 public class AppendOnlyTableCompactionITTest {
 
@@ -62,8 +64,8 @@ public class AppendOnlyTableCompactionITTest {
 
         messages.forEach(
                 message ->
-                        Assertions.assertTrue(
-                                ((CommitMessageImpl) message).compactIncrement().isEmpty()));
+                        assertThat(
+                                ((CommitMessageImpl) message).compactIncrement().isEmpty()).isTrue());
     }
 
     @Test
@@ -75,33 +77,33 @@ public class AppendOnlyTableCompactionITTest {
         // first compact, six files left after commit compact and update restored files
         // test run method invoke scan and compactPlan
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.run();
-        Assertions.assertEquals(tasks.size(), 1);
+        assertThat(tasks.size()).isEqualTo(1);
         AppendOnlyCompactionTask task = tasks.get(0);
-        Assertions.assertEquals(task.compactBefore().size(), 6);
+        assertThat(task.compactBefore().size()).isEqualTo(6);
         compactionWorker.accept(tasks);
         List<CommitMessage> result = compactionWorker.doCompact();
-        Assertions.assertEquals(1, result.size());
+        assertThat(result.size()).isEqualTo(1);
         commit(result);
         compactionCoordinator.scan();
-        Assertions.assertEquals(compactionCoordinator.listRestoredFiles().size(), 6);
+        assertThat(compactionCoordinator.listRestoredFiles().size()).isEqualTo(6);
 
         // second compact, only one file left after updateRestored
         tasks = compactionCoordinator.compactPlan();
-        Assertions.assertEquals(tasks.size(), 1);
+        assertThat(tasks.size()).isEqualTo(1);
         // before update, zero file left
-        Assertions.assertEquals(compactionCoordinator.listRestoredFiles().size(), 0);
+        assertThat(compactionCoordinator.listRestoredFiles().size()).isEqualTo(0);
         commit(compactionWorker.accept(tasks).doCompact());
         compactionCoordinator.scan();
         // one file is loaded from delta
         List<DataFileMeta> last = new ArrayList<>(compactionCoordinator.listRestoredFiles());
-        Assertions.assertEquals(last.size(), 1);
-        Assertions.assertEquals(last.get(0).rowCount(), 11);
+        assertThat(last.size()).isEqualTo(1);
+        assertThat(last.get(0).rowCount()).isEqualTo(11);
     }
 
     @Test
     public void testCompactionLot() throws Exception {
         // test continuous compaction
-        Assertions.assertNull(snapshotManager.latestSnapshotId());
+        assertThat(snapshotManager.latestSnapshotId()).isNull();
 
         long count = 0;
         for (int i = 90; i < 100; i++) {
@@ -109,17 +111,17 @@ public class AppendOnlyTableCompactionITTest {
             commit(writeCommit(i));
             commit(compactionWorker.accept(compactionCoordinator.run()).doCompact());
             // scan the file generated itself
-            Assertions.assertTrue(compactionCoordinator.scan());
-            Assertions.assertEquals(
+            assertThat(compactionCoordinator.scan()).isTrue();
+            assertThat(
                     compactionCoordinator.listRestoredFiles().stream()
                             .map(DataFileMeta::rowCount)
                             .reduce(Long::sum)
-                            .get(),
+                            .get()).isEqualTo(
                     count);
         }
 
-        Assertions.assertEquals(
-                appendOnlyFileStoreTable.store().newScan().plan().files().size(),
+        assertThat(
+                appendOnlyFileStoreTable.store().newScan().plan().files().size()).isEqualTo(
                 compactionCoordinator.listRestoredFiles().size());
 
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
@@ -129,8 +131,8 @@ public class AppendOnlyTableCompactionITTest {
         }
 
         int remainedSize = appendOnlyFileStoreTable.store().newScan().plan().files().size();
-        Assertions.assertEquals(remainedSize, compactionCoordinator.listRestoredFiles().size());
-        Assertions.assertEquals(remainedSize, 5);
+        assertThat(remainedSize).isEqualTo(compactionCoordinator.listRestoredFiles().size());
+        assertThat(remainedSize).isEqualTo(5);
     }
 
     private static Schema schema() {

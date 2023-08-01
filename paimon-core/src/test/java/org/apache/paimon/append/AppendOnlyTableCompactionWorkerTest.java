@@ -48,6 +48,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /** Tests for {@link AppendOnlyTableCompactionWorker}. */
 public class AppendOnlyTableCompactionWorkerTest {
 
@@ -68,19 +70,19 @@ public class AppendOnlyTableCompactionWorkerTest {
         List<DataFileMeta> writtenFiles = writeCommit(fileNumer);
         compactionCoordinator.notifyNewFiles(partition, writtenFiles);
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
-        Assertions.assertEquals(tasks.size(), taskSize);
+        assertThat(tasks.size()).isEqualTo(taskSize);
 
         compactionWorker.accept(tasks);
         List<CommitMessage> lists = compactionWorker.doCompact();
 
-        Assertions.assertEquals(lists.size(), taskSize);
+        assertThat(lists.size()).isEqualTo(taskSize);
 
         for (int i = 0; i < taskSize; i++) {
             AppendOnlyCompactionTask task = tasks.get(i);
             CommitMessageImpl commitMessage = (CommitMessageImpl) lists.get(i);
-            Assertions.assertIterableEquals(
-                    task.compactBefore(), commitMessage.compactIncrement().compactBefore());
-            Assertions.assertEquals(commitMessage.compactIncrement().compactAfter().size(), 1);
+            assertThat(
+                    task.compactBefore()).containsExactlyInAnyOrderElementsOf(commitMessage.compactIncrement().compactBefore());
+            assertThat(commitMessage.compactIncrement().compactAfter().size()).isEqualTo(1);
         }
     }
 
@@ -105,19 +107,19 @@ public class AppendOnlyTableCompactionWorkerTest {
         List<DataFileMeta> writtenFiles1 = writeCommit(fileNumer);
         compactionCoordinator.notifyNewFiles(partition1, writtenFiles1);
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
-        Assertions.assertEquals(tasks.size(), taskSize * 2);
+        assertThat(tasks.size()).isEqualTo(taskSize * 2);
 
         compactionWorker.accept(tasks);
         List<CommitMessage> lists = compactionWorker.doCompact();
 
-        Assertions.assertEquals(lists.size(), taskSize * 2);
+        assertThat(lists.size()).isEqualTo(taskSize * 2);
 
         for (int i = 0; i < taskSize; i++) {
             AppendOnlyCompactionTask task = tasks.get(i);
             CommitMessageImpl commitMessage = (CommitMessageImpl) lists.get(i);
-            Assertions.assertEquals(task.partition(), commitMessage.partition());
-            Assertions.assertIterableEquals(
-                    task.compactBefore(), commitMessage.compactIncrement().compactBefore());
+            assertThat(task.partition()).isEqualTo(commitMessage.partition());
+            assertThat(
+                    task.compactBefore()).containsExactlyInAnyOrderElementsOf(commitMessage.compactIncrement().compactBefore());
         }
     }
 

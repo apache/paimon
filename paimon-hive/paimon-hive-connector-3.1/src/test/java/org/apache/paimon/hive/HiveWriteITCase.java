@@ -54,6 +54,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.hive.FileStoreTestUtils.DATABASE_NAME;
 import static org.apache.paimon.hive.FileStoreTestUtils.TABLE_NAME;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonOutputFormat}. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -196,7 +197,7 @@ public class HiveWriteITCase {
         hiveShell.execute(
                 "insert into " + outputTableName + " values (1,2,3,'Hello'),(4,5,6,'Fine')");
         List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
-        Assert.assertEquals(select, Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine"));
+        assertThat(select).isEqualTo(Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine"));
     }
 
     @Test
@@ -218,6 +219,6 @@ public class HiveWriteITCase {
                         + outputTableName
                         + " values(1,'2023-01-13 20:00:01.123','2023-12-23')");
         List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
-        Assert.assertEquals(Arrays.asList("1\t2023-01-13 20:00:01.123\t2023-12-23"), select);
+        assertThat(select).isEqualTo(Collections.singletonList("1\t2023-01-13 20:00:01.123\t2023-12-23"));
     }
 }

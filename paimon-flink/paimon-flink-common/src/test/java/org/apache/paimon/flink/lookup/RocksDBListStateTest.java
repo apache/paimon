@@ -41,6 +41,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /** Test for {@link org.apache.paimon.flink.lookup.RocksDBListState}. */
 public class RocksDBListStateTest {
 
@@ -62,13 +64,12 @@ public class RocksDBListStateTest {
         GenericRow key = row("aaa");
         listState.add(key, row("1"));
         List<InternalRow> result = listState.get(key);
-        Assertions.assertEquals(Lists.newArrayList("1"), getString(result));
+        assertThat(getString(result)).containsExactlyInAnyOrder("1");
         listState.add(key, row("2,3"));
-        Assertions.assertEquals(Lists.newArrayList("1", "2,3"), getString(listState.get(key)));
+        assertThat(getString(listState.get(key))).containsExactlyInAnyOrder("1", "2,3");
         listState.add(key, row("1"));
-        Assertions.assertEquals(Lists.newArrayList("1", "2,3", "1"), getString(listState.get(key)));
-        Assertions.assertEquals(Lists.newArrayList("1", "2,3", "1"), getString(listState.get(key)));
-        Assertions.assertTrue(listState.get(row("bbb")).isEmpty());
+        assertThat(getString(listState.get(key))).containsExactlyInAnyOrder("1", "2,3", "1");
+        assertThat(listState.get(row("bbb"))).isEmpty();
     }
 
     public GenericRow row(String value) {

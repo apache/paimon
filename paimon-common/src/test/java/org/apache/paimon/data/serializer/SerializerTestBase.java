@@ -38,9 +38,8 @@ import java.util.List;
 import java.util.concurrent.CyclicBarrier;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 /** Abstract test base for serializers. */
 public abstract class SerializerTestBase<T> {
@@ -86,14 +85,14 @@ public abstract class SerializerTestBase<T> {
                 serializer.serialize(value, out);
                 TestInputView in = out.getInputView();
 
-                assertTrue(in.available() > 0, "No data available during deserialization.");
+                assertThat(in.available() > 0).withFailMessage("No data available during deserialization.").isTrue();
 
                 T deserialized = serializer.deserialize(in);
                 checkToString(deserialized);
 
                 deepEquals("Deserialized value if wrong.", value, deserialized);
 
-                assertEquals(0, in.available(), "Trailing data available after deserialization.");
+                assertThat(in.available()).withFailMessage("Trailing data available after deserialization.").isEqualTo(0);
             }
         } catch (Exception e) {
             System.err.println(e.getMessage());
@@ -124,7 +123,7 @@ public abstract class SerializerTestBase<T> {
                 num++;
             }
 
-            assertEquals(testData.length, num, "Wrong number of elements deserialized.");
+            assertThat(num).withFailMessage("Wrong number of elements deserialized.").isEqualTo(testData.length);
         } catch (Exception e) {
             System.err.println(e.getMessage());
             e.printStackTrace();
@@ -144,8 +143,7 @@ public abstract class SerializerTestBase<T> {
                 return;
             }
 
-            assertEquals(
-                    ser1, ser2, "The copy of the serializer is not equal to the original one.");
+            assertThat(ser2).withFailMessage("The copy of the serializer is not equal to the original one.").isEqualTo(ser1);
         } catch (Exception e) {
             System.err.println(e.getMessage());
             e.printStackTrace();
@@ -171,7 +169,7 @@ public abstract class SerializerTestBase<T> {
         final Serializer<T> serializer = getSerializer();
         final CyclicBarrier startLatch = new CyclicBarrier(numThreads);
         final List<SerializerRunner> concurrentRunners = new ArrayList<>(numThreads);
-        assertEquals(serializer, serializer.duplicate());
+        assertThat(serializer.duplicate()).isEqualTo(serializer);
 
         T[] testData = getData();
 
@@ -196,7 +194,7 @@ public abstract class SerializerTestBase<T> {
 
             for (T value : testData) {
                 byte[] bytes = InstantiationUtil.serializeObject(value);
-                assertTrue(bytes.length > 0, "No data available during deserialization.");
+                assertThat(bytes.length > 0).withFailMessage("No data available during deserialization.").isTrue();
 
                 T deserialized =
                         InstantiationUtil.deserializeObject(
@@ -215,7 +213,7 @@ public abstract class SerializerTestBase<T> {
     // --------------------------------------------------------------------------------------------
 
     private void deepEquals(String message, T should, T is) {
-        assertTrue(deepEquals(should, is), message);
+        assertThat(deepEquals(should, is)).withFailMessage(message).isTrue();
     }
 
     // --------------------------------------------------------------------------------------------
@@ -303,9 +301,10 @@ public abstract class SerializerTestBase<T> {
                         T copySerdeTestItem = serializer.copy(serdeTestItem);
                         dataOutputSerializer.clear();
 
-                        assertTrue(
-                                deepEquals(copySerdeTestItem, testItem),
-                                "Serialization/Deserialization cycle resulted in an object that are not equal to the original.");
+                        assertThat(
+                                deepEquals(copySerdeTestItem, testItem)
+                                ).withFailMessage("Serialization/Deserialization cycle resulted in an object that are not equal to the original.")
+                                .isTrue();
 
                         // try to enforce some upper bound to the test time
                         if (System.nanoTime() >= endTimeNanos) {

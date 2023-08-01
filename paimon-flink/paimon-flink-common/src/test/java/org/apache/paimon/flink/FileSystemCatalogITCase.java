@@ -39,8 +39,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for {@link FlinkCatalog}. */
 public class FileSystemCatalogITCase extends KafkaTableTestBase {
@@ -78,15 +77,14 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
                 .hasMessage("Could not execute ALTER TABLE fs.default.t1 RENAME TO fs.default.t2");
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
-        assertEquals(Arrays.asList(Row.of("t2"), Row.of("t3")), collect("SHOW TABLES"));
+        assertThat(collect("SHOW TABLES")).containsExactlyInAnyOrder(Row.of("t2"), Row.of("t3"));
 
         Identifier identifier = new Identifier(DB_NAME, "t3");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         Path tablePath = ((AbstractCatalog) catalog).getDataTableLocation(identifier);
-        assertEquals(
-                tablePath.toString(),
-                new File(path, DB_NAME + ".db" + File.separator + "t3").toString());
+        assertThat(
+                tablePath.toString()).isEqualTo(new File(path, DB_NAME + ".db" + File.separator + "t3").toString());
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(tEnv.from("t3").execute().collect());

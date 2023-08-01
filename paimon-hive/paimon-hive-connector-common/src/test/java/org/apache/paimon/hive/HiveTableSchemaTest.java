@@ -35,9 +35,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Properties;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.*;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link HiveSchema}. */
 public class HiveTableSchemaTest {
@@ -142,10 +141,10 @@ public class HiveTableSchemaTest {
                         + "Field #3\n"
                         + "Hive DDL          : c decimal(6,3)\n"
                         + "Paimon Schema: c decimal(5,3)";
-        IllegalArgumentException exception =
-                assertThrows(
-                        IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
-        assertThat(exception).hasMessageContaining(expected);
+
+        assertThatThrownBy(() -> HiveSchema.extract(null, properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(expected);
     }
 
     @Test
@@ -243,10 +242,9 @@ public class HiveTableSchemaTest {
                                 + "Partition Key #2\n"
                                 + "Hive DDL          : mismatched string\n"
                                 + "Paimon Schema: b string");
-        IllegalArgumentException exception =
-                assertThrows(
-                        IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
-        assertThat(exception).hasMessageContaining(expected);
+        assertThatThrownBy(() -> HiveSchema.extract(null, properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(expected);
     }
 
     @Test
