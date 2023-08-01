@@ -128,7 +128,7 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         // clear age
         compactionCoordinator.notifyNewFiles(partition, generateNewFiles(1, 0));
         assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
-        ;
+
         // check whether age goes to zero again
         assertThat(compactionCoordinator.partitionCompactCoordinators.get(partition).age)
                 .isEqualTo(0);
