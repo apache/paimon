@@ -72,7 +72,7 @@ To use this feature through `flink run`, run the following shell command.
 
 If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
 
-Example
+Example 1: synchronize tables into one Paimon table
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -87,7 +87,7 @@ Example
     --mysql-conf hostname=127.0.0.1 \
     --mysql-conf username=root \
     --mysql-conf password=123456 \
-    --mysql-conf database-name='source_db1|source_db2' \
+    --mysql-conf database-name='source_db' \
     --mysql-conf table-name='source_table1|source_table2' \
     --catalog-conf metastore=hive \
     --catalog-conf uri=thrift://hive-metastore:9083 \
@@ -96,8 +96,36 @@ Example
     --table-conf sink.parallelism=4
 ```
 
-As example shows, the mysql-conf's database-name and table-name also support regular expressions to monitor multiple 
-tables that satisfy the regular expressions.
+As example shows, the mysql-conf's table-name supports regular expressions to monitor multiple tables that satisfy
+the regular expressions. The schemas of all the tables will be merged into one Paimon table schema.
+
+Example 2: synchronize shards into one Paimon table
+
+You can also set 'database-name' with a regular expression to capture multiple databases. A typical scenario is that a 
+table 'source_table' is split into database 'source_db1', 'source_db2' ..., then you can synchronize data of all the 
+'source_table's into one Paimon table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mysql-sync-table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition-keys pt \
+    --primary-keys pt,uid \
+    --computed-columns '_year=year(age)' \
+    --mysql-conf hostname=127.0.0.1 \
+    --mysql-conf username=root \
+    --mysql-conf password=123456 \
+    --mysql-conf database-name='source_db.+' \
+    --mysql-conf table-name='source_table' \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4
+```
 
 ### Synchronizing Databases
 
