@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;

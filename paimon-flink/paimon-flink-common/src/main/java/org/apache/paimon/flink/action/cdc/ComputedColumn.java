@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import org.apache.paimon.flink.action.cdc.mysql.Expression;
 import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
