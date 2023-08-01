@@ -364,7 +364,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             // tables, so we should use regular expression to monitor all valid tables and exclude
             // certain invalid tables
 
-            // The table list is build by template:
+            // The table list is built by template:
             // (?!(^db\\.tbl$)|(^...$))(databasePattern\\.(including_pattern1|...))
 
             // The excluding pattern ?!(^db\\.tbl$)|(^...$) can exclude tables whose qualified name

@@ -929,7 +929,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
             List<String> expected =
                     Arrays.asList(
                             "+I[1, 2021-09-15T15:00:10, 21]", "+I[2, 2023-03-23T16:00:20, 42]");
-            waitForResult(expected, table, rowType, Arrays.asList("pk"));
+            waitForResult(expected, table, rowType, Collections.singletonList("pk"));
         }
     }
 
@@ -1015,6 +1015,64 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[2, 4, four, NULL]",
                         "+I[1, 5, five, 50]");
         waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    public void testSyncShards() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "shard_.+");
+        mySqlConfig.put("table-name", "t.+");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pk", "pt"),
+                        Collections.singletonList("pt=substring(_date,5)"),
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+            statement.execute("USE shard_1");
+            statement.executeUpdate("INSERT INTO t1 VALUES (1, '2023-07-30'), (2, '2023-07-30')");
+            statement.execute("USE shard_2");
+            statement.executeUpdate("INSERT INTO t1 VALUES (3, '2023-07-31'), (4, '2023-07-31')");
+        }
+
+        FileStoreTable table = getFileStoreTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.STRING().notNull()
+                        },
+                        new String[] {"pk", "_date", "pt"});
+        waitForResult(
+                Arrays.asList(
+                        "+I[1, 2023-07-30, 07-30]",
+                        "+I[2, 2023-07-30, 07-30]",
+                        "+I[3, 2023-07-31, 07-31]",
+                        "+I[4, 2023-07-31, 07-31]"),
+                table,
+                rowType,
+                Arrays.asList("pk", "pt"));
     }
 
     private FileStoreTable getFileStoreTable() throws Exception {

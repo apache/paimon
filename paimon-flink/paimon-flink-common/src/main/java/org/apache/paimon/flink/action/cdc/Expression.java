@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -288,9 +288,9 @@ public interface Expression extends Serializable {
 
         private final String fieldReference;
 
-        private DataType fieldType;
+        private final DataType fieldType;
 
-        private int width;
+        private final int width;
 
         TruncateComputer(String fieldReference, DataType fieldType, String literal) {
             this.fieldReference = fieldReference;
@@ -320,11 +320,11 @@ public interface Expression extends Serializable {
             switch (fieldType.getTypeRoot()) {
                 case TINYINT:
                 case SMALLINT:
-                    return String.valueOf(truncateShort(width, Short.valueOf(input)));
+                    return String.valueOf(truncateShort(width, Short.parseShort(input)));
                 case INTEGER:
-                    return String.valueOf(truncateInt(width, Integer.valueOf(input)));
+                    return String.valueOf(truncateInt(width, Integer.parseInt(input)));
                 case BIGINT:
-                    return String.valueOf(truncateLong(width, Long.valueOf(input)));
+                    return String.valueOf(truncateLong(width, Long.parseLong(input)));
                 case DECIMAL:
                     return truncateDecimal(BigInteger.valueOf(width), new BigDecimal(input))
                             .toString();
