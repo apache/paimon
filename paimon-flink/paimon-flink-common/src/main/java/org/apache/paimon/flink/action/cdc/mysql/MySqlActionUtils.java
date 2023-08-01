@@ -32,7 +32,6 @@ import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffset;
 import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffsetBuilder;
-import com.ververica.cdc.connectors.mysql.table.JdbcUrlUtils;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
@@ -66,6 +65,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class MySqlActionUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
+
+    private static final String PROPERTIES_PREFIX = "jdbc.properties.";
+
     public static final ConfigOption<Boolean> SCAN_NEWLY_ADDED_TABLE_ENABLED =
             ConfigOptions.key("scan.newly-added-table.enabled")
                     .booleanType()
@@ -314,8 +316,8 @@ public class MySqlActionUtils {
         for (Map.Entry<String, String> entry : mySqlConfig.toMap().entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
-            if (key.startsWith(JdbcUrlUtils.PROPERTIES_PREFIX)) {
-                jdbcProperties.put(key.substring(JdbcUrlUtils.PROPERTIES_PREFIX.length()), value);
+            if (key.startsWith(PROPERTIES_PREFIX)) {
+                jdbcProperties.put(key.substring(PROPERTIES_PREFIX.length()), value);
             } else if (key.startsWith(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX)) {
                 debeziumProperties.put(
                         key.substring(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX.length()), value);

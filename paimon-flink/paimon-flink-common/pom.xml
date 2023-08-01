@@ -35,7 +35,7 @@ under the License.
 
     <properties>
         <flink.version>1.17.1</flink.version>
-        <flink.cdc.version>2.3.0</flink.cdc.version>
+        <flink.cdc.version>2.4.1</flink.cdc.version>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
         <geometry.version>2.2.0</geometry.version>
     </properties>
