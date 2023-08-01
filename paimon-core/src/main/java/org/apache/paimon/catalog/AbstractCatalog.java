@@ -145,4 +145,9 @@ public abstract class AbstractCatalog implements Catalog {
     public static Path databasePath(String warehouse, String database) {
         return new Path(warehouse, database + DB_SUFFIX);
     }
+
+    @Override
+    public void truncateTable(Identifier identifier) throws TableNotExistException {
+        getDataTable(identifier).truncate();
+    }
 }

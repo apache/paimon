@@ -108,7 +108,12 @@ public class SparkTable
         List<Predicate> predicates = new ArrayList<>();
         for (Filter filter : filters) {
             if ("AlwaysTrue()".equals(filter.toString())) {
-                continue;
+                if (table instanceof FileStoreTable) {
+                    ((FileStoreTable) table).truncate();
+                    return;
+                } else {
+                    continue;
+                }
             }
 
             predicates.add(converter.convert(filter));

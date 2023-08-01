@@ -24,6 +24,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.MetastoreClient;
@@ -62,11 +63,14 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -82,6 +86,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final TableSchema tableSchema;
     protected final Lock.Factory lockFactory;
     @Nullable protected final MetastoreClient.Factory metastoreClientFactory;
+    private Set<Object> metaPaths = new HashSet<>(Arrays.asList("manifest", "schema"));
 
     public AbstractFileStoreTable(
             FileIO fileIO,
@@ -452,5 +457,20 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    @Override
+    public void truncate() {
+        try {
+            FileStatus[] fileStatuses = fileIO.listStatus(path);
+            for (FileStatus fileStatus : fileStatuses) {
+                Path path = fileStatus.getPath();
+                if (!metaPaths.contains(path.getName())) {
+                    fileIO.delete(path, true);
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

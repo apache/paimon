@@ -42,7 +42,7 @@ public class SparkWriteITCase {
 
     @BeforeAll
     public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
-        Path warehousePath = new Path("file:" + tempDir.toString());
+        Path warehousePath = new Path("file:///" + tempDir.toString());
         spark = SparkSession.builder().master("local[2]").getOrCreate();
         spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
@@ -117,6 +117,17 @@ public class SparkWriteITCase {
         spark.sql("DELETE FROM T WHERE b=11").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[2,22,222]]");
+    }
+
+    @Test
+    public void testTruncateTable() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
+                        + " ('primary-key'='a', 'file.format'='avro')");
+        spark.sql("INSERT INTO T VALUES (1, 11, '111'), (2, 22, '222')").collectAsList();
+        spark.sql("TRUNCATE TABLE T").collectAsList();
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[]");
     }
 
     @Test

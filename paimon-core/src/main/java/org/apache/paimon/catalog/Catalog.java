@@ -211,6 +211,8 @@ public interface Catalog extends AutoCloseable {
         return true;
     }
 
+    void truncateTable(Identifier identifier) throws TableNotExistException;
+
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
         private static final String MSG = "Database %s is not empty.";
