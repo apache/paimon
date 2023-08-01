@@ -196,7 +196,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     levels,
                     compactStrategy,
                     keyComparator,
-                    options.targetFileSize(),
+                    options.compactionFileSize(),
                     options.numSortedRunStopTrigger(),
                     rewriter);
         }

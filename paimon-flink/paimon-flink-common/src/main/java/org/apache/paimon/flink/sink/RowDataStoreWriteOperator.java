@@ -178,9 +178,9 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<RowData> {
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
-        List<Committable> committables = super.prepareCommit(doCompaction, checkpointId);
+        List<Committable> committables = super.prepareCommit(waitCompaction, checkpointId);
 
         if (logCallback != null) {
             try {

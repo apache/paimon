@@ -65,7 +65,7 @@ public class PaimonInternalRowObjectInspector extends StructObjectInspector {
             typeNameBuilder
                     .append(name)
                     .append(":")
-                    .append(HiveTypeUtils.logicalTypeToTypeInfo(logicalType).getTypeName());
+                    .append(HiveTypeUtils.toTypeInfo(logicalType).getTypeName());
         }
 
         typeNameBuilder.append(">");

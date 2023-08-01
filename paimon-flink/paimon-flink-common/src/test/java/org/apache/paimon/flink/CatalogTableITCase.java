@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -36,6 +38,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for catalog tables. */
@@ -84,6 +87,45 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         List<Row> result = sql("SELECT * FROM T$options");
         assertThat(result).containsExactly(Row.of("snapshot.time-retained", "5 h"));
+    }
+
+    @Test
+    public void testAllTableOptions() {
+        sql("CREATE TABLE T (a INT, b INT) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
+        sql("ALTER TABLE T SET ('c.cc.ccc' = 'val3')");
+
+        List<Row> result = sql("SELECT * FROM sys.all_table_options");
+        assertThat(result)
+                .containsExactly(
+                        Row.of("default", "T", "a.aa.aaa", "val1"),
+                        Row.of("default", "T", "b.bb.bbb", "val2"),
+                        Row.of("default", "T", "c.cc.ccc", "val3"));
+    }
+
+    @Test
+    public void testDropSystemDatabase() {
+        assertThatCode(() -> sql("DROP DATABASE sys"))
+                .hasRootCauseMessage("Can't do operation on system database.");
+    }
+
+    @Test
+    public void testCreateSystemDatabase() {
+        assertThatCode(() -> sql("CREATE DATABASE sys"))
+                .hasRootCauseMessage("Can't do operation on system database.");
+    }
+
+    @Test
+    public void testChangeTableInSystemDatabase() {
+        sql("USE sys");
+        assertThatCode(() -> sql("ALTER TABLE all_table_options SET ('bucket-num' = '5')"))
+                .hasRootCauseMessage("Can't alter system table.");
+    }
+
+    @Test
+    public void testSystemDatabase() {
+        sql("USE " + Catalog.SYSTEM_DATABASE_NAME);
+        assertThat(sql("SHOW TABLES"))
+                .containsExactly(Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS));
     }
 
     @Test
@@ -546,5 +588,50 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         List<Row> result = sql("SELECT * FROM T$consumers");
         assertThat(result).containsExactly(Row.of("my1", 3L));
+    }
+
+    @Test
+    public void testPartitionsTable() throws Exception {
+        sql(
+                "CREATE TABLE T_VALUE_COUNT (a INT, p INT, b BIGINT, c STRING) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='change-log')"); // change log with value count table
+        assertFilesTable("T_VALUE_COUNT");
+
+        sql(
+                "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='change-log')"); // change log with key table
+        assertFilesTable("T_WITH_KEY");
+
+        sql(
+                "CREATE TABLE T_APPEND_ONLY (a INT, p INT, b BIGINT, c STRING) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='append-only')"); // append only table
+        assertPartitionsTable("T_APPEND_ONLY");
+    }
+
+    private void assertPartitionsTable(String tableName) throws Exception {
+        assertThat(sql(String.format("SELECT * FROM %s$partitions", tableName))).isEmpty();
+        // TODO should use sql for schema evolution after flink supports it.
+        SchemaManager schemaManager =
+                new SchemaManager(
+                        LocalFileIO.create(),
+                        new Path(path, String.format("default.db/%s", tableName)));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S2'), (1, 2, 2, 'S1')", tableName));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
+        List<Row> rows1 = sql(String.format("SELECT * FROM %s$partitions", tableName));
+        for (Row row : rows1) {
+            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]");
+            assertThat((long) row.getField(2)).isGreaterThan(0L); // check file size
+        }
+
+        sql(String.format("INSERT INTO %s VALUES (3, 4, 4, 'S3'), (1, 3, 2, 'S4')", tableName));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
+
+        List<Row> rows2 = sql(String.format("SELECT * FROM %s$partitions", tableName));
+        for (Row row : rows2) {
+            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]", "[3]", "[4]");
+        }
     }
 }

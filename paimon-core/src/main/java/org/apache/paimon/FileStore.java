@@ -78,4 +78,6 @@ public interface FileStore<T> extends Serializable {
 
     @Nullable
     TagAutoCreation newTagCreationManager();
+
+    boolean mergeSchema(RowType rowType, boolean allowExplicitCast);
 }

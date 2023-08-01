@@ -444,7 +444,7 @@ public abstract class MergeTreeTestBase {
                 new Levels(comparator, files, options.numLevels()),
                 strategy,
                 comparator,
-                options.targetFileSize(),
+                options.compactionFileSize(),
                 options.numSortedRunStopTrigger(),
                 new TestRewriter());
     }

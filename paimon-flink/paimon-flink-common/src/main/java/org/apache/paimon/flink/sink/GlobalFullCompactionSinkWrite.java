@@ -130,7 +130,7 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
     }
 
     @Override
-    public List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    public List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         checkSuccessfulFullCompaction();
 
@@ -154,10 +154,10 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
         }
 
         if (!writtenBuckets.isEmpty() && isFullCompactedIdentifier(checkpointId, deltaCommits)) {
-            doCompaction = true;
+            waitCompaction = true;
         }
 
-        if (doCompaction) {
+        if (waitCompaction) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Submit full compaction for checkpoint #{}", checkpointId);
             }
@@ -165,7 +165,7 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             commitIdentifiersToCheck.add(checkpointId);
         }
 
-        return super.prepareCommit(doCompaction, checkpointId);
+        return super.prepareCommit(waitCompaction, checkpointId);
     }
 
     private void checkSuccessfulFullCompaction() {

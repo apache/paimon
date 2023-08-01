@@ -54,7 +54,7 @@ public class MemoryPoolFactoryTest {
         Random random = ThreadLocalRandom.current();
 
         // prepare empty owners lists
-        int numList = random.nextInt(5);
+        int numList = random.nextInt(5) + 1;
         for (int i = 0; i < numList; i++) {
             List<MemoryOwner> owners = new ArrayList<>();
             factory.addOwners(owners);

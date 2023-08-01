@@ -26,21 +26,24 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
 
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
 
     public static final String DB_SUFFIX = ".db";
-
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    protected static final List<String> GLOBAL_TABLES =
+            Arrays.asList(AllTableOptionsTable.ALL_TABLE_OPTIONS);
 
     protected final FileIO fileIO;
-
     protected final Map<String, String> tableDefaultOptions;
 
     protected AbstractCatalog(FileIO fileIO) {
@@ -63,7 +66,14 @@ public abstract class AbstractCatalog implements Catalog {
 
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        if (isSystemTable(identifier)) {
+        if (isSystemDatabase(identifier.getDatabaseName())) {
+            String tableName = identifier.getObjectName();
+            Table table = SystemTableLoader.loadGlobal(tableName, fileIO, allTablePaths());
+            if (table == null) {
+                throw new TableNotExistException(identifier);
+            }
+            return table;
+        } else if (isSpecifiedSystemTable(identifier)) {
             String[] splits = tableAndSystemName(identifier);
             String tableName = splits[0];
             String type = splits[1];
@@ -94,6 +104,24 @@ public abstract class AbstractCatalog implements Catalog {
         return databasePath(warehouse(), database);
     }
 
+    Map<String, Map<String, Path>> allTablePaths() {
+        try {
+            Map<String, Map<String, Path>> allPaths = new HashMap<>();
+            for (String database : listDatabases()) {
+                Map<String, Path> tableMap =
+                        allPaths.computeIfAbsent(database, d -> new HashMap<>());
+                for (String table : listTables(database)) {
+                    tableMap.put(
+                            table,
+                            dataTableLocation(warehouse(), Identifier.create(database, table)));
+                }
+            }
+            return allPaths;
+        } catch (DatabaseNotExistException e) {
+            throw new RuntimeException("Database is deleted while listing", e);
+        }
+    }
+
     protected abstract String warehouse();
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
@@ -104,12 +132,12 @@ public abstract class AbstractCatalog implements Catalog {
         return dataTableLocation(warehouse(), identifier);
     }
 
-    private static boolean isSystemTable(Identifier identifier) {
+    private static boolean isSpecifiedSystemTable(Identifier identifier) {
         return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER);
     }
 
     protected void checkNotSystemTable(Identifier identifier, String method) {
-        if (isSystemTable(identifier)) {
+        if (isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot '%s' for system table '%s', please use data table.",
@@ -132,7 +160,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public static Path dataTableLocation(String warehouse, Identifier identifier) {
-        if (isSystemTable(identifier)) {
+        if (isSpecifiedSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Table name[%s] cannot contain '%s' separator",
@@ -144,6 +172,10 @@ public abstract class AbstractCatalog implements Catalog {
 
     public static Path databasePath(String warehouse, String database) {
         return new Path(warehouse, database + DB_SUFFIX);
+    }
+
+    protected boolean isSystemDatabase(String database) {
+        return SYSTEM_DATABASE_NAME.equals(database);
     }
 
     @Override

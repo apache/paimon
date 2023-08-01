@@ -26,7 +26,9 @@ under the License.
 
 # System Tables
 
-System tables contain metadata and information about each table, such as the snapshots created and the options in use. Users can access system tables with batch queries.
+## Table Specified System Table
+
+Table specified system tables contain metadata and information about each table, such as the snapshots created and the options in use. Users can access system tables with batch queries.
 
 Currently, Flink, Spark and Trino supports querying system tables.
 
@@ -35,7 +37,7 @@ In some cases, the table name needs to be enclosed with back quotes to avoid syn
 SELECT * FROM my_catalog.my_db.`MyTable$snapshots`;
 ```
 
-## Snapshots Table
+### Snapshots Table
 
 You can query the snapshot history information of the table through snapshots table, including the record count occurred in the snapshot.
 
@@ -55,7 +57,7 @@ SELECT * FROM MyTable$snapshots;
 
 By querying the snapshots table, you can know the commit and expiration information about that table and time travel through the data.
 
-## Schemas Table
+### Schemas Table
 
 You can query the historical schemas of the table through schemas table.
 
@@ -82,7 +84,7 @@ SELECT s.snapshot_id, t.schema_id, t.fields
     ON s.schema_id=t.schema_id where s.snapshot_id=100;
 ```
 
-## Options Table
+### Options Table
 
 You can query the table's option information which is specified from the DDL through options table. The options not shown will be the default value. You can take reference to  [Configuration].
 
@@ -99,7 +101,7 @@ SELECT * FROM MyTable$options;
 */
 ```
 
-## Audit log Table
+### Audit log Table
 
 If you need to audit the changelog of the table, you can use the `audit_log` system table. Through `audit_log` table, you can get the `rowkind` column when you get the incremental data of the table. You can use this column for
 filtering and other operations to complete the audit.
@@ -128,7 +130,7 @@ SELECT * FROM MyTable$audit_log;
 */
 ```
 
-## Files Table
+### Files Table
 You can query the files of the table with specific snapshot.
 
 ```sql
@@ -164,7 +166,7 @@ SELECT * FROM MyTable$files /*+ OPTIONS('scan.snapshot-id'='1') */;
 */
 ```
 
-## Tags Table
+### Tags Table
 
 You can query the tag history information of the table through tags table, including which snapshots are the tags based on
 and some historical information of the snapshots. You can also get all tag names and time travel to a specific tag data by name.
@@ -183,7 +185,7 @@ SELECT * FROM MyTable$tags;
 */
 ```
 
-## Consumers Table
+### Consumers Table
 
 You can query all consumers which contains next snapshot.
 
@@ -201,7 +203,7 @@ SELECT * FROM MyTable$consumers;
 */
 ```
 
-## Manifests Table
+### Manifests Table
 
 You can query all manifest files contained in the latest snapshot or the specified snapshot of the current table.
 
@@ -230,3 +232,51 @@ SELECT * FROM MyTable$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
 1 rows in set
 */
 ```
+
+## Partitions Table
+
+You can query the partition files of the table.
+
+```sql
+SELECT * FROM MyTable$partitions;
+
+/*
++---------------+----------------+--------------------+
+|  partition    |   record_count |  file_size_in_bytes|
++---------------+----------------+--------------------+
+|  [1]          |           1    |             645    |
++---------------+----------------+--------------------+
+*/
+```
+
+## Global System Table
+
+Global system tables contain the statistical information of all the tables exists in paimon. For convenient of searching, we create a reference system database called `sys`.
+We can display all the global system tables by sql in flink:
+```sql
+USE sys;
+SHOW TABLES;
+```
+
+### ALL Options Table
+This table is similar to [Options Table]({{< ref "how-to/system-tables#options-table" >}}), but it shows all the table options is all database.
+
+```sql
+SELECT * FROM sys.all_table_options;
+
+/*
++---------------+--------------------------------+--------------------------------+------------------+
+| database_name |                     table_name |                            key |            value |
++---------------+--------------------------------+--------------------------------+------------------+
+|         my_db |                    Orders_orc  |                         bucket |               -1 |
+|         my_db |                        Orders2 |                         bucket |               -1 |
+|         my_db |                        Orders2 |                     write-mode |      append-only |
+|         my_db |                        Orders2 |               sink.parallelism |                7 |
+|         my_db |                   StockAnalyze |                     write-mode |       change-log |
+|         my_db2|                      OrdersSum |                         bucket |                1 |
+|         my_db2|                      OrdersSum |                     write-mode |       change-log |
++---------------+--------------------------------+--------------------------------+------------------+
+7 rows in set
+*/
+```
+
