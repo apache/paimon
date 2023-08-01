@@ -178,9 +178,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String historyRecordString = historyRecord.asText();
             JsonNode tableChanges = objectMapper.readTree(historyRecordString).get("tableChanges");
             if (tableChanges.size() != 1) {
-                throw new IllegalArgumentException(
+                LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
-                                + historyRecordString);
+                                + historyRecord.asText());
+                return Collections.emptyList();
             }
             columns = tableChanges.get(0).get("table").get("columns");
         } catch (Exception e) {
@@ -229,9 +230,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String historyRecordString = historyRecord.asText();
             JsonNode tableChanges = objectMapper.readTree(historyRecordString).get("tableChanges");
             if (tableChanges.size() != 1) {
-                throw new IllegalArgumentException(
+                LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
                                 + historyRecord.asText());
+                return Optional.empty();
             }
 
             JsonNode tableChange = tableChanges.get(0);
