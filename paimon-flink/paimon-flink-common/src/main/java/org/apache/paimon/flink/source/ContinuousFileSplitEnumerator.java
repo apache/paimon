@@ -169,7 +169,9 @@ public class ContinuousFileSplitEnumerator
             return;
         }
 
-        nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
+        if (nextSnapshotId == null || planWithNextSnapshotId.nextSnapshotId > nextSnapshotId) {
+            nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
+        }
         TableScan.Plan plan = planWithNextSnapshotId.plan;
         if (plan.equals(SnapshotNotExistPlan.INSTANCE)) {
             hasReadLatest = true;

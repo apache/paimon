@@ -598,7 +598,7 @@ public class ContinuousFileSplitEnumeratorTest {
             splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
         }
         results.put(2L, new DataFilePlan(splits));
-        // cause latestSnapshot = false, so this request will trigger scan
+        // because latestSnapshot = false, so this request will trigger scan
         enumerator.handleSplitRequest(2, "test-host");
         enumerator.handleSplitRequest(3, "test-host");
         assignments = context.getSplitAssignments();
