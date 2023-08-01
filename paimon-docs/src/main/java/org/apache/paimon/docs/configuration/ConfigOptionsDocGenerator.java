@@ -81,7 +81,7 @@ public class ConfigOptionsDocGenerator {
                 new OptionsClassLocation(
                         "paimon-hive/paimon-hive-catalog", "org.apache.paimon.hive"),
                 new OptionsClassLocation(
-                    "paimon-spark/paimon-spark-common", "org.apache.paimon.spark")
+                        "paimon-spark/paimon-spark-common", "org.apache.paimon.spark")
             };
     static final String DEFAULT_PATH_PREFIX = "src/main/java";
 

@@ -388,7 +388,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    public boolean mergeSchema(RowType rowType, Boolean allowExplicitCast) {
+    public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
         TableSchema current =
                 latest().orElseThrow(
                                 () ->

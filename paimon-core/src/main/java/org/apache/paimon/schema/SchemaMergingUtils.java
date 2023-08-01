@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
 public class SchemaMergingUtils {
 
     public static TableSchema mergeSchemas(
-            TableSchema currentTableSchema, RowType dataFields, Boolean allowExplicitCast) {
+            TableSchema currentTableSchema, RowType dataFields, boolean allowExplicitCast) {
         if (currentTableSchema.logicalRowType().equals(dataFields)) {
             return currentTableSchema;
         }
@@ -65,7 +65,7 @@ public class SchemaMergingUtils {
             RowType tableSchema,
             RowType dataSchema,
             AtomicInteger highestFieldId,
-            Boolean allowExplicitCast) {
+            boolean allowExplicitCast) {
         return (RowType) merge(tableSchema, dataSchema, highestFieldId, allowExplicitCast);
     }
 
@@ -85,7 +85,7 @@ public class SchemaMergingUtils {
             DataType base0,
             DataType update0,
             AtomicInteger highestFieldId,
-            Boolean allowExplicitCast) {
+            boolean allowExplicitCast) {
         // Here we try t0 merge the base0 and update0 without regard to the nullability,
         // and set the base0's nullability to the return's.
         DataType base = base0.copy(true);

@@ -143,7 +143,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    public boolean mergeSchema(RowType rowType, Boolean allowExplicitCast) {
+    public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
         return schemaManager.mergeSchema(rowType, allowExplicitCast);
     }
 
