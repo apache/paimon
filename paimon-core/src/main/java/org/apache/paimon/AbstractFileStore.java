@@ -143,6 +143,11 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
+    public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
+        return schemaManager.mergeSchema(rowType, allowExplicitCast);
+    }
+
+    @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
         return new FileStoreCommitImpl(
                 fileIO,
