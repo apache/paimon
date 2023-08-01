@@ -121,8 +121,8 @@ public class OffsetRowTest {
 
         // test get
         assertThat(row.getBoolean(0)).isTrue();
-        assertThat(row.getByte(1)).isEqualTo(1);
-        assertThat(row.getShort(2)).isEqualTo(2);
+        assertThat(row.getByte(1)).isEqualTo((byte) 1);
+        assertThat(row.getShort(2)).isEqualTo((short) 2);
         assertThat(row.getInt(3)).isEqualTo(3);
         assertThat(row.getLong(4)).isEqualTo(4);
         assertThat((int) row.getFloat(5)).isEqualTo(5);
