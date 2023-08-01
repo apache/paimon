@@ -57,9 +57,9 @@ public class AppendOnlyTableCompactionWorkerOperator
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
-        // ignore doCompaction tag
+        // ignore waitCompaction tag
         ArrayList<CommitMessage> tempList = new ArrayList<>(result);
         result.clear();
         return tempList.stream()

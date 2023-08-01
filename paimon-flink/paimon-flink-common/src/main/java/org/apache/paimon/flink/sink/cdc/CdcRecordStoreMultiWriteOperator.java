@@ -204,14 +204,14 @@ public class CdcRecordStoreMultiWriteOperator
     }
 
     @Override
-    protected List<MultiTableCommittable> prepareCommit(boolean doCompaction, long checkpointId)
+    protected List<MultiTableCommittable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         List<MultiTableCommittable> committables = new LinkedList<>();
         for (Map.Entry<Identifier, StoreSinkWrite> entry : writes.entrySet()) {
             Identifier key = entry.getKey();
             StoreSinkWrite write = entry.getValue();
             committables.addAll(
-                    write.prepareCommit(doCompaction, checkpointId).stream()
+                    write.prepareCommit(waitCompaction, checkpointId).stream()
                             .map(
                                     committable ->
                                             MultiTableCommittable.fromCommittable(key, committable))
