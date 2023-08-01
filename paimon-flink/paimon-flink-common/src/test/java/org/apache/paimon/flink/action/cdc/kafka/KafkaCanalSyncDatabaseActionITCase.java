@@ -292,7 +292,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("topic cannot be null.");
+                .hasMessage("topic cannot be null.");
     }
 
     @Test

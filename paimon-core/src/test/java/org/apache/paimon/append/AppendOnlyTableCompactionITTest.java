@@ -35,7 +35,6 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -64,8 +63,8 @@ public class AppendOnlyTableCompactionITTest {
 
         messages.forEach(
                 message ->
-                        assertThat(
-                                ((CommitMessageImpl) message).compactIncrement().isEmpty()).isTrue());
+                        assertThat(((CommitMessageImpl) message).compactIncrement().isEmpty())
+                                .isTrue());
     }
 
     @Test
@@ -113,16 +112,15 @@ public class AppendOnlyTableCompactionITTest {
             // scan the file generated itself
             assertThat(compactionCoordinator.scan()).isTrue();
             assertThat(
-                    compactionCoordinator.listRestoredFiles().stream()
-                            .map(DataFileMeta::rowCount)
-                            .reduce(Long::sum)
-                            .get()).isEqualTo(
-                    count);
+                            compactionCoordinator.listRestoredFiles().stream()
+                                    .map(DataFileMeta::rowCount)
+                                    .reduce(Long::sum)
+                                    .get())
+                    .isEqualTo(count);
         }
 
-        assertThat(
-                appendOnlyFileStoreTable.store().newScan().plan().files().size()).isEqualTo(
-                compactionCoordinator.listRestoredFiles().size());
+        assertThat(appendOnlyFileStoreTable.store().newScan().plan().files().size())
+                .isEqualTo(compactionCoordinator.listRestoredFiles().size());
 
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
         while (tasks.size() != 0) {

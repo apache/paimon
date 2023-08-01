@@ -60,7 +60,6 @@ import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -315,10 +314,8 @@ public abstract class MergeTreeTestBase {
         }
 
         assertThat(ex).isNotNull();
-        assertThat(
-                ExceptionUtils.findThrowable(ex, ExecutionException.class)).isPresent();
-        assertThat(
-                ExceptionUtils.stringifyException(ex).contains("CIRCULAR REFERENCE")).isFalse();
+        assertThat(ExceptionUtils.findThrowable(ex, ExecutionException.class)).isPresent();
+        assertThat(ExceptionUtils.stringifyException(ex).contains("CIRCULAR REFERENCE")).isFalse();
     }
 
     interface RunnableWithException {

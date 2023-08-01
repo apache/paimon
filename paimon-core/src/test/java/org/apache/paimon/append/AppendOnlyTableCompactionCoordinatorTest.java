@@ -30,7 +30,6 @@ import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataTypes;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -43,7 +42,6 @@ import java.util.UUID;
 
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.apache.paimon.stats.StatsTestUtils.newTableStats;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link AppendOnlyTableCompactionCoordinator}. */
@@ -110,7 +108,8 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         // age enough, generate less file comaction
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
         assertThat(tasks.size()).isEqualTo(1);
-        assertThat(new HashSet<>(files)).containsExactlyInAnyOrderElementsOf(tasks.get(0).compactBefore());
+        assertThat(new HashSet<>(files))
+                .containsExactlyInAnyOrderElementsOf(tasks.get(0).compactBefore());
         assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(0);
     }
 
@@ -122,16 +121,17 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         for (int i = 0; i < AppendOnlyTableCompactionCoordinator.REMOVE_AGE; i++) {
             compactionCoordinator.compactPlan();
             assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
-            assertThat(
-                    compactionCoordinator.partitionCompactCoordinators.get(partition).age).isEqualTo( i + 1);
+            assertThat(compactionCoordinator.partitionCompactCoordinators.get(partition).age)
+                    .isEqualTo(i + 1);
         }
 
         // clear age
         compactionCoordinator.notifyNewFiles(partition, generateNewFiles(1, 0));
-        assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);;
+        assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
+        ;
         // check whether age goes to zero again
-        assertThat(
-                compactionCoordinator.partitionCompactCoordinators.get(partition).age).isEqualTo(0);
+        assertThat(compactionCoordinator.partitionCompactCoordinators.get(partition).age)
+                .isEqualTo(0);
     }
 
     private void assertTasks(List<DataFileMeta> files, int taskNum) {

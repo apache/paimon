@@ -53,7 +53,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -693,20 +692,23 @@ public class HiveWriteITCase {
                         Object expectedObject =
                                 primitiveOi.getPrimitiveJavaObject(expectedRow.getField(i));
                         if (expectedObject instanceof byte[]) {
-                            assertThat((byte[]) actualRow[i]).containsExactly((byte[]) expectedObject);
+                            assertThat((byte[]) actualRow[i])
+                                    .containsExactly((byte[]) expectedObject);
                         } else if (expectedObject instanceof HiveDecimal) {
                             // HiveDecimal will remove trailing zeros
                             // so we have to compare it from the original DecimalData
                             assertThat(actualRow[i]).isEqualTo(expectedRow.getField(i).toString());
                         } else {
-                            assertThat(String.valueOf(actualRow[i])).isEqualTo(String.valueOf(expectedObject));
+                            assertThat(String.valueOf(actualRow[i]))
+                                    .isEqualTo(String.valueOf(expectedObject));
                         }
                         break;
                     case LIST:
                         ListObjectInspector listOi = (ListObjectInspector) oi;
-                        assertThat(
-                                actualRow[i]).isEqualTo(String.valueOf(listOi.getList(expectedRow.getField(i)))
-                                .replace(" ", ""));
+                        assertThat(actualRow[i])
+                                .isEqualTo(
+                                        String.valueOf(listOi.getList(expectedRow.getField(i)))
+                                                .replace(" ", ""));
                         break;
                     case MAP:
                         MapObjectInspector mapOi = (MapObjectInspector) oi;

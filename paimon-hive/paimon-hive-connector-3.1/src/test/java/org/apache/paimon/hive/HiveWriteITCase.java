@@ -38,7 +38,6 @@ import org.apache.paimon.utils.StringUtils;
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -219,6 +218,7 @@ public class HiveWriteITCase {
                         + outputTableName
                         + " values(1,'2023-01-13 20:00:01.123','2023-12-23')");
         List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
-        assertThat(select).isEqualTo(Collections.singletonList("1\t2023-01-13 20:00:01.123\t2023-12-23"));
+        assertThat(select)
+                .isEqualTo(Collections.singletonList("1\t2023-01-13 20:00:01.123\t2023-12-23"));
     }
 }

@@ -57,7 +57,7 @@ public class MappingTableITCase extends AbstractTestBase {
                         path));
         assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await())
                 .isInstanceOf(ValidationException.class)
-                        .hasMessage("Schema file not found in location");
+                .hasMessage("Schema file not found in location");
     }
 
     @Test

@@ -26,7 +26,6 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -296,17 +295,18 @@ public class PartialUpdateMergeFunctionTest {
     private void validate(
             MergeFunctionFactory.AdjustedProjection projection, int[] pushdown, int[] outer) {
         if (projection.pushdownProjection == null) {
-            Assertions.assertNull(pushdown);
+            assertThat(pushdown).isNull();
         } else {
-            Assertions.assertArrayEquals(
-                    Projection.of(projection.pushdownProjection).toTopLevelIndexes(), pushdown);
+            assertThat(pushdown)
+                    .containsExactly(
+                            Projection.of(projection.pushdownProjection).toTopLevelIndexes());
         }
 
         if (projection.outerProjection == null) {
-            Assertions.assertNull(outer);
+            assertThat(outer).isNull();
         } else {
-            Assertions.assertArrayEquals(
-                    Projection.of(projection.outerProjection).toTopLevelIndexes(), outer);
+            assertThat(outer)
+                    .containsExactly(Projection.of(projection.outerProjection).toTopLevelIndexes());
         }
     }
 }

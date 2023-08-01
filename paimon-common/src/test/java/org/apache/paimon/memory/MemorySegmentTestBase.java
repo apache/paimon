@@ -41,7 +41,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
 import static org.assertj.core.api.Assertions.within;
 
-
 /** Tests for the access and transfer methods of the {@link MemorySegment}. */
 public abstract class MemorySegmentTestBase {
 
@@ -217,7 +216,8 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos + 1] = true;
             }
 
-            assertThat(segment.getChar(pos)).isEqualTo((char) (random.nextInt(Character.MAX_VALUE)));
+            assertThat(segment.getChar(pos))
+                    .isEqualTo((char) (random.nextInt(Character.MAX_VALUE)));
         }
     }
 
@@ -454,7 +454,6 @@ public abstract class MemorySegmentTestBase {
             }
 
             assertThat(segment.getFloat(pos)).isCloseTo(random.nextFloat(), within(0.0f));
-
         }
     }
 
@@ -561,7 +560,6 @@ public abstract class MemorySegmentTestBase {
                 segment.get(i * (pageSize / 8), actual);
 
                 assertThat(actual).containsExactly(expected);
-
             }
         }
 
@@ -777,12 +775,14 @@ public abstract class MemorySegmentTestBase {
 
     @TestTemplate
     public void testHeapByteBufferGetReadOnly() {
-        assertThatThrownBy(() -> testByteBufferGetReadOnly(false)).isInstanceOf(ReadOnlyBufferException.class);
+        assertThatThrownBy(() -> testByteBufferGetReadOnly(false))
+                .isInstanceOf(ReadOnlyBufferException.class);
     }
 
     @TestTemplate
     public void testOffHeapByteBufferGetReadOnly() {
-        assertThatThrownBy(() -> testByteBufferGetReadOnly(true)).isInstanceOf(ReadOnlyBufferException.class);
+        assertThatThrownBy(() -> testByteBufferGetReadOnly(true))
+                .isInstanceOf(ReadOnlyBufferException.class);
     }
 
     /**

@@ -37,7 +37,6 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.DataTypes;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -80,8 +79,9 @@ public class AppendOnlyTableCompactionWorkerTest {
         for (int i = 0; i < taskSize; i++) {
             AppendOnlyCompactionTask task = tasks.get(i);
             CommitMessageImpl commitMessage = (CommitMessageImpl) lists.get(i);
-            assertThat(
-                    task.compactBefore()).containsExactlyInAnyOrderElementsOf(commitMessage.compactIncrement().compactBefore());
+            assertThat(task.compactBefore())
+                    .containsExactlyInAnyOrderElementsOf(
+                            commitMessage.compactIncrement().compactBefore());
             assertThat(commitMessage.compactIncrement().compactAfter().size()).isEqualTo(1);
         }
     }
@@ -118,8 +118,9 @@ public class AppendOnlyTableCompactionWorkerTest {
             AppendOnlyCompactionTask task = tasks.get(i);
             CommitMessageImpl commitMessage = (CommitMessageImpl) lists.get(i);
             assertThat(task.partition()).isEqualTo(commitMessage.partition());
-            assertThat(
-                    task.compactBefore()).containsExactlyInAnyOrderElementsOf(commitMessage.compactIncrement().compactBefore());
+            assertThat(task.compactBefore())
+                    .containsExactlyInAnyOrderElementsOf(
+                            commitMessage.compactIncrement().compactBefore());
         }
     }
 

@@ -33,7 +33,6 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -43,6 +42,7 @@ import java.util.List;
 
 import static org.apache.paimon.format.orc.OrcFileFormatFactory.IDENTIFIER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link FileFormat}. */
 public class FileFormatTest {
@@ -84,13 +84,13 @@ public class FileFormatTest {
         FormatWriterFactory writerFactory =
                 createFileFormat("_unsupported").createWriterFactory(RowType.of(new IntType()));
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
-        Assertions.assertThrows(
-                RuntimeException.class,
-                () ->
-                        writerFactory.create(
-                                LocalFileIO.create().newOutputStream(path, false),
-                                CoreOptions.FILE_COMPRESSION.defaultValue()),
-                "Unrecognized codec: _unsupported");
+        assertThatThrownBy(
+                        () ->
+                                writerFactory.create(
+                                        LocalFileIO.create().newOutputStream(path, false),
+                                        CoreOptions.FILE_COMPRESSION.defaultValue()))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessage("Unrecognized codec: _unsupported");
     }
 
     @Test
@@ -100,7 +100,7 @@ public class FileFormatTest {
         tableOptions.set(CoreOptions.READ_BATCH_SIZE, 1024);
         tableOptions.setString(IDENTIFIER + ".hello", "world");
         FileFormat fileFormat = CoreOptions.createFileFormat(tableOptions, CoreOptions.FILE_FORMAT);
-        Assertions.assertTrue(fileFormat instanceof OrcFileFormat);
+        assertThat(fileFormat instanceof OrcFileFormat).isTrue();
 
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
         assertThat(orcFileFormat.formatContext().formatOptions().get("hello")).isEqualTo("world");
@@ -116,7 +116,7 @@ public class FileFormatTest {
         FileFormatDiscover fileFormatDiscover =
                 FileFormatDiscover.of(new CoreOptions(tableOptions));
         FileFormat fileFormat = fileFormatDiscover.discover(IDENTIFIER);
-        Assertions.assertTrue(fileFormat instanceof OrcFileFormat);
+        assertThat(fileFormat instanceof OrcFileFormat).isTrue();
         OrcFileFormat orcFileFormat = (OrcFileFormat) fileFormat;
         assertThat(orcFileFormat.formatContext().formatOptions().get("hello")).isEqualTo("world");
         assertThat(orcFileFormat.formatContext().readBatchSize()).isEqualTo(1024);

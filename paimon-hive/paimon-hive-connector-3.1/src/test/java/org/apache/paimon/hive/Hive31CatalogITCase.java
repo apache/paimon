@@ -77,10 +77,12 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive").await();
-        assertThat(collect("SHOW DATABASES")).isEqualTo(Arrays.asList(
-                Row.of("default"),
-                Row.of("test_db"),
-                Row.of(TestHiveMetaStoreClient.MOCK_DATABASE)));
+        assertThat(collect("SHOW DATABASES"))
+                .isEqualTo(
+                        Arrays.asList(
+                                Row.of("default"),
+                                Row.of("test_db"),
+                                Row.of(TestHiveMetaStoreClient.MOCK_DATABASE)));
     }
 
     @Test
@@ -107,11 +109,12 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                 .hasMessage(
                         "Could not execute CreateTable in path `my_hive_custom_client`.`default`.`hive_table`");
         assertThat(
-                new SchemaManager(
-                                LocalFileIO.create(),
-                                new org.apache.paimon.fs.Path(path, "default.db/hive_table"))
-                        .listAllIds()
-                        ).isEmpty();
+                        new SchemaManager(
+                                        LocalFileIO.create(),
+                                        new org.apache.paimon.fs.Path(
+                                                path, "default.db/hive_table"))
+                                .listAllIds())
+                .isEmpty();
     }
 
     @Test
@@ -140,13 +143,13 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 + "  SET 'aa' = 'bb'");
 
         assertThat(
-                new SchemaManager(
-                                LocalFileIO.create(),
-                                new org.apache.paimon.fs.Path(
-                                        path, "default.db/alter_failed_table"))
-                        .latest()
-                        .get()
-                        .options()
-                        ).isEmpty();
+                        new SchemaManager(
+                                        LocalFileIO.create(),
+                                        new org.apache.paimon.fs.Path(
+                                                path, "default.db/alter_failed_table"))
+                                .latest()
+                                .get()
+                                .options())
+                .isEmpty();
     }
 }

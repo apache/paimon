@@ -43,7 +43,6 @@ import com.klarna.hiverunner.annotations.HiveSQL;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -63,7 +62,6 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 
 /** Test for specify location. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -218,9 +216,10 @@ public class HiveLocationTest {
 
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"aaa"});
         // create table with location field
-        assertThatThrownBy(() ->
-                createTableWithStorageLocation(
-                        path, rowType, "test_extern_table", conf, true))
+        assertThatThrownBy(
+                        () ->
+                                createTableWithStorageLocation(
+                                        path, rowType, "test_extern_table", conf, true))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("No FileSystem for scheme: s3");
 

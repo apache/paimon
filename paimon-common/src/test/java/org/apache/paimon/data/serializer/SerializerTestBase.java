@@ -85,14 +85,18 @@ public abstract class SerializerTestBase<T> {
                 serializer.serialize(value, out);
                 TestInputView in = out.getInputView();
 
-                assertThat(in.available() > 0).withFailMessage("No data available during deserialization.").isTrue();
+                assertThat(in.available() > 0)
+                        .withFailMessage("No data available during deserialization.")
+                        .isTrue();
 
                 T deserialized = serializer.deserialize(in);
                 checkToString(deserialized);
 
                 deepEquals("Deserialized value if wrong.", value, deserialized);
 
-                assertThat(in.available()).withFailMessage("Trailing data available after deserialization.").isEqualTo(0);
+                assertThat(in.available())
+                        .withFailMessage("Trailing data available after deserialization.")
+                        .isEqualTo(0);
             }
         } catch (Exception e) {
             System.err.println(e.getMessage());
@@ -123,7 +127,9 @@ public abstract class SerializerTestBase<T> {
                 num++;
             }
 
-            assertThat(num).withFailMessage("Wrong number of elements deserialized.").isEqualTo(testData.length);
+            assertThat(num)
+                    .withFailMessage("Wrong number of elements deserialized.")
+                    .isEqualTo(testData.length);
         } catch (Exception e) {
             System.err.println(e.getMessage());
             e.printStackTrace();
@@ -143,7 +149,9 @@ public abstract class SerializerTestBase<T> {
                 return;
             }
 
-            assertThat(ser2).withFailMessage("The copy of the serializer is not equal to the original one.").isEqualTo(ser1);
+            assertThat(ser2)
+                    .withFailMessage("The copy of the serializer is not equal to the original one.")
+                    .isEqualTo(ser1);
         } catch (Exception e) {
             System.err.println(e.getMessage());
             e.printStackTrace();
@@ -194,7 +202,9 @@ public abstract class SerializerTestBase<T> {
 
             for (T value : testData) {
                 byte[] bytes = InstantiationUtil.serializeObject(value);
-                assertThat(bytes.length > 0).withFailMessage("No data available during deserialization.").isTrue();
+                assertThat(bytes.length > 0)
+                        .withFailMessage("No data available during deserialization.")
+                        .isTrue();
 
                 T deserialized =
                         InstantiationUtil.deserializeObject(
@@ -301,9 +311,9 @@ public abstract class SerializerTestBase<T> {
                         T copySerdeTestItem = serializer.copy(serdeTestItem);
                         dataOutputSerializer.clear();
 
-                        assertThat(
-                                deepEquals(copySerdeTestItem, testItem)
-                                ).withFailMessage("Serialization/Deserialization cycle resulted in an object that are not equal to the original.")
+                        assertThat(deepEquals(copySerdeTestItem, testItem))
+                                .withFailMessage(
+                                        "Serialization/Deserialization cycle resulted in an object that are not equal to the original.")
                                 .isTrue();
 
                         // try to enforce some upper bound to the test time

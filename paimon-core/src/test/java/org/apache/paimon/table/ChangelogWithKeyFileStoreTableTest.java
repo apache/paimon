@@ -187,8 +187,10 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row1).sequenceNumber();
         long sequenceNumber2 =
                 ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row2).sequenceNumber();
-        assertThat(TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS)).isEqualTo(1685530987);
-        assertThat(TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS)).isEqualTo(1685530987);
+        assertThat(TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS))
+                .isEqualTo(1685530987);
+        assertThat(TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS))
+                .isEqualTo(1685530987);
         write.close();
 
         // Do not check results, they are unstable

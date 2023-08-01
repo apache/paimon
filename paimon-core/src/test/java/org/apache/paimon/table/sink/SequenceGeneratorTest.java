@@ -163,40 +163,46 @@ public class SequenceGeneratorTest {
 
     @Test
     public void testGenerateWithPadding() {
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_id"))).isEqualTo(1);
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("pt"))).isEqualTo(1);
+        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_id")))
+                .isEqualTo(1);
+        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("pt")))
+                .isEqualTo(1);
+        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_intsecond")))
+                .isEqualTo(1685548953);
+        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_tinyint")))
+                .isEqualTo(2);
+        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_smallint")))
+                .isEqualTo(3);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_bigint")))
+                .isEqualTo(4000000000000L);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_bigintmillis")))
+                .isEqualTo(1685548953000L);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_float")))
+                .isEqualTo(2);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_double")))
+                .isEqualTo(3);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_string")))
+                .isEqualTo(1);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_date")))
+                .isEqualTo(375);
+        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_timestamp0")))
+                .isEqualTo(1685548953L);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_timestamp3")))
+                .isEqualTo(1685548953123L);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_timestamp6")))
+                .isEqualTo(1685548953123L);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_char")))
+                .isEqualTo(3);
+        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_varchar")))
+                .isEqualTo(4);
         assertThat(
-                getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_intsecond"))).isEqualTo(1685548953);
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_tinyint"))).isEqualTo(2);
+                        getSecondFromGeneratedWithPadding(
+                                generateWithPaddingOnSecond("_localtimestamp")))
+                .isEqualTo(1685548953L);
         assertThat(
-                getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_smallint"))).isEqualTo(3);
-        assertThat(
-
-                getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_bigint"))).isEqualTo(4000000000000L);
-        assertThat(
-
-                getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_bigintmillis"))).isEqualTo(1685548953000L);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_float"))).isEqualTo(2);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_double"))).isEqualTo(3);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_string"))).isEqualTo(1);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_date"))).isEqualTo(375);
-        assertThat(
-
-                getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_timestamp0"))).isEqualTo(1685548953L);
-        assertThat(
-
-                getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_timestamp3"))).isEqualTo(1685548953123L);
-        assertThat(
-
-                getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_timestamp6"))).isEqualTo(1685548953123L);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_char"))).isEqualTo(3);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_varchar"))).isEqualTo(4);
-        assertThat(
-
-                getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_localtimestamp"))).isEqualTo(1685548953L);
-        assertThat(
-
-                getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_localtimestamp"))).isEqualTo(1685548953123L);
+                        getMillisFromGeneratedWithPadding(
+                                generateWithPaddingOnMillis("_localtimestamp")))
+                .isEqualTo(1685548953123L);
         assertUnsupportedDatatype("_boolean");
         assertUnsupportedDatatype("_binary");
         assertUnsupportedDatatype("_varbinary");
@@ -212,7 +218,8 @@ public class SequenceGeneratorTest {
     }
 
     private void assertUnsupportedDatatype(String field) {
-        assertThatThrownBy(() -> getGenerator(field).generate(row)).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> getGenerator(field).generate(row))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     private long generateWithPaddingOnSecond(String field) {

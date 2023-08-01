@@ -684,10 +684,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         // check table schema
         FileStoreTable table = getFileStoreTable("t");
-        assertThat(
-
-                JsonSerdeUtil.toFlatJson(table.schema().fields())).isEqualTo( "[{\"id\":0,\"name\":\"k\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
-                + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\",\"description\":\"\"}]");
+        assertThat(JsonSerdeUtil.toFlatJson(table.schema().fields()))
+                .isEqualTo(
+                        "[{\"id\":0,\"name\":\"k\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
+                                + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\",\"description\":\"\"}]");
 
         // check sync schema changes and records
         try (Connection conn =

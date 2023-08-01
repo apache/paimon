@@ -548,11 +548,12 @@ public class FileStoreCommitTest {
 
         // commit the first snapshot again, should throw exception due to conflicts
         for (int i = 0; i < 3; i++) {
-            assertThatThrownBy(() ->
-                    store.newCommit()
-                            .commit(committables.get(0), Collections.emptyMap()))
+            assertThatThrownBy(
+                            () ->
+                                    store.newCommit()
+                                            .commit(committables.get(0), Collections.emptyMap()))
                     .isInstanceOf(RuntimeException.class)
-            .hasMessageContaining("Give up committing.");
+                    .hasMessageContaining("Give up committing.");
         }
     }
 

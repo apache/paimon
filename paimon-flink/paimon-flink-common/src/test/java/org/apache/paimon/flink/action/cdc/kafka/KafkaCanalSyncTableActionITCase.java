@@ -40,7 +40,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaCanalSyncTableActionITCase}. */
@@ -687,7 +686,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(Exception.class)
-        .hasMessage("Could not get metadata from server,topic :no_non_ddl_data");
+                .hasMessage("Could not get metadata from server,topic :no_non_ddl_data");
     }
 
     @Test

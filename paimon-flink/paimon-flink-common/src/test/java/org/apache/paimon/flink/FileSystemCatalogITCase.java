@@ -33,7 +33,6 @@ import org.junit.jupiter.api.Test;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -83,8 +82,8 @@ public class FileSystemCatalogITCase extends KafkaTableTestBase {
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
         Path tablePath = ((AbstractCatalog) catalog).getDataTableLocation(identifier);
-        assertThat(
-                tablePath.toString()).isEqualTo(new File(path, DB_NAME + ".db" + File.separator + "t3").toString());
+        assertThat(tablePath.toString())
+                .isEqualTo(new File(path, DB_NAME + ".db" + File.separator + "t3").toString());
 
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(tEnv.from("t3").execute().collect());

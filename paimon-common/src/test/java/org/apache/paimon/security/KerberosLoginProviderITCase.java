@@ -32,12 +32,12 @@ import java.nio.file.Path;
 import static org.apache.paimon.security.SecurityConfiguration.KERBEROS_LOGIN_KEYTAB;
 import static org.apache.paimon.security.SecurityConfiguration.KERBEROS_LOGIN_PRINCIPAL;
 import static org.apache.paimon.security.SecurityConfiguration.KERBEROS_LOGIN_USETICKETCACHE;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
-import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Test for {@link KerberosLoginProvider}.
@@ -168,7 +168,8 @@ public class KerberosLoginProviderITCase {
                     .thenReturn(UserGroupInformation.AuthenticationMethod.PROXY);
             ugi.when(UserGroupInformation::getCurrentUser).thenReturn(userGroupInformation);
 
-            assertThatThrownBy(kerberosLoginProvider::doLogin).isInstanceOf(UnsupportedOperationException.class);
+            assertThatThrownBy(kerberosLoginProvider::doLogin)
+                    .isInstanceOf(UnsupportedOperationException.class);
         }
     }
 }

@@ -28,7 +28,6 @@ import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.util.Collector;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicReference;
@@ -38,6 +37,7 @@ import static org.apache.paimon.flink.kafka.KafkaLogTestUtils.discoverKafkaLogFa
 import static org.apache.paimon.flink.kafka.KafkaLogTestUtils.testContext;
 import static org.apache.paimon.flink.kafka.KafkaLogTestUtils.testRecord;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link KafkaLogSerializationSchema} and {@link KafkaLogDeserializationSchema}. */
 public class KafkaLogSerializationTest {
@@ -53,9 +53,8 @@ public class KafkaLogSerializationTest {
 
     @Test
     public void testNonKeyedUpsert() {
-        Assertions.assertThrows(
-                IllegalArgumentException.class,
-                () -> checkNonKeyed(LogChangelogMode.UPSERT, 3, 6, 9));
+        assertThatThrownBy(() -> checkNonKeyed(LogChangelogMode.UPSERT, 3, 6, 9))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

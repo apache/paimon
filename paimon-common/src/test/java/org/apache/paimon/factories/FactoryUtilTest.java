@@ -34,11 +34,12 @@ public class FactoryUtilTest {
                         DummyFactory.IDENTIFIER);
         assertThat(factory.identifier()).isEqualTo(DummyFactory.IDENTIFIER);
 
-        assertThatThrownBy(() ->
-                        FactoryUtil.discoverFactory(
-                                Thread.currentThread().getContextClassLoader(),
-                                DummyFactory.class,
-                                "non-exist-factory"))
+        assertThatThrownBy(
+                        () ->
+                                FactoryUtil.discoverFactory(
+                                        Thread.currentThread().getContextClassLoader(),
+                                        DummyFactory.class,
+                                        "non-exist-factory"))
                 .isInstanceOf(FactoryException.class)
                 .hasMessageContaining(
                         "Could not find any factory for identifier '%s' that implements '%s' in the classpath.",

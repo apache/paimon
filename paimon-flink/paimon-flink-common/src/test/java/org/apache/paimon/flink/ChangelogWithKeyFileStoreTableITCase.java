@@ -587,7 +587,8 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
             switch (row.getKind()) {
                 case INSERT:
                     assertThat(valueMap.containsKey(key)).isFalse();
-                    assertThat(!kindMap.containsKey(key) || kindMap.get(key) == RowKind.DELETE).isTrue();
+                    assertThat(!kindMap.containsKey(key) || kindMap.get(key) == RowKind.DELETE)
+                            .isTrue();
                     valueMap.put(key, value);
                     break;
                 case UPDATE_AFTER:
@@ -599,8 +600,9 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
                 case DELETE:
                     assertThat(valueMap.get(key)).isEqualTo(value);
                     assertThat(
-                            kindMap.get(key) == RowKind.INSERT
-                                    || kindMap.get(key) == RowKind.UPDATE_AFTER).isTrue();
+                                    kindMap.get(key) == RowKind.INSERT
+                                            || kindMap.get(key) == RowKind.UPDATE_AFTER)
+                            .isTrue();
                     valueMap.remove(key);
                     break;
                 default:

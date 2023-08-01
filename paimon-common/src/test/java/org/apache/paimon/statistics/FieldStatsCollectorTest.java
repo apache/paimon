@@ -32,7 +32,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.StringUtils;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -68,12 +67,12 @@ public class FieldStatsCollectorTest {
 
     @Test
     public void testParse() {
-        assertThat(
-                FieldStatsCollector.from("none").create() instanceof NoneFieldStatsCollector).isTrue();
-        assertThat(
-                FieldStatsCollector.from("Full").create() instanceof FullFieldStatsCollector).isTrue();
-        assertThat(
-                FieldStatsCollector.from("CoUNts").create() instanceof CountsFieldStatsCollector).isTrue();
+        assertThat(FieldStatsCollector.from("none").create() instanceof NoneFieldStatsCollector)
+                .isTrue();
+        assertThat(FieldStatsCollector.from("Full").create() instanceof FullFieldStatsCollector)
+                .isTrue();
+        assertThat(FieldStatsCollector.from("CoUNts").create() instanceof CountsFieldStatsCollector)
+                .isTrue();
         TruncateFieldStatsCollector t1 =
                 (TruncateFieldStatsCollector) FieldStatsCollector.from("truncate(10)").create();
         assertThat(t1.getLength()).isEqualTo(10);

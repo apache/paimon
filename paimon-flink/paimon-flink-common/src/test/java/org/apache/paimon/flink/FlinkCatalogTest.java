@@ -303,13 +303,17 @@ public class FlinkCatalogTest {
 
         // system tables
         assertThat(
-                catalog.tableExists(
-                        new ObjectPath(
-                                path1.getDatabaseName(), path1.getObjectName() + "$snapshots"))).isTrue();
+                        catalog.tableExists(
+                                new ObjectPath(
+                                        path1.getDatabaseName(),
+                                        path1.getObjectName() + "$snapshots")))
+                .isTrue();
         assertThat(
-                catalog.tableExists(
-                        new ObjectPath(
-                                path1.getDatabaseName(), path1.getObjectName() + "$unknown"))).isFalse();
+                        catalog.tableExists(
+                                new ObjectPath(
+                                        path1.getDatabaseName(),
+                                        path1.getObjectName() + "$unknown")))
+                .isFalse();
     }
 
     @ParameterizedTest
@@ -499,9 +503,8 @@ public class FlinkCatalogTest {
         catalog.createTable(path3, catalogTable2, false);
 
         CatalogBaseTable storedTable2 = catalog.getTable(path3);
-        assertThat(
-
-                storedTable2.getOptions().get("testing.log.store.topic")).isEqualTo(String.format("%s-topic", path3.getObjectName()));
+        assertThat(storedTable2.getOptions().get("testing.log.store.topic"))
+                .isEqualTo(String.format("%s-topic", path3.getObjectName()));
         assertThatThrownBy(() -> catalog.dropTable(path3, true))
                 .hasMessage("Check unregister log store topic here.");
     }

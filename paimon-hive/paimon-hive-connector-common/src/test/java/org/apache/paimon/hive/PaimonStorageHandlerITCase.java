@@ -71,7 +71,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.hive.FileStoreTestUtils.DATABASE_NAME;
 import static org.apache.paimon.hive.FileStoreTestUtils.TABLE_NAME;
-
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonInputFormat}. */
@@ -175,7 +174,6 @@ public class PaimonStorageHandlerITCase {
                         "2\t40\tNULL\t400",
                         "3\t50\tStore\t200");
         assertThat(actual).isEqualTo(expected);
-
 
         actual = hiveShell.executeQuery("SELECT c, b FROM " + externalTable + " ORDER BY b");
         expected = Arrays.asList("Hi Again\t10", "Hello\t20", "NULL\t40", "Store\t50");
@@ -792,19 +790,23 @@ public class PaimonStorageHandlerITCase {
                         Object expectedObject =
                                 primitiveOi.getPrimitiveJavaObject(expectedRow.getField(i));
                         if (expectedObject instanceof byte[]) {
-                            assertThat((byte[]) actualRow[i]).containsExactly((byte[]) expectedObject);
+                            assertThat((byte[]) actualRow[i])
+                                    .containsExactly((byte[]) expectedObject);
                         } else if (expectedObject instanceof HiveDecimal) {
                             // HiveDecimal will remove trailing zeros,
                             // so we have to compare it from the original DecimalData
                             assertThat(actualRow[i]).isEqualTo(expectedRow.getField(i).toString());
                         } else {
-                            assertThat(String.valueOf(actualRow[i])).isEqualTo(String.valueOf(expectedObject));
+                            assertThat(String.valueOf(actualRow[i]))
+                                    .isEqualTo(String.valueOf(expectedObject));
                         }
                         break;
                     case LIST:
                         ListObjectInspector listOi = (ListObjectInspector) oi;
-                        assertThat(actualRow[i]).isEqualTo(String.valueOf(listOi.getList(expectedRow.getField(i)))
-                                .replace(" ", ""));
+                        assertThat(actualRow[i])
+                                .isEqualTo(
+                                        String.valueOf(listOi.getList(expectedRow.getField(i)))
+                                                .replace(" ", ""));
                         break;
                     case MAP:
                         MapObjectInspector mapOi = (MapObjectInspector) oi;
@@ -871,53 +873,44 @@ public class PaimonStorageHandlerITCase {
                                 "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + tablePath + "'")));
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a = 1 OR a = 5"))
+                .containsExactly("1", "5");
         assertThat(
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a = 1 OR a = 5")).containsExactly("1", "5");
+                        hiveShell.executeQuery(
+                                "SELECT * FROM test_table WHERE a <> 1 AND a <> 4 AND a <> 5"))
+                .containsExactly("2", "3", "6");
         assertThat(
-
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE a <> 1 AND a <> 4 AND a <> 5")).containsExactly("2", "3", "6");
+                        hiveShell.executeQuery(
+                                "SELECT * FROM test_table WHERE NOT (a = 1 OR a = 5) AND NOT a = 4"))
+                .containsExactly("2", "3", "6");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a < 4"))
+                .containsExactly("1", "2", "3");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a <= 3"))
+                .containsExactly("1", "2", "3");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a > 3"))
+                .containsExactly("4", "5", "6");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a >= 4"))
+                .containsExactly("4", "5", "6");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, 1, 3, 7)"))
+                .containsExactly("1", "3");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, NULL, 3, 7)"))
+                .containsExactly("3");
         assertThat(
-
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE NOT (a = 1 OR a = 5) AND NOT a = 4")).containsExactly("2", "3", "6");
+                        hiveShell.executeQuery(
+                                "SELECT * FROM test_table WHERE a NOT IN (0, 1, 3, 2, 5, 7)"))
+                .containsExactly("4", "6");
         assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a < 4")).containsExactly("1", "2", "3");
-        assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a <= 3")).containsExactly("1", "2", "3");
-        assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a > 3")).containsExactly("4", "5", "6");
-        assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a >= 4")).containsExactly("4", "5", "6");
-        assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, 1, 3, 7)")).containsExactly("1", "3");
-        assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, NULL, 3, 7)")).containsExactly("3");
-        assertThat(
-
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE a NOT IN (0, 1, 3, 2, 5, 7)")).containsExactly("4", "6");
-        assertThat(
-
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE a NOT IN (0, 1, NULL, 2, 5, 7)")).isEmpty();
-        assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a BETWEEN 2 AND 3")).containsExactly("2", "3");
-        assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a NOT BETWEEN 2 AND 4")).containsExactly("1", "5", "6");
-        assertThat(
-
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NULL")).containsExactly("NULL", "NULL");
-        assertThat(
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NOT NULL")).containsExactly("1", "2", "3", "4", "5", "6");
+                        hiveShell.executeQuery(
+                                "SELECT * FROM test_table WHERE a NOT IN (0, 1, NULL, 2, 5, 7)"))
+                .isEmpty();
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a BETWEEN 2 AND 3"))
+                .containsExactly("2", "3");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a NOT BETWEEN 2 AND 4"))
+                .containsExactly("1", "5", "6");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NULL"))
+                .containsExactly("NULL", "NULL");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NOT NULL"))
+                .containsExactly("1", "2", "3", "4", "5", "6");
     }
 
     @Test
@@ -962,25 +955,25 @@ public class PaimonStorageHandlerITCase {
 
         createExternalTable();
         assertThat(
-
-                hiveShell.executeQuery(
-                        "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-11'")).containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
+                        hiveShell.executeQuery(
+                                "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-11'"))
+                .containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
         assertThat(
-
-                hiveShell.executeQuery(
-                        "SELECT * FROM `"
-                                + externalTable
-                                + "` WHERE ts = '2022-05-17 17:29:20.1'")).containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
+                        hiveShell.executeQuery(
+                                "SELECT * FROM `"
+                                        + externalTable
+                                        + "` WHERE ts = '2022-05-17 17:29:20.1'"))
+                .containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
         assertThat(
-
-                hiveShell.executeQuery(
-                        "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-12'")).containsExactly("1971-01-12\tNULL");
+                        hiveShell.executeQuery(
+                                "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-12'"))
+                .containsExactly("1971-01-12\tNULL");
         assertThat(
-
-                hiveShell.executeQuery(
-                        "SELECT * FROM `"
-                                + externalTable
-                                + "` WHERE ts = '2022-06-18 08:30:00.1'")).containsExactly("NULL\t2022-06-18 08:30:00.1");
+                        hiveShell.executeQuery(
+                                "SELECT * FROM `"
+                                        + externalTable
+                                        + "` WHERE ts = '2022-06-18 08:30:00.1'"))
+                .containsExactly("NULL\t2022-06-18 08:30:00.1");
     }
 
     @Test
@@ -1055,18 +1048,19 @@ public class PaimonStorageHandlerITCase {
         createExternalTable();
 
         assertThat(
-                hiveShell.executeQuery(
-                        "SELECT "
-                                + "date_key[CAST('1971-01-11' AS DATE)],"
-                                + "timestamp3_key[CAST('2023-7-18 12:29:59.123' AS TIMESTAMP)],"
-                                + "timestamp5_key[CAST('2023-7-18 12:29:59.12345' AS TIMESTAMP)],"
-                                + "decimal_key[1.2],"
-                                + "string_key['Engine'],"
-                                + "varchar_key['Name']"
-                                + " FROM `"
-                                + externalTable
-                                + "`")).containsExactly(
-                "Date 1971-01-11\tTest timestamp(3)\tTest timestamp(5)\t一点二\tHive\tPaimon");
+                        hiveShell.executeQuery(
+                                "SELECT "
+                                        + "date_key[CAST('1971-01-11' AS DATE)],"
+                                        + "timestamp3_key[CAST('2023-7-18 12:29:59.123' AS TIMESTAMP)],"
+                                        + "timestamp5_key[CAST('2023-7-18 12:29:59.12345' AS TIMESTAMP)],"
+                                        + "decimal_key[1.2],"
+                                        + "string_key['Engine'],"
+                                        + "varchar_key['Name']"
+                                        + " FROM `"
+                                        + externalTable
+                                        + "`"))
+                .containsExactly(
+                        "Date 1971-01-11\tTest timestamp(3)\tTest timestamp(5)\t一点二\tHive\tPaimon");
     }
 
     private Options getBasicConf() {

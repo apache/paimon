@@ -37,8 +37,8 @@ import java.util.Arrays;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_IN_TEST;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_SUPPORT_CONCURRENCY;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_TXN_MANAGER;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive 2.3 connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -77,10 +77,12 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive").await();
-        assertThat(collect("SHOW DATABASES")).isEqualTo(Arrays.asList(
-                Row.of("default"),
-                Row.of("test_db"),
-                Row.of(TestHiveMetaStoreClient.MOCK_DATABASE)));
+        assertThat(collect("SHOW DATABASES"))
+                .isEqualTo(
+                        Arrays.asList(
+                                Row.of("default"),
+                                Row.of("test_db"),
+                                Row.of(TestHiveMetaStoreClient.MOCK_DATABASE)));
     }
 
     @Test
@@ -106,10 +108,13 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
                 .isInstanceOf(TableException.class)
                 .hasMessage(
                         "Could not execute CreateTable in path `my_hive_custom_client`.`default`.`hive_table`");
-        assertThat(new SchemaManager(
-                LocalFileIO.create(),
-                new org.apache.paimon.fs.Path(path, "default.db/hive_table"))
-                .listAllIds()).isEmpty();
+        assertThat(
+                        new SchemaManager(
+                                        LocalFileIO.create(),
+                                        new org.apache.paimon.fs.Path(
+                                                path, "default.db/hive_table"))
+                                .listAllIds())
+                .isEmpty();
     }
 
     @Test
@@ -138,13 +143,13 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
                                 + "  SET 'aa' = 'bb'");
 
         assertThat(
-                new SchemaManager(
-                                LocalFileIO.create(),
-                                new org.apache.paimon.fs.Path(
-                                        path, "default.db/alter_failed_table"))
-                        .latest()
-                        .get()
-                        .options()
-                        ).isEmpty();
+                        new SchemaManager(
+                                        LocalFileIO.create(),
+                                        new org.apache.paimon.fs.Path(
+                                                path, "default.db/alter_failed_table"))
+                                .latest()
+                                .get()
+                                .options())
+                .isEmpty();
     }
 }

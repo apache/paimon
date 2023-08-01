@@ -88,9 +88,8 @@ class DefaultValueAssignerTest {
         int[][] nest = top.toNestedIndexes();
         defaultValueAssigner = defaultValueAssigner.handleProject(nest);
         InternalRow row = defaultValueAssigner.createDefaultValueRow().defaultValueRow();
-        assertThat(
-
-                String.format("%s|%s|%s", row.getString(0), row.getString(1), row.getString(2))).isEqualTo("1|0|null");
+        assertThat(String.format("%s|%s|%s", row.getString(0), row.getString(1), row.getString(2)))
+                .isEqualTo("1|0|null");
     }
 
     @Test
@@ -104,7 +103,8 @@ class DefaultValueAssignerTest {
                             predicateBuilder.equal(predicateBuilder.indexOf("col5"), "100"),
                             predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
             Predicate actual = defaultValueAssigner.handlePredicate(predicate);
-            assertThat(actual).isEqualTo(predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
+            assertThat(actual)
+                    .isEqualTo(predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
         }
 
         {
@@ -125,7 +125,8 @@ class DefaultValueAssignerTest {
             Predicate actual =
                     defaultValueAssigner.handlePredicate(
                             predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
-            assertThat(actual).isEqualTo(predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
+            assertThat(actual)
+                    .isEqualTo(predicateBuilder.equal(predicateBuilder.indexOf("col1"), "1"));
         }
     }
 }

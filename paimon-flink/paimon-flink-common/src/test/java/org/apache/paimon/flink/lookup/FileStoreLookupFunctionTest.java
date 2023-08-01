@@ -36,7 +36,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -102,14 +101,18 @@ public class FileStoreLookupFunctionTest {
         commit(writeCommit(1));
         fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(
-                TraceableFileIO.openInputStreams(s -> s.toString().contains(tempDir.toString()))
-                        .size()).isEqualTo(0);
+                        TraceableFileIO.openInputStreams(
+                                        s -> s.toString().contains(tempDir.toString()))
+                                .size())
+                .isEqualTo(0);
 
         commit(writeCommit(10));
         fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(
-                TraceableFileIO.openInputStreams(s -> s.toString().contains(tempDir.toString()))
-                        .size()).isEqualTo(0);
+                        TraceableFileIO.openInputStreams(
+                                        s -> s.toString().contains(tempDir.toString()))
+                                .size())
+                .isEqualTo(0);
     }
 
     @Test
