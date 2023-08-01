@@ -129,19 +129,17 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
                         .pathFactory()
                         .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0);
         int i = 0;
-        for (Future<List<CommitMessage>> f : workerOperator.result) {
+        for (Future<CommitMessage> f : workerOperator.result) {
             if (!f.isDone()) {
                 break;
             }
-            for (CommitMessage commitMessage : f.get()) {
-                List<DataFileMeta> fileMetas =
-                        ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
-                for (DataFileMeta fileMeta : fileMetas) {
-                    Assertions.assertThat(
-                                    localFileIO.exists(
-                                            dataFilePathFactory.toPath(fileMeta.fileName())))
-                            .isTrue();
-                }
+            CommitMessage commitMessage = f.get();
+            List<DataFileMeta> fileMetas =
+                    ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
+            for (DataFileMeta fileMeta : fileMetas) {
+                Assertions.assertThat(
+                                localFileIO.exists(dataFilePathFactory.toPath(fileMeta.fileName())))
+                        .isTrue();
             }
             if (i++ > 8) {
                 break;
@@ -151,17 +149,16 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
         // shut down worker operator
         workerOperator.shutdown();
 
-        for (Future<List<CommitMessage>> f : workerOperator.result) {
+        for (Future<CommitMessage> f : workerOperator.result) {
             try {
-                for (CommitMessage commitMessage : f.get()) {
-                    List<DataFileMeta> fileMetas =
-                            ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
-                    for (DataFileMeta fileMeta : fileMetas) {
-                        Assertions.assertThat(
-                                        localFileIO.exists(
-                                                dataFilePathFactory.toPath(fileMeta.fileName())))
-                                .isFalse();
-                    }
+                CommitMessage commitMessage = f.get();
+                List<DataFileMeta> fileMetas =
+                        ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();
+                for (DataFileMeta fileMeta : fileMetas) {
+                    Assertions.assertThat(
+                                    localFileIO.exists(
+                                            dataFilePathFactory.toPath(fileMeta.fileName())))
+                            .isFalse();
                 }
             } catch (Exception e) {
                 // do nothing

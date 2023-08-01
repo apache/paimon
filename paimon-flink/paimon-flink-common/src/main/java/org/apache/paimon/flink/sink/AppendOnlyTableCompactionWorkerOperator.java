@@ -20,15 +20,12 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.append.AppendOnlyTableCompactionWorker;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.CommitMessageImpl;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -57,9 +54,9 @@ public class AppendOnlyTableCompactionWorkerOperator
 
     private final AppendOnlyFileStoreTable table;
     private final String commitUser;
-    private transient AppendOnlyTableCompactionWorker worker;
+    private transient AppendOnlyFileStoreWrite write;
     private transient ExecutorService lazyCompactExecutor;
-    transient Queue<Future<List<CommitMessage>>> result;
+    transient Queue<Future<CommitMessage>> result;
 
     public AppendOnlyTableCompactionWorkerOperator(
             AppendOnlyFileStoreTable table, String commitUser) {
@@ -71,7 +68,7 @@ public class AppendOnlyTableCompactionWorkerOperator
     @Override
     public void open() throws Exception {
         LOG.debug("Opened a append-only table compaction worker.");
-        this.worker = new AppendOnlyTableCompactionWorker(table, commitUser);
+        this.write = table.store().newWrite(commitUser);
         this.result = new LinkedList<>();
     }
 
@@ -81,19 +78,13 @@ public class AppendOnlyTableCompactionWorkerOperator
         List<CommitMessage> tempList = new ArrayList<>();
         try {
             while (!result.isEmpty()) {
-                Future<List<CommitMessage>> future = result.peek();
-                if (!future.isDone()) {
-                    if (waitCompaction) {
-                        while (!future.isDone()) {
-                            Thread.sleep(1000L);
-                        }
-                    } else {
-                        break;
-                    }
+                Future<CommitMessage> future = result.peek();
+                if (!future.isDone() && !waitCompaction) {
+                    break;
                 }
 
                 result.poll();
-                tempList.addAll(future.get());
+                tempList.add(future.get());
             }
             return tempList.stream()
                     .map(s -> new Committable(checkpointId, Committable.Kind.FILE, s))
@@ -108,13 +99,7 @@ public class AppendOnlyTableCompactionWorkerOperator
     @Override
     public void processElement(StreamRecord<AppendOnlyCompactionTask> element) throws Exception {
         AppendOnlyCompactionTask task = element.getValue();
-        result.add(
-                workerExecutor()
-                        .submit(
-                                () -> {
-                                    worker.accept(task);
-                                    return worker.doCompact();
-                                }));
+        result.add(workerExecutor().submit(() -> task.doCompact(write)));
     }
 
     private ExecutorService workerExecutor() {
@@ -134,40 +119,24 @@ public class AppendOnlyTableCompactionWorkerOperator
     }
 
     @VisibleForTesting
-    void shutdown() {
+    void shutdown() throws Exception {
         if (lazyCompactExecutor != null) {
             // ignore runnable tasks in queue
             lazyCompactExecutor.shutdownNow();
-
-            // remove the file already written
-            FileIO fileIO = table.fileIO();
-
-            for (Future<List<CommitMessage>> resultFuture : result) {
+            List<CommitMessage> messages = new ArrayList<>();
+            for (Future<CommitMessage> resultFuture : result) {
                 if (!resultFuture.isDone()) {
                     // the later tasks should be stopped running
                     break;
                 }
-                List<CommitMessage> messages;
                 try {
-                    messages = resultFuture.get();
+                    messages.add(resultFuture.get());
                 } catch (Exception exception) {
                     // exception should already be handled
-                    continue;
                 }
-                for (CommitMessage uncommitMessage : messages) {
-                    CommitMessageImpl uncommitMessageImpl = (CommitMessageImpl) uncommitMessage;
-                    List<DataFileMeta> fileMetas =
-                            uncommitMessageImpl.compactIncrement().compactAfter();
-                    DataFilePathFactory dataFilePathFactory =
-                            table.store()
-                                    .pathFactory()
-                                    .createDataFilePathFactory(
-                                            uncommitMessageImpl.partition(),
-                                            uncommitMessageImpl.bucket());
-                    for (DataFileMeta dataFileMeta : fileMetas) {
-                        fileIO.deleteQuietly(dataFilePathFactory.toPath(dataFileMeta.fileName()));
-                    }
-                }
+            }
+            try (TableCommitImpl tableCommit = table.newCommit(commitUser)) {
+                tableCommit.abort(messages);
             }
         }
     }
