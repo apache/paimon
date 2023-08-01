@@ -88,7 +88,7 @@ public class KafkaSyncTableAction extends ActionBase {
 
     private final Map<String, String> paimonConfig;
 
-    KafkaSyncTableAction(
+    public KafkaSyncTableAction(
             Map<String, String> kafkaConfig,
             String warehouse,
             String database,

@@ -117,11 +117,11 @@ public class MergeIntoAction extends TableActionBase {
     @Nullable private String notMatchedInsertCondition;
     @Nullable private String notMatchedInsertValues;
 
-    MergeIntoAction(String warehouse, String database, String tableName) {
+    public MergeIntoAction(String warehouse, String database, String tableName) {
         this(warehouse, database, tableName, Collections.emptyMap());
     }
 
-    MergeIntoAction(
+    public MergeIntoAction(
             String warehouse,
             String database,
             String tableName,

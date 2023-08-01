@@ -496,6 +496,9 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private static void validateAlterTable(CatalogTable ct1, CatalogTable ct2) {
+        if (ct1 instanceof SystemCatalogTable) {
+            throw new UnsupportedOperationException("Can't alter system table.");
+        }
         org.apache.flink.table.api.TableSchema ts1 = ct1.getSchema();
         org.apache.flink.table.api.TableSchema ts2 = ct2.getSchema();
         boolean pkEquality = false;

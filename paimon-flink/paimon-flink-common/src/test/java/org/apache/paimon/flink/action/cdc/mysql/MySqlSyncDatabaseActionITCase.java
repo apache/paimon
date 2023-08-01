@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -281,7 +282,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
                         new String[] {"_id", "v1"});
 
-        List<String> primaryKeys1 = Arrays.asList("_id");
+        List<String> primaryKeys1 = Collections.singletonList("_id");
         List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
 
         waitForResult(expected, table1, rowType1, primaryKeys1);
@@ -292,7 +293,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                             DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.TINYINT()
                         },
                         new String[] {"_id", "v1", "v2"});
-        List<String> primaryKeys2 = Arrays.asList("_id");
+        List<String> primaryKeys2 = Collections.singletonList("_id");
         expected = Arrays.asList("+I[2, two, 21]", "+I[4, four, 24]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
 
@@ -927,7 +928,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         createNewTable(statement, newTableName);
         statement.executeUpdate(
                 String.format("INSERT INTO `%s`.`t2` VALUES (8, 'eight', 80, 800)", databaseName));
-        List<Tuple2<Integer, String>> newTableRecords = getNewTableRecords(newTableCount);
+        List<Tuple2<Integer, String>> newTableRecords = getNewTableRecords();
         recordsMap.put(newTableName, newTableRecords);
         List<String> newTableExpected = getNewTableExpected(newTableRecords);
         insertRecordsIntoNewTable(statement, databaseName, newTableName, newTableRecords);
@@ -966,7 +967,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             Thread.sleep(5000L);
 
             // insert records
-            newTableRecords = getNewTableRecords(newTableCount);
+            newTableRecords = getNewTableRecords();
             recordsMap.put(newTableName, newTableRecords);
             insertRecordsIntoNewTable(statement, databaseName, newTableName, newTableRecords);
             newTable = getFileStoreTable(newTableName);
@@ -1030,7 +1031,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 .collect(Collectors.toList());
     }
 
-    private List<Tuple2<Integer, String>> getNewTableRecords(int newTableCount) {
+    private List<Tuple2<Integer, String>> getNewTableRecords() {
         List<Tuple2<Integer, String>> records = new LinkedList<>();
         int count = ThreadLocalRandom.current().nextInt(10) + 1;
         for (int i = 0; i < count; i++) {
@@ -1167,7 +1168,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         new String[] {"pk", "_datetime", "_tinyint1"});
         List<String> expected =
                 Arrays.asList("+I[1, 2021-09-15T15:00:10, 21]", "+I[2, 2023-03-23T16:00:20, 42]");
-        waitForResult(expected, table, rowType, Arrays.asList("pk"));
+        waitForResult(expected, table, rowType, Collections.singletonList("pk"));
     }
 
     @Test
@@ -1248,9 +1249,136 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         }
     }
 
-    private FileStoreTable getFileStoreTable(String tableName) throws Exception {
-        Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog().getTable(identifier);
+    @Test
+    @Timeout(60)
+    public void testSyncMultipleShards() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "database_shard_.*");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        false,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Collections.emptyMap(),
+                        tableConfig,
+                        mode);
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+            // test insert into t1
+            statement.executeUpdate("INSERT INTO database_shard_1.t1 VALUES (1, 'db1_1')");
+            statement.executeUpdate("INSERT INTO database_shard_1.t1 VALUES (2, 'db1_2')");
+
+            statement.executeUpdate("INSERT INTO database_shard_2.t1 VALUES (3, 'db2_3', 300)");
+            statement.executeUpdate("INSERT INTO database_shard_2.t1 VALUES (4, 'db2_4', 400)");
+
+            FileStoreTable table = getFileStoreTable("t1");
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(20), DataTypes.BIGINT()
+                            },
+                            new String[] {"k", "v1", "v2"});
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, db1_1, NULL]",
+                            "+I[2, db1_2, NULL]",
+                            "+I[3, db2_3, 300]",
+                            "+I[4, db2_4, 400]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
+            // test schema evolution of t2
+            statement.executeUpdate("ALTER TABLE database_shard_1.t2 ADD COLUMN v2 INT");
+            statement.executeUpdate("ALTER TABLE database_shard_2.t2 ADD COLUMN v3 VARCHAR(10)");
+            statement.executeUpdate("INSERT INTO database_shard_1.t2 VALUES (1, 1.1, 1)");
+            statement.executeUpdate("INSERT INTO database_shard_1.t2 VALUES (2, 2.2, 2)");
+            statement.executeUpdate("INSERT INTO database_shard_2.t2 VALUES (3, 3.3, 'db2_3')");
+            statement.executeUpdate("INSERT INTO database_shard_2.t2 VALUES (4, 4.4, 'db2_4')");
+            table = getFileStoreTable("t2");
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.BIGINT().notNull(),
+                                DataTypes.DOUBLE(),
+                                DataTypes.INT(),
+                                DataTypes.VARCHAR(10)
+                            },
+                            new String[] {"k", "v1", "v2", "v3"});
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, 1.1, 1, NULL]",
+                            "+I[2, 2.2, 2, NULL]",
+                            "+I[3, 3.3, NULL, db2_3]",
+                            "+I[4, 4.4, NULL, db2_4]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
+            // test that database_shard_2.t3 won't be synchronized
+            statement.executeUpdate(
+                    "INSERT INTO database_shard_2.t3 VALUES (1, 'db2_1'), (2, 'db2_2')");
+            statement.executeUpdate(
+                    "INSERT INTO database_shard_1.t3 VALUES (3, 'db1_3'), (4, 'db1_4')");
+            table = getFileStoreTable("t3");
+            rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new String[] {"k", "v1"});
+            waitForResult(
+                    Arrays.asList("+I[3, db1_3]", "+I[4, db1_4]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
+            // test newly added table
+            if (mode == COMBINED) {
+                statement.executeUpdate(
+                        "CREATE TABLE database_shard_1.t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                statement.executeUpdate("INSERT INTO database_shard_1.t4 VALUES (1, 'db1_1')");
+
+                statement.executeUpdate(
+                        "CREATE TABLE database_shard_2.t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                statement.executeUpdate("INSERT INTO database_shard_2.t4 VALUES (2, 'db2_2')");
+
+                Catalog catalog = catalog();
+                while (!catalog.tableExists(Identifier.create(database, "t4"))) {
+                    Thread.sleep(100);
+                }
+
+                table = getFileStoreTable("t4");
+                rowType =
+                        RowType.of(
+                                new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                                new String[] {"k", "v1"});
+                waitForResult(
+                        Arrays.asList("+I[1, db1_1]", "+I[2, db2_2]"),
+                        table,
+                        rowType,
+                        Collections.singletonList("k"));
+            }
+        }
     }
 
     private void assertTableExists(List<String> tableNames) {

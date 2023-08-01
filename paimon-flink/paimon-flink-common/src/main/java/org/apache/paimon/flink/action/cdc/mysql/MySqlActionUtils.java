@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
@@ -44,7 +45,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -52,6 +55,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -96,6 +102,44 @@ public class MySqlActionUtils {
                 url,
                 mySqlConfig.get(MySqlSourceOptions.USERNAME),
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
+    }
+
+    static List<MySqlSchema> getMySqlSchemaList(
+            Configuration mySqlConfig,
+            Predicate<MySqlSchema> monitorTablePredication,
+            List<Identifier> excludedTables)
+            throws Exception {
+        Pattern databasePattern =
+                Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
+        List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
+        try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            try (ResultSet schemas = metaData.getCatalogs()) {
+                while (schemas.next()) {
+                    String databaseName = schemas.getString("TABLE_CAT");
+                    Matcher databaseMatcher = databasePattern.matcher(databaseName);
+                    if (databaseMatcher.matches()) {
+                        try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
+                            while (tables.next()) {
+                                String tableName = tables.getString("TABLE_NAME");
+                                MySqlSchema mySqlSchema =
+                                        new MySqlSchema(
+                                                metaData,
+                                                databaseName,
+                                                tableName,
+                                                mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
+                                if (monitorTablePredication.test(mySqlSchema)) {
+                                    mySqlSchemaList.add(mySqlSchema);
+                                } else {
+                                    excludedTables.add(mySqlSchema.identifier());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return mySqlSchemaList;
     }
 
     static void assertSchemaCompatible(TableSchema paimonSchema, Schema mySqlSchema) {
@@ -154,8 +198,8 @@ public class MySqlActionUtils {
                 checkArgument(
                         !mySqlFields.containsKey(fieldName.toLowerCase()),
                         String.format(
-                                "Duplicate key '%s' in table '%s.%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, mySqlSchema.databaseName(), mySqlSchema.tableName()));
+                                "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
+                                fieldName, mySqlSchema.identifier()));
                 mySqlFields.put(fieldName.toLowerCase(), entry.getValue());
             }
             mySqlPrimaryKeys =
@@ -199,19 +243,17 @@ public class MySqlActionUtils {
         return builder.build();
     }
 
-    static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig) {
+    static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {
         validateMySqlConfig(mySqlConfig);
         MySqlSourceBuilder<String> sourceBuilder = MySqlSource.builder();
 
-        String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
-        String tableName = mySqlConfig.get(MySqlSourceOptions.TABLE_NAME);
         sourceBuilder
                 .hostname(mySqlConfig.get(MySqlSourceOptions.HOSTNAME))
                 .port(mySqlConfig.get(MySqlSourceOptions.PORT))
                 .username(mySqlConfig.get(MySqlSourceOptions.USERNAME))
                 .password(mySqlConfig.get(MySqlSourceOptions.PASSWORD))
-                .databaseList(databaseName)
-                .tableList(databaseName + "." + tableName);
+                .databaseList(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME))
+                .tableList(tableList);
 
         mySqlConfig.getOptional(MySqlSourceOptions.SERVER_ID).ifPresent(sourceBuilder::serverId);
         mySqlConfig
@@ -317,11 +359,6 @@ public class MySqlActionUtils {
                 String.format(
                         "mysql-conf [%s] must be specified.",
                         MySqlSourceOptions.DATABASE_NAME.key()));
-
-        checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.TABLE_NAME) != null,
-                String.format(
-                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.TABLE_NAME.key()));
     }
 
     static List<ComputedColumn> buildComputedColumns(
