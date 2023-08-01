@@ -83,7 +83,7 @@ Example 1: synchronize tables into one Paimon table
     --table test_table \
     --partition-keys pt \
     --primary-keys pt,uid \
-    --computed-columns '_year=year(age)' \
+    --computed-column '_year=year(age)' \
     --mysql-conf hostname=127.0.0.1 \
     --mysql-conf username=root \
     --mysql-conf password=123456 \
@@ -114,7 +114,7 @@ table 'source_table' is split into database 'source_db1', 'source_db2' ..., then
     --table test_table \
     --partition-keys pt \
     --primary-keys pt,uid \
-    --computed-columns '_year=year(age)' \
+    --computed-column '_year=year(age)' \
     --mysql-conf hostname=127.0.0.1 \
     --mysql-conf username=root \
     --mysql-conf password=123456 \
@@ -329,7 +329,7 @@ Example
     --table test_table \
     --partition-keys pt \
     --primary-keys pt,uid \
-    --computed-columns '_year=year(age)' \
+    --computed-column '_year=year(age)' \
     --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
     --kafka-conf topic=order \
     --kafka-conf properties.group.id=123456 \
