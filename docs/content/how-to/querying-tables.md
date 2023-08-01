@@ -117,10 +117,31 @@ SELECT * FROM t;
 {{< /tab >}}
 
 {{< tab "Hive" >}}
+
+Hive requires adding the following configuration parameters to the hive-site.xml file:
+```xml
+<!--This parameter is used to configure the whitelist of permissible configuration items allowed for use in SQL standard authorization mode.-->
+<property>
+  <name>hive.security.authorization.sqlstd.confwhitelist</name>
+  <value>mapred.*|hive.*|mapreduce.*|spark.*</value>
+</property>
+
+<!--This parameter is an additional configuration for hive.security.authorization.sqlstd.confwhitelist. It allows you to add other permissible configuration items to the existing whitelist.-->
+<property>
+ <name>hive.security.authorization.sqlstd.confwhitelist.append</name>
+  <value>mapred.*|hive.*|mapreduce.*|spark.*</value>
+</property>
+```
+
 ```sql
 SET paimon.scan.timestamp-millis=1679486589444;
 SELECT * FROM t;
 SET paimon.scan.timestamp-millis=null;
+    
+-- read tag 'my-tag'
+set paimon.scan.tag-name=my-tag:
+SELECT * FROM t;
+set paimon.scan.tag-name=null;
 ```
 {{< /tab >}}
 
