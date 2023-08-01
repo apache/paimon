@@ -24,6 +24,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 
@@ -200,7 +201,7 @@ public class ContinuousFileSplitEnumeratorTest {
         context.registerReader(1, "test-host");
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
-        StreamTableScan scan = new MockScan(results);
+        MockScan scan = new MockScan(results);
         ContinuousFileSplitEnumerator enumerator =
                 new Builder()
                         .setSplitEnumeratorContext(context)
@@ -378,7 +379,7 @@ public class ContinuousFileSplitEnumeratorTest {
         context.registerReader(3, "test-host");
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
-        StreamTableScan scan = new MockScan(results);
+        MockScan scan = new MockScan(results);
         ContinuousFileSplitEnumerator enumerator =
                 new Builder()
                         .setSplitEnumeratorContext(context)
@@ -390,6 +391,7 @@ public class ContinuousFileSplitEnumeratorTest {
         enumerator.start();
 
         // assign to task 0, but no assigned. add to wait list
+        scan.allowEnd(false);
         enumerator.handleSplitRequest(0, "test-host");
         Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
                 context.getSplitAssignments();
@@ -499,6 +501,133 @@ public class ContinuousFileSplitEnumeratorTest {
         // assign to task 0
         assertThatCode(() -> enumerator.handleSplitRequest(0, "test-host"))
                 .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testTriggerScanByTaskRequest() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(2);
+        context.registerReader(0, "test-host");
+        context.registerReader(1, "test-host");
+
+        TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
+        MockScan scan = new MockScan(results);
+        scan.allowEnd(false);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .build();
+        enumerator.start();
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
+        }
+        results.put(1L, new DataFilePlan(splits));
+
+        // request directly
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0);
+        List<FileStoreSourceSplit> assignedSplits = assignments.get(0).getAssignedSplits();
+        assertThat(toDataSplits(assignedSplits)).containsExactly(splits.get(0));
+
+        enumerator.handleSplitRequest(1, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        assignedSplits = assignments.get(1).getAssignedSplits();
+        assertThat(toDataSplits(assignedSplits)).containsExactly(splits.get(1));
+    }
+
+    @Test
+    public void testNoTriggerWhenReadLatest() {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(4);
+        context.registerReader(0, "test-host");
+        context.registerReader(1, "test-host");
+        context.registerReader(2, "test-host");
+        context.registerReader(3, "test-host");
+
+        TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
+        MockScan scan = new MockScan(results);
+        scan.allowEnd(false);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .build();
+        enumerator.start();
+        enumerator.handleSplitRequest(0, "test-host");
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 2; i++) {
+            splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
+        }
+        results.put(1L, new DataFilePlan(splits));
+
+        // will not trigger scan here
+        enumerator.handleSplitRequest(0, "test-host");
+        Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
+                context.getSplitAssignments();
+        assertThat(assignments).isEmpty();
+
+        enumerator.handleSplitRequest(1, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).isEmpty();
+
+        // trigger all actions, we will scan anyway
+        context.triggerAllActions();
+
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1);
+        List<FileStoreSourceSplit> assignedSplits = assignments.get(0).getAssignedSplits();
+        assertThat(toDataSplits(assignedSplits)).containsExactly(splits.get(0));
+        assignedSplits = assignments.get(1).getAssignedSplits();
+        assertThat(toDataSplits(assignedSplits)).containsExactly(splits.get(1));
+
+        splits.clear();
+        for (int i = 2; i < 4; i++) {
+            splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
+        }
+        results.put(2L, new DataFilePlan(splits));
+        // cause latestSnapshot = false, so this request will trigger scan
+        enumerator.handleSplitRequest(2, "test-host");
+        enumerator.handleSplitRequest(3, "test-host");
+        assignments = context.getSplitAssignments();
+        assertThat(assignments).containsOnlyKeys(0, 1, 2, 3);
+        assignedSplits = assignments.get(2).getAssignedSplits();
+        assertThat(toDataSplits(assignedSplits)).containsExactly(splits.get(0));
+        assignedSplits = assignments.get(3).getAssignedSplits();
+        assertThat(toDataSplits(assignedSplits)).containsExactly(splits.get(1));
+
+        // this will trigger scan, and then set latestSnapshot = true
+        enumerator.handleSplitRequest(3, "test-host");
+        splits.clear();
+        splits.add(createDataSplit(snapshot, 7, Collections.emptyList()));
+        results.put(3L, new DataFilePlan(splits));
+
+        // this won't trigger scan, cause latestSnapshot = true
+        enumerator.handleSplitRequest(3, "test-host");
+        assignments = context.getSplitAssignments();
+        assignedSplits = assignments.get(3).getAssignedSplits();
+        assertThat(toDataSplits(assignedSplits)).doesNotContain(splits.get(0));
+
+        // forcely set latestSnapshot = false, so the split request below will trigger scan
+        enumerator.hasReadLatest = false;
+        // trigger scan here
+        enumerator.handleSplitRequest(3, "test-host");
+        assignments = context.getSplitAssignments();
+        assignedSplits = assignments.get(3).getAssignedSplits();
+        // get expected split
+        assertThat(toDataSplits(assignedSplits)).contains(splits.get(0));
     }
 
     @Test
@@ -652,6 +781,7 @@ public class ContinuousFileSplitEnumeratorTest {
 
         private final TreeMap<Long, Plan> results;
         private @Nullable Long nextSnapshotId;
+        private boolean allowEnd = true;
 
         public MockScan(TreeMap<Long, Plan> results) {
             this.results = results;
@@ -662,7 +792,11 @@ public class ContinuousFileSplitEnumeratorTest {
         public Plan plan() {
             Map.Entry<Long, Plan> planEntry = results.pollFirstEntry();
             if (planEntry == null) {
-                throw new EndOfScanException();
+                if (allowEnd) {
+                    throw new EndOfScanException();
+                } else {
+                    return SnapshotNotExistPlan.INSTANCE;
+                }
             }
             nextSnapshotId = planEntry.getKey() + 1;
             return planEntry.getValue();
@@ -689,6 +823,10 @@ public class ContinuousFileSplitEnumeratorTest {
 
         @Override
         public void restore(Long state) {}
+
+        public void allowEnd(boolean allowEnd) {
+            this.allowEnd = allowEnd;
+        }
     }
 
     private static class TestingAsyncSplitEnumeratorContext<SplitT extends SourceSplit>

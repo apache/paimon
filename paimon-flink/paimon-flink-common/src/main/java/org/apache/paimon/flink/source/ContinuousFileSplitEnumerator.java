@@ -24,6 +24,7 @@ import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 
@@ -55,6 +56,7 @@ public class ContinuousFileSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
     private static final Logger LOG = LoggerFactory.getLogger(ContinuousFileSplitEnumerator.class);
+    private static final int SPLIT_MAX_NUM = 1_000;
 
     protected final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
@@ -72,6 +74,7 @@ public class ContinuousFileSplitEnumerator
 
     @Nullable protected Long nextSnapshotId;
 
+    protected volatile boolean hasReadLatest = false;
     protected boolean finished = false;
 
     public ContinuousFileSplitEnumerator(
@@ -120,7 +123,7 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void handleSplitRequest(int subtaskId, @Nullable String requesterHostname) {
         readersAwaitingSplit.add(subtaskId);
-        assignSplits();
+        assignAndScanIfNeeded(subtaskId);
     }
 
     @Override
@@ -146,13 +149,13 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
-    protected PlanWithNextSnapshotId scanNextSnapshot() {
+    protected synchronized PlanWithNextSnapshotId scanNextSnapshot() {
         TableScan.Plan plan = scan.plan();
         Long nextSnapshotId = scan.checkpoint();
         return new PlanWithNextSnapshotId(plan, nextSnapshotId);
     }
 
-    protected void processDiscoveredSplits(
+    protected synchronized void processDiscoveredSplits(
             PlanWithNextSnapshotId planWithNextSnapshotId, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
@@ -168,6 +171,12 @@ public class ContinuousFileSplitEnumerator
 
         nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
         TableScan.Plan plan = planWithNextSnapshotId.plan;
+        if (plan.equals(SnapshotNotExistPlan.INSTANCE)) {
+            hasReadLatest = true;
+            return;
+        } else {
+            hasReadLatest = false;
+        }
 
         if (plan.splits().isEmpty()) {
             return;
@@ -175,6 +184,28 @@ public class ContinuousFileSplitEnumerator
 
         addSplits(splitGenerator.createSplits(plan));
         assignSplits();
+    }
+
+    private void assignAndScanIfNeeded(int taskId) {
+        assignSplits();
+        // if current task assigned no split, we check conditions to scan one more time
+        if (readersAwaitingSplit.contains(taskId)) {
+            if (!shouldInvokeScan()) {
+                return;
+            }
+            scanOnce();
+        }
+    }
+
+    private void scanOnce() {
+        PlanWithNextSnapshotId plan = null;
+        Throwable error = null;
+        try {
+            plan = scanNextSnapshot();
+        } catch (Throwable e) {
+            error = e;
+        }
+        processDiscoveredSplits(plan, error);
     }
 
     /**
@@ -214,9 +245,13 @@ public class ContinuousFileSplitEnumerator
         return assignment;
     }
 
+    private boolean shouldInvokeScan() {
+        return !hasReadLatest && splitAssigner.remainingSplits().size() <= SPLIT_MAX_NUM;
+    }
+
     protected int assignTask(int bucket) {
         if (bucketMode == BucketMode.UNAWARE) {
-            // we just assign task 0 when bucket unaware
+            // we just assign task 0 when bucket unaware, because we don't need this.
             return 0;
         } else {
             // if not bucket unaware, we assign the bucket % parallelism, the same bucket data go
