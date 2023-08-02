@@ -135,22 +135,25 @@ public class MySqlSyncTableAction extends ActionBase {
                 String.format(
                         "mysql-conf [%s] must be specified.", MySqlSourceOptions.TABLE_NAME.key()));
 
-        String tableList =
-                mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME)
-                        + "\\."
-                        + mySqlConfig.get(MySqlSourceOptions.TABLE_NAME);
-        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig, tableList);
-
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {
             validateCaseInsensitive();
         }
 
-        MySqlSchema mySqlSchema =
+        List<MySqlSchema> mySqlSchemaList =
                 MySqlActionUtils.getMySqlSchemaList(
-                                mySqlConfig, monitorTablePredication(), new ArrayList<>())
-                        .stream()
+                        mySqlConfig, monitorTablePredication(), new ArrayList<>());
+
+        String tableList =
+                mySqlSchemaList.stream()
+                        .map(m -> m.identifier().getDatabaseName() + "." + m.tableName())
+                        .collect(Collectors.joining("|"));
+
+        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig, tableList);
+
+        MySqlSchema mySqlSchema =
+                mySqlSchemaList.stream()
                         .reduce(MySqlSchema::merge)
                         .orElseThrow(
                                 () ->
