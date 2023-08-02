@@ -36,8 +36,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for flink table and data lineage. */
 public class FlinkLineageITCase extends CatalogITCaseBase {
