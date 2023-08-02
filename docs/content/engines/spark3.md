@@ -128,6 +128,18 @@ spark-sql ... \
 Using `SparkGenericCatalog`, you can use Paimon tables in this Catalog or non-Paimon tables such as Spark's csv,
 parquet, Hive tables, etc.
 
+We can regard SparkGenericCatalog as a combination of Spark-self Catalog and Spark-paimon Catalog,
+if we use hive metastore with SparkGenericCatalog, we must config the metastore information in `spark conf`.  For example:
+
+```bash
+spark-sql ... \
+    --conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
+    --conf spark.sql.catalog.spark_catalog.metastore=hive
+    --conf spark.sql.catalog.spark_catalog.uri=thrift://localhost:9083
+```
+The script above will config the metastore to Spark-paimon Catalog.
+
+
 {{< /tab >}}
 
 {{< /tabs >}}
