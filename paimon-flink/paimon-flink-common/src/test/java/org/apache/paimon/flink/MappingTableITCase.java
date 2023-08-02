@@ -57,7 +57,8 @@ public class MappingTableITCase extends AbstractTestBase {
                         path));
         assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await())
                 .isInstanceOf(ValidationException.class)
-                .hasMessage("Schema file not found in location");
+                .hasRootCauseMessage(
+                        "Schema file not found in location %s. Please create table first.", path);
     }
 
     @Test
@@ -111,6 +112,7 @@ public class MappingTableITCase extends AbstractTestBase {
 
         assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM T").collect().close())
                 .isInstanceOf(ValidationException.class)
-                .hasMessage("Flink schema and store schema are not the same");
+                .hasRootCauseMessage(
+                        "Flink schema and store schema are not the same, store schema is ROW<`i` INT, `j` INT>, Flink schema is ROW<`i` INT, `j` INT, `k` INT> NOT NULL");
     }
 }
