@@ -504,7 +504,7 @@ public class ContinuousFileSplitEnumeratorTest {
     }
 
     @Test
-    public void testTriggerScanByTaskRequest() {
+    public void testTriggerScanByTaskRequest() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
                 new TestingSplitEnumeratorContext<>(2);
         context.registerReader(0, "test-host");
@@ -531,6 +531,7 @@ public class ContinuousFileSplitEnumeratorTest {
 
         // request directly
         enumerator.handleSplitRequest(0, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
                 context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(0);
@@ -538,6 +539,7 @@ public class ContinuousFileSplitEnumeratorTest {
         assertThat(toDataSplits(assignedSplits)).containsExactly(splits.get(0));
 
         enumerator.handleSplitRequest(1, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         assignments = context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(0, 1);
         assignedSplits = assignments.get(1).getAssignedSplits();
@@ -565,6 +567,7 @@ public class ContinuousFileSplitEnumeratorTest {
                         .build();
         enumerator.start();
         enumerator.handleSplitRequest(0, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
 
         long snapshot = 0;
         List<DataSplit> splits = new ArrayList<>();
@@ -575,11 +578,13 @@ public class ContinuousFileSplitEnumeratorTest {
 
         // will not trigger scan here
         enumerator.handleSplitRequest(0, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         Map<Integer, SplitAssignmentState<FileStoreSourceSplit>> assignments =
                 context.getSplitAssignments();
         assertThat(assignments).isEmpty();
 
         enumerator.handleSplitRequest(1, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         assignments = context.getSplitAssignments();
         assertThat(assignments).isEmpty();
 
@@ -600,7 +605,9 @@ public class ContinuousFileSplitEnumeratorTest {
         results.put(2L, new DataFilePlan(splits));
         // because latestSnapshot = false, so this request will trigger scan
         enumerator.handleSplitRequest(2, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         enumerator.handleSplitRequest(3, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         assignments = context.getSplitAssignments();
         assertThat(assignments).containsOnlyKeys(0, 1, 2, 3);
         assignedSplits = assignments.get(2).getAssignedSplits();
@@ -610,12 +617,14 @@ public class ContinuousFileSplitEnumeratorTest {
 
         // this will trigger scan, and then set latestSnapshot = true
         enumerator.handleSplitRequest(3, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         splits.clear();
         splits.add(createDataSplit(snapshot, 7, Collections.emptyList()));
         results.put(3L, new DataFilePlan(splits));
 
         // this won't trigger scan, cause latestSnapshot = true
         enumerator.handleSplitRequest(3, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         assignments = context.getSplitAssignments();
         assignedSplits = assignments.get(3).getAssignedSplits();
         assertThat(toDataSplits(assignedSplits)).doesNotContain(splits.get(0));
@@ -624,6 +633,7 @@ public class ContinuousFileSplitEnumeratorTest {
         enumerator.hasReadLatest = false;
         // trigger scan here
         enumerator.handleSplitRequest(3, "test-host");
+        context.getExecutorService().triggerAllNonPeriodicTasks();
         assignments = context.getSplitAssignments();
         assignedSplits = assignments.get(3).getAssignedSplits();
         // get expected split

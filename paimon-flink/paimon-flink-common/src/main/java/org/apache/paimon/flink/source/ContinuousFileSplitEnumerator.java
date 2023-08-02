@@ -122,7 +122,6 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void handleSplitRequest(int subtaskId, @Nullable String requesterHostname) {
-        readersAwaitingSplit.add(subtaskId);
         assignAndScanIfNeeded(subtaskId);
     }
 
@@ -149,13 +148,17 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
+    // this need to be synchronized because scan object is not thread safe. handleSplitRequest and
+    // context.callAsync will invoke this.
     protected synchronized PlanWithNextSnapshotId scanNextSnapshot() {
         TableScan.Plan plan = scan.plan();
         Long nextSnapshotId = scan.checkpoint();
         return new PlanWithNextSnapshotId(plan, nextSnapshotId);
     }
 
-    protected synchronized void processDiscoveredSplits(
+    // this mothod could not be synchronized, because it runs in coordinatorThread, which will make
+    // it serialize.
+    protected void processDiscoveredSplits(
             PlanWithNextSnapshotId planWithNextSnapshotId, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
@@ -169,9 +172,7 @@ public class ContinuousFileSplitEnumerator
             return;
         }
 
-        if (nextSnapshotId == null || planWithNextSnapshotId.nextSnapshotId > nextSnapshotId) {
-            nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
-        }
+        nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
         TableScan.Plan plan = planWithNextSnapshotId.plan;
         if (plan.equals(SnapshotNotExistPlan.INSTANCE)) {
             hasReadLatest = true;
@@ -189,25 +190,15 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void assignAndScanIfNeeded(int taskId) {
+        readersAwaitingSplit.add(taskId);
         assignSplits();
         // if current task assigned no split, we check conditions to scan one more time
         if (readersAwaitingSplit.contains(taskId)) {
             if (!shouldInvokeScan()) {
                 return;
             }
-            scanOnce();
+            context.callAsync(this::scanNextSnapshot, this::processDiscoveredSplits);
         }
-    }
-
-    private void scanOnce() {
-        PlanWithNextSnapshotId plan = null;
-        Throwable error = null;
-        try {
-            plan = scanNextSnapshot();
-        } catch (Throwable e) {
-            error = e;
-        }
-        processDiscoveredSplits(plan, error);
     }
 
     /**
@@ -215,22 +206,7 @@ public class ContinuousFileSplitEnumerator
      * #processDiscoveredSplits} have thread conflicts.
      */
     protected synchronized void assignSplits() {
-        Map<Integer, List<FileStoreSourceSplit>> assignment = createAssignment();
-        if (noMoreSplits()) {
-            Iterator<Integer> iterator = readersAwaitingSplit.iterator();
-            while (iterator.hasNext()) {
-                Integer reader = iterator.next();
-                if (!assignment.containsKey(reader)) {
-                    context.signalNoMoreSplits(reader);
-                    iterator.remove();
-                }
-            }
-        }
-        assignment.keySet().forEach(readersAwaitingSplit::remove);
-        context.assignSplits(new SplitsAssignment<>(assignment));
-    }
-
-    private Map<Integer, List<FileStoreSourceSplit>> createAssignment() {
+        // create assignment
         Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
         Iterator<Integer> readersAwait = readersAwaitingSplit.iterator();
         while (readersAwait.hasNext()) {
@@ -244,7 +220,20 @@ public class ContinuousFileSplitEnumerator
                 assignment.put(task, splits);
             }
         }
-        return assignment;
+
+        // remove readers who fetched splits
+        if (noMoreSplits()) {
+            Iterator<Integer> iterator = readersAwaitingSplit.iterator();
+            while (iterator.hasNext()) {
+                Integer reader = iterator.next();
+                if (!assignment.containsKey(reader)) {
+                    context.signalNoMoreSplits(reader);
+                    iterator.remove();
+                }
+            }
+        }
+        assignment.keySet().forEach(readersAwaitingSplit::remove);
+        context.assignSplits(new SplitsAssignment<>(assignment));
     }
 
     private boolean shouldInvokeScan() {

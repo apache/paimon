@@ -185,7 +185,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
     // ------------------------------------------------------------------------
 
     @Override
-    protected synchronized PlanWithNextSnapshotId scanNextSnapshot() {
+    protected PlanWithNextSnapshotId scanNextSnapshot() {
         if (pendingPlans.remainingCapacity() > 0) {
             PlanWithNextSnapshotId scannedPlan = super.scanNextSnapshot();
             if (!(scannedPlan.plan() instanceof SnapshotNotExistPlan)) {
@@ -199,8 +199,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
     }
 
     @Override
-    protected synchronized void processDiscoveredSplits(
-            PlanWithNextSnapshotId ignore, Throwable error) {
+    protected void processDiscoveredSplits(PlanWithNextSnapshotId ignore, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
                 // finished
