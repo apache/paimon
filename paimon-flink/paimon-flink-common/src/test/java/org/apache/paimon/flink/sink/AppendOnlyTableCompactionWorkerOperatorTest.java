@@ -129,7 +129,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
                         .pathFactory()
                         .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0);
         int i = 0;
-        for (Future<CommitMessage> f : workerOperator.result) {
+        for (Future<CommitMessage> f : workerOperator.result()) {
             if (!f.isDone()) {
                 break;
             }
@@ -149,7 +149,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
         // shut down worker operator
         workerOperator.shutdown();
 
-        for (Future<CommitMessage> f : workerOperator.result) {
+        for (Future<CommitMessage> f : workerOperator.result()) {
             try {
                 CommitMessage commitMessage = f.get();
                 List<DataFileMeta> fileMetas =
