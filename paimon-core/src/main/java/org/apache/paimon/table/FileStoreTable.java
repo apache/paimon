@@ -74,6 +74,8 @@ public interface FileStoreTable extends DataTable {
 
     BucketMode bucketMode();
 
+    CatalogEnvironment catalogEnvironment();
+
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
 

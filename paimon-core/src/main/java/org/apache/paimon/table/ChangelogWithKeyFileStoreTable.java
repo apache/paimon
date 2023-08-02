@@ -33,7 +33,6 @@ import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
-import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.Lock;
@@ -52,8 +51,6 @@ import org.apache.paimon.table.source.ValueContentRowDataRecordIterator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
-import javax.annotation.Nullable;
-
 import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
@@ -71,22 +68,20 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     private transient KeyValueFileStore lazyStore;
 
     ChangelogWithKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
-        this(fileIO, path, tableSchema, Lock.emptyFactory(), null);
+        this(fileIO, path, tableSchema, new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 
     ChangelogWithKeyFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
-            Lock.Factory lockFactory,
-            @Nullable MetastoreClient.Factory metastoreClientFactory) {
-        super(fileIO, path, tableSchema, lockFactory, metastoreClientFactory);
+            CatalogEnvironment catalogEnvironment) {
+        super(fileIO, path, tableSchema, catalogEnvironment);
     }
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new ChangelogWithKeyFileStoreTable(
-                fileIO, path, newTableSchema, lockFactory, metastoreClientFactory);
+        return new ChangelogWithKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
     }
 
     @Override

@@ -19,10 +19,15 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.lineage.LineageMeta;
+import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
@@ -30,10 +35,14 @@ import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -46,13 +55,19 @@ public abstract class AbstractCatalog implements Catalog {
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
 
+    @Nullable protected final LineageMeta lineageMeta;
+
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
+        this.lineageMeta = null;
         this.tableDefaultOptions = new HashMap<>();
     }
 
     protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
         this.fileIO = fileIO;
+        this.lineageMeta =
+                findAndCreateLineageMeta(
+                        Options.fromMap(options), AbstractCatalog.class.getClassLoader());
         this.tableDefaultOptions = new HashMap<>();
 
         options.keySet().stream()
@@ -62,6 +77,17 @@ public abstract class AbstractCatalog implements Catalog {
                                 this.tableDefaultOptions.put(
                                         key.substring(TABLE_DEFAULT_OPTION_PREFIX.length()),
                                         options.get(key)));
+    }
+
+    @Nullable
+    private LineageMeta findAndCreateLineageMeta(Options options, ClassLoader classLoader) {
+        return options.getOptional(LINEAGE_META)
+                .map(
+                        meta ->
+                                FactoryUtil.discoverFactory(
+                                                classLoader, LineageMetaFactory.class, meta)
+                                        .create(() -> options))
+                .orElse(null);
     }
 
     @Override
@@ -95,8 +121,10 @@ public abstract class AbstractCatalog implements Catalog {
                 fileIO,
                 getDataTableLocation(identifier),
                 tableSchema,
-                Lock.factory(lockFactory().orElse(null), identifier),
-                metastoreClientFactory(identifier).orElse(null));
+                new CatalogEnvironment(
+                        Lock.factory(lockFactory().orElse(null), identifier),
+                        metastoreClientFactory(identifier).orElse(null),
+                        lineageMeta));
     }
 
     @VisibleForTesting

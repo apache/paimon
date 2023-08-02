@@ -51,7 +51,10 @@ import java.io.File;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 
@@ -69,14 +72,17 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         path = getTempDirPath();
         String inferScan =
                 !inferScanParallelism() ? ",\n'table-default.scan.infer-parallelism'='false'" : "";
+
+        Map<String, String> options = new HashMap<>(catalogOptions());
+        options.put("type", "paimon");
+        options.put("warehouse", toWarehouse(path));
         tEnv.executeSql(
                 String.format(
-                        "CREATE CATALOG %s WITH ("
-                                + "'type'='paimon', 'warehouse'='%s'"
-                                + inferScan
-                                + ")",
+                        "CREATE CATALOG %s WITH (" + "%s" + inferScan + ")",
                         catalog,
-                        toWarehouse(path)));
+                        options.entrySet().stream()
+                                .map(e -> String.format("'%s'='%s'", e.getKey(), e.getValue()))
+                                .collect(Collectors.joining(","))));
         tEnv.useCatalog(catalog);
 
         sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
@@ -86,6 +92,10 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
         setParallelism(defaultParallelism());
         prepareEnv();
+    }
+
+    protected Map<String, String> catalogOptions() {
+        return Collections.emptyMap();
     }
 
     protected boolean inferScanParallelism() {
