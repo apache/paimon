@@ -54,15 +54,21 @@ public class AppendOnlyTableCompactionWorkerOperator
 
     private final AppendOnlyFileStoreTable table;
     private final String commitUser;
+
     private transient AppendOnlyFileStoreWrite write;
     private transient ExecutorService lazyCompactExecutor;
-    transient Queue<Future<CommitMessage>> result;
+    private transient Queue<Future<CommitMessage>> result;
 
     public AppendOnlyTableCompactionWorkerOperator(
             AppendOnlyFileStoreTable table, String commitUser) {
         super(Options.fromMap(table.options()));
         this.table = table;
         this.commitUser = commitUser;
+    }
+
+    @VisibleForTesting
+    Iterable<Future<CommitMessage>> result() {
+        return result;
     }
 
     @Override
@@ -135,6 +141,10 @@ public class AppendOnlyTableCompactionWorkerOperator
                     // exception should already be handled
                 }
             }
+            if (messages.isEmpty()) {
+                return;
+            }
+
             try (TableCommitImpl tableCommit = table.newCommit(commitUser)) {
                 tableCommit.abort(messages);
             }
