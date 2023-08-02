@@ -45,7 +45,6 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /** SQL ITCase for continuous file store. */
 @ExtendWith(ParameterizedTestExtension.class)
@@ -454,6 +453,6 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 "INSERT INTO %s /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='1M') */ "
                         + "VALUES ('1', '2', '3'), ('4', '5', '6')",
                 "T1");
-        assertEquals(batchSql("SELECT * FROM T1").size(), 2);
+        assertThat(batchSql("SELECT * FROM T1").size()).isEqualTo(2);
     }
 }

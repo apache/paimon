@@ -25,15 +25,13 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for the {@link MetricGroup}. */
 public class MetricGroupTest {
     @Test
     public void testGroupRegisterMetrics() {
         GenericMetricGroup group = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
-        assertFalse(group.isClosed());
+        assertThat(group.isClosed()).isFalse();
         // these will fail is the registration is propagated
         group.counter("testcounter");
         group.gauge(
@@ -55,7 +53,7 @@ public class MetricGroupTest {
                         });
         assertThat(group.getMetrics().size()).isEqualTo(2);
         group.close();
-        assertTrue(group.isClosed());
+        assertThat(group.isClosed()).isTrue();
     }
 
     @Test

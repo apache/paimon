@@ -47,8 +47,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link MySqlSyncTableAction}. */
 public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
@@ -107,7 +106,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         FileStoreTable table = getFileStoreTable();
 
-        assertEquals(excepted, JsonSerdeUtil.toFlatJson(table.schema().fields()));
+        assertThat(JsonSerdeUtil.toFlatJson(table.schema().fields())).isEqualTo(excepted);
     }
 
     private void testSchemaEvolutionImpl(Statement statement) throws Exception {
@@ -667,12 +666,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyMap(),
                         Collections.emptyMap());
 
-        IllegalArgumentException e =
-                assertThrows(
-                        IllegalArgumentException.class,
-                        () -> action.build(env),
-                        "Expecting IllegalArgumentException");
-        assertThat(e)
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Column v1 have different types in table "
                                 + DATABASE_NAME
@@ -707,12 +702,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyMap(),
                         Collections.emptyMap());
 
-        IllegalArgumentException e =
-                assertThrows(
-                        IllegalArgumentException.class,
-                        () -> action.build(env),
-                        "Expecting IllegalArgumentException");
-        assertThat(e).hasMessageContaining("Paimon schema and MySQL schema are not compatible.");
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Paimon schema and MySQL schema are not compatible.");
     }
 
     @Test
@@ -733,12 +725,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyMap(),
                         Collections.emptyMap());
 
-        IllegalArgumentException e =
-                assertThrows(
-                        IllegalArgumentException.class,
-                        () -> action.build(env),
-                        "Expecting IllegalArgumentException");
-        assertThat(e)
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Specified primary key pk does not exist in MySQL tables or computed columns.");
     }
@@ -761,12 +749,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyMap(),
                         Collections.emptyMap());
 
-        IllegalArgumentException e =
-                assertThrows(
-                        IllegalArgumentException.class,
-                        () -> action.build(env),
-                        "Expecting IllegalArgumentException");
-        assertThat(e)
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Primary keys are not specified. "
                                 + "Also, can't infer primary keys from MySQL table schemas because "

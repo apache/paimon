@@ -60,7 +60,6 @@ import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -245,10 +244,10 @@ public abstract class MergeTreeTestBase {
         writeBatch(2);
         CommitIncrement increment = writer.prepareCommit(false);
 
-        Assertions.assertEquals(1, increment.newFilesIncrement().newFiles().size());
+        assertThat(increment.newFilesIncrement().newFiles().size()).isEqualTo(1);
 
-        Assertions.assertEquals(11, increment.compactIncrement().compactBefore().size());
-        Assertions.assertEquals(1, increment.compactIncrement().compactAfter().size());
+        assertThat(increment.compactIncrement().compactBefore().size()).isEqualTo(11);
+        assertThat(increment.compactIncrement().compactAfter().size()).isEqualTo(1);
     }
 
     private List<DataFileMeta> generateDataFileToCommit() throws Exception {
@@ -314,11 +313,9 @@ public abstract class MergeTreeTestBase {
             ex = e;
         }
 
-        Assertions.assertNotNull(ex);
-        Assertions.assertTrue(
-                ExceptionUtils.findThrowable(ex, ExecutionException.class).isPresent());
-        Assertions.assertFalse(
-                ExceptionUtils.stringifyException(ex).contains("CIRCULAR REFERENCE"));
+        assertThat(ex).isNotNull();
+        assertThat(ExceptionUtils.findThrowable(ex, ExecutionException.class)).isPresent();
+        assertThat(ExceptionUtils.stringifyException(ex).contains("CIRCULAR REFERENCE")).isFalse();
     }
 
     interface RunnableWithException {

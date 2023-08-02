@@ -38,8 +38,8 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 /** Test for {@link LoserTree}. */
 public class LoserTreeTest {
@@ -89,7 +89,7 @@ public class LoserTreeTest {
                 new LoserTree<>(sortedTestReaders, KEY_COMPARATOR, SEQUENCE_COMPARATOR);
         assertThatThrownBy(() -> checkLoserTree(loserTree, kv -> {}))
                 .satisfies(AssertionUtils.anyCauseMatches(IOException.class));
-        assertDoesNotThrow(loserTree::close);
+        assertThatCode(loserTree::close).doesNotThrowAnyException();
     }
 
     private List<RecordReader<KeyValue>> createSortedTestReaders(

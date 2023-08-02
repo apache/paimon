@@ -18,7 +18,7 @@
 
 package org.apache.paimon.tests;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base e2e test class for hive and spark readers. */
 public abstract class E2eReaderTestBase extends E2eTestBase {
@@ -104,6 +104,6 @@ public abstract class E2eReaderTestBase extends E2eTestBase {
             throws Exception {
         final String file = "pk.hql";
         writeSharedFile(file, query);
-        assertEquals(result, executor.execute(file));
+        assertThat(executor.execute(file)).isEqualTo(result);
     }
 }

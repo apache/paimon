@@ -23,7 +23,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -34,6 +33,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.fail;
 
 /** Tests for {@link SnapshotManager}. */
 public class SnapshotManagerTest {
@@ -130,7 +130,7 @@ public class SnapshotManagerTest {
                     if (snapshot.id() == 5) {
                         return true;
                     } else if (snapshot.id() < 5) {
-                        Assertions.fail();
+                        fail("snapshot id %s is less than 5", snapshot.id());
                     }
                     return false;
                 });

@@ -31,7 +31,7 @@ import java.util.List;
 
 import static org.apache.paimon.io.DataFileTestUtils.newFile;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.fail;
 
 /** Test for {@link FullCompactTaskTest}. */
 public class FullCompactTaskTest {

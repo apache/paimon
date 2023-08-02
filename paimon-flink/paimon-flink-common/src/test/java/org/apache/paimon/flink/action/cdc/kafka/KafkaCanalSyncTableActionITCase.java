@@ -40,8 +40,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaCanalSyncTableActionITCase}. */
 public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
@@ -642,12 +641,10 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
-        UnsupportedOperationException e =
-                assertThrows(
-                        UnsupportedOperationException.class,
-                        () -> action.build(env),
-                        "Expecting UnsupportedOperationException");
-        assertThat(e).hasMessage("This format: ogg-json is not support.");
+
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("This format: ogg-json is not support.");
     }
 
     @Test
@@ -686,8 +683,10 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
-        Exception e = assertThrows(Exception.class, () -> action.build(env), "Expecting Exception");
-        assertThat(e).hasMessage("Could not get metadata from server,topic :no_non_ddl_data");
+
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(Exception.class)
+                .hasMessage("Could not get metadata from server,topic :no_non_ddl_data");
     }
 
     @Test
@@ -738,12 +737,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
-        IllegalArgumentException e =
-                assertThrows(
-                        IllegalArgumentException.class,
-                        () -> action.build(env),
-                        "Expecting IllegalArgumentException");
-        assertThat(e)
+
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Paimon schema and Kafka schema are not compatible.\n"
                                 + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"

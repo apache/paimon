@@ -32,7 +32,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.StringUtils;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -41,7 +40,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link FieldStatsCollector}. */
 public class FieldStatsCollectorTest {
@@ -68,15 +67,15 @@ public class FieldStatsCollectorTest {
 
     @Test
     public void testParse() {
-        Assertions.assertTrue(
-                FieldStatsCollector.from("none").create() instanceof NoneFieldStatsCollector);
-        Assertions.assertTrue(
-                FieldStatsCollector.from("Full").create() instanceof FullFieldStatsCollector);
-        Assertions.assertTrue(
-                FieldStatsCollector.from("CoUNts").create() instanceof CountsFieldStatsCollector);
+        assertThat(FieldStatsCollector.from("none").create() instanceof NoneFieldStatsCollector)
+                .isTrue();
+        assertThat(FieldStatsCollector.from("Full").create() instanceof FullFieldStatsCollector)
+                .isTrue();
+        assertThat(FieldStatsCollector.from("CoUNts").create() instanceof CountsFieldStatsCollector)
+                .isTrue();
         TruncateFieldStatsCollector t1 =
                 (TruncateFieldStatsCollector) FieldStatsCollector.from("truncate(10)").create();
-        Assertions.assertEquals(10, t1.getLength());
+        assertThat(t1.getLength()).isEqualTo(10);
         assertThatThrownBy(() -> FieldStatsCollector.from("aatruncate(10)"))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> FieldStatsCollector.from("truncate(10.1)"))
@@ -164,8 +163,8 @@ public class FieldStatsCollectorTest {
                         BinaryString.fromString("\uD83E\uDD18b"),
                         0L);
         fieldStats = t1.convert(fieldStats);
-        Assertions.assertEquals(BinaryString.fromString("\uD83E\uDD18"), fieldStats.minValue());
-        Assertions.assertEquals(BinaryString.fromString("\uD83E\uDD19"), fieldStats.maxValue());
+        assertThat(fieldStats.minValue()).isEqualTo(BinaryString.fromString("\uD83E\uDD18"));
+        assertThat(fieldStats.maxValue()).isEqualTo(BinaryString.fromString("\uD83E\uDD19"));
     }
 
     @Test
@@ -218,8 +217,9 @@ public class FieldStatsCollectorTest {
         for (GenericRow row : rows) {
             fieldStatsCollector.collect(row.getField(column), serializers[column]);
         }
-        Assertions.assertEquals(expected, fieldStatsCollector.result());
-        Assertions.assertEquals(expected, fieldStatsCollector.convert(formatExtracted));
+
+        assertThat(fieldStatsCollector.result()).isEqualTo(expected);
+        assertThat(fieldStatsCollector.convert(formatExtracted)).isEqualTo(expected);
     }
 
     private List<GenericRow> getRows() {

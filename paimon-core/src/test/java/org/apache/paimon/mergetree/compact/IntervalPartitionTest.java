@@ -43,7 +43,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.stats.StatsTestUtils.newTableStats;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for {@link IntervalPartition}. */
 public class IntervalPartitionTest {
@@ -130,7 +129,7 @@ public class IntervalPartitionTest {
         IntervalPartition algorithm = new IntervalPartition(parseMetas(input), COMPARATOR);
         List<List<SortedRun>> result = algorithm.partition();
         for (List<SortedRun> section : result) {
-            assertTrue(section.size() <= numSortedRuns);
+            assertThat(section.size() <= numSortedRuns).isTrue();
             for (SortedRun sortedRun : section) {
                 sortedRun.validate(COMPARATOR);
             }

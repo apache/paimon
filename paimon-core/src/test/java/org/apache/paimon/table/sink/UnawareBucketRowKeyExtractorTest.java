@@ -25,7 +25,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -35,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link UnawareBucketRowKeyExtractor}. */
 public class UnawareBucketRowKeyExtractorTest {
@@ -42,7 +42,7 @@ public class UnawareBucketRowKeyExtractorTest {
     @Test
     public void testBucket() {
         GenericRow row = GenericRow.of(5, 6, 7);
-        Assertions.assertEquals(bucket(extractor("a"), row), 0);
+        assertThat(bucket(extractor("a"), row)).isEqualTo(0);
     }
 
     private int bucket(UnawareBucketRowKeyExtractor extractor, InternalRow row) {

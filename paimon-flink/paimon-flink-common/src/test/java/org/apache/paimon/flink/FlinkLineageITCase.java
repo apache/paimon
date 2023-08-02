@@ -36,8 +36,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for flink table and data lineage. */
 public class FlinkLineageITCase extends CatalogITCaseBase {
@@ -113,9 +113,9 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
         @Override
         public void saveSinkTableLineage(TableLineageEntity entity) {
-            assertEquals("insert_t_job", entity.getJob());
-            assertEquals("T", entity.getTable());
-            assertEquals("default", entity.getDatabase());
+            assertThat(entity.getJob()).isEqualTo("insert_t_job");
+            assertThat(entity.getTable()).isEqualTo("T");
+            assertThat(entity.getDatabase()).isEqualTo("default");
             throw new UnsupportedOperationException("Method saveSinkTableLineage is not supported");
         }
 
@@ -131,9 +131,9 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
         @Override
         public void saveSourceDataLineage(DataLineageEntity entity) {
-            assertEquals("select_t_job", entity.getJob());
-            assertEquals("T", entity.getTable());
-            assertEquals("default", entity.getDatabase());
+            assertThat(entity.getJob()).isEqualTo("select_t_job");
+            assertThat(entity.getTable()).isEqualTo("T");
+            assertThat(entity.getDatabase()).isEqualTo("default");
             throw new UnsupportedOperationException("Method saveSinkTableLineage is not supported");
         }
 

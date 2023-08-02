@@ -36,7 +36,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -49,6 +48,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FileStoreLookupFunction}. */
 public class FileStoreLookupFunctionTest {
@@ -99,17 +100,19 @@ public class FileStoreLookupFunctionTest {
     public void testLookupScanLeak() throws Exception {
         commit(writeCommit(1));
         fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
-        Assertions.assertEquals(
-                TraceableFileIO.openInputStreams(s -> s.toString().contains(tempDir.toString()))
-                        .size(),
-                0);
+        assertThat(
+                        TraceableFileIO.openInputStreams(
+                                        s -> s.toString().contains(tempDir.toString()))
+                                .size())
+                .isEqualTo(0);
 
         commit(writeCommit(10));
         fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
-        Assertions.assertEquals(
-                TraceableFileIO.openInputStreams(s -> s.toString().contains(tempDir.toString()))
-                        .size(),
-                0);
+        assertThat(
+                        TraceableFileIO.openInputStreams(
+                                        s -> s.toString().contains(tempDir.toString()))
+                                .size())
+                .isEqualTo(0);
     }
 
     @Test

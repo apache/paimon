@@ -37,12 +37,9 @@ import java.util.Collection;
 import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
+import static org.assertj.core.api.Assertions.within;
 
 /** Tests for the access and transfer methods of the {@link MemorySegment}. */
 public abstract class MemorySegmentTestBase {
@@ -78,7 +75,7 @@ public abstract class MemorySegmentTestBase {
 
         random.setSeed(seed);
         for (int i = 0; i < pageSize; i++) {
-            assertEquals((byte) random.nextInt(), segment.get(i));
+            assertThat(segment.get(i)).isEqualTo((byte) random.nextInt());
         }
 
         // test expected correct behavior, random access
@@ -110,7 +107,7 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos] = true;
             }
 
-            assertEquals((byte) random.nextInt(), segment.get(pos));
+            assertThat(segment.get(pos)).isEqualTo((byte) random.nextInt());
         }
     }
 
@@ -147,7 +144,7 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos] = true;
             }
 
-            assertEquals(random.nextBoolean(), segment.getBoolean(pos));
+            assertThat(segment.getBoolean(pos)).isEqualTo(random.nextBoolean());
         }
     }
 
@@ -163,13 +160,13 @@ public abstract class MemorySegmentTestBase {
         int i = new Random().nextInt(pageSize - 8);
 
         seg1.put(i, (byte) 10);
-        assertFalse(seg1.equalTo(seg2, i, i, 9));
+        assertThat(seg1.equalTo(seg2, i, i, 9)).isFalse();
 
         seg1.put(i, (byte) 0);
-        assertTrue(seg1.equalTo(seg2, i, i, 9));
+        assertThat(seg1.equalTo(seg2, i, i, 9)).isTrue();
 
         seg1.put(i + 8, (byte) 10);
-        assertFalse(seg1.equalTo(seg2, i, i, 9));
+        assertThat(seg1.equalTo(seg2, i, i, 9)).isFalse();
     }
 
     @TestTemplate
@@ -185,7 +182,7 @@ public abstract class MemorySegmentTestBase {
 
         random.setSeed(seed);
         for (int i = 0; i <= pageSize - 2; i += 2) {
-            assertEquals((char) (random.nextInt(Character.MAX_VALUE)), segment.getChar(i));
+            assertThat(segment.getChar(i)).isEqualTo((char) (random.nextInt(Character.MAX_VALUE)));
         }
 
         // test expected correct behavior, random access
@@ -219,7 +216,8 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos + 1] = true;
             }
 
-            assertEquals((char) (random.nextInt(Character.MAX_VALUE)), segment.getChar(pos));
+            assertThat(segment.getChar(pos))
+                    .isEqualTo((char) (random.nextInt(Character.MAX_VALUE)));
         }
     }
 
@@ -236,7 +234,7 @@ public abstract class MemorySegmentTestBase {
 
         random.setSeed(seed);
         for (int i = 0; i <= pageSize - 2; i += 2) {
-            assertEquals((short) random.nextInt(), segment.getShort(i));
+            assertThat(segment.getShort(i)).isEqualTo((short) random.nextInt());
         }
 
         // test expected correct behavior, random access
@@ -270,7 +268,7 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos + 1] = true;
             }
 
-            assertEquals((short) random.nextInt(), segment.getShort(pos));
+            assertThat(segment.getShort(pos)).isEqualTo((short) random.nextInt());
         }
     }
 
@@ -287,7 +285,7 @@ public abstract class MemorySegmentTestBase {
 
         random.setSeed(seed);
         for (int i = 0; i <= pageSize - 4; i += 4) {
-            assertEquals(random.nextInt(), segment.getInt(i));
+            assertThat(segment.getInt(i)).isEqualTo(random.nextInt());
         }
 
         random.setSeed(seed);
@@ -323,7 +321,7 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos + 3] = true;
             }
 
-            assertEquals(random.nextInt(), segment.getInt(pos));
+            assertThat(segment.getInt(pos)).isEqualTo(random.nextInt());
         }
     }
 
@@ -340,7 +338,7 @@ public abstract class MemorySegmentTestBase {
 
         random.setSeed(seed);
         for (int i = 0; i <= pageSize - 8; i += 8) {
-            assertEquals(random.nextLong(), segment.getLong(i));
+            assertThat(segment.getLong(i)).isEqualTo(random.nextLong());
         }
 
         // test expected correct behavior, random access
@@ -400,7 +398,7 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos + 7] = true;
             }
 
-            assertEquals(random.nextLong(), segment.getLong(pos));
+            assertThat(segment.getLong(pos)).isEqualTo(random.nextLong());
         }
     }
 
@@ -417,7 +415,7 @@ public abstract class MemorySegmentTestBase {
 
         random.setSeed(seed);
         for (int i = 0; i <= pageSize - 4; i += 4) {
-            assertEquals(random.nextFloat(), segment.getFloat(i), 0.0);
+            assertThat(segment.getFloat(i)).isCloseTo(random.nextFloat(), within(0.0f));
         }
 
         // test expected correct behavior, random access
@@ -455,7 +453,7 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos + 3] = true;
             }
 
-            assertEquals(random.nextFloat(), segment.getFloat(pos), 0.0);
+            assertThat(segment.getFloat(pos)).isCloseTo(random.nextFloat(), within(0.0f));
         }
     }
 
@@ -472,7 +470,7 @@ public abstract class MemorySegmentTestBase {
 
         random.setSeed(seed);
         for (int i = 0; i <= pageSize - 8; i += 8) {
-            assertEquals(random.nextDouble(), segment.getDouble(i), 0.0);
+            assertThat(segment.getDouble(i)).isCloseTo(random.nextDouble(), within(0.0d));
         }
 
         // test expected correct behavior, random access
@@ -532,7 +530,7 @@ public abstract class MemorySegmentTestBase {
                 occupied[pos + 7] = true;
             }
 
-            assertEquals(random.nextDouble(), segment.getDouble(pos), 0.0);
+            assertThat(segment.getDouble(pos)).isCloseTo(random.nextDouble(), within(0.0d));
         }
     }
 
@@ -561,7 +559,7 @@ public abstract class MemorySegmentTestBase {
                 random.nextBytes(expected);
                 segment.get(i * (pageSize / 8), actual);
 
-                assertArrayEquals(expected, actual);
+                assertThat(actual).containsExactly(expected);
             }
         }
 
@@ -580,7 +578,7 @@ public abstract class MemorySegmentTestBase {
                 segment.get(i * (pageSize / 16), actual, i * (pageSize / 16), pageSize / 16);
             }
 
-            assertArrayEquals(expected, actual);
+            assertThat(actual).containsExactly(expected);
         }
 
         // put segments of various lengths to various positions
@@ -608,7 +606,7 @@ public abstract class MemorySegmentTestBase {
             byte[] validation = new byte[pageSize];
             segment.get(0, validation);
 
-            assertArrayEquals(expected, validation);
+            assertThat(validation).containsExactly(expected);
         }
 
         // get segments with various contents
@@ -629,7 +627,7 @@ public abstract class MemorySegmentTestBase {
 
                 byte[] expected = Arrays.copyOfRange(contents, pos, pos + numBytes);
                 byte[] validation = Arrays.copyOfRange(data, dataStartPos, dataStartPos + numBytes);
-                assertArrayEquals(expected, validation);
+                assertThat(validation).containsExactly(expected);
             }
         }
     }
@@ -659,7 +657,7 @@ public abstract class MemorySegmentTestBase {
 
         // verify that we wrote the same bytes
         byte[] result = buffer.toByteArray();
-        assertArrayEquals(contents, result);
+        assertThat(result).containsExactly(contents);
 
         // re-read the bytes into a new memory segment
         MemorySegment reader = createSegment(pageSize);
@@ -676,7 +674,7 @@ public abstract class MemorySegmentTestBase {
         byte[] targetBuffer = new byte[pageSize];
         reader.get(0, targetBuffer);
 
-        assertArrayEquals(contents, targetBuffer);
+        assertThat(targetBuffer).containsExactly(contents);
     }
 
     @TestTemplate
@@ -772,17 +770,19 @@ public abstract class MemorySegmentTestBase {
         target.position(2 * pageSize);
         target.get(result);
 
-        assertArrayEquals(bytes, result);
+        assertThat(result).containsExactly(bytes);
     }
 
     @TestTemplate
     public void testHeapByteBufferGetReadOnly() {
-        assertThrows(ReadOnlyBufferException.class, () -> testByteBufferGetReadOnly(false));
+        assertThatThrownBy(() -> testByteBufferGetReadOnly(false))
+                .isInstanceOf(ReadOnlyBufferException.class);
     }
 
     @TestTemplate
     public void testOffHeapByteBufferGetReadOnly() {
-        assertThrows(ReadOnlyBufferException.class, () -> testByteBufferGetReadOnly(true));
+        assertThatThrownBy(() -> testByteBufferGetReadOnly(true))
+                .isInstanceOf(ReadOnlyBufferException.class);
     }
 
     /**
@@ -836,7 +836,7 @@ public abstract class MemorySegmentTestBase {
         byte[] result = new byte[pageSize];
         seg.get(offset, result);
 
-        assertArrayEquals(bytes, result);
+        assertThat(result).containsExactly(bytes);
     }
 
     // ------------------------------------------------------------------------
@@ -878,7 +878,7 @@ public abstract class MemorySegmentTestBase {
         target.position(19);
         target.get(result);
 
-        assertArrayEquals(bytes, result);
+        assertThat(result).containsExactly(bytes);
     }
 
     @TestTemplate
@@ -918,7 +918,7 @@ public abstract class MemorySegmentTestBase {
         seg.get(offset, result);
 
         byte[] expected = Arrays.copyOfRange(bytes, 19, 19 + pageSize);
-        assertArrayEquals(expected, result);
+        assertThat(result).containsExactly(expected);
     }
 
     @TestTemplate
@@ -955,9 +955,9 @@ public abstract class MemorySegmentTestBase {
             int cmp = seg1.compare(seg2, pos1, pos2, len);
 
             if (pos1 < pos2 - shift) {
-                assertTrue(cmp <= 0);
+                assertThat(cmp <= 0).isTrue();
             } else {
-                assertTrue(cmp >= 0);
+                assertThat(cmp >= 0).isTrue();
             }
         }
     }
@@ -1009,9 +1009,9 @@ public abstract class MemorySegmentTestBase {
         // second half
 
         for (int i = 0; i < halfPageSize; i++) {
-            assertEquals((byte) 0, seg1.get(i));
-            assertEquals((byte) 0, seg2.get(i));
-            assertEquals((byte) 1, seg1.get(i + halfPageSize));
+            assertThat(seg1.get(i)).isEqualTo((byte) 0);
+            assertThat(seg2.get(i)).isEqualTo((byte) 0);
+            assertThat(seg1.get(i + halfPageSize)).isEqualTo((byte) 1);
         }
     }
 
@@ -1024,37 +1024,37 @@ public abstract class MemorySegmentTestBase {
         MemorySegment seg = createSegment(1024);
 
         ByteBuffer buf1 = seg.wrap(13, 47);
-        assertEquals(13, buf1.position());
-        assertEquals(60, buf1.limit());
-        assertEquals(47, buf1.remaining());
+        assertThat(buf1.position()).isEqualTo(13);
+        assertThat(buf1.limit()).isEqualTo(60);
+        assertThat(buf1.remaining()).isEqualTo(47);
 
         ByteBuffer buf2 = seg.wrap(500, 267);
-        assertEquals(500, buf2.position());
-        assertEquals(767, buf2.limit());
-        assertEquals(267, buf2.remaining());
+        assertThat(buf2.position()).isEqualTo(500);
+        assertThat(buf2.limit()).isEqualTo(767);
+        assertThat(buf2.remaining()).isEqualTo(267);
 
         ByteBuffer buf3 = seg.wrap(0, 1024);
-        assertEquals(0, buf3.position());
-        assertEquals(1024, buf3.limit());
-        assertEquals(1024, buf3.remaining());
+        assertThat(buf3.position()).isEqualTo(0);
+        assertThat(buf3.limit()).isEqualTo(1024);
+        assertThat(buf3.remaining()).isEqualTo(1024);
 
         // verify that operations on the byte buffer are correctly reflected
         // in the memory segment
         buf3.order(ByteOrder.LITTLE_ENDIAN);
         buf3.putInt(112, 651797651);
-        assertEquals(651797651, seg.getIntLittleEndian(112));
+        assertThat(seg.getIntLittleEndian(112)).isEqualTo(651797651);
 
         buf3.order(ByteOrder.BIG_ENDIAN);
         buf3.putInt(187, 992288337);
-        assertEquals(992288337, seg.getIntBigEndian(187));
+        assertThat(seg.getIntBigEndian(187)).isEqualTo(992288337);
 
         // existing wraps should stay valid after freeing
         buf3.order(ByteOrder.LITTLE_ENDIAN);
         buf3.putInt(112, 651797651);
-        assertEquals(651797651, buf3.getInt(112));
+        assertThat(buf3.getInt(112)).isEqualTo(651797651);
         buf3.order(ByteOrder.BIG_ENDIAN);
         buf3.putInt(187, 992288337);
-        assertEquals(992288337, buf3.getInt(187));
+        assertThat(buf3.getInt(187)).isEqualTo(992288337);
     }
 
     // ------------------------------------------------------------------------

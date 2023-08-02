@@ -40,7 +40,6 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -54,6 +53,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeoutException;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactAction}. */
 public class CompactActionITCase extends ActionITCaseBase {
@@ -93,8 +94,8 @@ public class CompactActionITCase extends ActionITCaseBase {
                 rowData(2, 100, 15, BinaryString.fromString("20221209")));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(2, snapshot.id());
-        Assertions.assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
+        assertThat(snapshot.id()).isEqualTo(2);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
@@ -105,18 +106,18 @@ public class CompactActionITCase extends ActionITCaseBase {
         env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(3, snapshot.id());
-        Assertions.assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
+        assertThat(snapshot.id()).isEqualTo(3);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
 
         List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
-        Assertions.assertEquals(3, splits.size());
+        assertThat(splits.size()).isEqualTo(3);
         for (DataSplit split : splits) {
             if (split.partition().getInt(1) == 15) {
                 // compacted
-                Assertions.assertEquals(1, split.dataFiles().size());
+                assertThat(split.dataFiles().size()).isEqualTo(1);
             } else {
                 // not compacted
-                Assertions.assertEquals(2, split.dataFiles().size());
+                assertThat(split.dataFiles().size()).isEqualTo(2);
             }
         }
     }
@@ -153,13 +154,13 @@ public class CompactActionITCase extends ActionITCaseBase {
                 rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(1, snapshot.id());
-        Assertions.assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
+        assertThat(snapshot.id()).isEqualTo(1);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
         // no full compaction has happened, so plan should be empty
         StreamTableScan scan = table.newReadBuilder().newStreamScan();
         TableScan.Plan plan = scan.plan();
-        Assertions.assertTrue(plan.splits().isEmpty());
+        assertThat(plan.splits()).isEmpty();
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
@@ -237,8 +238,8 @@ public class CompactActionITCase extends ActionITCaseBase {
                 rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(2, snapshot.id());
-        Assertions.assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
+        assertThat(snapshot.id()).isEqualTo(2);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
         FileStoreScan storeScan = ((AbstractFileStoreTable) table).store().newScan();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -292,8 +293,8 @@ public class CompactActionITCase extends ActionITCaseBase {
                 rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        Assertions.assertEquals(2, snapshot.id());
-        Assertions.assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
+        assertThat(snapshot.id()).isEqualTo(2);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
         FileStoreScan storeScan = ((AbstractFileStoreTable) table).store().newScan();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -343,7 +344,7 @@ public class CompactActionITCase extends ActionITCaseBase {
                             expected.size(), timeout));
         }
         actual.sort(String::compareTo);
-        Assertions.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
     }
 
     private void checkFileAndRowSize(
@@ -364,7 +365,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         for (ManifestEntry file : files) {
             count += file.file().rowCount();
         }
-        Assertions.assertEquals(fileNum, files.size());
-        Assertions.assertEquals(rowCount, count);
+        assertThat(files.size()).isEqualTo(fileNum);
+        assertThat(count).isEqualTo(rowCount);
     }
 }

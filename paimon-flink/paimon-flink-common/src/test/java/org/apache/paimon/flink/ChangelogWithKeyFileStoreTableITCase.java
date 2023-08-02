@@ -52,9 +52,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for changelog table with primary keys. */
 public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
@@ -158,11 +155,11 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
                     .await();
         }
 
-        assertEquals(JobStatus.RUNNING, client.getJobStatus().get());
+        assertThat(client.getJobStatus().get()).isEqualTo(JobStatus.RUNNING);
 
         for (int i = 1; i <= currentKey; i++) {
-            assertTrue(it.hasNext());
-            assertEquals(String.format("+I[%d, %d]", i, i * 100), it.next().toString());
+            assertThat(it.hasNext()).isTrue();
+            assertThat(it.next().toString()).isEqualTo(String.format("+I[%d, %d]", i, i * 100));
         }
         it.close();
     }
@@ -589,21 +586,23 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
             String value = row.getField(2) + "|" + row.getField(3);
             switch (row.getKind()) {
                 case INSERT:
-                    assertFalse(valueMap.containsKey(key));
-                    assertTrue(!kindMap.containsKey(key) || kindMap.get(key) == RowKind.DELETE);
+                    assertThat(valueMap.containsKey(key)).isFalse();
+                    assertThat(!kindMap.containsKey(key) || kindMap.get(key) == RowKind.DELETE)
+                            .isTrue();
                     valueMap.put(key, value);
                     break;
                 case UPDATE_AFTER:
-                    assertFalse(valueMap.containsKey(key));
-                    assertEquals(RowKind.UPDATE_BEFORE, kindMap.get(key));
+                    assertThat(valueMap.containsKey(key)).isFalse();
+                    assertThat(kindMap.get(key)).isEqualTo(RowKind.UPDATE_BEFORE);
                     valueMap.put(key, value);
                     break;
                 case UPDATE_BEFORE:
                 case DELETE:
-                    assertEquals(value, valueMap.get(key));
-                    assertTrue(
-                            kindMap.get(key) == RowKind.INSERT
-                                    || kindMap.get(key) == RowKind.UPDATE_AFTER);
+                    assertThat(valueMap.get(key)).isEqualTo(value);
+                    assertThat(
+                                    kindMap.get(key) == RowKind.INSERT
+                                            || kindMap.get(key) == RowKind.UPDATE_AFTER)
+                            .isTrue();
                     valueMap.remove(key);
                     break;
                 default:
@@ -613,13 +612,13 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         }
 
         private void assertResult(int numProducers) {
-            assertEquals(NUM_PARTS * NUM_KEYS * numProducers, valueMap.size());
+            assertThat(valueMap.size()).isEqualTo(NUM_PARTS * NUM_KEYS * numProducers);
             for (int i = 0; i < NUM_PARTS; i++) {
                 for (int j = 0; j < NUM_KEYS * numProducers; j++) {
                     String key = i + "|" + j;
                     int x = LIMIT + i * NUM_KEYS + j % NUM_KEYS;
                     String expectedValue = x + "|" + x + ".str";
-                    assertEquals(expectedValue, valueMap.get(key));
+                    assertThat(valueMap.get(key)).isEqualTo(expectedValue);
                 }
             }
         }

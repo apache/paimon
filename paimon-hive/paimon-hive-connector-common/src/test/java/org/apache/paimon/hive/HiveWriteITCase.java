@@ -53,7 +53,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -216,7 +215,7 @@ public class HiveWriteITCase {
         hiveShell.execute(
                 "insert into " + outputTableName + " values (1,2,3,'Hello'),(4,5,6,'Fine')");
         List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
-        Assert.assertEquals(select, Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine"));
+        assertThat(select).containsExactly("1\t2\t3\tHello", "4\t5\t6\tFine");
     }
 
     @Test
@@ -261,7 +260,7 @@ public class HiveWriteITCase {
         TableScan scan = table.newReadBuilder().newStreamScan();
         DataSplit split = (DataSplit) scan.plan().splits().get(0);
         // no compact snapshot
-        Assert.assertEquals(split.snapshotId(), 5L);
+        assertThat(split.snapshotId()).isEqualTo(5L);
     }
 
     @Test
@@ -307,7 +306,7 @@ public class HiveWriteITCase {
         TableScan scan = table.newReadBuilder().newStreamScan();
         DataSplit split = (DataSplit) scan.plan().splits().get(0);
         // no compact snapshot
-        Assert.assertEquals(split.snapshotId(), maxCompact);
+        assertThat(split.snapshotId()).isEqualTo(maxCompact);
     }
 
     @Test
@@ -675,12 +674,12 @@ public class HiveWriteITCase {
         // because containsExactlyInAnyOrder cannot compare map objects correctly
         for (Object[] actualRow : actual) {
             int key = (int) actualRow[3];
-            Assert.assertTrue(expected.containsKey(key));
+            assertThat(expected.containsKey(key)).isTrue();
             GenericRow expectedRow = expected.get(key);
-            Assert.assertEquals(expectedRow.getFieldCount(), actualRow.length);
+            assertThat(actualRow.length).isEqualTo(expectedRow.getFieldCount());
             for (int i = 0; i < actualRow.length; i++) {
                 if (expectedRow.isNullAt(i)) {
-                    Assert.assertNull(actualRow[i]);
+                    assertThat(actualRow[i]).isNull();
                     continue;
                 }
                 ObjectInspector oi =
@@ -693,23 +692,23 @@ public class HiveWriteITCase {
                         Object expectedObject =
                                 primitiveOi.getPrimitiveJavaObject(expectedRow.getField(i));
                         if (expectedObject instanceof byte[]) {
-                            Assert.assertArrayEquals(
-                                    (byte[]) expectedObject, (byte[]) actualRow[i]);
+                            assertThat((byte[]) actualRow[i])
+                                    .containsExactly((byte[]) expectedObject);
                         } else if (expectedObject instanceof HiveDecimal) {
                             // HiveDecimal will remove trailing zeros
                             // so we have to compare it from the original DecimalData
-                            Assert.assertEquals(expectedRow.getField(i).toString(), actualRow[i]);
+                            assertThat(actualRow[i]).isEqualTo(expectedRow.getField(i).toString());
                         } else {
-                            Assert.assertEquals(
-                                    String.valueOf(expectedObject), String.valueOf(actualRow[i]));
+                            assertThat(String.valueOf(actualRow[i]))
+                                    .isEqualTo(String.valueOf(expectedObject));
                         }
                         break;
                     case LIST:
                         ListObjectInspector listOi = (ListObjectInspector) oi;
-                        Assert.assertEquals(
-                                String.valueOf(listOi.getList(expectedRow.getField(i)))
-                                        .replace(" ", ""),
-                                actualRow[i]);
+                        assertThat(actualRow[i])
+                                .isEqualTo(
+                                        String.valueOf(listOi.getList(expectedRow.getField(i)))
+                                                .replace(" ", ""));
                         break;
                     case MAP:
                         MapObjectInspector mapOi = (MapObjectInspector) oi;
@@ -725,7 +724,7 @@ public class HiveWriteITCase {
                             }
                             String[] split = kv.split(":");
                             String k = split[0].substring(1, split[0].length() - 1);
-                            Assert.assertEquals(expectedMap.get(k), split[1]);
+                            assertThat(split[1]).isEqualTo(expectedMap.get(k));
                             expectedMap.remove(k);
                         }
                         break;
@@ -735,7 +734,7 @@ public class HiveWriteITCase {
             }
             expected.remove(key);
         }
-        Assert.assertTrue(expected.isEmpty());
+        assertThat(expected).isEmpty();
     }
 
     @Test

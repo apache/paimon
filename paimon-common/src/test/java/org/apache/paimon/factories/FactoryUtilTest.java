@@ -20,8 +20,8 @@ package org.apache.paimon.factories;
 
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrowsExactly;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FactoryUtil}. */
 public class FactoryUtilTest {
@@ -32,17 +32,17 @@ public class FactoryUtilTest {
                         Thread.currentThread().getContextClassLoader(),
                         DummyFactory.class,
                         DummyFactory.IDENTIFIER);
-        assertEquals(DummyFactory.IDENTIFIER, factory.identifier());
+        assertThat(factory.identifier()).isEqualTo(DummyFactory.IDENTIFIER);
 
-        assertThrowsExactly(
-                FactoryException.class,
-                () ->
-                        FactoryUtil.discoverFactory(
-                                Thread.currentThread().getContextClassLoader(),
-                                DummyFactory.class,
-                                "non-exist-factory"),
-                String.format(
+        assertThatThrownBy(
+                        () ->
+                                FactoryUtil.discoverFactory(
+                                        Thread.currentThread().getContextClassLoader(),
+                                        DummyFactory.class,
+                                        "non-exist-factory"))
+                .isInstanceOf(FactoryException.class)
+                .hasMessageContaining(
                         "Could not find any factory for identifier '%s' that implements '%s' in the classpath.",
-                        "non-exist-factory", DummyFactory.class.getName()));
+                        "non-exist-factory", DummyFactory.class.getName());
     }
 }
