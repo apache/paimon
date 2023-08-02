@@ -73,7 +73,9 @@ public class FlinkSinkBuilder {
             case FIXED:
                 return buildForFixedBucket();
             case DYNAMIC:
-                return buildDynamicBucketSink();
+                return buildDynamicBucketSink(false);
+            case GLOBAL_DYNAMIC:
+                return buildDynamicBucketSink(true);
             case UNAWARE:
                 return buildUnawareBucketSink();
             default:
@@ -81,9 +83,12 @@ public class FlinkSinkBuilder {
         }
     }
 
-    private DataStreamSink<?> buildDynamicBucketSink() {
+    private DataStreamSink<?> buildDynamicBucketSink(boolean globalIndex) {
         checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
-        return new RowDynamicBucketSink(table, overwritePartition).build(input, parallelism);
+        RowDynamicBucketSink sink = new RowDynamicBucketSink(table, overwritePartition);
+        return globalIndex
+                ? sink.buildGlobalDynamic(input, parallelism)
+                : sink.build(input, parallelism);
     }
 
     private DataStreamSink<?> buildForFixedBucket() {

@@ -19,10 +19,12 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.DynamicBucketSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.flink.sink.index.GlobalIndexAssignerOperator;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
@@ -69,6 +71,16 @@ public class CdcDynamicBucketSink extends DynamicBucketSink<CdcRecord> {
                 }
             };
         };
+    }
+
+    @Override
+    protected SerializableFunction<InternalRow, CdcRecord> converter() {
+        throw new UnsupportedOperationException("TODO");
+    }
+
+    @Override
+    protected GlobalIndexAssignerOperator<CdcRecord> globalIndexAssignerOperator() {
+        throw new UnsupportedOperationException("TODO");
     }
 
     @Override

@@ -107,11 +107,6 @@ public class TableSchema implements Serializable {
 
     public List<String> trimmedPrimaryKeys() {
         if (primaryKeys.size() > 0) {
-            Preconditions.checkState(
-                    primaryKeys.containsAll(partitionKeys),
-                    String.format(
-                            "Primary key constraint %s should include all partition fields %s",
-                            primaryKeys, partitionKeys));
             List<String> adjusted =
                     primaryKeys.stream()
                             .filter(pk -> !partitionKeys.contains(pk))
@@ -143,6 +138,14 @@ public class TableSchema implements Serializable {
             bucketKeys = fieldNames();
         }
         return bucketKeys;
+    }
+
+    public boolean crossPartitionUpdate() {
+        if (primaryKeys.isEmpty() || partitionKeys.isEmpty()) {
+            return false;
+        }
+
+        return !primaryKeys.containsAll(partitionKeys);
     }
 
     /** Original bucket keys, maybe empty. */

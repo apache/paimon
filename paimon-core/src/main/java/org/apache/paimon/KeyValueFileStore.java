@@ -50,12 +50,14 @@ import java.util.function.Supplier;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
 public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     private static final long serialVersionUID = 1L;
 
+    private final boolean crossPartitionUpdate;
     private final RowType bucketKeyType;
     private final RowType keyType;
     private final RowType valueType;
@@ -68,6 +70,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             FileIO fileIO,
             SchemaManager schemaManager,
             long schemaId,
+            boolean crossPartitionUpdate,
             CoreOptions options,
             RowType partitionType,
             RowType bucketKeyType,
@@ -76,6 +79,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory) {
         super(fileIO, schemaManager, schemaId, options, partitionType);
+        this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -87,7 +91,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public BucketMode bucketMode() {
-        return options.bucket() == -1 ? BucketMode.DYNAMIC : BucketMode.FIXED;
+        if (options.bucket() == -1) {
+            return crossPartitionUpdate ? BucketMode.GLOBAL_DYNAMIC : BucketMode.DYNAMIC;
+        } else {
+            checkArgument(!crossPartitionUpdate);
+            return BucketMode.FIXED;
+        }
     }
 
     @Override

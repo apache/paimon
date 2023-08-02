@@ -185,6 +185,14 @@ public class SchemaValidation {
                         "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
             }
         }
+
+        if (schema.crossPartitionUpdate() && options.bucket() != -1) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
+                                    + "(Primary key constraint %s not include all partition fields %s).",
+                            schema.primaryKeys(), schema.partitionKeys()));
+        }
     }
 
     private static void validatePrimaryKeysType(List<DataField> fields, List<String> primaryKeys) {

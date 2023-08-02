@@ -34,7 +34,7 @@ import java.util.function.Predicate;
 /** A {@link LookupTable} for primary key table which provides lookup by secondary key. */
 public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
-    private final RocksDBSetState indexState;
+    private final RocksDBSetState<InternalRow, InternalRow> indexState;
 
     private final KeyProjectedRow secKeyRow;
 

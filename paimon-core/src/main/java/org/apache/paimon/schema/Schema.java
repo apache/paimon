@@ -133,14 +133,9 @@ public class Schema {
                 "Table column %s should include all primary key constraint %s",
                 fieldNames,
                 primaryKeys);
-        Set<String> pkSet = new HashSet<>(primaryKeys);
-        Preconditions.checkState(
-                pkSet.containsAll(partitionKeys),
-                "Primary key constraint %s should include all partition fields %s",
-                primaryKeys,
-                partitionKeys);
 
         // primary key should not nullable
+        Set<String> pkSet = new HashSet<>(primaryKeys);
         List<DataField> newFields = new ArrayList<>();
         for (DataField field : fields) {
             if (pkSet.contains(field.name()) && field.type().isNullable()) {

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
@@ -37,7 +36,7 @@ import java.io.IOException;
 import java.util.Arrays;
 
 /** Rocksdb state for key value. */
-public abstract class RocksDBState<CacheV> {
+public abstract class RocksDBState<K, V, CacheV> {
 
     protected final RocksDB db;
 
@@ -45,9 +44,9 @@ public abstract class RocksDBState<CacheV> {
 
     protected final ColumnFamilyHandle columnFamily;
 
-    protected final Serializer<InternalRow> keySerializer;
+    protected final Serializer<K> keySerializer;
 
-    protected final Serializer<InternalRow> valueSerializer;
+    protected final Serializer<V> valueSerializer;
 
     protected final DataOutputSerializer keyOutView;
 
@@ -60,8 +59,8 @@ public abstract class RocksDBState<CacheV> {
     public RocksDBState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
-            Serializer<InternalRow> keySerializer,
-            Serializer<InternalRow> valueSerializer,
+            Serializer<K> keySerializer,
+            Serializer<V> valueSerializer,
             long lruCacheSize) {
         this.db = db;
         this.columnFamily = columnFamily;
@@ -78,7 +77,7 @@ public abstract class RocksDBState<CacheV> {
                         .build();
     }
 
-    protected byte[] serializeKey(InternalRow key) throws IOException {
+    protected byte[] serializeKey(K key) throws IOException {
         keyOutView.clear();
         keySerializer.serialize(key, keyOutView);
         return keyOutView.getCopyOfBuffer();

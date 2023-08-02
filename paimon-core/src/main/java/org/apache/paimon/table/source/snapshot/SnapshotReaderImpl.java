@@ -167,6 +167,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
+    @Override
+    public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
+        scan.withBucketFilter(bucketFilter);
+        return this;
+    }
+
     /** Get splits from {@link FileKind#ADD} files. */
     @Override
     public Plan read() {
