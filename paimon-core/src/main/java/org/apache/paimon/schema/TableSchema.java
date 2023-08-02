@@ -58,6 +58,8 @@ public class TableSchema implements Serializable {
 
     private final String comment;
 
+    private final long timeMillis;
+
     public TableSchema(
             long id,
             List<DataField> fields,
@@ -66,6 +68,26 @@ public class TableSchema implements Serializable {
             List<String> primaryKeys,
             Map<String, String> options,
             String comment) {
+        this(
+                id,
+                fields,
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                options,
+                comment,
+                System.currentTimeMillis());
+    }
+
+    public TableSchema(
+            long id,
+            List<DataField> fields,
+            int highestFieldId,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            Map<String, String> options,
+            String comment,
+            long timeMillis) {
         this.id = id;
         this.fields = fields;
         this.highestFieldId = highestFieldId;
@@ -73,6 +95,7 @@ public class TableSchema implements Serializable {
         this.primaryKeys = primaryKeys;
         this.options = Collections.unmodifiableMap(options);
         this.comment = comment;
+        this.timeMillis = timeMillis;
 
         // try to trim to validate primary keys
         trimmedPrimaryKeys();
@@ -183,6 +206,10 @@ public class TableSchema implements Serializable {
         return comment;
     }
 
+    public long getTimeMills() {
+        return timeMillis;
+    }
+
     public RowType logicalRowType() {
         return new RowType(fields);
     }
@@ -221,7 +248,14 @@ public class TableSchema implements Serializable {
 
     public TableSchema copy(Map<String, String> newOptions) {
         return new TableSchema(
-                id, fields, highestFieldId, partitionKeys, primaryKeys, newOptions, comment);
+                id,
+                fields,
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                newOptions,
+                comment,
+                timeMillis);
     }
 
     @Override

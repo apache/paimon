@@ -76,6 +76,8 @@ public class SchemaSerializer
             generator.writeStringField("comment", tableSchema.comment());
         }
 
+        generator.writeNumberField("timeMillis", tableSchema.getTimeMills());
+
         generator.writeEndObject();
     }
 
@@ -117,7 +119,16 @@ public class SchemaSerializer
             comment = commentNode.asText();
         }
 
+        long timeMillis = node.get("timeMillis") == null ? 0 : node.get("timeMillis").asLong();
+
         return new TableSchema(
-                id, fields, highestFieldId, partitionKeys, primaryKeys, options, comment);
+                id,
+                fields,
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                options,
+                comment,
+                timeMillis);
     }
 }
