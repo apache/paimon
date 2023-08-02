@@ -64,6 +64,20 @@ It is recommended that the parallelism of sink should be less than or equal to t
 
 ## Compaction
 
+### Asynchronous Compaction
+
+Compaction is inherently asynchronous, but if you want it to be completely asynchronous and not blocking writing,
+expect a mode to have maximum write throughput, the compaction can be done slowly and not in a hurry.
+You can use the following strategies for your table:
+
+```shell
+num-sorted-run.stop-trigger = 2147483647
+sort-spill-threshold = 10
+```
+
+This configuration will generate more files during peak write periods and gradually merge into optimal read
+performance during low write periods.
+
 ### Number of Sorted Runs to Pause Writing
 
 When number of sorted runs is small, Paimon writers will perform compaction asynchronously in separated threads, so
@@ -96,19 +110,6 @@ Write stalls will become less frequent when `num-sorted-run.stop-trigger` become
 performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the
 table. If you are concerned about the OOM of memory, please configure the following option `sort-spill-threshold`.
 Its value depends on your memory size.
-
-### Prioritize write throughput
-
-If you expect a mode to have maximum write throughput, the compaction can be done slowly and not in a hurry.
-You can use the following strategies for your table:
-
-```shell
-num-sorted-run.stop-trigger = 2147483647
-sort-spill-threshold = 10
-```
-
-This configuration will generate more files during peak write periods and gradually merge into optimal read
-performance during low write periods.
 
 ### Number of Sorted Runs to Trigger Compaction
 
