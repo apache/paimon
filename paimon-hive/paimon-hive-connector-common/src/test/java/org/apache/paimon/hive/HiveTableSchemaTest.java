@@ -61,7 +61,7 @@ public class HiveTableSchemaTest {
                 .withMessage(
                         "Schema file not found in location "
                                 + tempDir.toString()
-                                + ". Please create table first.");
+                                + ". Please create table by Paimon catalog first.");
     }
 
     @Test

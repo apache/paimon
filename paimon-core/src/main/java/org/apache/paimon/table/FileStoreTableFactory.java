@@ -62,7 +62,7 @@ public class FileStoreTableFactory {
                                         new IllegalArgumentException(
                                                 "Schema file not found in location "
                                                         + tablePath
-                                                        + ". Please create table first."));
+                                                        + ". Please create table by Paimon catalog first."));
         return create(
                 fileIO,
                 tablePath,

@@ -18,18 +18,14 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.flink.util.AbstractTestBase;
-
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
-import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
@@ -37,28 +33,37 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for mapping table api. */
-public class MappingTableITCase extends AbstractTestBase {
+public class MappingTableITCase extends CatalogITCaseBase {
 
-    private TableEnvironment tEnv;
-    private String path;
+    private String tablePath;
 
     @BeforeEach
-    public void before() throws IOException {
-        tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
-        path = getTempDirPath();
+    public void beforeEach() throws Exception {
+        tEnv.executeSql("CREATE TABLE T (i INT, j INT)");
+        tablePath =
+                tEnv.getCatalog(tEnv.getCurrentCatalog())
+                        .get()
+                        .getTable(new ObjectPath(tEnv.getCurrentDatabase(), "T"))
+                        .getOptions()
+                        .get("path");
+
+        // use default catalog
+        tEnv.useCatalog("default_catalog");
     }
 
     @Test
     public void testCreateEmptyMappingTable() {
+        String newTable = tablePath + "_other";
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
                                 + "'connector'='paimon', 'path'='%s')",
-                        path));
+                        newTable));
         assertThatThrownBy(() -> tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await())
                 .isInstanceOf(ValidationException.class)
                 .hasRootCauseMessage(
-                        "Schema file not found in location %s. Please create table first.", path);
+                        "Schema file not found in location %s. Please create table by Paimon catalog first.",
+                        newTable);
     }
 
     @Test
@@ -66,8 +71,8 @@ public class MappingTableITCase extends AbstractTestBase {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
-                                + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
-                        path));
+                                + "'connector'='paimon', 'path'='%s')",
+                        tablePath));
         tEnv.executeSql("INSERT INTO T VALUES (1, 2), (3, 4)").await();
 
         tEnv.executeSql("DROP TABLE T");
@@ -75,40 +80,19 @@ public class MappingTableITCase extends AbstractTestBase {
                 String.format(
                         "CREATE TABLE T (i INT, j INT) WITH ("
                                 + "'connector'='paimon', 'path'='%s')",
-                        path));
+                        tablePath));
 
         List<Row> result = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM T").collect());
         assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2), Row.of(3, 4));
     }
 
     @Test
-    public void testCreateTemporaryTableRepeat() throws Exception {
-        for (int i = 0; i < 5; i++) {
-            tEnv.executeSql(
-                    String.format(
-                            "CREATE TABLE T (i INT, j INT) WITH ("
-                                    + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
-                            path));
-            tEnv.executeSql("SELECT * FROM T").collect().close();
-            tEnv.executeSql("DROP TABLE T");
-        }
-    }
-
-    @Test
-    public void testCreateTemporaryTableConflict() throws Exception {
-        tEnv.executeSql(
-                String.format(
-                        "CREATE TABLE T (i INT, j INT) WITH ("
-                                + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
-                        path));
-        tEnv.executeSql("SELECT * FROM T").collect().close();
-        tEnv.executeSql("DROP TABLE T");
-
+    public void testCreateTemporaryTableConflict() {
         tEnv.executeSql(
                 String.format(
                         "CREATE TABLE T (i INT, j INT, k INT) WITH ("
-                                + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
-                        path));
+                                + "'connector'='paimon', 'path'='%s')",
+                        tablePath));
 
         assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM T").collect().close())
                 .isInstanceOf(ValidationException.class)

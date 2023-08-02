@@ -103,7 +103,7 @@ public class HiveSchema {
                 throw new IllegalArgumentException(
                         "Schema file not found in location "
                                 + location
-                                + ". Please create table first.");
+                                + ". Please create table by Paimon catalog first.");
             }
             // Paimon external table can read schema from the specified location
             return new HiveSchema(new RowType(tableSchema.get().fields()));

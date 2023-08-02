@@ -63,7 +63,7 @@ public class CreateTableITCase extends HiveTestBase {
                 .hasRootCauseMessage(
                         "Schema file not found in location file:"
                                 + path
-                                + ". Please create table first.");
+                                + ". Please create table by Paimon catalog first.");
     }
 
     @Test
