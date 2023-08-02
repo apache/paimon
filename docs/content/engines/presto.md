@@ -99,7 +99,7 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 
 ## Kerberos
 
-You can configure kerberos keytag file when using KERBEROS authentication in the properties.
+You can configure kerberos keytab file when using KERBEROS authentication in the properties.
 
 ```
 security.kerberos.login.principal=hadoop-user
@@ -124,12 +124,12 @@ CREATE TABLE paimon.test_db.orders (
     order_date date
 )
 WITH (
-    file_format = 'ORC',
+    file.format = 'ORC',
     primary_key = ARRAY['order_key','order_date'],
     partitioned_by = ARRAY['orderdate'],
     bucket = '2',
-    bucket_key = 'order_key',
-    changelog_producer = 'input'
+    bucket-key = 'order_key',
+    changelog-producer = 'input'
 )
 ```
 
@@ -143,12 +143,12 @@ CREATE TABLE paimon.test_db.orders (
     order_date date
 )
 WITH (
-    file_format = 'ORC',
+    file.format = 'ORC',
     primary_key = ARRAY['order_key','order_date'],
     partitioned_by = ARRAY['orderdate'],
     bucket = '2',
-    bucket_key = 'order_key',
-    changelog_producer = 'input'
+    bucket-key = 'order_key',
+    changelog-producer = 'input'
 )
 
 ALTER TABLE paimon.test_db.orders ADD COLUMN "shipping_address varchar;
