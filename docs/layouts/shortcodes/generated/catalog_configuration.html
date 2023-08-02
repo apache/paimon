@@ -33,6 +33,12 @@ under the License.
             <td>Allow to fallback to hadoop File IO when no file io found for the scheme.</td>
         </tr>
         <tr>
+            <td><h5>lineage-meta</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The lineage meta to store table and data lineage information.<br /><br />Possible values:<br /><ul><li>"jdbc": Use standard jdbc to store table and data lineage information.</li></ul><ul><li>"custom": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>lock-acquire-timeout</h5></td>
             <td style="word-wrap: break-word;">8 min</td>
             <td>Duration</td>

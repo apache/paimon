@@ -33,6 +33,7 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.DataSplit;
@@ -138,7 +139,11 @@ public abstract class ScannerTestBase {
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                fileIO, tablePath, tableSchema, conf, Lock.emptyFactory(), null);
+                fileIO,
+                tablePath,
+                tableSchema,
+                conf,
+                new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {
