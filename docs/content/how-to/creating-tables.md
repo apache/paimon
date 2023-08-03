@@ -168,14 +168,14 @@ SET hive.metastore.warehouse.dir=warehouse_path;
 CREATE TABLE MyTable (
     user_id BIGINT,
     item_id BIGINT,
-    behavior STRING,
+    behavior STRING
+) PARTITIONED BY ( 
     dt STRING,
     hh STRING
 )
 STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
 TBLPROPERTIES (
-    'primary-key' = 'dt,hh,user_id',
-    'partition'='dt,hh'
+    'primary-key' = 'dt,hh,user_id'
 );
 ```
 
