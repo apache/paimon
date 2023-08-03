@@ -38,6 +38,7 @@ import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.util.CollectionUtil;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
@@ -158,20 +159,13 @@ class KafkaActionUtils {
     }
 
     static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
+        validateKafkaConfig(kafkaConfig);
         KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
-        String groupId = kafkaConfig.get(KafkaConnectorOptions.PROPS_GROUP_ID);
         kafkaSourceBuilder
                 .setTopics(kafkaConfig.get(KafkaConnectorOptions.TOPIC))
                 .setValueOnlyDeserializer(new SimpleStringSchema())
-                .setGroupId(StringUtils.isEmpty(groupId) ? UUID.randomUUID().toString() : groupId);
-        Properties properties = new Properties();
-        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            if (key.startsWith(PROPERTIES_PREFIX)) {
-                properties.put(key.substring(PROPERTIES_PREFIX.length()), value);
-            }
-        }
+                .setGroupId(kafkaPropsGroupId(kafkaConfig));
+        Properties properties = kafkaProperties(kafkaConfig);
 
         StartupMode startupMode =
                 fromOption(kafkaConfig.get(KafkaConnectorOptions.SCAN_STARTUP_MODE));
@@ -359,5 +353,45 @@ class KafkaActionUtils {
             }
         }
         return offsetMap;
+    }
+
+    private static void validateKafkaConfig(Configuration kafkaConfig) {
+        checkArgument(
+                kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT) != null,
+                String.format(
+                        "kafka-conf [%s] must be specified.",
+                        KafkaConnectorOptions.VALUE_FORMAT.key()));
+
+        checkArgument(
+                !CollectionUtil.isNullOrEmpty(kafkaConfig.get(KafkaConnectorOptions.TOPIC)),
+                String.format(
+                        "kafka-conf [%s] must be specified.", KafkaConnectorOptions.TOPIC.key()));
+
+        checkArgument(
+                kafkaConfig.get(KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS) != null,
+                String.format(
+                        "kafka-conf [%s] must be specified.",
+                        KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS.key()));
+    }
+
+    public static Properties kafkaProperties(Configuration kafkaConfig) {
+        Properties properties = new Properties();
+        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key.startsWith(PROPERTIES_PREFIX)) {
+                properties.put(key.substring(PROPERTIES_PREFIX.length()), value);
+            }
+        }
+        return properties;
+    }
+
+    public static String kafkaPropsGroupId(Configuration kafkaConfig) {
+        String groupId = kafkaConfig.get(KafkaConnectorOptions.PROPS_GROUP_ID);
+        if (StringUtils.isEmpty(groupId)) {
+            groupId = UUID.randomUUID().toString();
+            kafkaConfig.set(KafkaConnectorOptions.PROPS_GROUP_ID, groupId);
+        }
+        return groupId;
     }
 }

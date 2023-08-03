@@ -74,6 +74,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
@@ -283,7 +284,7 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
     protected Map<String, String> getBasicKafkaConfig() {
         Map<String, String> config = new HashMap<>();
         config.put("properties.bootstrap.servers", KAFKA_CONTAINER.getBootstrapServers());
-        config.put("properties.group.id", "paimon-tests");
+        config.put("properties.group.id", "paimon-tests" + UUID.randomUUID());
         config.put("properties.enable.auto.commit", "false");
         config.put("properties.auto.offset.reset", "earliest");
         return config;

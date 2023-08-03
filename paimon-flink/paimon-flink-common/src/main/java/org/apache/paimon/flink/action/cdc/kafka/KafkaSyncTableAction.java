@@ -42,8 +42,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /**
  * An {@link Action} which synchronize one kafka topic into one Paimon table.
  *
@@ -130,9 +128,6 @@ public class KafkaSyncTableAction extends ActionBase {
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
-        checkArgument(
-                kafkaConfig.contains(KafkaConnectorOptions.VALUE_FORMAT),
-                KafkaConnectorOptions.VALUE_FORMAT.key() + " cannot be null ");
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
         String topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
         KafkaSchema kafkaSchema = KafkaSchema.getKafkaSchema(kafkaConfig, topic);
