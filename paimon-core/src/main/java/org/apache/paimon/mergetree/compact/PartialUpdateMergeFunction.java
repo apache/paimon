@@ -89,13 +89,24 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 return;
             }
 
+            if (fieldSequences.size() > 1) {
+                retractWithSequenceGroup(kv);
+                return;
+            }
+
             if (kv.valueKind() == RowKind.UPDATE_BEFORE) {
                 throw new IllegalArgumentException(
                         "Partial update can not accept update_before records, it is a bug.");
             }
 
-            throw new IllegalArgumentException(
-                    "Partial update can not accept delete records. Partial delete is not supported!");
+            String msg =
+                    String.join(
+                            "By default, Partial update can not accept delete records,"
+                                    + " you can choose one of the following solutions:",
+                            "1. Configure 'partial-update.ignore-delete' to ignore delete records.",
+                            "2. Configure 'sequence-group' to retract partial columns.");
+
+            throw new IllegalArgumentException(msg);
         }
 
         latestSequenceNumber = kv.sequenceNumber();
@@ -130,6 +141,27 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     Long previousSeq = sequenceGen.generateNullable(row);
                     if (previousSeq == null || currentSeq >= previousSeq) {
                         row.setField(i, field);
+                    }
+                }
+            }
+        }
+    }
+
+    private void retractWithSequenceGroup(KeyValue kv) {
+        for (int i = 0; i < getters.length; i++) {
+            SequenceGenerator sequenceGen = fieldSequences.get(i);
+            if (sequenceGen != null) {
+                Long currentSeq = sequenceGen.generateNullable(kv.value());
+                if (currentSeq != null) {
+                    Long previousSeq = sequenceGen.generateNullable(row);
+                    if (previousSeq == null || currentSeq >= previousSeq) {
+                        if (sequenceGen.index() == i) {
+                            // update sequence field
+                            row.setField(i, getters[i].getFieldOrNull(kv.value()));
+                        } else {
+                            // retract normal field
+                            row.setField(i, null);
+                        }
                     }
                 }
             }
