@@ -124,7 +124,7 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 
 ## Kerberos
 
-You can configure kerberos keytag file when using KERBEROS authentication in the properties.
+You can configure kerberos keytab file when using KERBEROS authentication in the properties.
 
 ```
 security.kerberos.login.principal=hadoop-user
