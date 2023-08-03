@@ -468,6 +468,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        true,
                         "test_prefix_",
                         "_test_suffix",
                         null,
@@ -643,6 +644,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        true,
                         null,
                         null,
                         includingTables,
@@ -767,6 +769,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
+    @Timeout(60)
     public void testAddIgnoredTable() throws Exception {
         String mySqlDatabase = "paimon_sync_database_add_ignored_table";
 
@@ -785,6 +788,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        true,
                         null,
                         null,
                         "t.+",
@@ -1097,6 +1101,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        true,
                         null,
                         null,
                         "t.+",
@@ -1203,6 +1208,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        true,
                         null,
                         null,
                         null,
@@ -1268,6 +1274,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        true,
                         null,
                         null,
                         null,
@@ -1352,7 +1359,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     rowType,
                     Collections.singletonList("k"));
 
-            // test newly added table
+            // test newly created table
             if (mode == COMBINED) {
                 statement.executeUpdate(
                         "CREATE TABLE database_shard_1.t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
@@ -1379,6 +1386,183 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         Collections.singletonList("k"));
             }
         }
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSyncMultipleShardsWithoutMerging() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "without_merging_shard_.*");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        Map<String, String> tableConfig = getBasicTableConfig();
+        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        false,
+                        false,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Collections.emptyMap(),
+                        tableConfig,
+                        mode);
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        try (Connection conn =
+                        DriverManager.getConnection(
+                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
+                                MYSQL_CONTAINER.getUsername(),
+                                MYSQL_CONTAINER.getPassword());
+                Statement statement = conn.createStatement()) {
+            Thread.sleep(5_000);
+
+            Catalog catalog = catalog();
+            assertThat(catalog.listTables(database))
+                    .containsExactlyInAnyOrder(
+                            "without_merging_shard_1_t1",
+                            "without_merging_shard_1_t2",
+                            "without_merging_shard_2_t1");
+
+            // test insert into without_merging_shard_1.t1
+            statement.executeUpdate(
+                    "INSERT INTO without_merging_shard_1.t1 VALUES (1, 'db1_1'), (2, 'db1_2')");
+            FileStoreTable table = getFileStoreTable("without_merging_shard_1_t1");
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new String[] {"k", "v1"});
+            waitForResult(
+                    Arrays.asList("+I[1, db1_1]", "+I[2, db1_2]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
+            // test insert into without_merging_shard_2.t1
+            statement.executeUpdate(
+                    "INSERT INTO without_merging_shard_2.t1 VALUES (3, 'db2_3', 300), (4, 'db2_4', 400)");
+            table = getFileStoreTable("without_merging_shard_2_t1");
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(20), DataTypes.BIGINT()
+                            },
+                            new String[] {"k", "v1", "v2"});
+            waitForResult(
+                    Arrays.asList("+I[3, db2_3, 300]", "+I[4, db2_4, 400]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
+            // test schema evolution of without_merging_shard_1.t2
+            statement.executeUpdate("ALTER TABLE without_merging_shard_1.t2 ADD COLUMN v2 DOUBLE");
+            statement.executeUpdate(
+                    "INSERT INTO without_merging_shard_1.t2 VALUES (1, 'Apache', 1.1)");
+            statement.executeUpdate(
+                    "INSERT INTO without_merging_shard_1.t2 VALUES (2, 'Paimon', 2.2)");
+            table = getFileStoreTable("without_merging_shard_1_t2");
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.DOUBLE()
+                            },
+                            new String[] {"k", "v1", "v2"});
+            waitForResult(
+                    Arrays.asList("+I[1, Apache, 1.1]", "+I[2, Paimon, 2.2]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
+            // test newly created table
+            if (mode == COMBINED) {
+                statement.executeUpdate(
+                        "CREATE TABLE without_merging_shard_1.t3 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                statement.executeUpdate(
+                        "INSERT INTO without_merging_shard_1.t3 VALUES (1, 'test')");
+
+                statement.executeUpdate(
+                        "CREATE TABLE without_merging_shard_2.t3 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                statement.executeUpdate(
+                        "INSERT INTO without_merging_shard_2.t3 VALUES (2, 'test')");
+
+                while (!catalog.listTables(database)
+                        .containsAll(
+                                Arrays.asList(
+                                        "without_merging_shard_1_t3",
+                                        "without_merging_shard_2_t3"))) {
+                    Thread.sleep(100);
+                }
+
+                table = getFileStoreTable("without_merging_shard_1_t3");
+                rowType =
+                        RowType.of(
+                                new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                                new String[] {"k", "v1"});
+                waitForResult(
+                        Collections.singletonList("+I[1, test]"),
+                        table,
+                        rowType,
+                        Collections.singletonList("k"));
+
+                table = getFileStoreTable("without_merging_shard_2_t3");
+                waitForResult(
+                        Collections.singletonList("+I[2, test]"),
+                        table,
+                        rowType,
+                        Collections.singletonList("k"));
+            }
+        }
+    }
+
+    @Test
+    public void testUnminitorTablesWithMergingShards() throws Exception {
+        // create an incompatible table named t2
+        Catalog catalog = catalog();
+        catalog.createDatabase(database, true);
+        Identifier identifier = Identifier.create(database, "t2");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("k", DataTypes.STRING())
+                        .column("v1", DataTypes.STRING())
+                        .primaryKey("k")
+                        .build();
+        catalog.createTable(identifier, schema, false);
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "test_unmonitor_table_shard_.*");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        true,
+                        true,
+                        null,
+                        null,
+                        null,
+                        null,
+                        Collections.emptyMap(),
+                        Collections.emptyMap(),
+                        COMBINED);
+        action.build(env);
+
+        assertThat(action.monitoredTables())
+                .containsOnly(
+                        Identifier.create("test_unmonitor_table_shard_1", "t1"),
+                        Identifier.create("test_unmonitor_table_shard_2", "t1"));
     }
 
     private void assertTableExists(List<String> tableNames) {

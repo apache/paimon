@@ -134,7 +134,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
 
         catalog.createDatabase(database, true);
         TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, tablePrefix, tableSuffix);
+                new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
 
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
 

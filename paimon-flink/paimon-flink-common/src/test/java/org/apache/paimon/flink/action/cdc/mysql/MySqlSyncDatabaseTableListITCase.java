@@ -73,6 +73,8 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        // TODO refactor
+                        true,
                         null,
                         null,
                         "t.+|s.+",

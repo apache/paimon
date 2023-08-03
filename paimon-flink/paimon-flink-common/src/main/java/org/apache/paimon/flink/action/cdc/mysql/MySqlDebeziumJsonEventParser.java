@@ -23,6 +23,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
@@ -163,7 +164,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     @Override
     public String parseTableName() {
-        return tableNameConverter.convert(currentTable);
+        return tableNameConverter.convert(Identifier.create(getDatabaseName(), currentTable));
     }
 
     private boolean isSchemaChange() {
@@ -288,6 +289,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         }
 
         return records;
+    }
+
+    private String getDatabaseName() {
+        return payload.get("source").get("db").asText();
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
