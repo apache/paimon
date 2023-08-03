@@ -80,7 +80,9 @@ For streaming queries, `partial-update` merge engine must be used together with 
 {{< /hint >}}
 
 {{< hint info >}}
-Partial cannot receive `DELETE` messages because the behavior cannot be defined. You can configure `partial-update.ignore-delete` to ignore `DELETE` messages.
+By default, Partial update can not accept delete records, you can choose one of the following solutions:
+- Configure 'partial-update.ignore-delete' to ignore delete records.
+- Configure 'sequence-group's to retract partial columns.
 {{< /hint >}}
 
 #### Sequence Group

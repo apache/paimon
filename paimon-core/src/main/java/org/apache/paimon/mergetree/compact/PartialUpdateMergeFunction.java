@@ -104,7 +104,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             "By default, Partial update can not accept delete records,"
                                     + " you can choose one of the following solutions:",
                             "1. Configure 'partial-update.ignore-delete' to ignore delete records.",
-                            "2. Configure 'sequence-group' to retract partial columns.");
+                            "2. Configure 'sequence-group's to retract partial columns.");
 
             throw new IllegalArgumentException(msg);
         }
