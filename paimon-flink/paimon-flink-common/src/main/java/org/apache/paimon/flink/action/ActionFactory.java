@@ -160,20 +160,4 @@ public interface ActionFactory extends Factory {
         }
         map.put(kv[0].trim(), kv[1].trim());
     }
-
-    default String getSqlOrderBy(MultipleParameterTool params) {
-        String sqlOrderBy = params.get("sql-order-by");
-        if (sqlOrderBy == null) {
-            throw new IllegalArgumentException("Please specify \"sql-order-by\".");
-        }
-        return sqlOrderBy;
-    }
-
-    default String getSqlSelect(MultipleParameterTool params) {
-        String selectSql = params.get("sql-select");
-        if (selectSql == null) {
-            throw new IllegalArgumentException("Please specify \"sql-select\".");
-        }
-        return selectSql;
-    }
 }

@@ -227,6 +227,26 @@ behavior is exactly the same as [Append For Qeueue]({{< ref "#compaction" >}}). 
 The auto compaction is only supported in Flink engine streaming mode. You can also start a compaction job in flink by flink action in paimon
 and disable all the other compaction by set `write-only`.
 
+### Order Rewrite
+
+The data in a per-partition out of order will lead a slow select, compaction may slow down the inserting. It is a good choice for you to set 
+write-only for inserting job, and after per-partition data done, trigger a partition `Order Rewrite` action. `Order Rewrite` action self could do two things:
+* Order all the data specified by select clause.
+* Rewrite the ordered data in a compaction way.
+
+You can trigger action by shell script:
+```shell
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-0.5-SNAPSHOT.jar \
+    order-rewrite \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --select <select-sql> \
+    --orderby <orderType><(col1,col2,...)>
+```
+
+{{< generated/order-rewrite >}}
+
 ### Streaming Source
 
 Unaware-bucket mode append-only table supported streaming read and write, but no longer guarantee order anymore. You cannot regard it 

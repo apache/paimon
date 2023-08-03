@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sorter.SorterFactory;
 import org.apache.paimon.flink.sorter.TableSorter;
 
@@ -32,13 +33,14 @@ import java.util.Map;
  * col1,col2,... "
  *
  * <p>Example usage: order-rewrite --warehouse /tmp/paimon/warehouse --database my_db --table
- * Orders1 --sql-select "SELECT * FROM my_db.Orders1 WHERE f0 < 10" --sql-order-by
+ * Orders1 --select "SELECT * FROM my_db.Orders1 WHERE f0 < 10" --order-by
  * "order(f0,f1,f2,f3,f4,f7,f8,f9,f10,f11,f12,f13,f14,f15)"
  */
-public class OrderRewriteAction extends FlinkActionEnvironmentBase {
+public class OrderRewriteAction extends ActionBase {
 
     private final String sqlSelect;
     private final String sqlOrderBy;
+    private final Identifier identifier;
 
     OrderRewriteAction(
             String warehouse,
@@ -47,7 +49,8 @@ public class OrderRewriteAction extends FlinkActionEnvironmentBase {
             String sqlSelect,
             String sqlOrderBy,
             Map<String, String> catalogConfig) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(warehouse, catalogConfig);
+        identifier = Identifier.create(databaseName, tableName);
         this.sqlSelect = sqlSelect;
         this.sqlOrderBy = sqlOrderBy;
     }

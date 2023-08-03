@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.utils.TableEnvironmentUtils;
 import org.apache.paimon.table.FileStoreTable;
@@ -38,18 +39,20 @@ import java.util.List;
 import java.util.Map;
 
 /** Abstract base of {@link Action} for table. */
-public abstract class TableActionBase extends FlinkActionEnvironmentBase {
+public abstract class TableActionBase extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(TableActionBase.class);
 
     protected Table table;
+    protected final Identifier identifier;
 
     TableActionBase(
             String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig) {
-        super(warehouse, databaseName, tableName, catalogConfig);
+        super(warehouse, catalogConfig);
+        identifier = new Identifier(databaseName, tableName);
         try {
             table = catalog.getTable(identifier);
         } catch (Catalog.TableNotExistException e) {
