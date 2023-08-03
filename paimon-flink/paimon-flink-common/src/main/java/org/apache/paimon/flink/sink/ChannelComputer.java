@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.utils.SerializableFunction;
 
 import java.io.Serializable;
 
@@ -41,32 +40,5 @@ public interface ChannelComputer<T> extends Serializable {
 
     static int select(int bucket, int numChannels) {
         return bucket % numChannels;
-    }
-
-    static <T> ChannelComputer<T> channelComputer(SerializableFunction<T, BinaryRow> keyExtractor) {
-        return new KeyChannelComputer<>(keyExtractor);
-    }
-
-    class KeyChannelComputer<T> implements ChannelComputer<T> {
-
-        private static final long serialVersionUID = 1L;
-
-        private final SerializableFunction<T, BinaryRow> keyExtractor;
-
-        private transient int numChannels;
-
-        private KeyChannelComputer(SerializableFunction<T, BinaryRow> keyExtractor) {
-            this.keyExtractor = keyExtractor;
-        }
-
-        @Override
-        public void setup(int numChannels) {
-            this.numChannels = numChannels;
-        }
-
-        @Override
-        public int channel(T record) {
-            return Math.abs(keyExtractor.apply(record).hashCode() % numChannels);
-        }
     }
 }
