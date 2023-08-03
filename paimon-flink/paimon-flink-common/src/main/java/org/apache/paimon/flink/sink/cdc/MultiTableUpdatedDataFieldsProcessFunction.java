@@ -38,7 +38,6 @@ import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -93,12 +92,12 @@ public class MultiTableUpdatedDataFieldsProcessFunction
                         });
 
         if (Objects.isNull(schemaManager)) {
-            throw new IOException("Failed to get schema manager for table " + tableId);
-        }
-
-        for (SchemaChange schemaChange :
-                extractSchemaChanges(schemaManager, updatedDataFields.f1)) {
-            applySchemaChange(schemaManager, schemaChange, tableId);
+            LOG.error("Failed to get schema manager for table " + tableId);
+        } else {
+            for (SchemaChange schemaChange :
+                    extractSchemaChanges(schemaManager, updatedDataFields.f1)) {
+                applySchemaChange(schemaManager, schemaChange, tableId);
+            }
         }
     }
 

@@ -418,8 +418,8 @@ Synchronization from multiple Kafka topics to Paimon database.
 
 ## Schema Change Evolution
 
-Cdc Ingestion supports a limited number of schema changes. Currently, the framework can not drop columns, so the
-behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently supported schema changes includes:
+Cdc Ingestion supports a limited number of schema changes. Currently, the framework can not rename table, drop columns, so the
+behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` will add a new column. Currently supported schema changes includes:
 
 * Adding columns.
 
