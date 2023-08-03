@@ -20,9 +20,6 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
@@ -31,12 +28,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.Statement;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -53,7 +46,6 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
         start();
     }
 
-    // TODO it's more convenient to check table without merging shards
     @Test
     @Timeout(60)
     public void testActionRunResult() throws Exception {
@@ -73,6 +65,7 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                         warehouse,
                         database,
                         false,
+                        false,
                         null,
                         null,
                         "t.+|s.+",
@@ -84,69 +77,21 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl("shard_1"),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
+        try (Statement statement = getStatement()) {
+            Thread.sleep(5_000);
             Catalog catalog = catalog();
             assertThat(catalog.listTables(database))
-                    .containsExactlyInAnyOrder("t1", "t11", "t2", "t22", "t3", "taa", "tb", "s2");
-
-            RowType rowType =
-                    RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(100)},
-                            new String[] {"k", "name"});
-            List<String> pk = Collections.singletonList("k");
-
-            waitForResult(
-                    Arrays.asList("+I[2, shard_2.t1]", "+I[3, x_shard_1.t1]"),
-                    getFileStoreTable("t1"),
-                    rowType,
-                    pk);
-
-            waitForResult(
-                    Collections.singletonList("+I[1, shard_1.t11]"),
-                    getFileStoreTable("t11"),
-                    rowType,
-                    pk);
-
-            waitForResult(
-                    Collections.singletonList("+I[1, shard_1.t2]"),
-                    getFileStoreTable("t2"),
-                    rowType,
-                    pk);
-
-            waitForResult(
-                    Collections.singletonList("+I[2, shard_2.t22]"),
-                    getFileStoreTable("t22"),
-                    rowType,
-                    pk);
-
-            waitForResult(
-                    Arrays.asList("+I[1, shard_1.t3]", "+I[2, shard_2.t3]"),
-                    getFileStoreTable("t3"),
-                    rowType,
-                    pk);
-
-            waitForResult(
-                    Collections.singletonList("+I[1, shard_1.taa]"),
-                    getFileStoreTable("taa"),
-                    rowType,
-                    pk);
-
-            waitForResult(
-                    Collections.singletonList("+I[2, shard_2.tb]"),
-                    getFileStoreTable("tb"),
-                    rowType,
-                    pk);
-
-            waitForResult(
-                    Collections.singletonList("+I[1, shard_1.s2]"),
-                    getFileStoreTable("s2"),
-                    rowType,
-                    pk);
+                    .containsExactlyInAnyOrder(
+                            "shard_1_t11",
+                            "shard_1_t2",
+                            "shard_1_t3",
+                            "shard_1_taa",
+                            "shard_1_s2",
+                            "shard_2_t1",
+                            "shard_2_t22",
+                            "shard_2_t3",
+                            "shard_2_tb",
+                            "x_shard_1_t1");
 
             // test newly added tables
             if (mode == COMBINED) {
@@ -155,12 +100,9 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                 // ignored: ta
                 statement.executeUpdate(
                         "CREATE TABLE ta (k INT, name VARCHAR(100), PRIMARY KEY (k))");
-                statement.executeUpdate("INSERT INTO ta VALUES (10, 'shard_2.ta')");
-
                 // captured: s3
                 statement.executeUpdate(
                         "CREATE TABLE s3 (k INT, name VARCHAR(100), PRIMARY KEY (k))");
-                statement.executeUpdate("INSERT INTO s3 VALUES (10, 'shard_2.s3')");
 
                 // case 2: new tables in new captured database
                 statement.executeUpdate("CREATE DATABASE shard_3");
@@ -168,16 +110,11 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                 // ignored: ta, m
                 statement.executeUpdate(
                         "CREATE TABLE ta (k INT, name VARCHAR(100), PRIMARY KEY (k))");
-                statement.executeUpdate("INSERT INTO ta VALUES (10, 'shard_3.ta')");
-
                 statement.executeUpdate(
                         "CREATE TABLE m (k INT, name VARCHAR(100), PRIMARY KEY (k))");
-                statement.executeUpdate("INSERT INTO m VALUES (10, 'shard_3.m')");
-
                 // captured: tab
                 statement.executeUpdate(
                         "CREATE TABLE tab (k INT, name VARCHAR(100), PRIMARY KEY (k))");
-                statement.executeUpdate("INSERT INTO tab VALUES (10, 'shard_3.tab')");
 
                 // case 3: new tables in new ignored database
                 statement.executeUpdate("CREATE DATABASE what");
@@ -185,30 +122,28 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                 // ignored: ta
                 statement.executeUpdate(
                         "CREATE TABLE ta (k INT, name VARCHAR(100), PRIMARY KEY (k))");
-                statement.executeUpdate("INSERT INTO ta VALUES (10, 'what.ta')");
-
                 // match including pattern but ignored: s4
                 statement.executeUpdate(
                         "CREATE TABLE s4 (k INT, name VARCHAR(100), PRIMARY KEY (k))");
-                statement.executeUpdate("INSERT INTO s4 VALUES (10, 'what.s4')");
 
                 Thread.sleep(5_000);
 
                 assertThat(catalog.listTables(database))
                         .containsExactlyInAnyOrder(
-                                "t1", "t11", "t2", "t22", "t3", "taa", "tb", "s2", "s3", "tab");
-
-                waitForResult(
-                        Collections.singletonList("+I[10, shard_2.s3]"),
-                        getFileStoreTable("s3"),
-                        rowType,
-                        pk);
-
-                waitForResult(
-                        Collections.singletonList("+I[10, shard_3.tab]"),
-                        getFileStoreTable("tab"),
-                        rowType,
-                        pk);
+                                // old
+                                "shard_1_t11",
+                                "shard_1_t2",
+                                "shard_1_t3",
+                                "shard_1_taa",
+                                "shard_1_s2",
+                                "shard_2_t1",
+                                "shard_2_t22",
+                                "shard_2_t3",
+                                "shard_2_tb",
+                                "x_shard_1_t1",
+                                // new
+                                "shard_2_s3",
+                                "shard_3_tab");
             }
         }
     }

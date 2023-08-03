@@ -37,58 +37,28 @@ CREATE DATABASE ignored;
 USE shard_1;
 
 CREATE TABLE t1 (k INT, name VARCHAR(100)); -- ignored because of pk absence
-INSERT INTO t1 VALUES (1, 'shard_1.t1');
-
 CREATE TABLE t11 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO t11 VALUES (1, 'shard_1.t11');
-
 CREATE TABLE t2 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO t2 VALUES (1, 'shard_1.t2');
-
 CREATE TABLE t3 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO t3 VALUES (1, 'shard_1.t3');
-
 CREATE TABLE ta (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- ignored
-INSERT INTO ta VALUES (1, 'shard_1.ta');
-
 CREATE TABLE taa (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO taa VALUES (1, 'shard_1.taa');
-
 CREATE TABLE s1 (k INT, name VARCHAR(100)); -- ignored because of pk absence
-INSERT INTO s1 VALUES (1, 'shard_1.s1');
-
 CREATE TABLE s2 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO s2 VALUES (1, 'shard_1.s2');
-
 CREATE TABLE sa (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- ignored
-INSERT INTO sa VALUES (1, 'shard_1.sa');
-
 CREATE TABLE m (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- ignored
-INSERT INTO m VALUES (1, 'shard_1.m');
 
 USE shard_2;
 
 CREATE TABLE t1 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO t1 VALUES (2, 'shard_2.t1');
-
 CREATE TABLE t2 (k INT, name VARCHAR(100)); -- ignored because of pk absence
-INSERT INTO t2 VALUES (2, 'shard_2.t2');
-
 CREATE TABLE t22 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO t22 VALUES (2, 'shard_2.t22');
-
 CREATE TABLE t3 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO t3 VALUES (2, 'shard_2.t3');
-
 CREATE TABLE tb (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO tb VALUES (2, 'shard_2.tb');
 
 USE x_shard_1;
 
 CREATE TABLE t1 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
-INSERT INTO t1 VALUES (3, 'x_shard_1.t1');
 
 USE ignored;
 
 CREATE TABLE t1 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- ignored
-INSERT INTO t1 VALUES (4, 'ignored.t1');

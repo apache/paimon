@@ -32,14 +32,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.utils.Preconditions.checkState;
+
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchema {
 
     private final String databaseName;
     private final String tableName;
-
     private final LinkedHashMap<String, Tuple2<DataType, String>> fields;
     private final List<String> primaryKeys;
+
+    private boolean hasMerged = false;
 
     public MySqlSchema(
             DatabaseMetaData metaData,
@@ -88,6 +91,7 @@ public class MySqlSchema {
     }
 
     public Identifier identifier() {
+        checkState(!hasMerged, "Cannot get table identifier from merged schema.");
         return Identifier.create(databaseName, tableName);
     }
 
@@ -106,6 +110,7 @@ public class MySqlSchema {
     }
 
     public MySqlSchema merge(MySqlSchema other) {
+        hasMerged = true;
         for (Map.Entry<String, Tuple2<DataType, String>> entry : other.fields.entrySet()) {
             String fieldName = entry.getKey();
             DataType newType = entry.getValue().f0;

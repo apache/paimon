@@ -140,6 +140,7 @@ To use this feature through `flink run`, run the following shell command.
     --warehouse <warehouse-path> \
     --database <database-name> \
     [--ignore-incompatible <true/false>] \
+    [--merge-shards <true/false>] \
     [--table-prefix <paimon-table-prefix>] \
     [--table-suffix <paimon-table-suffix>] \
     [--including-tables <mysql-table-name|name-regular-expr>] \
@@ -253,6 +254,11 @@ synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... 
 
 By setting database-name to a regular expression, the synchronization job will capture all tables under matched databases 
 and merge tables of the same name into one table.
+
+{{< hint info >}}
+You can set `--merge-shards false` to prevent merging shards. The synchronized tables will be named to 'databaseName_tableName' 
+to avoid potential name conflict.
+{{< /hint >}}
 
 
 ## Kafka

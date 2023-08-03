@@ -347,6 +347,10 @@ CREATE TABLE a (
     PRIMARY KEY (k)
 );
 
+-- ################################################################################
+--  testSyncMultipleShards
+-- ################################################################################
+
 CREATE DATABASE database_shard_1;
 USE database_shard_1;
 
@@ -391,3 +395,74 @@ CREATE TABLE t3 (
     k INT,
     v1 VARCHAR(10)
 );
+
+-- ################################################################################
+--  testSyncMultipleShardsWithoutMerging
+-- ################################################################################
+
+CREATE DATABASE without_merging_shard_1;
+USE without_merging_shard_1;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE DATABASE without_merging_shard_2;
+USE without_merging_shard_2;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(20),
+    v2 BIGINT,
+    PRIMARY KEY (k)
+);
+
+-- test some shard doesn't have primary key
+CREATE TABLE t2 (
+    k INT,
+    v1 VARCHAR(10)
+);
+
+-- ################################################################################
+--  testUnmonitorTablesWithMergingShards
+-- ################################################################################
+
+CREATE DATABASE test_unmonitor_table_shard_1;
+USE test_unmonitor_table_shard_1;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+
+CREATE DATABASE test_unmonitor_table_shard_2;
+USE test_unmonitor_table_shard_2;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k INT,
+    v2 DOUBLE,
+    PRIMARY KEY (k)
+);
+

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -101,6 +102,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private final Configuration mySqlConfig;
     private final String database;
     private final boolean ignoreIncompatible;
+    private final boolean mergeShards;
     private final String tablePrefix;
     private final String tableSuffix;
     private final Pattern includingPattern;
@@ -108,6 +110,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private final Map<String, String> tableConfig;
     private final String includingTables;
     private final DatabaseSyncMode mode;
+
+    private List<Identifier> monitoredTables;
 
     public MySqlSyncDatabaseAction(
             Map<String, String> mySqlConfig,
@@ -121,6 +125,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 warehouse,
                 database,
                 ignoreIncompatible,
+                true,
                 null,
                 null,
                 null,
@@ -135,6 +140,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             String warehouse,
             String database,
             boolean ignoreIncompatible,
+            boolean mergeShards,
             @Nullable String tablePrefix,
             @Nullable String tableSuffix,
             @Nullable String includingTables,
@@ -146,6 +152,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.database = database;
         this.ignoreIncompatible = ignoreIncompatible;
+        this.mergeShards = mergeShards;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
         this.includingTables = includingTables == null ? ".*" : includingTables;
@@ -172,9 +179,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         List<MySqlSchema> beforeMerging =
                 MySqlActionUtils.getMySqlSchemaList(
                         mySqlConfig, monitorTablePredication(), excludedTables);
-        List<Identifier> monitoredTables =
+        monitoredTables =
                 beforeMerging.stream().map(MySqlSchema::identifier).collect(Collectors.toList());
-        List<MySqlSchema> mySqlSchemas = mergeShards(beforeMerging);
+        List<MySqlSchema> mySqlSchemas = mergeShards ? mergeShards(beforeMerging) : beforeMerging;
 
         checkArgument(
                 mySqlSchemas.size() > 0,
@@ -184,12 +191,11 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
         catalog.createDatabase(database, true);
         TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, tablePrefix, tableSuffix);
+                new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
 
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
         for (MySqlSchema mySqlSchema : mySqlSchemas) {
-            String paimonTableName = tableNameConverter.convert(mySqlSchema.tableName());
-            Identifier identifier = new Identifier(database, paimonTableName);
+            Identifier identifier = buildPaimonIdentifier(tableNameConverter, mySqlSchema);
             FileStoreTable table;
             Schema fromMySql =
                     MySqlActionUtils.buildPaimonSchema(
@@ -206,7 +212,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
                     fileStoreTables.add(table);
                 } else {
-                    monitoredTables.remove(mySqlSchema.identifier());
+                    unmonitor(mySqlSchema);
                 }
             } catch (Catalog.TableNotExistException e) {
                 catalog.createTable(identifier, fromMySql, false);
@@ -221,8 +227,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
 
         MySqlSource<String> source =
-                MySqlActionUtils.buildMySqlSource(
-                        mySqlConfig, buildTableList(monitoredTables, excludedTables));
+                MySqlActionUtils.buildMySqlSource(mySqlConfig, buildTableList(excludedTables));
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
@@ -328,7 +333,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 + "MySQL table is: %s, fields are: %s.\n",
                         identifier.getFullName(),
                         paimonSchema.fields(),
-                        mySqlSchema.identifier(),
+                        mySqlSchema.tableName(),
                         mySqlSchema.fields());
     }
 
@@ -347,12 +352,42 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return new ArrayList<>(schemaMap.values());
     }
 
+    private Identifier buildPaimonIdentifier(
+            TableNameConverter tableNameConverter, MySqlSchema mySqlSchema) {
+        String tableName;
+        if (mergeShards) {
+            tableName = tableNameConverter.convert(mySqlSchema.tableName());
+        } else {
+            // the Paimon table name should be compound of origin database name and table name
+            // together to avoid name conflict
+            tableName = tableNameConverter.convert(mySqlSchema.identifier());
+        }
+
+        return Identifier.create(database, tableName);
+    }
+
+    private void unmonitor(MySqlSchema mySqlSchema) {
+        if (mergeShards) {
+            // if schema has been merged, all shards with the same table name should be removed
+            monitoredTables =
+                    monitoredTables.stream()
+                            .filter(id -> !id.getObjectName().equals(mySqlSchema.tableName()))
+                            .collect(Collectors.toList());
+        } else {
+            monitoredTables.remove(mySqlSchema.identifier());
+        }
+    }
+
+    @VisibleForTesting
+    public List<Identifier> monitoredTables() {
+        return monitoredTables;
+    }
+
     /**
      * See {@link com.ververica.cdc.connectors.mysql.debezium.DebeziumUtils#discoverCapturedTables}
      * and {@code MySqlSyncDatabaseTableListITCase}.
      */
-    private String buildTableList(
-            List<Identifier> monitoredTables, List<Identifier> excludedTables) {
+    private String buildTableList(List<Identifier> excludedTables) {
         String separatorRex = "\\.";
         if (mode == DIVIDED) {
             // In DIVIDED mode, we only concern about existed tables

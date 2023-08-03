@@ -200,7 +200,7 @@ public class MySqlActionUtils {
                         !mySqlFields.containsKey(fieldName.toLowerCase()),
                         String.format(
                                 "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, mySqlSchema.identifier()));
+                                fieldName, mySqlSchema.tableName()));
                 mySqlFields.put(fieldName.toLowerCase(), entry.getValue());
             }
             mySqlPrimaryKeys =

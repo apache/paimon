@@ -49,6 +49,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         String warehouse = params.get("warehouse");
         String database = params.get("database");
         boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
+        boolean mergeShards =
+                !params.has("merge-shards") || Boolean.parseBoolean(params.get("merge-shards"));
         String tablePrefix = params.get("table-prefix");
         String tableSuffix = params.get("table-suffix");
         String includingTables = params.get("including-tables");
@@ -80,6 +82,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         warehouse,
                         database,
                         ignoreIncompatible,
+                        mergeShards,
                         tablePrefix,
                         tableSuffix,
                         includingTables,
@@ -103,6 +106,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         System.out.println(
                 "  mysql-sync-database --warehouse <warehouse-path> --database <database-name> "
                         + "[--ignore-incompatible <true/false>] "
+                        + "[--merge-shards <true/false>] "
                         + "[--table-prefix <paimon-table-prefix>] "
                         + "[--table-suffix <paimon-table-suffix>] "
                         + "[--including-tables <mysql-table-name|name-regular-expr>] "
@@ -117,6 +121,13 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 "--ignore-incompatible is default false, in this case, if MySQL table name exists in Paimon "
                         + "and their schema is incompatible, an exception will be thrown. "
                         + "You can specify it to true explicitly to ignore the incompatible tables and exception.");
+        System.out.println();
+
+        System.out.println(
+                "--merge-shards is default true, in this case, if some tables in different databases have the same name, "
+                        + "their schemas will be merged and their records will be synchronized into one Paimon table. "
+                        + "Otherwise, each table's records will be synchronized to a corresponding Paimon table, "
+                        + "and the Paimon table will be named to 'databaseName_tableName' to avoid potential name conflict.");
         System.out.println();
 
         System.out.println(
