@@ -43,7 +43,7 @@ public interface ChannelComputer<T> extends Serializable {
         return bucket % numChannels;
     }
 
-    static <T, R> ChannelComputer<R> convert(
+    static <T, R> ChannelComputer<R> transform(
             ChannelComputer<T> input, SerializableFunction<R, T> converter) {
         return new ChannelComputer<R>() {
             @Override

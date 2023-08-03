@@ -27,24 +27,24 @@ import java.io.IOException;
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeInt;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeInt;
 
-/** Int Int serializer. */
-public class IntIntSerializer extends SerializerSingleton<IntInt> {
+/** A {@link SerializerSingleton} for {@link PositiveIntInt}. */
+public class PositiveIntIntSerializer extends SerializerSingleton<PositiveIntInt> {
 
     @Override
-    public IntInt copy(IntInt from) {
+    public PositiveIntInt copy(PositiveIntInt from) {
         return from;
     }
 
     @Override
-    public void serialize(IntInt record, DataOutputView target) throws IOException {
+    public void serialize(PositiveIntInt record, DataOutputView target) throws IOException {
         encodeInt(target, record.i1());
         encodeInt(target, record.i2());
     }
 
     @Override
-    public IntInt deserialize(DataInputView source) throws IOException {
+    public PositiveIntInt deserialize(DataInputView source) throws IOException {
         int i1 = decodeInt(source);
         int i2 = decodeInt(source);
-        return new IntInt(i1, i2);
+        return new PositiveIntInt(i1, i2);
     }
 }

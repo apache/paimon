@@ -35,8 +35,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.IDMapping;
-import org.apache.paimon.utils.IntInt;
-import org.apache.paimon.utils.IntIntSerializer;
+import org.apache.paimon.utils.PositiveIntInt;
+import org.apache.paimon.utils.PositiveIntIntSerializer;
 import org.apache.paimon.utils.SerBiFunction;
 import org.apache.paimon.utils.SerializableFunction;
 
@@ -66,7 +66,7 @@ public class GlobalIndexAssigner<T> implements Serializable {
     private transient PartitionKeyExtractor<T> extractor;
     private transient File path;
     private transient RocksDBStateFactory stateFactory;
-    private transient RocksDBValueState<InternalRow, IntInt> keyIndex;
+    private transient RocksDBValueState<InternalRow, PositiveIntInt> keyIndex;
 
     private transient IDMapping<BinaryRow> partMapping;
     private transient BucketAssigner bucketAssigner;
@@ -103,7 +103,7 @@ public class GlobalIndexAssigner<T> implements Serializable {
                 stateFactory.valueState(
                         "keyIndex",
                         new RowCompactedSerializer(keyType),
-                        new IntIntSerializer(),
+                        new PositiveIntIntSerializer(),
                         cacheSize);
 
         this.partMapping = new IDMapping<>(BinaryRow::copy);
@@ -117,7 +117,7 @@ public class GlobalIndexAssigner<T> implements Serializable {
 
         int partId = partMapping.index(partition);
 
-        IntInt partitionBucket = keyIndex.get(key);
+        PositiveIntInt partitionBucket = keyIndex.get(key);
         if (partitionBucket != null) {
             int previousPartId = partitionBucket.i1();
             int previousBucket = partitionBucket.i2();
@@ -160,13 +160,13 @@ public class GlobalIndexAssigner<T> implements Serializable {
         BinaryRow partition = extractor.partition(value);
         keyIndex.put(
                 extractor.trimmedPrimaryKey(value),
-                new IntInt(partMapping.index(partition), assignBucket(partition)));
+                new PositiveIntInt(partMapping.index(partition), assignBucket(partition)));
     }
 
     private void processNewRecord(BinaryRow partition, int partId, BinaryRow key, T value)
             throws IOException {
         int bucket = assignBucket(partition);
-        keyIndex.put(key, new IntInt(partId, bucket));
+        keyIndex.put(key, new PositiveIntInt(partId, bucket));
         collect(value, bucket);
     }
 

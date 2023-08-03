@@ -18,17 +18,20 @@
 
 package org.apache.paimon.utils;
 
+import java.io.Serializable;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** IntInt pojo class. */
-public class IntInt {
+public class PositiveIntInt implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final int i1;
     private final int i2;
 
-    public IntInt(int i1, int i2) {
+    public PositiveIntInt(int i1, int i2) {
         checkArgument(i1 >= 0);
         checkArgument(i2 >= 0);
         this.i1 = i1;
@@ -51,7 +54,7 @@ public class IntInt {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        IntInt intInt = (IntInt) o;
+        PositiveIntInt intInt = (PositiveIntInt) o;
         return i1 == intInt.i1 && i2 == intInt.i2;
     }
 

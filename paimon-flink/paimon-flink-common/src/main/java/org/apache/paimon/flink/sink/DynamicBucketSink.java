@@ -121,7 +121,7 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
             assignerParallelism = parallelism;
         }
         ChannelComputer<Tuple2<KeyPartOrRow, T>> channelComputer1 =
-                ChannelComputer.convert(channelComputer1(), tuple2 -> tuple2.f1);
+                ChannelComputer.transform(channelComputer1(), tuple2 -> tuple2.f1);
         DataStream<Tuple2<KeyPartOrRow, T>> partitionByKeyHash =
                 partition(bootstraped, channelComputer1, assignerParallelism);
 
