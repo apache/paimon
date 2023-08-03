@@ -51,6 +51,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
             options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
         }
         options.set(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, 3L);
+        options.set(CoreOptions.BUCKET, -1);
         Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
