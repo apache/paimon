@@ -78,6 +78,16 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, 1, 2, 2, 2, 1, 1, 1);
         add(func, 1, 3, 3, 1, 3, 3, 3);
         validate(func, 1, 2, 2, 2, 3, 3, 3);
+
+        // delete
+        add(func, RowKind.DELETE, 1, 1, 1, 3, 1, 1, null);
+        validate(func, 1, null, null, 3, 3, 3, 3);
+        add(func, RowKind.DELETE, 1, 1, 1, 3, 1, 1, 4);
+        validate(func, 1, null, null, 3, null, null, 4);
+        add(func, 1, 4, 4, 4, 5, 5, 5);
+        validate(func, 1, 4, 4, 4, 5, 5, 5);
+        add(func, RowKind.DELETE, 1, 1, 1, 6, 1, 1, 6);
+        validate(func, 1, null, null, 6, null, null, 6);
     }
 
     @Test
@@ -283,9 +293,12 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     private void add(MergeFunction<KeyValue> function, Integer... f) {
+        add(function, RowKind.INSERT, f);
+    }
+
+    private void add(MergeFunction<KeyValue> function, RowKind rowKind, Integer... f) {
         function.add(
-                new KeyValue()
-                        .replace(GenericRow.of(1), sequence++, RowKind.INSERT, GenericRow.of(f)));
+                new KeyValue().replace(GenericRow.of(1), sequence++, rowKind, GenericRow.of(f)));
     }
 
     private void validate(MergeFunction<KeyValue> function, Integer... f) {
