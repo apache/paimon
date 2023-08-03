@@ -18,17 +18,16 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.Collections;
 import java.util.Map;
@@ -78,12 +77,7 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl("shard_1"),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
+        try (Statement statement = getStatement()) {
             Thread.sleep(5_000);
             Catalog catalog = catalog();
             assertThat(catalog.listTables(database))

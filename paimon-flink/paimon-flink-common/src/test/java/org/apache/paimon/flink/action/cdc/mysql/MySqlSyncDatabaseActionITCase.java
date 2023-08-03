@@ -45,8 +45,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import javax.annotation.Nullable;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -68,12 +66,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** IT cases for {@link MySqlSyncDatabaseAction}. */
 public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
-    private static final String DATABASE_NAME = "paimon_sync_database";
-
-    private static final String DATABASE_NAME_TINYINT_CONVERT =
-            "paimon_sync_database_tinyint_schema";
-
-    private static final String DATABASE_NAME_TINYINT = "paimon_sync_database_tinyint";
     @TempDir java.nio.file.Path tempDir;
 
     @BeforeAll
@@ -86,7 +78,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Timeout(60)
     public void testSchemaEvolution() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("database-name", "paimon_sync_database");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(2);
@@ -106,14 +98,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                DriverManager.getConnection(
-                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                        MYSQL_CONTAINER.getUsername(),
-                        MYSQL_CONTAINER.getPassword())) {
-            try (Statement statement = conn.createStatement()) {
-                testSchemaEvolutionImpl(statement);
-            }
+        try (Statement statement = getStatement()) {
+            testSchemaEvolutionImpl(statement);
         }
     }
 
@@ -234,7 +220,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Timeout(60)
     public void testSchemaEvolutionWithTinyInt1Convert() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME_TINYINT_CONVERT);
+        mySqlConfig.put("database-name", "paimon_sync_database_tinyint_schema");
         mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -255,14 +241,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                DriverManager.getConnection(
-                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                        MYSQL_CONTAINER.getUsername(),
-                        MYSQL_CONTAINER.getPassword())) {
-            try (Statement statement = conn.createStatement()) {
-                testSchemaEvolutionImplWithTinyInt1Convert(statement);
-            }
+        try (Statement statement = getStatement()) {
+            testSchemaEvolutionImplWithTinyInt1Convert(statement);
         }
     }
 
@@ -270,7 +250,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         FileStoreTable table1 = getFileStoreTable("schema_evolution_4");
         FileStoreTable table2 = getFileStoreTable("schema_evolution_5");
 
-        statement.executeUpdate("USE " + DATABASE_NAME_TINYINT_CONVERT);
+        statement.executeUpdate("USE " + "paimon_sync_database_tinyint_schema");
 
         statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (1, 'one')");
         statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (2, 'two', 21)");
@@ -330,7 +310,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Test
     public void testSpecifiedMySqlTable() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("database-name", "paimon_sync_database");
         mySqlConfig.put("table-name", "my_table");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -410,12 +390,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         waitJobRunning(client);
 
         // validate `compatible` can be synchronized
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
+        try (Statement statement = getStatement()) {
             FileStoreTable table = getFileStoreTable("compatible");
 
             statement.executeUpdate("USE paimon_sync_database_ignore_incompatible");
@@ -480,12 +455,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
+        try (Statement statement = getStatement()) {
             testTableAffixImpl(statement);
         }
     }
@@ -692,12 +662,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                                 + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\",\"description\":\"\"}]");
 
         // check sync schema changes and records
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
+        try (Statement statement = getStatement()) {
             statement.executeUpdate("USE paimon_ignore_CASE");
             statement.executeUpdate("INSERT INTO T VALUES (1, 'Hi')");
             RowType rowType1 =
@@ -800,13 +765,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl(mySqlDatabase),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
-
+        try (Statement statement = getStatement()) {
             FileStoreTable table1 = getFileStoreTable("t1");
 
             statement.executeUpdate("USE " + mySqlDatabase);
@@ -862,20 +821,14 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 buildSyncDatabaseActionWithNewlyAddedTables(databaseName, testSchemaChange);
         waitJobRunning(client);
 
-        try (Connection conn =
-                DriverManager.getConnection(
-                        MYSQL_CONTAINER.getJdbcUrl(databaseName),
-                        MYSQL_CONTAINER.getUsername(),
-                        MYSQL_CONTAINER.getPassword())) {
-            try (Statement statement = conn.createStatement()) {
-                testNewlyAddedTableImpl(
-                        client,
-                        statement,
-                        numOfNewlyAddedTables,
-                        testSavepointRecovery,
-                        testSchemaChange,
-                        databaseName);
-            }
+        try (Statement statement = getStatement()) {
+            testNewlyAddedTableImpl(
+                    client,
+                    statement,
+                    numOfNewlyAddedTables,
+                    testSavepointRecovery,
+                    testSchemaChange,
+                    databaseName);
         }
     }
 
@@ -1125,7 +1078,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Timeout(60)
     public void testTinyInt1Convert() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME_TINYINT);
+        mySqlConfig.put("database-name", "paimon_sync_database_tinyint");
         mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -1146,14 +1099,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                DriverManager.getConnection(
-                        MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                        MYSQL_CONTAINER.getUsername(),
-                        MYSQL_CONTAINER.getPassword())) {
-            try (Statement statement = conn.createStatement()) {
-                testTinyInt1Convert(statement);
-            }
+        try (Statement statement = getStatement()) {
+            testTinyInt1Convert(statement);
         }
     }
 
@@ -1221,12 +1168,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl(databaseName),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE " + databaseName);
             // wait checkpointing to step into incremental phase
             Thread.sleep(2_000);
 
@@ -1286,12 +1229,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
+        try (Statement statement = getStatement()) {
             // test insert into t1
             statement.executeUpdate("INSERT INTO database_shard_1.t1 VALUES (1, 'db1_1')");
             statement.executeUpdate("INSERT INTO database_shard_1.t1 VALUES (2, 'db1_2')");
@@ -1419,12 +1357,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Connection conn =
-                        DriverManager.getConnection(
-                                MYSQL_CONTAINER.getJdbcUrl(DATABASE_NAME),
-                                MYSQL_CONTAINER.getUsername(),
-                                MYSQL_CONTAINER.getPassword());
-                Statement statement = conn.createStatement()) {
+        try (Statement statement = getStatement()) {
             Thread.sleep(5_000);
 
             Catalog catalog = catalog();
