@@ -124,12 +124,12 @@ CREATE TABLE paimon.test_db.orders (
     order_date date
 )
 WITH (
-    file.format = 'ORC',
+    file_format = 'ORC',
     primary_key = ARRAY['order_key','order_date'],
-    partitioned_by = ARRAY['orderdate'],
+    partitioned_by = ARRAY['order_date'],
     bucket = '2',
-    bucket-key = 'order_key',
-    changelog-producer = 'input'
+    bucket_key = 'order_key',
+    changelog_producer = 'input'
 )
 ```
 
@@ -143,12 +143,12 @@ CREATE TABLE paimon.test_db.orders (
     order_date date
 )
 WITH (
-    file.format = 'ORC',
+    file_format = 'ORC',
     primary_key = ARRAY['order_key','order_date'],
-    partitioned_by = ARRAY['orderdate'],
+    partitioned_by = ARRAY['order_date'],
     bucket = '2',
-    bucket-key = 'order_key',
-    changelog-producer = 'input'
+    bucket_key = 'order_key',
+    changelog_producer = 'input'
 )
 
 ALTER TABLE paimon.test_db.orders ADD COLUMN "shipping_address varchar;
