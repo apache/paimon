@@ -70,6 +70,7 @@ public abstract class AbstractFileStoreWrite<T>
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
 
     private ExecutorService lazyCompactExecutor;
+    private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
 
@@ -104,6 +105,7 @@ public abstract class AbstractFileStoreWrite<T>
 
     public void withCompactExecutor(ExecutorService compactExecutor) {
         this.lazyCompactExecutor = compactExecutor;
+        this.closeCompactExecutorWhenLeaving = false;
     }
 
     @Override
@@ -235,7 +237,7 @@ public abstract class AbstractFileStoreWrite<T>
             }
         }
         writers.clear();
-        if (lazyCompactExecutor != null) {
+        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
             lazyCompactExecutor.shutdownNow();
         }
     }

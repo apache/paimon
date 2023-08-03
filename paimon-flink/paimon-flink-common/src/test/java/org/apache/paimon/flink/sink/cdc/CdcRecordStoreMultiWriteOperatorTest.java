@@ -679,13 +679,23 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         CommonTestUtils.waitUtil(
                 () -> operator.writes().size() == 2, Duration.ofSeconds(5), Duration.ofMillis(100));
 
+        List<StoreSinkWrite> storeSinkWrites = new ArrayList<>(operator.writes().values());
         List<ExecutorService> compactExecutors = new ArrayList<>();
-        for (StoreSinkWrite storeSinkWrite : operator.writes().values()) {
+        for (StoreSinkWrite storeSinkWrite : storeSinkWrites) {
             StoreSinkWriteImpl storeSinkWriteImpl = (StoreSinkWriteImpl) storeSinkWrite;
             compactExecutors.add(storeSinkWriteImpl.getWrite().getWrite().getCompactExecutor());
         }
-
         assertThat(compactExecutors.get(0) == compactExecutors.get(1)).isTrue();
+
+        // check that compactExecutor should be shutdown by operator
+        ExecutorService compactExecutor = compactExecutors.get(0);
+        for (StoreSinkWrite storeSinkWrite : storeSinkWrites) {
+            storeSinkWrite.close();
+            assertThat(compactExecutor.isShutdown()).isFalse();
+        }
+
+        operator.close();
+        assertThat(compactExecutor.isShutdown()).isTrue();
 
         runner.stop();
         t.join();

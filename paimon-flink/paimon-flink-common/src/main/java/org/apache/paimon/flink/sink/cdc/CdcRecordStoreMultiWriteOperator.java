@@ -210,6 +210,9 @@ public class CdcRecordStoreMultiWriteOperator
         for (StoreSinkWrite write : writes.values()) {
             write.close();
         }
+        if (compactExecutor != null) {
+            compactExecutor.shutdownNow();
+        }
     }
 
     @Override
