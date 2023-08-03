@@ -22,7 +22,11 @@ package org.apache.paimon.utils;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
-/** This class is a util for processing {@link ByteBuffer}. */
+/**
+ * Most of the content of this class is referenced from Iceberg's ByteBuffers.
+ *
+ * <p>This class is a util for processing {@link ByteBuffer}.
+ */
 public class ByteBuffers {
 
     public static byte[] toByteArray(ByteBuffer buffer) {

@@ -234,6 +234,9 @@ from http://flink.apache.org/ version 1.17.0
 
 paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/SparkGenericCatalog.java
 paimon-hive/paimon-hive-common/src/test/java/org/apache/paimon/hive/TestHiveMetastore.java
+paimon-core/src/main/java/org/apache/paimon/utils/ByteBuffers.java
+paimon-core/src/main/java/org/apache/paimon/utils/ZOrderByteUtils.java
+paimon-core/src/test/java/org/apache/paimon/utils/TestZOrderByteUtil.java
 from http://iceberg.apache.org/ version 1.3.0
 
 paimon-hive/paimon-hive-common/src/test/resources/hive-schema-3.1.0.derby.sql
