@@ -206,7 +206,7 @@ public class TableSchema implements Serializable {
         return comment;
     }
 
-    public long getTimeMills() {
+    public long timeMillis() {
         return timeMillis;
     }
 

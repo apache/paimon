@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -38,6 +39,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ProjectedRow;
@@ -46,6 +48,9 @@ import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import java.io.IOException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -72,7 +77,8 @@ public class SchemasTable implements ReadonlyTable {
                             new DataField(
                                     3, "primary_keys", SerializationUtils.newStringType(false)),
                             new DataField(4, "options", SerializationUtils.newStringType(false)),
-                            new DataField(5, "comment", SerializationUtils.newStringType(true))));
+                            new DataField(5, "comment", SerializationUtils.newStringType(true)),
+                            new DataField(6, "effective_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -211,7 +217,11 @@ public class SchemasTable implements ReadonlyTable {
                     toJson(schema.partitionKeys()),
                     toJson(schema.primaryKeys()),
                     toJson(schema.options()),
-                    BinaryString.fromString(schema.comment()));
+                    BinaryString.fromString(schema.comment()),
+                    Timestamp.fromLocalDateTime(
+                            LocalDateTime.ofInstant(
+                                    Instant.ofEpochMilli(schema.timeMillis()),
+                                    ZoneId.systemDefault())));
         }
 
         private BinaryString toJson(Object obj) {

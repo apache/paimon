@@ -76,7 +76,7 @@ public class SchemaSerializer
             generator.writeStringField("comment", tableSchema.comment());
         }
 
-        generator.writeNumberField("timeMillis", tableSchema.getTimeMills());
+        generator.writeNumberField("timeMillis", tableSchema.timeMillis());
 
         generator.writeEndObject();
     }
