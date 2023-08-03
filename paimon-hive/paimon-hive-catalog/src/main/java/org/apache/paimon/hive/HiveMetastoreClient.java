@@ -26,6 +26,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.RowDataPartitionComputer;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
@@ -43,7 +44,6 @@ public class HiveMetastoreClient implements MetastoreClient {
     private final RowDataPartitionComputer partitionComputer;
 
     private final IMetaStoreClient client;
-    private final StorageDescriptor sd;
 
     private HiveMetastoreClient(Identifier identifier, TableSchema schema, IMetaStoreClient client)
             throws Exception {
@@ -55,7 +55,10 @@ public class HiveMetastoreClient implements MetastoreClient {
                         schema.partitionKeys().toArray(new String[0]));
 
         this.client = client;
-        this.sd = client.getTable(identifier.getDatabaseName(), identifier.getObjectName()).getSd();
+    }
+
+    private StorageDescriptor getCurrentSd() throws Exception {
+        return client.getTable(identifier.getDatabaseName(), identifier.getObjectName()).getSd();
     }
 
     @Override
@@ -64,10 +67,17 @@ public class HiveMetastoreClient implements MetastoreClient {
                 partitionComputer.generatePartValues(partition);
         List<String> partitionValues = new ArrayList<>(partitionMap.values());
 
+        StorageDescriptor sd = getCurrentSd();
+
         try {
-            client.getPartition(
+            Partition currentPartition = client.getPartition(
                     identifier.getDatabaseName(), identifier.getObjectName(), partitionValues);
-            // do nothing if the partition already exists
+
+            // update fields in partition metadata
+            if (!CollectionUtils.isEqualCollection(currentPartition.getSd().getCols(), currentPartition.getSd().getCols())) {
+                currentPartition.getSd().setCols(sd.getCols());
+                client.alter_partition(identifier.getDatabaseName(), identifier.getObjectName(), currentPartition);
+            }
         } catch (NoSuchObjectException e) {
             // partition not found, create new partition
             StorageDescriptor newSd = new StorageDescriptor(sd);
