@@ -18,11 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.sink.index.GlobalIndexAssignerOperator;
-import org.apache.paimon.flink.sink.index.IndexBootstrap;
-import org.apache.paimon.flink.sink.index.IndexBootstrapOperator;
-import org.apache.paimon.flink.sink.index.KeyPartOrRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
@@ -30,7 +25,6 @@ import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.EnumTypeInfo;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -82,58 +76,6 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         DataStream<Tuple2<T, Integer>> bucketAssigned =
                 partitionByKeyHash
                         .transform("dynamic-bucket-assigner", rowWithBucketType, assignerOperator)
-                        .setParallelism(partitionByKeyHash.getParallelism());
-
-        // 3. shuffle by bucket
-        DataStream<Tuple2<T, Integer>> partitionByBucket =
-                partition(bucketAssigned, channelComputer2(), parallelism);
-
-        // 4. writer and committer
-        return sinkFrom(partitionByBucket, initialCommitUser);
-    }
-
-    protected abstract SerializableFunction<InternalRow, T> converter();
-
-    protected abstract GlobalIndexAssignerOperator<T> globalIndexAssignerOperator();
-
-    public DataStreamSink<?> buildGlobalDynamic(
-            DataStream<T> input, @Nullable Integer parallelism) {
-        String initialCommitUser = UUID.randomUUID().toString();
-
-        // Topology:
-        // input -- bootstrap -- shuffle by key hash --> bucket-assigner -- shuffle by bucket -->
-        // writer --> committer
-
-        // TODO user different serializers for key and row.
-        TupleTypeInfo<Tuple2<KeyPartOrRow, T>> enumValue =
-                new TupleTypeInfo<>(new EnumTypeInfo<>(KeyPartOrRow.class), input.getType());
-        DataStream<Tuple2<KeyPartOrRow, T>> bootstraped =
-                input.transform(
-                                "INDEX_BOOTSTRAP",
-                                enumValue,
-                                new IndexBootstrapOperator<>(
-                                        new IndexBootstrap(table), converter()))
-                        .setParallelism(input.getParallelism());
-
-        // 1. shuffle by key hash
-        Integer assignerParallelism = table.coreOptions().dynamicBucketAssignerParallelism();
-        if (assignerParallelism == null) {
-            assignerParallelism = parallelism;
-        }
-        ChannelComputer<Tuple2<KeyPartOrRow, T>> channelComputer1 =
-                ChannelComputer.transform(channelComputer1(), tuple2 -> tuple2.f1);
-        DataStream<Tuple2<KeyPartOrRow, T>> partitionByKeyHash =
-                partition(bootstraped, channelComputer1, assignerParallelism);
-
-        // 2. bucket-assigner
-        TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
-                new TupleTypeInfo<>(input.getType(), BasicTypeInfo.INT_TYPE_INFO);
-        DataStream<Tuple2<T, Integer>> bucketAssigned =
-                partitionByKeyHash
-                        .transform(
-                                "dynamic-bucket-assigner",
-                                rowWithBucketType,
-                                globalIndexAssignerOperator())
                         .setParallelism(partitionByKeyHash.getParallelism());
 
         // 3. shuffle by bucket

@@ -18,9 +18,7 @@
 
 package org.apache.paimon.flink.sink.index;
 
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.AbstractInnerTableScan;
@@ -53,13 +51,6 @@ public class IndexBootstrap implements Serializable {
         List<String> keyPartFields =
                 Stream.concat(table.primaryKeys().stream(), table.partitionKeys().stream())
                         .collect(Collectors.toList());
-        FieldGetter[] keyPartGetters = new FieldGetter[keyPartFields.size()];
-        for (int i = 0; i < keyPartGetters.length; i++) {
-            keyPartGetters[i] =
-                    InternalRow.createFieldGetter(
-                            rowType.getTypeAt(fieldNames.indexOf(keyPartFields.get(i))), i);
-        }
-
         int[] projection =
                 keyPartFields.stream()
                         .map(fieldNames::indexOf)
@@ -72,14 +63,7 @@ public class IndexBootstrap implements Serializable {
                 tableScan.withBucketFilter(bucket -> bucket % numAssigners == assignId).plan();
 
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
-            reader.forEachRemaining(
-                    keyRow -> {
-                        GenericRow row = new GenericRow(fieldNames.size());
-                        for (int i = 0; i < keyPartGetters.length; i++) {
-                            row.setField(projection[i], keyPartGetters[i].getFieldOrNull(keyRow));
-                        }
-                        collector.accept(row);
-                    });
+            reader.forEachRemaining(collector);
         }
     }
 }

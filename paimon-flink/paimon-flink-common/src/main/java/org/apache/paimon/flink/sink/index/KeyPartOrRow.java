@@ -21,5 +21,28 @@ package org.apache.paimon.flink.sink.index;
 /** Type of record, key or full row. */
 public enum KeyPartOrRow {
     KEY_PART,
-    ROW
+    ROW;
+
+    public byte toByteValue() {
+        switch (this) {
+            case KEY_PART:
+                return 0;
+            case ROW:
+                return 1;
+            default:
+                throw new UnsupportedOperationException("Unsupported value: " + this);
+        }
+    }
+
+    public static KeyPartOrRow fromByteValue(byte value) {
+        switch (value) {
+            case 0:
+                return KEY_PART;
+            case 1:
+                return ROW;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported byte value '" + value + "' for row kind.");
+        }
+    }
 }

@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.FlinkRowData;
-import org.apache.paimon.flink.sink.index.GlobalIndexAssignerOperator;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
@@ -58,16 +55,6 @@ public class RowDynamicBucketSink extends DynamicBucketSink<RowData> {
     protected SerializableFunction<TableSchema, PartitionKeyExtractor<RowData>>
             extractorFunction() {
         return RowDataPartitionKeyExtractor::new;
-    }
-
-    @Override
-    protected SerializableFunction<InternalRow, RowData> converter() {
-        return FlinkRowData::new;
-    }
-
-    @Override
-    protected GlobalIndexAssignerOperator<RowData> globalIndexAssignerOperator() {
-        return GlobalIndexAssignerOperator.forRowData(table);
     }
 
     @Override

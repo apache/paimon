@@ -43,18 +43,30 @@ public interface ChannelComputer<T> extends Serializable {
         return bucket % numChannels;
     }
 
-    static <T, R> ChannelComputer<R> transform(
-            ChannelComputer<T> input, SerializableFunction<R, T> converter) {
-        return new ChannelComputer<R>() {
-            @Override
-            public void setup(int numChannels) {
-                input.setup(numChannels);
-            }
+    static <T> ChannelComputer<T> channelComputer(SerializableFunction<T, BinaryRow> keyExtractor) {
+        return new KeyChannelComputer<>(keyExtractor);
+    }
 
-            @Override
-            public int channel(R record) {
-                return input.channel(converter.apply(record));
-            }
-        };
+    class KeyChannelComputer<T> implements ChannelComputer<T> {
+
+        private static final long serialVersionUID = 1L;
+
+        private final SerializableFunction<T, BinaryRow> keyExtractor;
+
+        private transient int numChannels;
+
+        private KeyChannelComputer(SerializableFunction<T, BinaryRow> keyExtractor) {
+            this.keyExtractor = keyExtractor;
+        }
+
+        @Override
+        public void setup(int numChannels) {
+            this.numChannels = numChannels;
+        }
+
+        @Override
+        public int channel(T record) {
+            return Math.abs(keyExtractor.apply(record).hashCode() % numChannels);
+        }
     }
 }

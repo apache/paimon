@@ -92,6 +92,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
         return new GlobalIndexAssigner<>(
                 t,
                 RowDataPartitionKeyExtractor::new,
+                KeyPartPartitionKeyExtractor::new,
                 new ProjectToRowDataFunction(t.rowType(), t.partitionKeys()),
                 (rowData, rowKind) -> {
                     rowData.setRowKind(toFlinkRowKind(rowKind));

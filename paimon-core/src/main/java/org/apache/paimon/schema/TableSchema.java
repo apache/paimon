@@ -218,7 +218,7 @@ public class TableSchema implements Serializable {
                 .collect(Collectors.toList());
     }
 
-    private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
+    public RowType projectedLogicalRowType(List<String> projectedFieldNames) {
         return new RowType(projectedDataFields(projectedFieldNames));
     }
 

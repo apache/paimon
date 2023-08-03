@@ -56,6 +56,8 @@ public class GlobalIndexAssigner<T> implements Serializable {
 
     private final AbstractFileStoreTable table;
     private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
+    private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>>
+            keyPartExtractorFunction;
     private final SerBiFunction<T, BinaryRow, T> setPartition;
     private final SerBiFunction<T, RowKind, T> setRowKind;
 
@@ -64,6 +66,7 @@ public class GlobalIndexAssigner<T> implements Serializable {
     private transient BiConsumer<T, Integer> collector;
     private transient int numAssigners;
     private transient PartitionKeyExtractor<T> extractor;
+    private transient PartitionKeyExtractor<T> keyPartExtractor;
     private transient File path;
     private transient RocksDBStateFactory stateFactory;
     private transient RocksDBValueState<InternalRow, PositiveIntInt> keyIndex;
@@ -75,10 +78,12 @@ public class GlobalIndexAssigner<T> implements Serializable {
     public GlobalIndexAssigner(
             Table table,
             SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction,
+            SerializableFunction<TableSchema, PartitionKeyExtractor<T>> keyPartExtractorFunction,
             SerBiFunction<T, BinaryRow, T> setPartition,
             SerBiFunction<T, RowKind, T> setRowKind) {
         this.table = (AbstractFileStoreTable) table;
         this.extractorFunction = extractorFunction;
+        this.keyPartExtractorFunction = keyPartExtractorFunction;
         this.setPartition = setPartition;
         this.setRowKind = setRowKind;
     }
@@ -92,6 +97,7 @@ public class GlobalIndexAssigner<T> implements Serializable {
         CoreOptions coreOptions = table.coreOptions();
         this.targetBucketRowNumber = (int) coreOptions.dynamicBucketTargetRowNum();
         this.extractor = extractorFunction.apply(table.schema());
+        this.keyPartExtractor = keyPartExtractorFunction.apply(table.schema());
 
         // state
         Options options = coreOptions.toConfiguration();
@@ -157,9 +163,9 @@ public class GlobalIndexAssigner<T> implements Serializable {
     }
 
     public void bootstrap(T value) throws IOException {
-        BinaryRow partition = extractor.partition(value);
+        BinaryRow partition = keyPartExtractor.partition(value);
         keyIndex.put(
-                extractor.trimmedPrimaryKey(value),
+                keyPartExtractor.trimmedPrimaryKey(value),
                 new PositiveIntInt(partMapping.index(partition), assignBucket(partition)));
     }
 
