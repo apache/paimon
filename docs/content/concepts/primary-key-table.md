@@ -36,16 +36,38 @@ By [defining primary keys]({{< ref "how-to/creating-tables#tables-with-primary-k
 
 A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}).
 
-Primary Key Table supports two bucket mode:
-1. Fixed Bucket mode: configure a bucket greater than 0, rescaling buckets can only be done through offline processes, 
-   see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}). A too large number of buckets leads to too many
-   small files, and a too small number of buckets leads to poor write performance.
-2. Dynamic Bucket mode: configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic expansion of
-   the number of buckets. (This is an experimental feature)
-   - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
-   - Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
-   - Dynamic Bucket requires more memory, 100 million entries in a partition takes up 1 GB more memory, partitions that are no longer active do not take up memory.
-   - Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition.
+### Fixed Bucket
+
+Configure a bucket greater than 0, rescaling buckets can only be done through offline processes,
+see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}). A too large number of buckets leads to too many
+small files, and a too small number of buckets leads to poor write performance.
+
+### Dynamic Bucket
+
+{{< hint info >}}
+This is an experimental feature.
+{{< /hint >}}
+
+Configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic expansion of the number of buckets.
+
+- Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
+- Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
+
+{{< hint info >}}
+Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition.
+{{< /hint >}}
+
+Normal Dynamic Bucket Mode:
+
+When your updates do not cross partitions (no partitions, or primary keys contain all partition fields), Dynamic
+Bucket mode uses HASH index to maintain mapping from key to bucket, it requires more memory than fixed bucket mode,
+100 million entries in a partition takes up 1 GB more memory, partitions that are no longer active do not take up memory.
+
+Cross Partitions Update Dynamic Bucket Mode:
+
+When you need cross partition updates (primary keys not contain all partition fields), Dynamic Bucket mode directly
+maintains the mapping of keys to partition and bucket, uses local disks, and initializes indexes by reading all 
+existing keys in the table when starting stream write job.
 
 ## Merge Engines
 
