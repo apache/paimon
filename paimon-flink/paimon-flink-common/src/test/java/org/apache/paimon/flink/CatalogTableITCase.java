@@ -180,10 +180,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `primary_keys` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `options` VARCHAR(2147483647) NOT NULL,\n"
-                                + "  `comment` VARCHAR(2147483647)\n"
+                                + "  `comment` VARCHAR(2147483647),\n"
+                                + "  `effective_time` TIMESTAMP(3) NOT NULL\n"
                                 + ") ]]");
 
-        List<Row> result = sql("SELECT * FROM T$schemas order by schema_id");
+        List<Row> result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM T$schemas order by schema_id");
 
         assertThat(result.toString())
                 .isEqualTo(
@@ -222,7 +226,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     public void testCreateTableLike() throws Exception {
         sql("CREATE TABLE T (a INT)");
         sql("CREATE TABLE T1 LIKE T");
-        List<Row> result = sql("SELECT * FROM T1$schemas s");
+        List<Row> result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM T1$schemas s");
         assertThat(result.toString())
                 .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
     }
@@ -232,7 +239,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE t (a INT)");
         sql("INSERT INTO t VALUES(1),(2)");
         sql("CREATE TABLE t1 AS SELECT * FROM t");
-        List<Row> result = sql("SELECT * FROM t1$schemas s");
+        List<Row> result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM t1$schemas s");
         assertThat(result.toString())
                 .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
         List<Row> data = sql("SELECT * FROM t1");
@@ -249,7 +259,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         + ") PARTITIONED BY (dt, hh)");
         sql("INSERT INTO t_p SELECT 1,2,'a','2023-02-19','12'");
         sql("CREATE TABLE t1_p WITH ('partition' = 'dt' ) AS SELECT * FROM t_p");
-        List<Row> resultPartition = sql("SELECT * FROM t1_p$schemas s");
+        List<Row> resultPartition =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM t1_p$schemas s");
         assertThat(resultPartition.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"user_id\",\"type\":\"BIGINT\"},{\"id\":1,\"name\":\"item_id\",\"type\":\"BIGINT\"},"
