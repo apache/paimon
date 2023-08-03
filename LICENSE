@@ -233,6 +233,9 @@ paimon-common/src/main/java/org/apache/paimon/options/ConfigOption.java
 from http://flink.apache.org/ version 1.17.0
 
 paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/SparkGenericCatalog.java
+paimon-core/src/main/java/org/apache/paimon/utils/ByteBuffers.java
+paimon-core/src/main/java/org/apache/paimon/utils/ZOrderByteUtils.java
+paimon-core/src/test/java/org/apache/paimon/utils/TestZOrderByteUtil.java
 from http://iceberg.apache.org/ version 1.3.0
 
 MIT License
