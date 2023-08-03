@@ -124,7 +124,7 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 
 ## Kerberos
 
-You can configure kerberos keytag file when using KERBEROS authentication in the properties.
+You can configure kerberos keytab file when using KERBEROS authentication in the properties.
 
 ```
 security.kerberos.login.principal=hadoop-user
@@ -151,7 +151,7 @@ CREATE TABLE paimon.test_db.orders (
 WITH (
     file_format = 'ORC',
     primary_key = ARRAY['order_key','order_date'],
-    partitioned_by = ARRAY['orderdate'],
+    partitioned_by = ARRAY['order_date'],
     bucket = '2',
     bucket_key = 'order_key',
     changelog_producer = 'input'
@@ -170,7 +170,7 @@ CREATE TABLE paimon.test_db.orders (
 WITH (
     file_format = 'ORC',
     primary_key = ARRAY['order_key','order_date'],
-    partitioned_by = ARRAY['orderdate'],
+    partitioned_by = ARRAY['order_date'],
     bucket = '2',
     bucket_key = 'order_key',
     changelog_producer = 'input'
