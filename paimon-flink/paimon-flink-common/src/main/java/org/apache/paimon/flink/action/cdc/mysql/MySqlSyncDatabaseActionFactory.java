@@ -127,7 +127,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 "--merge-shards is default true, in this case, if some tables in different databases have the same name, "
                         + "their schemas will be merged and their records will be synchronized into one Paimon table. "
                         + "Otherwise, each table's records will be synchronized to a corresponding Paimon table, "
-                        + "and the Paimon table will be named to 'databaseName_tableName' to avoid name conflict.");
+                        + "and the Paimon table will be named to 'databaseName_tableName' to avoid potential name conflict.");
         System.out.println();
 
         System.out.println(
