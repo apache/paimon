@@ -102,6 +102,10 @@ public abstract class AbstractFileStoreWrite<T>
         this.ignorePreviousFiles = ignorePreviousFiles;
     }
 
+    public void withCompactExecutor(ExecutorService compactExecutor) {
+        this.lazyCompactExecutor = compactExecutor;
+    }
+
     @Override
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
         WriterContainer<T> container = getWriterWrapper(partition, bucket);
@@ -353,6 +357,11 @@ public abstract class AbstractFileStoreWrite<T>
                             new ExecutorThreadFactory(
                                     Thread.currentThread().getName() + "-compaction"));
         }
+        return lazyCompactExecutor;
+    }
+
+    @VisibleForTesting
+    public ExecutorService getCompactExecutor() {
         return lazyCompactExecutor;
     }
 

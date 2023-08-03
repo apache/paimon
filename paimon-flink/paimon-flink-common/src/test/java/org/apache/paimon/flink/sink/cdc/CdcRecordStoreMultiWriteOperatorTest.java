@@ -24,8 +24,8 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.flink.sink.MultiTableCommittableTypeInfo;
+import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -37,6 +37,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.api.common.ExecutionConfig;
@@ -51,15 +52,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -145,16 +147,6 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         Predicate<Path> pathPredicate = path -> path.toString().contains(tempDir.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
         assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();
-    }
-
-    private static FileIO getFileIO(CatalogContext catalogContext, Path warehouse) {
-        FileIO fileIO;
-        try {
-            fileIO = FileIO.get(warehouse, catalogContext);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return fileIO;
     }
 
     @Test
@@ -245,14 +237,14 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         CdcRecordStoreMultiWriteOperator operator =
                 (CdcRecordStoreMultiWriteOperator) harness.getOperator();
-        assertThat(operator.tables.size()).isEqualTo(0);
-        assertThat(operator.writes.size()).isEqualTo(0);
+        assertThat(operator.tables().size()).isEqualTo(0);
+        assertThat(operator.writes().size()).isEqualTo(0);
 
         catalog.createTable(tableId, firstTableSchema, true);
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
-        assertThat(operator.tables.size()).isEqualTo(1);
-        assertThat(operator.writes.size()).isEqualTo(1);
+        assertThat(operator.tables().size()).isEqualTo(1);
+        assertThat(operator.writes().size()).isEqualTo(1);
 
         // after table is created, record should be processed immediately
         fields = new HashMap<>();
@@ -278,7 +270,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         harness.initializeState(snapshot);
         operator = (CdcRecordStoreMultiWriteOperator) harness.getOperator();
 
-        assertThat(operator.commitUser).isEqualTo(prevCommitUser);
+        assertThat(operator.commitUser()).isEqualTo(prevCommitUser);
 
         runner.stop();
         t.join();
@@ -634,6 +626,66 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         schemaManager.commitChanges(SchemaChange.updateColumnType("v4", DataTypes.VARBINARY(10)));
         actual = runner.take();
         assertThat(actual).isEqualTo(expected);
+
+        runner.stop();
+        t.join();
+        harness.close();
+    }
+
+    @Test
+    @Timeout(30)
+    public void testUsingTheSameCompactExecutor() throws Exception {
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> harness =
+                createTestHarness(catalogLoader);
+        harness.open();
+
+        Runner runner = new Runner(harness);
+        Thread t = new Thread(runner);
+        t.start();
+
+        // write records to two tables thus two FileStoreWrite will be created
+        Map<String, String> fields;
+
+        // first table record
+        fields = new HashMap<>();
+        fields.put("pt", "0");
+        fields.put("k", "1");
+        fields.put("v", "10");
+
+        CdcMultiplexRecord expected =
+                CdcMultiplexRecord.fromCdcRecord(
+                        databaseName,
+                        firstTable.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, fields));
+        runner.offer(expected);
+
+        // second table record
+        fields = new HashMap<>();
+        fields.put("k", "1");
+        fields.put("v1", "10");
+        fields.put("v2", "0.625");
+        fields.put("v3", "one");
+        fields.put("v4", "b_one");
+        expected =
+                CdcMultiplexRecord.fromCdcRecord(
+                        databaseName,
+                        secondTable.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, fields));
+        runner.offer(expected);
+
+        // get and check compactExecutor from two FileStoreWrite
+        CdcRecordStoreMultiWriteOperator operator =
+                (CdcRecordStoreMultiWriteOperator) harness.getOperator();
+        CommonTestUtils.waitUtil(
+                () -> operator.writes().size() == 2, Duration.ofSeconds(5), Duration.ofMillis(100));
+
+        List<ExecutorService> compactExecutors = new ArrayList<>();
+        for (StoreSinkWrite storeSinkWrite : operator.writes().values()) {
+            StoreSinkWriteImpl storeSinkWriteImpl = (StoreSinkWriteImpl) storeSinkWrite;
+            compactExecutors.add(storeSinkWriteImpl.getWrite().getWrite().getCompactExecutor());
+        }
+
+        assertThat(compactExecutors.get(0) == compactExecutors.get(1)).isTrue();
 
         runner.stop();
         t.join();

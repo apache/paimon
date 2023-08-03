@@ -80,6 +80,11 @@ public class CommonTestUtils {
         assertThatThrownBy(code::call).isInstanceOf(expected).hasMessageContaining(msg);
     }
 
+    public static void waitUtil(Supplier<Boolean> condition, Duration timeout, Duration pause)
+            throws TimeoutException, InterruptedException {
+        waitUtil(condition, timeout, pause, "Failed to wait for condition to be true.");
+    }
+
     /**
      * Wait util the given condition is met or timeout.
      *
