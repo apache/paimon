@@ -45,9 +45,7 @@ import java.util.List;
 import static org.apache.paimon.utils.JsonSerdeUtil.toFlatJson;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Unit tests for {@link SchemasTable}.
- */
+/** Unit tests for {@link SchemasTable}. */
 public class SchemasTableTest extends TableTestBase {
 
     private SchemasTable schemasTable;
