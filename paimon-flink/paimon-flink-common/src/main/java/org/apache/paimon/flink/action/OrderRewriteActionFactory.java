@@ -71,16 +71,33 @@ public class OrderRewriteActionFactory implements ActionFactory {
                         + "             --database <database-name>\n"
                         + "             --warehouse <warehouse-path>\n"
                         + "             --table <target-table-name>\n"
-                        + "             --sql-select \"sql\"\n"
-                        + "             --sql-order-by \"<orderType>(col1,col2,...)\"\n");
+                        + "             --select \"sql\"\n"
+                        + "             --order-by \"<orderType>(col1,col2,...)\"\n");
 
         System.out.println("orderType could by: zorder, order.");
         System.out.println(
                 "This action is only work for unaware-bucket append-only table, which is append-only with property bucket=-1.");
-        System.out.println("You can add WHERE sub-clause in sql-select.");
+        System.out.println("You can add WHERE sub-clause in select.");
         System.out.println(
                 "The sink-parallelism of the target table will infect the action process time and the result. "
                         + "If you want better aggregation result, you should turn down the sink-parallelism of target table."
                         + "If you want this action finish faster, you should turn up that.");
+    }
+
+    private String getSqlOrderBy(MultipleParameterTool params) {
+        String sqlOrderBy = params.get("order-by");
+        if (sqlOrderBy == null) {
+            throw new IllegalArgumentException("Please specify \"order-by\".");
+        }
+        return sqlOrderBy;
+    }
+
+    // we need to specify select clause to define to z-order source
+    private String getSqlSelect(MultipleParameterTool params) {
+        String selectSql = params.get("select");
+        if (selectSql == null) {
+            throw new IllegalArgumentException("Please specify \"select\".");
+        }
+        return selectSql;
     }
 }
