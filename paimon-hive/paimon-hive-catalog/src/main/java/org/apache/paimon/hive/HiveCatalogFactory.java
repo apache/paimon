@@ -54,21 +54,24 @@ public class HiveCatalogFactory implements CatalogFactory {
 
     @Override
     public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        String uri =
-                Preconditions.checkNotNull(
-                        context.options().get(CatalogOptions.URI),
-                        CatalogOptions.URI.key()
-                                + " must be set for paimon "
-                                + IDENTIFIER
-                                + " catalog");
-
+        String uri = context.options().get(CatalogOptions.URI);
         String hiveConfDir = context.options().get(HIVE_CONF_DIR);
         String hadoopConfDir = context.options().get(HADOOP_CONF_DIR);
         HiveConf hiveConf = createHiveConf(hiveConfDir, hadoopConfDir);
 
         // always using user-set parameters overwrite hive-site.xml parameters
         context.options().toMap().forEach(hiveConf::set);
-        hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+        if (uri != null) {
+            hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+        }
+        Preconditions.checkNotNull(
+                hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname),
+                "Can't find hive metastore uri to connect: "
+                        + " either set "
+                        + CatalogOptions.URI.key()
+                        + " for paimon "
+                        + IDENTIFIER
+                        + " catalog or set hive.metastore.uris in hive-site.xml or hadoop configurations.");
 
         String clientClassName = context.options().get(METASTORE_CLIENT_CLASS);
 
