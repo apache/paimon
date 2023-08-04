@@ -48,7 +48,7 @@ public class FileIOTest {
                     .hasMessageContaining("Missing required options are:\n\nRequire1\nreQuire2");
         }
 
-        options.set("Require1", "dummy");
+        options.set("Re-quire1", "dummy");
         options.set("reQuire2", "dummy");
         FileIO fileIO =
                 FileIO.get(

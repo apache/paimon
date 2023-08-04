@@ -25,8 +25,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 /** A {@link PluginLoader} to load oss. */
 public class S3Loader implements FileIOLoader {
@@ -53,10 +53,10 @@ public class S3Loader implements FileIOLoader {
     }
 
     @Override
-    public Set<String> requiredOptions() {
-        Set<String> options = new HashSet<>();
-        options.add("s3.access-key");
-        options.add("s3.secret-key");
+    public List<String[]> requiredOptions() {
+        List<String[]> options = new ArrayList<>();
+        options.add(new String[] {"s3.access-key", "s3.access.key"});
+        options.add(new String[] {"s3.secret-key", "s3.secret.key"});
         return options;
     }
 

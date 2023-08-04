@@ -20,8 +20,8 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.fs.local.LocalFileIO;
 
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Test {@link FileIOLoader}. */
 public class RequireOptionsFileIOLoader implements FileIOLoader {
@@ -32,10 +32,10 @@ public class RequireOptionsFileIOLoader implements FileIOLoader {
     }
 
     @Override
-    public Set<String> requiredOptions() {
-        Set<String> options = new HashSet<>();
-        options.add("Require1");
-        options.add("reQuire2");
+    public List<String[]> requiredOptions() {
+        List<String[]> options = new ArrayList<>();
+        options.add(new String[] {"Require1", "Re-quire1"});
+        options.add(new String[] {"reQuire2"});
         return options;
     }
 

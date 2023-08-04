@@ -259,14 +259,21 @@ public interface FileIO extends Serializable {
         List<IOException> ioExceptionList = new ArrayList<>();
 
         if (loader != null) {
-            Set<String> keys =
+            Set<String> options =
                     config.options().keySet().stream()
                             .map(String::toLowerCase)
                             .collect(Collectors.toSet());
             Set<String> missOptions = new HashSet<>();
-            for (String key : loader.requiredOptions()) {
-                if (!keys.contains(key.toLowerCase())) {
-                    missOptions.add(key);
+            for (String[] keys : loader.requiredOptions()) {
+                boolean found = false;
+                for (String key : keys) {
+                    if (options.contains(key.toLowerCase())) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    missOptions.add(keys[0]);
                 }
             }
             if (missOptions.size() > 0) {
