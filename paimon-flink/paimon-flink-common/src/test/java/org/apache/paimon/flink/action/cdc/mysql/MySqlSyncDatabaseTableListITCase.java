@@ -68,8 +68,8 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                         false,
                         null,
                         null,
-                        "t.+|s.+",
-                        "ta|sa",
+                        ".*shard_.*\\.t.+|.*shard_.*\\.s.+",
+                        ".*shard_.*\\.ta|.*shard_.*\\.sa",
                         Collections.emptyMap(),
                         tableConfig,
                         mode);
