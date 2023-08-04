@@ -20,6 +20,7 @@ package org.apache.paimon.metrics.commit;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.metrics.Counter;
@@ -300,6 +301,6 @@ public class CommitMetricsTest {
                         RowType.of(new IntType()),
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString());
-        return new CommitMetrics(pathFactory);
+        return new CommitMetrics(pathFactory, LocalFileIO.create());
     }
 }

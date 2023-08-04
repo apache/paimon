@@ -167,7 +167,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestMergeMinCount(),
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator(),
-                new CommitMetrics(pathFactory()));
+                new CommitMetrics(pathFactory(), fileIO));
     }
 
     @Override
