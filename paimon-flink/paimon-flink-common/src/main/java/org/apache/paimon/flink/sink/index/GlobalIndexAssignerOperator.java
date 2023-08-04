@@ -18,9 +18,16 @@
 
 package org.apache.paimon.flink.sink.index;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.RowDataPartitionKeyExtractor;
+import org.apache.paimon.flink.sink.cdc.CdcRecord;
+import org.apache.paimon.flink.sink.cdc.CdcRecordPartitionKeyExtractor;
+import org.apache.paimon.flink.sink.cdc.CdcRecordUtils;
 import org.apache.paimon.flink.utils.ProjectToRowDataFunction;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -31,6 +38,9 @@ import org.apache.flink.table.data.RowData;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.FlinkRowData.toFlinkRowKind;
@@ -98,5 +108,26 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
                     rowData.setRowKind(toFlinkRowKind(rowKind));
                     return rowData;
                 });
+    }
+
+    public static GlobalIndexAssignerOperator<CdcRecord> forCdcRecord(Table table) {
+        RowType partitionType = ((FileStoreTable) table).schema().logicalPartitionType();
+        List<String> partitionNames = partitionType.getFieldNames();
+        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(partitionType);
+        GlobalIndexAssigner<CdcRecord> assigner =
+                new GlobalIndexAssigner<>(
+                        table,
+                        CdcRecordPartitionKeyExtractor::new,
+                        CdcRecordPartitionKeyExtractor::new,
+                        (record, part) -> {
+                            CdcRecord partCdc =
+                                    CdcRecordUtils.fromGenericRow(
+                                            GenericRow.of(converter.convert(part)), partitionNames);
+                            Map<String, String> fields = new HashMap<>(record.fields());
+                            fields.putAll(partCdc.fields());
+                            return new CdcRecord(record.kind(), fields);
+                        },
+                        CdcRecord::setRowKind);
+        return new GlobalIndexAssignerOperator<>(assigner);
     }
 }

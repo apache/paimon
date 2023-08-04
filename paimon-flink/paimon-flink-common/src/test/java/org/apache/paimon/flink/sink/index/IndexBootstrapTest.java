@@ -36,7 +36,7 @@ import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link GlobalIndexAssigner}. */
+/** Test for {@link IndexBootstrap}. */
 public class IndexBootstrapTest extends TableTestBase {
 
     @Test
@@ -66,11 +66,7 @@ public class IndexBootstrapTest extends TableTestBase {
 
         IndexBootstrap indexBootstrap = new IndexBootstrap(table);
         List<Integer> result = new ArrayList<>();
-        Consumer<InternalRow> consumer =
-                row -> {
-                    assertThat(row.isNullAt(0)).isTrue();
-                    result.add(row.getInt(1));
-                };
+        Consumer<InternalRow> consumer = row -> result.add(row.getInt(0));
 
         indexBootstrap.bootstrap(2, 0, consumer);
         assertThat(result).containsExactlyInAnyOrder(2, 3);

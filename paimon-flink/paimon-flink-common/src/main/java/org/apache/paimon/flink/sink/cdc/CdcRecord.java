@@ -32,12 +32,18 @@ public class CdcRecord implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final RowKind kind;
+    private RowKind kind;
+
     private final Map<String, String> fields;
 
     public CdcRecord(RowKind kind, Map<String, String> fields) {
         this.kind = kind;
         this.fields = fields;
+    }
+
+    public CdcRecord setRowKind(RowKind kind) {
+        this.kind = kind;
+        return this;
     }
 
     public static CdcRecord emptyRecord() {

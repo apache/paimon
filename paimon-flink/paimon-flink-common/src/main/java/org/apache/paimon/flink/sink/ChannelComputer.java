@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.utils.SerializableFunction;
 
 import java.io.Serializable;
 
@@ -40,5 +41,20 @@ public interface ChannelComputer<T> extends Serializable {
 
     static int select(int bucket, int numChannels) {
         return bucket % numChannels;
+    }
+
+    static <T, R> ChannelComputer<R> transform(
+            ChannelComputer<T> input, SerializableFunction<R, T> converter) {
+        return new ChannelComputer<R>() {
+            @Override
+            public void setup(int numChannels) {
+                input.setup(numChannels);
+            }
+
+            @Override
+            public int channel(R record) {
+                return input.channel(converter.apply(record));
+            }
+        };
     }
 }

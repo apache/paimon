@@ -24,12 +24,15 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.RowType;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
 
 /** Convert {@link InternalRow} to object array. */
-public class RowDataToObjectArrayConverter {
+public class RowDataToObjectArrayConverter implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     private final RowType rowType;
     private final InternalRow.FieldGetter[] fieldGetters;
