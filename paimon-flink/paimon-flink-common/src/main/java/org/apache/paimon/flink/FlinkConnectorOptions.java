@@ -250,6 +250,13 @@ public class FlinkConnectorOptions {
                     .defaultValue(16)
                     .withDescription("The thread number for lookup async.");
 
+    public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
+            ConfigOptions.key("sink.savepoint.auto-tag")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, a tag will be automatically created for the snapshot created by flink savepoint.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

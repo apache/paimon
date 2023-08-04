@@ -448,7 +448,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         }
     }
 
-    private TagManager tagManager() {
+    @Override
+    public TagManager tagManager() {
         return new TagManager(fileIO, path);
     }
 
