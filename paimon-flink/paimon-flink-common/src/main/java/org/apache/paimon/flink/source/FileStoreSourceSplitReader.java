@@ -20,8 +20,10 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 
@@ -63,14 +65,20 @@ public class FileStoreSourceSplitReader
     private RecordIterator<InternalRow> currentFirstBatch;
 
     private boolean paused;
+    private final FileStoreSourceReaderMetrics sourceReaderMetrics;
+    private long currentSnapshotId = FileStoreSourceReaderMetrics.UNDEFINED;
 
-    public FileStoreSourceSplitReader(TableRead tableRead, @Nullable RecordLimiter limiter) {
+    public FileStoreSourceSplitReader(
+            TableRead tableRead,
+            @Nullable RecordLimiter limiter,
+            FileStoreSourceReaderMetrics sourceReaderMetrics) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
         this.paused = false;
+        this.sourceReaderMetrics = sourceReaderMetrics;
     }
 
     @Override
@@ -125,6 +133,12 @@ public class FileStoreSourceSplitReader
         }
 
         splits.addAll(splitsChange.splits());
+        DataSplit dataSplit = (DataSplit) splits.peek().split();
+        if (currentSnapshotId == FileStoreSourceReaderMetrics.UNDEFINED
+                || dataSplit.snapshotId() != currentSnapshotId) {
+            currentSnapshotId = dataSplit.snapshotId();
+            sourceReaderMetrics.recordSnapshotUpdate(dataSplit.snapshotTimestamp());
+        }
     }
 
     /**

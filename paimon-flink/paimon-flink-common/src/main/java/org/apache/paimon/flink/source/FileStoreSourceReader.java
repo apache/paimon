@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.SourceReader;
@@ -41,7 +42,11 @@ public class FileStoreSourceReader
             SourceReaderContext readerContext, TableRead tableRead, @Nullable Long limit) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
-                () -> new FileStoreSourceSplitReader(tableRead, RecordLimiter.create(limit)),
+                () ->
+                        new FileStoreSourceSplitReader(
+                                tableRead,
+                                RecordLimiter.create(limit),
+                                new FileStoreSourceReaderMetrics(readerContext.metricGroup())),
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);
@@ -55,7 +60,11 @@ public class FileStoreSourceReader
                     elementsQueue) {
         super(
                 elementsQueue,
-                () -> new FileStoreSourceSplitReader(tableRead, RecordLimiter.create(limit)),
+                () ->
+                        new FileStoreSourceSplitReader(
+                                tableRead,
+                                RecordLimiter.create(limit),
+                                new FileStoreSourceReaderMetrics(readerContext.metricGroup())),
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);

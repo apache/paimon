@@ -70,6 +70,7 @@ public class IncrementalStartingScanner implements StartingScanner {
                 result.add(
                         DataSplit.builder()
                                 .withSnapshot(end)
+                                .withSnapshotTimestamp(manager.snapshot(end).timeMillis())
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .withDataFiles(files)

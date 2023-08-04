@@ -107,7 +107,7 @@ public class FileStoreSourceSplitReaderTest {
 
     private FileStoreSourceSplitReader createReader(TableRead tableRead, @Nullable Long limit) {
         return new FileStoreSourceSplitReader(
-                tableRead, limit == null ? null : new RecordLimiter(limit));
+                tableRead, limit == null ? null : new RecordLimiter(limit), null);
     }
 
     private void innerTestOnce(boolean valueCountMode, int skip) throws Exception {

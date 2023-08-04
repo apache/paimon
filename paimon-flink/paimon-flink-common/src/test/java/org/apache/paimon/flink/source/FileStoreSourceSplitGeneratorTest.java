@@ -82,6 +82,7 @@ public class FileStoreSourceSplitGeneratorTest {
         List<DataSplit> scanSplits =
                 SnapshotReaderImpl.generateSplits(
                         1L,
+                        1691132962000L,
                         false,
                         new SplitGenerator() {
                             @Override

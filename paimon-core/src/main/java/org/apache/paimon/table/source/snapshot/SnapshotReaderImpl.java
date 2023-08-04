@@ -177,7 +177,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public Plan read() {
         FileStoreScan.Plan plan = scan.plan();
-        Long snapshotId = plan.snapshotId();
+        Long snapshotId =
+                plan.snapshotId() == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : plan.snapshotId();
 
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> files =
                 groupByPartFiles(plan.files(FileKind.ADD));
@@ -190,7 +191,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
         List<DataSplit> splits =
                 generateSplits(
-                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        snapshotId,
+                        snapshotManager.snapshot(snapshotId).timeMillis(),
                         scanKind != ScanKind.ALL,
                         splitGenerator,
                         files);
@@ -286,6 +288,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 DataSplit split =
                         DataSplit.builder()
                                 .withSnapshot(plan.snapshotId())
+                                .withSnapshotTimestamp(
+                                        snapshotManager.snapshot(plan.snapshotId()).timeMillis())
                                 .withPartition(part)
                                 .withBucket(bucket)
                                 .withBeforeFiles(before)
@@ -340,6 +344,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @VisibleForTesting
     public static List<DataSplit> generateSplits(
             long snapshotId,
+            long snapshotTimestamp,
             boolean isStreaming,
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
@@ -354,6 +359,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 DataSplit.Builder builder =
                         DataSplit.builder()
                                 .withSnapshot(snapshotId)
+                                .withSnapshotTimestamp(snapshotTimestamp)
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .isStreaming(isStreaming);
