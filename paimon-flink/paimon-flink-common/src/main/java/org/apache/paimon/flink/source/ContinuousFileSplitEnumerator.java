@@ -24,6 +24,7 @@ import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 
@@ -55,6 +56,7 @@ public class ContinuousFileSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
     private static final Logger LOG = LoggerFactory.getLogger(ContinuousFileSplitEnumerator.class);
+    private static final int SPLIT_MAX_NUM = 5_000;
 
     protected final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
@@ -72,6 +74,7 @@ public class ContinuousFileSplitEnumerator
 
     @Nullable protected Long nextSnapshotId;
 
+    protected boolean blockScanByRequest = false;
     protected boolean finished = false;
 
     public ContinuousFileSplitEnumerator(
@@ -120,7 +123,7 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void handleSplitRequest(int subtaskId, @Nullable String requesterHostname) {
         readersAwaitingSplit.add(subtaskId);
-        assignSplits();
+        doHandleSplitRequest(subtaskId);
     }
 
     @Override
@@ -146,12 +149,16 @@ public class ContinuousFileSplitEnumerator
 
     // ------------------------------------------------------------------------
 
-    protected PlanWithNextSnapshotId scanNextSnapshot() {
+    // this need to be synchronized because scan object is not thread safe. handleSplitRequest and
+    // context.callAsync will invoke this.
+    protected synchronized PlanWithNextSnapshotId scanNextSnapshot() {
         TableScan.Plan plan = scan.plan();
         Long nextSnapshotId = scan.checkpoint();
         return new PlanWithNextSnapshotId(plan, nextSnapshotId);
     }
 
+    // this mothod could not be synchronized, because it runs in coordinatorThread, which will make
+    // it serialize.
     protected void processDiscoveredSplits(
             PlanWithNextSnapshotId planWithNextSnapshotId, Throwable error) {
         if (error != null) {
@@ -168,6 +175,12 @@ public class ContinuousFileSplitEnumerator
 
         nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
         TableScan.Plan plan = planWithNextSnapshotId.plan;
+        if (plan.equals(SnapshotNotExistPlan.INSTANCE)) {
+            blockScanByRequest = true;
+            return;
+        } else {
+            blockScanByRequest = false;
+        }
 
         if (plan.splits().isEmpty()) {
             return;
@@ -177,12 +190,39 @@ public class ContinuousFileSplitEnumerator
         assignSplits();
     }
 
+    private void doHandleSplitRequest(int taskId) {
+        assignSplits();
+        // if current task assigned no split, we check conditions to scan one more time
+        if (readersAwaitingSplit.contains(taskId)) {
+            if (!shouldInvokeScan()) {
+                return;
+            }
+            blockScanByRequest = true;
+            context.callAsync(this::scanNextSnapshot, this::processDiscoveredSplits);
+        }
+    }
+
     /**
      * Method should be synchronized because {@link #handleSplitRequest} and {@link
      * #processDiscoveredSplits} have thread conflicts.
      */
     protected synchronized void assignSplits() {
-        Map<Integer, List<FileStoreSourceSplit>> assignment = createAssignment();
+        // create assignment
+        Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
+        Iterator<Integer> readersAwait = readersAwaitingSplit.iterator();
+        while (readersAwait.hasNext()) {
+            Integer task = readersAwait.next();
+            if (!context.registeredReaders().containsKey(task)) {
+                readersAwait.remove();
+                continue;
+            }
+            List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
+            if (splits.size() > 0) {
+                assignment.put(task, splits);
+            }
+        }
+
+        // remove readers who fetched splits
         if (noMoreSplits()) {
             Iterator<Integer> iterator = readersAwaitingSplit.iterator();
             while (iterator.hasNext()) {
@@ -197,26 +237,13 @@ public class ContinuousFileSplitEnumerator
         context.assignSplits(new SplitsAssignment<>(assignment));
     }
 
-    private Map<Integer, List<FileStoreSourceSplit>> createAssignment() {
-        Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
-        Iterator<Integer> readersAwait = readersAwaitingSplit.iterator();
-        while (readersAwait.hasNext()) {
-            Integer task = readersAwait.next();
-            if (!context.registeredReaders().containsKey(task)) {
-                readersAwait.remove();
-                continue;
-            }
-            List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
-            if (splits.size() > 0) {
-                assignment.put(task, splits);
-            }
-        }
-        return assignment;
+    private boolean shouldInvokeScan() {
+        return !blockScanByRequest && splitAssigner.remainingSplits().size() <= SPLIT_MAX_NUM;
     }
 
     protected int assignTask(int bucket) {
         if (bucketMode == BucketMode.UNAWARE) {
-            // we just assign task 0 when bucket unaware
+            // we just assign task 0 when bucket unaware, because we don't need this.
             return 0;
         } else {
             // if not bucket unaware, we assign the bucket % parallelism, the same bucket data go
