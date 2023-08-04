@@ -603,7 +603,7 @@ public class ContinuousFileSplitEnumeratorTest {
             splits.add(createDataSplit(snapshot, i, Collections.emptyList()));
         }
         results.put(2L, new DataFilePlan(splits));
-        // because latestSnapshot = false, so this request will trigger scan
+        // because blockScanByRequest = false, so this request will trigger scan
         enumerator.handleSplitRequest(2, "test-host");
         context.getExecutorService().triggerAllNonPeriodicTasks();
         enumerator.handleSplitRequest(3, "test-host");
@@ -615,22 +615,22 @@ public class ContinuousFileSplitEnumeratorTest {
         assignedSplits = assignments.get(3).getAssignedSplits();
         assertThat(toDataSplits(assignedSplits)).containsExactly(splits.get(1));
 
-        // this will trigger scan, and then set latestSnapshot = true
+        // this will trigger scan, and then set blockScanByRequest = true
         enumerator.handleSplitRequest(3, "test-host");
         context.getExecutorService().triggerAllNonPeriodicTasks();
         splits.clear();
         splits.add(createDataSplit(snapshot, 7, Collections.emptyList()));
         results.put(3L, new DataFilePlan(splits));
 
-        // this won't trigger scan, cause latestSnapshot = true
+        // this won't trigger scan, cause blockScanByRequest = true
         enumerator.handleSplitRequest(3, "test-host");
         context.getExecutorService().triggerAllNonPeriodicTasks();
         assignments = context.getSplitAssignments();
         assignedSplits = assignments.get(3).getAssignedSplits();
         assertThat(toDataSplits(assignedSplits)).doesNotContain(splits.get(0));
 
-        // forcely set latestSnapshot = false, so the split request below will trigger scan
-        enumerator.hasReadLatest = false;
+        // forcely set blockScanByRequest = false, so the split request below will trigger scan
+        enumerator.blockScanByRequest = false;
         // trigger scan here
         enumerator.handleSplitRequest(3, "test-host");
         context.getExecutorService().triggerAllNonPeriodicTasks();

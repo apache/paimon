@@ -56,7 +56,7 @@ public class ContinuousFileSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
     private static final Logger LOG = LoggerFactory.getLogger(ContinuousFileSplitEnumerator.class);
-    private static final int SPLIT_MAX_NUM = 1_000;
+    private static final int SPLIT_MAX_NUM = 5_000;
 
     protected final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
@@ -74,7 +74,7 @@ public class ContinuousFileSplitEnumerator
 
     @Nullable protected Long nextSnapshotId;
 
-    protected volatile boolean hasReadLatest = false;
+    protected boolean blockScanByRequest = false;
     protected boolean finished = false;
 
     public ContinuousFileSplitEnumerator(
@@ -176,10 +176,10 @@ public class ContinuousFileSplitEnumerator
         nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
         TableScan.Plan plan = planWithNextSnapshotId.plan;
         if (plan.equals(SnapshotNotExistPlan.INSTANCE)) {
-            hasReadLatest = true;
+            blockScanByRequest = true;
             return;
         } else {
-            hasReadLatest = false;
+            blockScanByRequest = false;
         }
 
         if (plan.splits().isEmpty()) {
@@ -197,6 +197,7 @@ public class ContinuousFileSplitEnumerator
             if (!shouldInvokeScan()) {
                 return;
             }
+            blockScanByRequest = true;
             context.callAsync(this::scanNextSnapshot, this::processDiscoveredSplits);
         }
     }
@@ -237,7 +238,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     private boolean shouldInvokeScan() {
-        return !hasReadLatest && splitAssigner.remainingSplits().size() <= SPLIT_MAX_NUM;
+        return !blockScanByRequest && splitAssigner.remainingSplits().size() <= SPLIT_MAX_NUM;
     }
 
     protected int assignTask(int bucket) {
