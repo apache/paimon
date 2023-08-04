@@ -25,6 +25,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /** A {@link PluginLoader} to load oss. */
 public class OSSLoader implements FileIOLoader {
 
@@ -47,6 +50,15 @@ public class OSSLoader implements FileIOLoader {
     @Override
     public String getScheme() {
         return "oss";
+    }
+
+    @Override
+    public Set<String> requiredOptions() {
+        Set<String> options = new HashSet<>();
+        options.add("fs.oss.endpoint");
+        options.add("fs.oss.accessKeyId");
+        options.add("fs.oss.accessKeySecret");
+        return options;
     }
 
     @Override

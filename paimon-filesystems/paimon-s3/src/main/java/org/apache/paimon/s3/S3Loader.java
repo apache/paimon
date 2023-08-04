@@ -25,6 +25,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
+import java.util.HashSet;
+import java.util.Set;
+
 /** A {@link PluginLoader} to load oss. */
 public class S3Loader implements FileIOLoader {
 
@@ -47,6 +50,14 @@ public class S3Loader implements FileIOLoader {
     @Override
     public String getScheme() {
         return "s3";
+    }
+
+    @Override
+    public Set<String> requiredOptions() {
+        Set<String> options = new HashSet<>();
+        options.add("s3.access-key");
+        options.add("s3.secret-key");
+        return options;
     }
 
     @Override
