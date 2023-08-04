@@ -72,7 +72,7 @@ public class AlignedSplitAssigner implements SplitAssigner {
     }
 
     @Override
-    public void addSplitsBack(int subtask, List<FileStoreSourceSplit> splits) {
+    public void addSplitsBack(int suggestedTask, List<FileStoreSourceSplit> splits) {
         if (splits.isEmpty()) {
             return;
         }
@@ -82,10 +82,10 @@ public class AlignedSplitAssigner implements SplitAssigner {
         PendingSnapshot head = pendingSplitAssignment.peek();
         if (head == null || snapshotId != head.snapshotId) {
             head = new PendingSnapshot(snapshotId, isPlaceholder, new HashMap<>());
-            head.addAll(subtask, splits);
+            head.addAll(suggestedTask, splits);
             pendingSplitAssignment.addFirst(head);
         } else {
-            head.addAll(subtask, splits);
+            head.addAll(suggestedTask, splits);
         }
     }
 

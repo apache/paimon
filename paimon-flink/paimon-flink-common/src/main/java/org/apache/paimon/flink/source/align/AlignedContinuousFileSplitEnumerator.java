@@ -122,8 +122,9 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
             Collection<FileStoreSourceSplit> splits) {
         Map<Integer, List<FileStoreSourceSplit>> subtaskSplits = new HashMap<>();
         for (FileStoreSourceSplit split : splits) {
-            int taskId = assignTask(((DataSplit) split.split()).bucket());
-            subtaskSplits.computeIfAbsent(taskId, subtask -> new ArrayList<>()).add(split);
+            subtaskSplits
+                    .computeIfAbsent(assignSuggestedTask(split), subtask -> new ArrayList<>())
+                    .add(split);
         }
         return subtaskSplits;
     }
@@ -240,7 +241,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
     }
 
     @Override
-    protected SplitAssigner createSplitAssigner() {
+    protected SplitAssigner createSplitAssigner(BucketMode bucketMode) {
         return new AlignedSplitAssigner();
     }
 }

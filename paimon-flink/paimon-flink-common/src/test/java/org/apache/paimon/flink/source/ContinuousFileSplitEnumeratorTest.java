@@ -629,8 +629,8 @@ public class ContinuousFileSplitEnumeratorTest {
         assignedSplits = assignments.get(3).getAssignedSplits();
         assertThat(toDataSplits(assignedSplits)).doesNotContain(splits.get(0));
 
-        // forcely set blockScanByRequest = false, so the split request below will trigger scan
-        enumerator.blockScanByRequest = false;
+        // forcely enable trigger scan, so the split request below will trigger scan
+        enumerator.enableTriggerScan();
         // trigger scan here
         enumerator.handleSplitRequest(3, "test-host");
         context.getExecutorService().triggerAllNonPeriodicTasks();

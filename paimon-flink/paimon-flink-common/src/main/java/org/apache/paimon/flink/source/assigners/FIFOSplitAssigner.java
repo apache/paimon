@@ -49,7 +49,7 @@ public class FIFOSplitAssigner implements SplitAssigner {
     }
 
     @Override
-    public void addSplit(int subtask, FileStoreSourceSplit split) {
+    public void addSplit(int suggestedTask, FileStoreSourceSplit split) {
         pendingSplitAssignment.add(split);
     }
 

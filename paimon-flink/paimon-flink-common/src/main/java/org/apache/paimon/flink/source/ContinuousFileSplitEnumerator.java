@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
@@ -70,12 +71,11 @@ public class ContinuousFileSplitEnumerator
 
     protected final SplitAssigner splitAssigner;
 
-    protected final BucketMode bucketMode;
-
     @Nullable protected Long nextSnapshotId;
 
-    protected boolean blockScanByRequest = false;
     protected boolean finished = false;
+
+    private boolean stopTriggerScan = false;
 
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
@@ -91,9 +91,13 @@ public class ContinuousFileSplitEnumerator
         this.readersAwaitingSplit = new LinkedHashSet<>();
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
-        this.bucketMode = bucketMode;
-        this.splitAssigner = createSplitAssigner();
+        this.splitAssigner = createSplitAssigner(bucketMode);
         addSplits(remainSplits);
+    }
+
+    @VisibleForTesting
+    void enableTriggerScan() {
+        this.stopTriggerScan = false;
     }
 
     protected void addSplits(Collection<FileStoreSourceSplit> splits) {
@@ -101,7 +105,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     private void addSplit(FileStoreSourceSplit split) {
-        splitAssigner.addSplit(assignTask(((DataSplit) split.split()).bucket()), split);
+        splitAssigner.addSplit(assignSuggestedTask(split), split);
     }
 
     @Override
@@ -123,7 +127,15 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void handleSplitRequest(int subtaskId, @Nullable String requesterHostname) {
         readersAwaitingSplit.add(subtaskId);
-        doHandleSplitRequest(subtaskId);
+        assignSplits();
+        // if current task assigned no split, we check conditions to scan one more time
+        if (readersAwaitingSplit.contains(subtaskId)) {
+            if (stopTriggerScan || splitAssigner.remainingSplits().size() >= SPLIT_MAX_NUM) {
+                return;
+            }
+            stopTriggerScan = true;
+            context.callAsync(this::scanNextSnapshot, this::processDiscoveredSplits);
+        }
     }
 
     @Override
@@ -176,30 +188,17 @@ public class ContinuousFileSplitEnumerator
         nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
         TableScan.Plan plan = planWithNextSnapshotId.plan;
         if (plan.equals(SnapshotNotExistPlan.INSTANCE)) {
-            blockScanByRequest = true;
+            stopTriggerScan = true;
             return;
-        } else {
-            blockScanByRequest = false;
         }
 
+        stopTriggerScan = false;
         if (plan.splits().isEmpty()) {
             return;
         }
 
         addSplits(splitGenerator.createSplits(plan));
         assignSplits();
-    }
-
-    private void doHandleSplitRequest(int taskId) {
-        assignSplits();
-        // if current task assigned no split, we check conditions to scan one more time
-        if (readersAwaitingSplit.contains(taskId)) {
-            if (!shouldInvokeScan()) {
-                return;
-            }
-            blockScanByRequest = true;
-            context.callAsync(this::scanNextSnapshot, this::processDiscoveredSplits);
-        }
     }
 
     /**
@@ -237,22 +236,11 @@ public class ContinuousFileSplitEnumerator
         context.assignSplits(new SplitsAssignment<>(assignment));
     }
 
-    private boolean shouldInvokeScan() {
-        return !blockScanByRequest && splitAssigner.remainingSplits().size() <= SPLIT_MAX_NUM;
+    protected int assignSuggestedTask(FileStoreSourceSplit split) {
+        return ((DataSplit) split.split()).bucket() % context.currentParallelism();
     }
 
-    protected int assignTask(int bucket) {
-        if (bucketMode == BucketMode.UNAWARE) {
-            // we just assign task 0 when bucket unaware, because we don't need this.
-            return 0;
-        } else {
-            // if not bucket unaware, we assign the bucket % parallelism, the same bucket data go
-            // into the same task
-            return bucket % context.currentParallelism();
-        }
-    }
-
-    protected SplitAssigner createSplitAssigner() {
+    protected SplitAssigner createSplitAssigner(BucketMode bucketMode) {
         return bucketMode == BucketMode.UNAWARE
                 ? new FIFOSplitAssigner(Collections.emptyList())
                 : new PreAssignSplitAssigner(1, context, Collections.emptyList());
