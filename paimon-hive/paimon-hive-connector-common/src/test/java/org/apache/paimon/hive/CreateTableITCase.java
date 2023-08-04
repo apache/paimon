@@ -31,7 +31,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.ql.parse.ParseException;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.Test;
@@ -40,6 +39,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Optional;
 
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -100,26 +100,47 @@ public class CreateTableITCase extends HiveTestBase {
     @Test
     public void testCreateTableUsePartitionedBy() {
         // Use `partitioned by` to create hive partition table
-        String tableName = "not_support_partitioned_by_table";
+        String tableName = "support_partitioned_by_table";
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
         String hiveSql =
                 String.join(
                         "\n",
                         Arrays.asList(
                                 "CREATE TABLE " + tableName + " (",
-                                "col1 "
-                                        + TypeInfoFactory.intTypeInfo.getTypeName()
-                                        + " COMMENT 'The col1 field'",
-                                ")",
-                                "PARTITIONED BY (dt "
+                                "user_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The user_id field',",
+                                "item_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The item_id field',",
+                                "behavior "
                                         + TypeInfoFactory.stringTypeInfo.getTypeName()
-                                        + ")",
-                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'"));
-        assertThatThrownBy(() -> hiveShell.execute(hiveSql))
-                .hasRootCauseInstanceOf(MetaException.class)
-                .hasRootCauseMessage(
-                        "Paimon currently does not support creating partitioned table "
-                                + "with PARTITIONED BY clause. If you want to create a partitioned table, "
-                                + "please set partition fields in properties.");
+                                        + " COMMENT 'The behavior field'",
+                                ")",
+                                "PARTITIONED BY ( ",
+                                "dt "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The dt field',",
+                                "hh "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The hh field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "TBLPROPERTIES (",
+                                "  'primary-key'='dt,hh,user_id'",
+                                ")"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+
+        // check the paimon table schema
+        Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
+        Path tablePath = AbstractCatalog.dataTableLocation(path, identifier);
+        Optional<TableSchema> tableSchema =
+                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+        assertThat(tableSchema).isPresent();
+        assertThat(tableSchema.get().primaryKeys()).contains("dt", "hh", "user_id");
+        assertThat(tableSchema.get().partitionKeys()).contains("dt", "hh");
+        assertThat(tableSchema.get().options())
+                .containsEntry(METASTORE_PARTITIONED_TABLE.key(), "true");
     }
 
     @Test
