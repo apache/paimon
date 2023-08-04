@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
@@ -40,6 +41,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -148,6 +150,10 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         }
     }
 
+    public void withCompactExecutor(ExecutorService compactExecutor) {
+        write.withCompactExecutor(compactExecutor);
+    }
+
     @Override
     public SinkRecord write(InternalRow rowData) throws Exception {
         return write.writeAndReturn(rowData);
@@ -222,5 +228,10 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         write.close();
         write = newTableWrite(newTable);
         write.restore((List) states);
+    }
+
+    @VisibleForTesting
+    public TableWriteImpl<?> getWrite() {
+        return write;
     }
 }

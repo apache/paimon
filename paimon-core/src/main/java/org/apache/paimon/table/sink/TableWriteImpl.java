@@ -31,6 +31,7 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.utils.Restorable;
 
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -83,6 +84,11 @@ public class TableWriteImpl<T>
 
     public TableWriteImpl<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         write.withMemoryPoolFactory(memoryPoolFactory);
+        return this;
+    }
+
+    public TableWriteImpl<T> withCompactExecutor(ExecutorService compactExecutor) {
+        write.withCompactExecutor(compactExecutor);
         return this;
     }
 
