@@ -66,7 +66,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     @Override
-    public int filterAndCommit(List<ManifestCommittable> globalCommittables) throws IOException {
+    public int filterAndCommit(List<ManifestCommittable> globalCommittables) {
         return commit.filterAndCommitMultiple(globalCommittables);
     }
 

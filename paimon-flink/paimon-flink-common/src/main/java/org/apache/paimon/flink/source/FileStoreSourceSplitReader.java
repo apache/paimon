@@ -41,6 +41,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
 
@@ -89,7 +90,10 @@ public class FileStoreSourceSplitReader
             nextBatch = currentFirstBatch;
             currentFirstBatch = null;
         } else {
-            nextBatch = reachLimit() ? null : currentReader.recordReader().readBatch();
+            nextBatch =
+                    reachLimit()
+                            ? null
+                            : Objects.requireNonNull(currentReader).recordReader().readBatch();
         }
         if (nextBatch == null) {
             pool.recycler().recycle(iterator);
@@ -179,7 +183,8 @@ public class FileStoreSourceSplitReader
 
     private void seek(long toSkip) throws IOException {
         while (true) {
-            RecordIterator<InternalRow> nextBatch = currentReader.recordReader().readBatch();
+            RecordIterator<InternalRow> nextBatch =
+                    Objects.requireNonNull(currentReader).recordReader().readBatch();
             if (nextBatch == null) {
                 throw new RuntimeException(
                         String.format(

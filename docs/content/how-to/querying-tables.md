@@ -139,7 +139,7 @@ SELECT * FROM t;
 SET paimon.scan.timestamp-millis=null;
     
 -- read tag 'my-tag'
-set paimon.scan.tag-name=my-tag:
+set paimon.scan.tag-name=my-tag;
 SELECT * FROM t;
 set paimon.scan.tag-name=null;
 ```
@@ -235,7 +235,7 @@ You can also do streaming read without the snapshot data, you can use `latest` s
 {{< tab "Flink" >}}
 ```sql
 -- Continuously reads latest changes without producing a snapshot at the beginning.
-SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest') */
+SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest') */;
 ```
 {{< /tab >}}
 {{< /tabs >}}
@@ -245,7 +245,7 @@ SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest') */
 If you only want to process data for today and beyond, you can do so with partitioned filters:
 
 ```sql
-SELECT * FROM t WHERE dt > '2023-06-26'
+SELECT * FROM t WHERE dt > '2023-06-26';
 ```
 
 If it's not a partitioned table, or you can't filter by partition, you can use Time travel's stream read.
@@ -348,7 +348,7 @@ CREATE TABLE orders (
     order_id BIGINT,
     .....,
     PRIMARY KEY (catalog_id, order_id) NOT ENFORCED -- composite primary key
-)
+);
 ```
 
 The query obtains a good acceleration by specifying a range filter for

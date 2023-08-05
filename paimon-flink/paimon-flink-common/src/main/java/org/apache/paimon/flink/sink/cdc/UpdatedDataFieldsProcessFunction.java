@@ -92,6 +92,11 @@ public class UpdatedDataFieldsProcessFunction extends ProcessFunction<List<DataF
     }
 
     private List<SchemaChange> extractSchemaChanges(List<DataField> updatedDataFields) {
+        return getSchemaChanges(updatedDataFields, schemaManager);
+    }
+
+    public static List<SchemaChange> getSchemaChanges(
+            List<DataField> updatedDataFields, SchemaManager schemaManager) {
         RowType oldRowType = schemaManager.latest().get().logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();
         for (DataField oldField : oldRowType.getFields()) {

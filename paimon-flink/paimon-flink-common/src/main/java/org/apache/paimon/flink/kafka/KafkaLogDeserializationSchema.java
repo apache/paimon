@@ -36,6 +36,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 import javax.annotation.Nullable;
 
+import java.util.Objects;
 import java.util.stream.IntStream;
 
 /** A {@link KafkaDeserializationSchema} for the table with primary key in log store. */
@@ -125,7 +126,7 @@ public class KafkaLogDeserializationSchema implements KafkaDeserializationSchema
         Collector<RowData> collector = projectCollector.project(underCollector);
 
         if (primaryKey.length > 0 && record.value() == null) {
-            RowData key = primaryKeyDeserializer.deserialize(record.key());
+            RowData key = Objects.requireNonNull(primaryKeyDeserializer).deserialize(record.key());
             GenericRowData value = new GenericRowData(RowKind.DELETE, fieldCount);
             for (int i = 0; i < primaryKey.length; i++) {
                 value.setField(primaryKey[i], keyFieldGetters[i].getFieldOrNull(key));

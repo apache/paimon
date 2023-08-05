@@ -362,7 +362,7 @@ CREATE TABLE MyTablePk (
       dt STRING,
       hh STRING,
       PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
-) ;
+);
 CREATE TABLE MyTablePkAs WITH ('primary-key' = 'dt,hh') AS SELECT * FROM MyTablePk;
 
 
@@ -453,7 +453,7 @@ CREATE TABLE MyTable (
     dt STRING,
     hh STRING,
     PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
-) ;
+);
 
 CREATE TABLE MyTableLike LIKE MyTable;
 ```

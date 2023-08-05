@@ -38,6 +38,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Predicate;
@@ -181,7 +182,7 @@ public class MySqlSyncTableAction extends ActionBase {
                                 .collect(Collectors.toList());
                 List<String> fieldNames = table.schema().fieldNames();
                 checkArgument(
-                        fieldNames.containsAll(computedFields),
+                        new HashSet<>(fieldNames).containsAll(computedFields),
                         " Exists Table should contain all computed columns %s, but are %s.",
                         computedFields,
                         fieldNames);
