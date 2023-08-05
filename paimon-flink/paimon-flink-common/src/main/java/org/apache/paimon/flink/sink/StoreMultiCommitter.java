@@ -85,7 +85,8 @@ public class StoreMultiCommitter
     }
 
     @Override
-    public void commit(List<WrappedManifestCommittable> committables, OperatorIOMetricGroup metricGroup)
+    public void commit(
+            List<WrappedManifestCommittable> committables, OperatorIOMetricGroup metricGroup)
             throws IOException, InterruptedException {
 
         // key by table id

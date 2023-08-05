@@ -342,7 +342,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             manifestCommittable.addFileCommittable(commitMessage);
         }
         write.close();
-        assertThat(StoreCommitter.calcDataBytesSend(new ArrayList<>(Arrays.asList(manifestCommittable)))).isEqualTo(275);
+        assertThat(
+                        StoreCommitter.calcDataBytesSend(
+                                new ArrayList<>(Arrays.asList(manifestCommittable))))
+                .isEqualTo(275);
     }
 
     // ------------------------------------------------------------------------

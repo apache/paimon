@@ -95,7 +95,12 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         for (ManifestCommittable committable : committables) {
             List<CommitMessage> commitMessages = committable.fileCommittables();
             for (CommitMessage commitMessage : commitMessages) {
-                long dataFileSizeInc = ((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles().stream().mapToLong(f -> f.fileSize()).reduce(Long::sum).getAsLong();
+                long dataFileSizeInc =
+                        ((CommitMessageImpl) commitMessage)
+                                .newFilesIncrement().newFiles().stream()
+                                        .mapToLong(f -> f.fileSize())
+                                        .reduce(Long::sum)
+                                        .getAsLong();
                 bytesSend += dataFileSizeInc;
             }
         }
