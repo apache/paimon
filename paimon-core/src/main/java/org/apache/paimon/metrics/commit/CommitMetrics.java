@@ -46,22 +46,30 @@ public class CommitMetrics {
     protected static final String GROUP_NAME = "commit";
 
     private final MetricGroup genericMetricGroup;
+
     private final FileStorePathFactory pathFactory;
+    private final FileIO fileIO;
 
     private long initTableFilesCount = 0;
     private long initChangelogFilesCount = 0;
+
     public CommitMetrics(FileStorePathFactory pathFactory, FileIO fileIO) {
-        this.pathFactory = pathFactory;
         this.genericMetricGroup =
                 GenericMetricGroup.createGenericMetricGroup(
                         pathFactory.root().getName(), GROUP_NAME);
-        initDataFilesCount(pathFactory, fileIO);
+        this.pathFactory = pathFactory;
+        this.fileIO = fileIO;
+        initDataFilesCount();
         registerGenericCommitMetrics();
     }
 
-    private void initDataFilesCount(FileStorePathFactory pathFactory, FileIO fileIO) {
+    @VisibleForTesting
+    void initDataFilesCount() {
         try {
-            List<Path> dirs = Arrays.stream(fileIO.listStatus(pathFactory.root())).map(f -> f.getPath()).collect(Collectors.toList());
+            List<Path> dirs =
+                    Arrays.stream(fileIO.listStatus(pathFactory.root()))
+                            .map(f -> f.getPath())
+                            .collect(Collectors.toList());
             boolean hasPartition = true;
             for (Path dir : dirs) {
                 if (dir.getName().startsWith("bucket-")) {
@@ -73,7 +81,16 @@ public class CommitMetrics {
                 List<Path> buckets = new ArrayList<>();
                 for (Path dir : dirs) {
                     FileStatus[] fileStatuses = fileIO.listStatus(dir);
-                    buckets.addAll(Arrays.stream(fileStatuses).filter(f -> f.isDir() && f.getPath().getName().startsWith("bucket-")).map(f -> f.getPath()).collect(Collectors.toList()));
+                    buckets.addAll(
+                            Arrays.stream(fileStatuses)
+                                    .filter(
+                                            f ->
+                                                    f.isDir()
+                                                            && f.getPath()
+                                                                    .getName()
+                                                                    .startsWith("bucket-"))
+                                    .map(f -> f.getPath())
+                                    .collect(Collectors.toList()));
                 }
                 for (Path bucket : buckets) {
                     FileStatus[] fileStatuses = fileIO.listStatus(bucket);
@@ -86,13 +103,29 @@ public class CommitMetrics {
                 }
             }
         } catch (IOException ie) {
-            log.warn("List table files failed, the 'total' prefixed commit metrics will calculate the number of total files since the job started. ");
+            log.warn(
+                    "List table files failed, the 'total' prefixed commit metrics will calculate the number of total files since the job started. ");
         }
     }
 
     private void accFilesCount(FileStatus[] fileStatuses) {
-        initTableFilesCount += Arrays.stream(fileStatuses).filter(f -> f.getPath().getName().startsWith(DataFilePathFactory.DATA_FILE_PREFIX)).count();
-        initChangelogFilesCount += Arrays.stream(fileStatuses).filter(f -> f.getPath().getName().startsWith(DataFilePathFactory.CHANGELOG_FILE_PREFIX)).count();
+        initTableFilesCount +=
+                Arrays.stream(fileStatuses)
+                        .filter(
+                                f ->
+                                        f.getPath()
+                                                .getName()
+                                                .startsWith(DataFilePathFactory.DATA_FILE_PREFIX))
+                        .count();
+        initChangelogFilesCount +=
+                Arrays.stream(fileStatuses)
+                        .filter(
+                                f ->
+                                        f.getPath()
+                                                .getName()
+                                                .startsWith(
+                                                        DataFilePathFactory.CHANGELOG_FILE_PREFIX))
+                        .count();
     }
 
     public MetricGroup getGenericMetricGroup() {
@@ -143,81 +176,49 @@ public class CommitMetrics {
 
     private void registerGenericCommitMetrics() {
         genericMetricGroup.gauge(
-                LAST_COMMIT_DURATION,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getDuration();
-                });
+                LAST_COMMIT_DURATION, () -> latestCommit == null ? 0L : latestCommit.getDuration());
         genericMetricGroup.gauge(
-                LAST_COMMIT_ATTEMPTS,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getAttempts();
-                });
+                LAST_COMMIT_ATTEMPTS, () -> latestCommit == null ? 0L : latestCommit.getAttempts());
         genericMetricGroup.gauge(
                 LAST_GENERATED_SNAPSHOTS,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getGeneratedSnapshots();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getGeneratedSnapshots());
         genericMetricGroup.gauge(
                 LAST_PARTITIONS_WRITTEN,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getNumPartitionsWritten();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getNumPartitionsWritten());
         genericMetricGroup.gauge(
                 LAST_BUCKETS_WRITTEN,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getNumBucketsWritten();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getNumBucketsWritten());
         genericMetricGroup.histogram(COMMIT_DURATION, durationHistogram);
         genericMetricGroup.gauge(
                 LAST_TABLE_FILES_ADDED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getTableFilesAdded();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getTableFilesAdded());
         genericMetricGroup.gauge(
                 LAST_TABLE_FILES_DELETED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getTableFilesDeleted();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getTableFilesDeleted());
         genericMetricGroup.gauge(
                 LAST_TABLE_FILES_APPENDED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getTableFilesAppended();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getTableFilesAppended());
         genericMetricGroup.gauge(
                 LAST_TABLE_FILES_COMMIT_COMPACTED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getTableFilesCompacted();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getTableFilesCompacted());
         genericMetricGroup.gauge(
                 LAST_CHANGELOG_FILES_APPENDED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getChangelogFilesAppended();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getChangelogFilesAppended());
         genericMetricGroup.gauge(
                 LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getChangelogFilesCompacted();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getChangelogFilesCompacted());
         genericMetricGroup.gauge(
                 LAST_DELTA_RECORDS_APPENDED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getDeltaRecordsAppended();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getDeltaRecordsAppended());
         genericMetricGroup.gauge(
                 LAST_CHANGELOG_RECORDS_APPENDED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getChangelogRecordsAppended();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getChangelogRecordsAppended());
         genericMetricGroup.gauge(
                 LAST_DELTA_RECORDS_COMMIT_COMPACTED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getDeltaRecordsCompacted();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getDeltaRecordsCompacted());
         genericMetricGroup.gauge(
                 LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
-                () -> {
-                    return latestCommit == null ? 0L : latestCommit.getChangelogRecordsCompacted();
-                });
+                () -> latestCommit == null ? 0L : latestCommit.getChangelogRecordsCompacted());
         totalTableFilesCounter = genericMetricGroup.counter(TOTAL_TABLE_FILES);
         totalTableFilesCounter.inc(initTableFilesCount);
         totalChangelogFilesCounter = genericMetricGroup.counter(TOTAL_CHANGELOG_FILES);
@@ -231,5 +232,25 @@ public class CommitMetrics {
         totalChangelogFilesCounter.inc(
                 commitStats.getChangelogFilesAppended() + commitStats.getChangelogFilesCompacted());
         durationHistogram.update(commitStats.getDuration());
+    }
+
+    @VisibleForTesting
+    long getInitTableFilesCount() {
+        return initTableFilesCount;
+    }
+
+    @VisibleForTesting
+    long getInitChangelogFilesCount() {
+        return initChangelogFilesCount;
+    }
+
+    @VisibleForTesting
+    FileStorePathFactory getPathFactory() {
+        return pathFactory;
+    }
+
+    @VisibleForTesting
+    FileIO getFileIO() {
+        return fileIO;
     }
 }

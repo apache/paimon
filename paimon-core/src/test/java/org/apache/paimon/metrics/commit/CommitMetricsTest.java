@@ -19,6 +19,7 @@
 package org.apache.paimon.metrics.commit;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileKind;
@@ -29,6 +30,17 @@ import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.Metrics;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -38,16 +50,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.manifest.ManifestFileMetaTestBase.makeEntry;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.offset;
 
 /** Tests for {@link CommitMetrics}. */
 public class CommitMetricsTest {
-
     @TempDir static java.nio.file.Path tempDir;
     private static final String TABLE_NAME = "myTable";
 
@@ -89,6 +105,68 @@ public class CommitMetricsTest {
 
         reportOnce(commitMetrics);
         assertThat(Metrics.getInstance().getMetricGroups().size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testInitDataFilesCountWithPartition() throws Exception {
+        CommitMetrics commitMetrics = getCommitMetricsWithTableWrite(true, "table1");
+        commitMetrics.initDataFilesCount();
+        assertThat(commitMetrics.getInitTableFilesCount()).isEqualTo(4);
+        assertThat(commitMetrics.getInitChangelogFilesCount()).isEqualTo(4);
+    }
+
+    @Test
+    public void testInitDataFilesCountWithoutPartition() throws Exception {
+        CommitMetrics commitMetrics = getCommitMetricsWithTableWrite(false, "table2");
+        commitMetrics.initDataFilesCount();
+        assertThat(commitMetrics.getInitTableFilesCount()).isEqualTo(2);
+        assertThat(commitMetrics.getInitChangelogFilesCount()).isEqualTo(2);
+    }
+
+    private CommitMetrics getCommitMetricsWithTableWrite(boolean withPartition, String tableName)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "2");
+        options.put(BUCKET_KEY.key(), "a");
+        options.put(CHANGELOG_PRODUCER.key(), "input");
+        Path tablePath = new Path(tempDir.toString(), tableName);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "a", "b"});
+        List<String> partitionList = new ArrayList<>();
+        if (withPartition) {
+            partitionList.add("pt");
+        }
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                partitionList,
+                                Arrays.asList("pt", "a"),
+                                options,
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        write.write(GenericRow.of(1, 1, 2));
+        write.write(GenericRow.of(1, 2, 2));
+        write.write(GenericRow.of(2, 1, 2));
+        write.write(GenericRow.of(2, 2, 2));
+
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        tablePath,
+                        RowType.of(new IntType()),
+                        "default",
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
+        return new CommitMetrics(pathFactory, LocalFileIO.create());
     }
 
     /** Tests that the metrics are updated properly. */

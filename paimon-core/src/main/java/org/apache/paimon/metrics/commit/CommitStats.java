@@ -36,7 +36,7 @@ import java.util.stream.Collectors;
 /** Statistics for a commit. */
 public class CommitStats {
     private final long duration;
-    private final long attempts;
+    private final int attempts;
     private final long tableFilesAdded;
     private final long tableFilesAppended;
     private final long tableFilesDeleted;
@@ -51,7 +51,6 @@ public class CommitStats {
     private final long generatedSnapshots;
     private final long numPartitionsWritten;
     private final long numBucketsWritten;
-    private final Map<BinaryRow, Set<Integer>> bucketsWritten;
 
     public CommitStats(
             List<ManifestEntry> appendTableFiles,
@@ -60,17 +59,16 @@ public class CommitStats {
             List<ManifestEntry> compactChangelogFiles,
             long commitDuration,
             int generatedSnapshots,
-            long attempts) {
+            int attempts) {
         List<ManifestEntry> addedTableFiles = new ArrayList<>(appendTableFiles);
         addedTableFiles.addAll(
                 compactTableFiles.stream()
                         .filter(f -> FileKind.ADD.equals(f.kind()))
                         .collect(Collectors.toList()));
         List<ManifestEntry> deletedTableFiles =
-                new ArrayList<>(
-                        compactTableFiles.stream()
-                                .filter(f -> FileKind.DELETE.equals(f.kind()))
-                                .collect(Collectors.toList()));
+                compactTableFiles.stream()
+                        .filter(f -> FileKind.DELETE.equals(f.kind()))
+                        .collect(Collectors.toList());
 
         this.tableFilesAdded = addedTableFiles.size();
         this.tableFilesAppended = appendTableFiles.size();
@@ -80,7 +78,6 @@ public class CommitStats {
         this.changelogFilesCompacted = compactChangelogFiles.size();
         this.numPartitionsWritten = numChangedPartitions(appendTableFiles, compactTableFiles);
         this.numBucketsWritten = numChangedBuckets(appendTableFiles, compactTableFiles);
-        this.bucketsWritten = changedPartBuckets(appendTableFiles, compactTableFiles);
         this.changelogRecordsCompacted = getRowCounts(compactChangelogFiles);
         this.deltaRecordsCompacted = getRowCounts(compactTableFiles);
         this.changelogRecordsAppended = getRowCounts(appendChangelogFiles);
@@ -96,8 +93,7 @@ public class CommitStats {
                 .flatMap(Collection::stream)
                 .map(ManifestEntry::partition)
                 .distinct()
-                .collect(Collectors.toList())
-                .size();
+                .count();
     }
 
     @VisibleForTesting
@@ -207,7 +203,7 @@ public class CommitStats {
     }
 
     @VisibleForTesting
-    protected long getAttempts() {
+    protected int getAttempts() {
         return attempts;
     }
 }

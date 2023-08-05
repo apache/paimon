@@ -131,8 +131,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             MemorySize manifestFullCompactionSize,
             int manifestMergeMinCount,
             boolean dynamicPartitionOverwrite,
-            @Nullable Comparator<InternalRow> keyComparator,
-            CommitMetrics commitMetrics) {
+            @Nullable Comparator<InternalRow> keyComparator) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -153,7 +152,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
-        this.commitMetrics = commitMetrics;
+        this.commitMetrics = new CommitMetrics(pathFactory, fileIO);
     }
 
     @Override
@@ -199,7 +198,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         long started = System.nanoTime();
         int generatedSnapshot = 0;
-        long attempts = 0;
+        int attempts = 0;
         Snapshot latestSnapshot = null;
         Long safeLatestSnapshotId = null;
         List<ManifestEntry> baseEntries = new ArrayList<>();
@@ -236,7 +235,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 latestSnapshot, appendTableFiles, compactTableFiles));
                 try {
                     noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
-                } catch (RuntimeException e) {
+                } finally {
                     reportCommit(
                             Collections.emptyList(),
                             Collections.emptyList(),
@@ -245,7 +244,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             0,
                             0,
                             1);
-                    throw e;
                 }
                 safeLatestSnapshotId = latestSnapshot.id();
             }
@@ -274,7 +272,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 baseEntries.addAll(appendTableFiles);
                 try {
                     noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
-                } catch (RuntimeException e) {
+                } finally {
                     long commitDuration = (System.nanoTime() - started) / 1_000_000;
                     reportCommit(
                             appendTableFiles,
@@ -284,7 +282,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             commitDuration,
                             generatedSnapshot,
                             attempts + 1);
-                    throw e;
                 }
                 // assume this compact commit follows just after the append commit created above
                 safeLatestSnapshotId += 1;
@@ -320,7 +317,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> compactChangelogFiles,
             long commitDuration,
             int generatedSnapshots,
-            long attempts) {
+            int attempts) {
         CommitStats commitStats =
                 new CommitStats(
                         appendTableFiles,
@@ -547,7 +544,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 kind, commitMessage.partition(), commitMessage.bucket(), numBucket, file);
     }
 
-    private long tryCommit(
+    private int tryCommit(
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             List<IndexManifestEntry> indexFiles,
@@ -556,7 +553,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long safeLatestSnapshotId) {
-        long cnt = 0;
+        int cnt = 0;
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
             cnt++;
