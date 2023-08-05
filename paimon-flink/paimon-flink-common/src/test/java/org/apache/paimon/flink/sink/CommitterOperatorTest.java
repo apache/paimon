@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.utils.SnapshotManager;
@@ -45,6 +46,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -320,6 +322,27 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
         assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
+    }
+
+    @Test
+    public void testCalcDataBytesSend() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        StreamTableWrite write = table.newWrite(initialCommitUser);
+        StreamTableCommit commit = table.newCommit(initialCommitUser);
+
+        write.write(GenericRow.of(1, 10L));
+        write.write(GenericRow.of(1, 20L));
+        List<CommitMessage> committable = write.prepareCommit(false, 0);
+
+        commit.commit(0, committable);
+
+        ManifestCommittable manifestCommittable = new ManifestCommittable(0);
+        for (CommitMessage commitMessage : committable) {
+            manifestCommittable.addFileCommittable(commitMessage);
+        }
+        write.close();
+        assertThat(StoreCommitter.calcDataBytesSend(new ArrayList<>(Arrays.asList(manifestCommittable)))).isEqualTo(275);
     }
 
     // ------------------------------------------------------------------------

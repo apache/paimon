@@ -18,10 +18,14 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
+
+import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -60,8 +64,9 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     @Override
-    public void commit(List<ManifestCommittable> committables)
+    public void commit(List<ManifestCommittable> committables, OperatorIOMetricGroup metricGroup)
             throws IOException, InterruptedException {
+        metricGroup.getNumBytesOutCounter().inc(calcDataBytesSend(committables));
         commit.commitMultiple(committables);
     }
 
@@ -82,5 +87,18 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void close() throws Exception {
         commit.close();
+    }
+
+    @VisibleForTesting
+    static long calcDataBytesSend(List<ManifestCommittable> committables) {
+        long bytesSend = 0;
+        for (ManifestCommittable committable : committables) {
+            List<CommitMessage> commitMessages = committable.fileCommittables();
+            for (CommitMessage commitMessage : commitMessages) {
+                long dataFileSizeInc = ((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles().stream().mapToLong(f -> f.fileSize()).reduce(Long::sum).getAsLong();
+                bytesSend += dataFileSizeInc;
+            }
+        }
+        return bytesSend;
     }
 }

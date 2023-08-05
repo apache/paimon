@@ -19,6 +19,8 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
+
 import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
@@ -37,7 +39,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             throws IOException;
 
     /** Commits the given {@link GlobalCommitT}. */
-    void commit(List<GlobalCommitT> globalCommittables) throws IOException, InterruptedException;
+    void commit(List<GlobalCommitT> globalCommittables, OperatorIOMetricGroup metricGroup) throws IOException, InterruptedException;
 
     /**
      * Filter out all {@link GlobalCommitT} which have committed, and commit the remaining {@link

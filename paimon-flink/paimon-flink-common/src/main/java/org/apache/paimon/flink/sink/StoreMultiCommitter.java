@@ -26,6 +26,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -84,7 +85,7 @@ public class StoreMultiCommitter
     }
 
     @Override
-    public void commit(List<WrappedManifestCommittable> committables)
+    public void commit(List<WrappedManifestCommittable> committables, OperatorIOMetricGroup metricGroup)
             throws IOException, InterruptedException {
 
         // key by table id
@@ -94,7 +95,7 @@ public class StoreMultiCommitter
             Identifier tableId = entry.getKey();
             List<ManifestCommittable> committableList = entry.getValue();
             StoreCommitter committer = getStoreCommitter(tableId);
-            committer.commit(committableList);
+            committer.commit(committableList, metricGroup);
         }
     }
 
