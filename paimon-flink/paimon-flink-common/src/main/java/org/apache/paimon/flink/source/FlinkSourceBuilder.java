@@ -140,19 +140,20 @@ public class FlinkSourceBuilder {
     }
 
     private DataStream<RowData> buildContinuousFileSource() {
-        if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
-            assertStreamingConfigurationForAlignMode(env);
-            return toDataStream(
-                    new AlignedContinuousFileStoreSource(
-                            createReadBuilder(),
-                            table.options(),
-                            limit,
-                            table instanceof FileStoreTable
-                                    ? ((FileStoreTable) table).bucketMode()
-                                    : BucketMode.FIXED));
-        }
         return toDataStream(
                 new ContinuousFileStoreSource(
+                        createReadBuilder(),
+                        table.options(),
+                        limit,
+                        table instanceof FileStoreTable
+                                ? ((FileStoreTable) table).bucketMode()
+                                : BucketMode.FIXED));
+    }
+
+    private DataStream<RowData> buildAlignedContinuousFileSource() {
+        assertStreamingConfigurationForAlignMode(env);
+        return toDataStream(
+                new AlignedContinuousFileStoreSource(
                         createReadBuilder(),
                         table.options(),
                         limit,
@@ -212,7 +213,9 @@ public class FlinkSourceBuilder {
                                     .build());
                 }
             } else {
-                if (conf.contains(CoreOptions.CONSUMER_ID)) {
+                if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
+                    return buildAlignedContinuousFileSource();
+                } else if (conf.contains(CoreOptions.CONSUMER_ID)) {
                     return buildContinuousStreamOperator();
                 } else {
                     return buildContinuousFileSource();

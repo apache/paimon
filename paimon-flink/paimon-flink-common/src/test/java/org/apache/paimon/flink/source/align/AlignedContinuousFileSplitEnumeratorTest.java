@@ -18,17 +18,36 @@
 
 package org.apache.paimon.flink.source.align;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
+import org.assertj.core.api.Condition;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -40,6 +59,33 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for the {@link AlignedContinuousFileSplitEnumerator}. */
 public class AlignedContinuousFileSplitEnumeratorTest {
+
+    private static final RowType ROW_TYPE =
+            RowType.of(
+                    new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()},
+                    new String[] {"pt", "a", "b"});
+
+    private static final String CONSUMER_ID = "consumer";
+
+    private @TempDir java.nio.file.Path tempDir;
+    private FileStoreTable table;
+
+    @BeforeEach
+    public void before() throws Exception {
+        Path tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        FileIO fileIO = FileIOFinder.find(tablePath);
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        TableSchema tableSchema =
+                schemaManager.createTable(
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Collections.singletonList("pt"),
+                                Arrays.asList("pt", "a"),
+                                Collections.singletonMap(
+                                        CoreOptions.CONSUMER_ID.key(), CONSUMER_ID),
+                                ""));
+        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
 
     @Test
     public void testSplitsAssignedBySnapshot() throws Exception {
@@ -122,6 +168,43 @@ public class AlignedContinuousFileSplitEnumeratorTest {
         assertThat(assignments.get(0).getAssignedSplits()).containsExactly(splits.get(0));
         PendingSplitsCheckpoint checkpoint = enumerator.snapshotState(1L);
         assertThat(checkpoint.splits()).containsExactly(splits.get(1));
+    }
+
+    @Test
+    public void testScanWithConsumerId() throws Exception {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingSplitEnumeratorContext<>(1);
+        context.registerReader(0, "test-host");
+
+        final AlignedContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setScan(table.newStreamScan())
+                        .build();
+
+        List<FileStoreSourceSplit> splits = new ArrayList<>();
+        for (int i = 1; i <= 2; i++) {
+            splits.add(createSnapshotSplit(i, 0, Collections.emptyList()));
+        }
+        enumerator.addSplits(splits);
+
+        ConsumerManager consumerManager = new ConsumerManager(table.fileIO(), table.location());
+        assertThat(consumerManager.consumer(CONSUMER_ID)).isEmpty();
+
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.snapshotState(1L);
+        enumerator.notifyCheckpointComplete(1L);
+        assertThat(consumerManager.consumer(CONSUMER_ID))
+                .hasValueSatisfying(
+                        new Condition<>(consumer -> consumer.nextSnapshot() == 2L, "condition"));
+
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.snapshotState(2L);
+        enumerator.notifyCheckpointComplete(2L);
+        assertThat(consumerManager.consumer(CONSUMER_ID))
+                .hasValueSatisfying(
+                        new Condition<>(consumer -> consumer.nextSnapshot() == 3L, "condition"));
     }
 
     private static class Builder {

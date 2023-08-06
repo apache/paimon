@@ -81,6 +81,8 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
 
     private long currentCheckpointId;
 
+    private Long lastConsumedSnapshotId;
+
     private boolean closed;
 
     public AlignedContinuousFileSplitEnumerator(
@@ -98,6 +100,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
         this.alignTimeout = alignTimeout;
         this.lock = new Object();
         this.currentCheckpointId = Long.MIN_VALUE;
+        this.lastConsumedSnapshotId = null;
         this.closed = false;
     }
 
@@ -161,6 +164,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
             assignSplits();
         }
         Preconditions.checkArgument(alignedAssigner.isAligned());
+        lastConsumedSnapshotId = alignedAssigner.minRemainingSnapshotId();
         alignedAssigner.removeFirst();
         currentCheckpointId = checkpointId;
 
@@ -182,6 +186,8 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
     @Override
     public void notifyCheckpointComplete(long checkpointId) {
         currentCheckpointId = Long.MIN_VALUE;
+        Long nextSnapshot = lastConsumedSnapshotId == null ? null : lastConsumedSnapshotId + 1;
+        scan.notifyCheckpointComplete(nextSnapshot);
     }
 
     // ------------------------------------------------------------------------
