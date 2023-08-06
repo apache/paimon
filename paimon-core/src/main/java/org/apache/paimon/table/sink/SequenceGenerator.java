@@ -31,6 +31,7 @@ import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
@@ -87,34 +88,45 @@ public class SequenceGenerator {
     }
 
     public long generateWithPadding(InternalRow row, CoreOptions.SequenceAutoPadding autoPadding) {
+        long sequence = generate(row);
         switch (autoPadding) {
+            case ROW_KIND_FLAG:
+                return addRowKindFlag(sequence, row.getRowKind());
             case SECOND_TO_MICRO:
-                long value = generate(row);
-                // timestamp returns millis
-                long second = fieldType.is(DataTypeFamily.TIMESTAMP) ? value / 1000 : value;
-                return second * 1_000_000 + getCurrentMicroOfSeconds();
+                return secondToMicro(sequence);
             case MILLIS_TO_MICRO:
-                // Generated value is millis
-                long millis = generate(row);
-                return millis * 1_000 + getCurrentMicroOfMillis();
+                return millisToMicro(sequence);
             default:
                 throw new UnsupportedOperationException(
                         "Unknown sequence padding mode " + autoPadding.name());
         }
     }
 
+    private long addRowKindFlag(long sequence, RowKind rowKind) {
+        return (sequence << 1) | (rowKind.isAdd() ? 1 : 0);
+    }
+
+    private long millisToMicro(long sequence) {
+        // Generated value is millis
+        return sequence * 1_000 + getCurrentMicroOfMillis();
+    }
+
+    private long secondToMicro(long sequence) {
+        // timestamp returns millis
+        long second = fieldType.is(DataTypeFamily.TIMESTAMP) ? sequence / 1000 : sequence;
+        return second * 1_000_000 + getCurrentMicroOfSeconds();
+    }
+
     private static long getCurrentMicroOfMillis() {
         long currentNanoTime = System.nanoTime();
         long mills = TimeUnit.MILLISECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        long microOfMillis = (currentNanoTime - mills * 1_000_000) / 1000;
-        return microOfMillis;
+        return (currentNanoTime - mills * 1_000_000) / 1000;
     }
 
     private static long getCurrentMicroOfSeconds() {
         long currentNanoTime = System.nanoTime();
         long seconds = TimeUnit.SECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        long microOfSecs = (currentNanoTime - seconds * 1_000_000_000) / 1000;
-        return microOfSecs;
+        return (currentNanoTime - seconds * 1_000_000_000) / 1000;
     }
 
     private interface Generator {

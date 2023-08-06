@@ -28,13 +28,16 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.CoreOptions.SequenceAutoPadding.ROW_KIND_FLAG;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -213,6 +216,19 @@ public class SequenceGeneratorTest {
         assertUnsupportedDatatype("_multiset");
     }
 
+    @Test
+    public void testGenerateWithPaddingRowKind() {
+        assertThat(generateWithPaddingOnRowKind(1L, RowKind.INSERT)).isEqualTo(3);
+        assertThat(generateWithPaddingOnRowKind(1L, RowKind.UPDATE_AFTER)).isEqualTo(3);
+        assertThat(generateWithPaddingOnRowKind(1L, RowKind.UPDATE_BEFORE)).isEqualTo(2);
+        assertThat(generateWithPaddingOnRowKind(1L, RowKind.DELETE)).isEqualTo(2);
+
+        long maxMicros =
+                Timestamp.fromLocalDateTime(LocalDateTime.parse("5000-01-01T00:00:00")).toMicros();
+        assertThat(generateWithPaddingOnRowKind(maxMicros, RowKind.INSERT))
+                .isEqualTo(191235168000000001L);
+    }
+
     private SequenceGenerator getGenerator(String field) {
         return new SequenceGenerator(field, ALL_DATA_TYPE);
     }
@@ -234,6 +250,12 @@ public class SequenceGeneratorTest {
     private long generateWithPaddingOnMillis(String field) {
         return getGenerator(field)
                 .generateWithPadding(row, CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO);
+    }
+
+    private long generateWithPaddingOnRowKind(long sequence, RowKind rowKind) {
+        return getGenerator("_bigint")
+                .generateWithPadding(
+                        GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence), ROW_KIND_FLAG);
     }
 
     private long getMillisFromGeneratedWithPadding(long generated) {

@@ -422,7 +422,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>sequence.auto-padding</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
-            <td>Specify the way of padding precision up to micro-second if the provided sequence field is used to indicate "time" but doesn't meet the precise.<br /><br />Possible values:<ul><li>"none": No padding for sequence field.</li><li>"second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>"millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li></ul></td>
+            <td>Specify the way of padding precision up to micro-second if the provided sequence field is used to indicate "time" but doesn't meet the precise.<br /><br />Possible values:<ul><li>"none": No padding for sequence field.</li><li>"row-kind-flag": Pads a bit flag to indicate whether it is retract (0) or add (1) message.</li><li>"second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>"millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li></ul></td>
         </tr>
         <tr>
             <td><h5>sequence.field</h5></td>

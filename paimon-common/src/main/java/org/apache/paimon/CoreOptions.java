@@ -1628,6 +1628,9 @@ public class CoreOptions implements Serializable {
     /** Specifies the way of making up time precision for sequence field. */
     public enum SequenceAutoPadding implements DescribedEnum {
         NONE("none", "No padding for sequence field."),
+        ROW_KIND_FLAG(
+                "row-kind-flag",
+                "Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
         SECOND_TO_MICRO(
                 "second-to-micro",
                 "Pads the sequence field that indicates time with precision of seconds to micro-second."),
