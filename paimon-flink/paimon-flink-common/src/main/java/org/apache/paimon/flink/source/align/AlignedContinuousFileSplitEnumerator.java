@@ -220,8 +220,9 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
         PlanWithNextSnapshotId nextPlan = pendingPlans.poll();
         if (nextPlan != null) {
             nextSnapshotId = nextPlan.nextSnapshotId();
+            Objects.requireNonNull(nextSnapshotId);
             TableScan.Plan plan = nextPlan.plan();
-            if (plan.splits().isEmpty() && nextSnapshotId != null) {
+            if (plan.splits().isEmpty()) {
                 addSplits(
                         Collections.singletonList(
                                 new FileStoreSourceSplit(
