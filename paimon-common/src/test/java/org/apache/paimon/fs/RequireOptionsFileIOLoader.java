@@ -18,29 +18,32 @@
 
 package org.apache.paimon.fs;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.paimon.fs.local.LocalFileIO;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Loader to load {@link FileIO}.
- *
- * @since 0.4.0
- */
-@Public
-public interface FileIOLoader {
+/** Test {@link FileIOLoader}. */
+public class RequireOptionsFileIOLoader implements FileIOLoader {
 
-    String getScheme();
-
-    /**
-     * Returns a set of option keys (case-insensitive, key can be written in multiple ways) that an
-     * implementation of this FileIO requires. Only when these options are included will this FileIO
-     * be selected, otherwise it will fall back to HadoopFileIO or compute engine's own FileIO.
-     */
-    default List<String[]> requiredOptions() {
-        return Collections.emptyList();
+    @Override
+    public String getScheme() {
+        return "require-options";
     }
 
-    FileIO load(Path path);
+    @Override
+    public List<String[]> requiredOptions() {
+        List<String[]> options = new ArrayList<>();
+        options.add(new String[] {"Require1", "Re-quire1"});
+        options.add(new String[] {"reQuire2"});
+        return options;
+    }
+
+    @Override
+    public FileIO load(Path path) {
+        return new MyFileIO();
+    }
+
+    /** My {@link LocalFileIO} for checking. */
+    public static class MyFileIO extends LocalFileIO {}
 }
