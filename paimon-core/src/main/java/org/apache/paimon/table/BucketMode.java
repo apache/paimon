@@ -40,6 +40,13 @@ public enum BucketMode {
     DYNAMIC,
 
     /**
+     * Compared with the DYNAMIC mode, this mode not only dynamically allocates buckets for
+     * Partition table, but also updates data across partitions. The primary key does not contain
+     * partition fields.
+     */
+    GLOBAL_DYNAMIC,
+
+    /**
      * Ignoring buckets can be equivalent to understanding that all data enters the global bucket,
      * and data is randomly written to the table. The data in the bucket has no order relationship
      * at all. This mode only works for append-only table.

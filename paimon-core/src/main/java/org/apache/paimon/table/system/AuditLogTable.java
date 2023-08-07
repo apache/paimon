@@ -235,6 +235,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
+            snapshotReader.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
         public Plan read() {
             return snapshotReader.read();
         }

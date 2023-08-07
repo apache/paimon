@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 
 import org.rocksdb.ColumnFamilyHandle;
@@ -30,22 +29,20 @@ import java.util.Collections;
 import java.util.List;
 
 /** RocksDB state for key -> List of value. */
-public class RocksDBListState extends RocksDBState<List<InternalRow>> {
+public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> {
 
     private final ListDelimitedSerializer listSerializer = new ListDelimitedSerializer();
-
-    private static final List<InternalRow> EMPTY = Collections.emptyList();
 
     public RocksDBListState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
-            Serializer<InternalRow> keySerializer,
-            Serializer<InternalRow> valueSerializer,
+            Serializer<K> keySerializer,
+            Serializer<V> valueSerializer,
             long lruCacheSize) {
         super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
-    public void add(InternalRow key, InternalRow value) throws IOException {
+    public void add(K key, V value) throws IOException {
         byte[] keyBytes = serializeKey(key);
         byte[] valueBytes = serializeValue(value);
         try {
@@ -56,7 +53,7 @@ public class RocksDBListState extends RocksDBState<List<InternalRow>> {
         cache.invalidate(wrap(keyBytes));
     }
 
-    public List<InternalRow> get(InternalRow key) throws IOException {
+    public List<V> get(K key) throws IOException {
         byte[] keyBytes = serializeKey(key);
         return cache.get(
                 wrap(keyBytes),
@@ -67,16 +64,15 @@ public class RocksDBListState extends RocksDBState<List<InternalRow>> {
                     } catch (RocksDBException e) {
                         throw new RuntimeException(e);
                     }
-                    List<InternalRow> rows =
-                            listSerializer.deserializeList(valueBytes, valueSerializer);
+                    List<V> rows = listSerializer.deserializeList(valueBytes, valueSerializer);
                     if (rows == null) {
-                        return EMPTY;
+                        return Collections.emptyList();
                     }
                     return rows;
                 });
     }
 
-    private byte[] serializeValue(InternalRow value) throws IOException {
+    private byte[] serializeValue(V value) throws IOException {
         valueOutputView.clear();
         valueSerializer.serialize(value, valueOutputView);
         return valueOutputView.getCopyOfBuffer();

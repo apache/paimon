@@ -131,6 +131,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                             fileIO(),
                             schemaManager(),
                             tableSchema.id(),
+                            tableSchema.crossPartitionUpdate(),
                             options,
                             tableSchema.logicalPartitionType(),
                             addKeyNamePrefix(tableSchema.logicalBucketKeyType()),

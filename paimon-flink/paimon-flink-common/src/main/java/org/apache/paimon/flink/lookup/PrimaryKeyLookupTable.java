@@ -34,7 +34,7 @@ import java.util.function.Predicate;
 /** A {@link LookupTable} for primary key table. */
 public class PrimaryKeyLookupTable implements LookupTable {
 
-    protected final RocksDBValueState tableState;
+    protected final RocksDBValueState<InternalRow, InternalRow> tableState;
 
     protected final Predicate<InternalRow> recordFilter;
 

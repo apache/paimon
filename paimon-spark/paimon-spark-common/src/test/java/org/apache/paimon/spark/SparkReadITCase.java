@@ -383,22 +383,6 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testCreateTableWithInvalidPk() {
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                        "CREATE TABLE PartitionedPkTable (\n"
-                                                + "a BIGINT,\n"
-                                                + "b STRING,\n"
-                                                + "c DOUBLE)\n"
-                                                + "PARTITIONED BY (b)\n"
-                                                + "TBLPROPERTIES ('primary-key' = 'a')"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining(
-                        "Primary key constraint [a] should include all partition fields [b]");
-    }
-
-    @Test
     public void testCreateTableWithNonexistentPk() {
         spark.sql("USE paimon");
         assertThatThrownBy(

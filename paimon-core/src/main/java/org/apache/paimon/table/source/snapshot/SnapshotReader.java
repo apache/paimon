@@ -55,6 +55,8 @@ public interface SnapshotReader {
 
     SnapshotReader withBucket(int bucket);
 
+    SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);
+
     /** Get splits plan from snapshot. */
     Plan read();
 
