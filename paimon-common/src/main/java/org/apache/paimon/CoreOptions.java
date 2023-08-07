@@ -37,6 +37,7 @@ import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -394,13 +395,25 @@ public class CoreOptions implements Serializable {
                             "The field that generates the sequence number for primary key table,"
                                     + " the sequence number determines which data is the most recent.");
 
-    public static final ConfigOption<SequenceAutoPadding> SEQUENCE_AUTO_PADDING =
+    public static final ConfigOption<String> SEQUENCE_AUTO_PADDING =
             key("sequence.auto-padding")
-                    .enumType(SequenceAutoPadding.class)
-                    .defaultValue(SequenceAutoPadding.NONE)
+                    .stringType()
+                    .noDefaultValue()
                     .withDescription(
-                            "Specify the way of padding precision up to micro-second"
-                                    + " if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.");
+                            Description.builder()
+                                    .text(
+                                            "Specify the way of padding precision, if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.")
+                                    .list(
+                                            text("You can specific:"),
+                                            text(
+                                                    "1. \"row-kind-flag\": Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
+                                            text(
+                                                    "2. \"second-to-micro\": Pads the sequence field that indicates time with precision of seconds to micro-second."),
+                                            text(
+                                                    "3. \"millis-to-micro\": Pads the sequence field that indicates time with precision of milli-second to micro-second."),
+                                            text(
+                                                    "4. Composite pattern: for example, \"second-to-micro,row-kind-flag\"."))
+                                    .build());
 
     public static final ConfigOption<StartupMode> SCAN_MODE =
             key("scan.mode")
@@ -1113,8 +1126,12 @@ public class CoreOptions implements Serializable {
         return options.getOptional(SEQUENCE_FIELD);
     }
 
-    public SequenceAutoPadding sequenceAutoPadding() {
-        return options.get(SEQUENCE_AUTO_PADDING);
+    public List<String> sequenceAutoPadding() {
+        String padding = options.get(SEQUENCE_AUTO_PADDING);
+        if (padding == null) {
+            return Collections.emptyList();
+        }
+        return Arrays.asList(padding.split(","));
     }
 
     public WriteMode writeMode() {
@@ -1627,7 +1644,6 @@ public class CoreOptions implements Serializable {
 
     /** Specifies the way of making up time precision for sequence field. */
     public enum SequenceAutoPadding implements DescribedEnum {
-        NONE("none", "No padding for sequence field."),
         ROW_KIND_FLAG(
                 "row-kind-flag",
                 "Pads a bit flag to indicate whether it is retract (0) or add (1) message."),

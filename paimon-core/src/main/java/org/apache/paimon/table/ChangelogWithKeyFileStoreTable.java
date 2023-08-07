@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.SequenceAutoPadding;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.WriteMode;
@@ -247,8 +248,10 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         .sequenceField()
                         .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
                         .orElse(null);
-        final CoreOptions.SequenceAutoPadding sequenceAutoPadding =
-                store().options().sequenceAutoPadding();
+        final List<SequenceAutoPadding> sequenceAutoPadding =
+                store().options().sequenceAutoPadding().stream()
+                        .map(SequenceAutoPadding::valueOf)
+                        .collect(Collectors.toList());
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser, manifestFilter),
@@ -257,7 +260,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     long sequenceNumber =
                             sequenceGenerator == null
                                     ? KeyValue.UNKNOWN_SEQUENCE
-                                    : sequenceAutoPadding == CoreOptions.SequenceAutoPadding.NONE
+                                    : sequenceAutoPadding.isEmpty()
                                             ? sequenceGenerator.generate(record.row())
                                             : sequenceGenerator.generateWithPadding(
                                                     record.row(), sequenceAutoPadding);

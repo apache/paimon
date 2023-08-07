@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.SequenceAutoPadding;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.CharType;
@@ -41,6 +41,7 @@ import org.apache.paimon.utils.InternalRowUtils;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /** Generate sequence number. */
@@ -87,19 +88,25 @@ public class SequenceGenerator {
         return generator.generate(row, index);
     }
 
-    public long generateWithPadding(InternalRow row, CoreOptions.SequenceAutoPadding autoPadding) {
+    public long generateWithPadding(InternalRow row, List<SequenceAutoPadding> paddings) {
         long sequence = generate(row);
-        switch (autoPadding) {
-            case ROW_KIND_FLAG:
-                return addRowKindFlag(sequence, row.getRowKind());
-            case SECOND_TO_MICRO:
-                return secondToMicro(sequence);
-            case MILLIS_TO_MICRO:
-                return millisToMicro(sequence);
-            default:
-                throw new UnsupportedOperationException(
-                        "Unknown sequence padding mode " + autoPadding.name());
+        for (SequenceAutoPadding padding : paddings) {
+            switch (padding) {
+                case ROW_KIND_FLAG:
+                    sequence = addRowKindFlag(sequence, row.getRowKind());
+                    break;
+                case SECOND_TO_MICRO:
+                    sequence = secondToMicro(sequence);
+                    break;
+                case MILLIS_TO_MICRO:
+                    sequence = millisToMicro(sequence);
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown sequence padding mode " + padding);
+            }
         }
+        return sequence;
     }
 
     private long addRowKindFlag(long sequence, RowKind rowKind) {
