@@ -250,7 +250,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                         .orElse(null);
         final List<SequenceAutoPadding> sequenceAutoPadding =
                 store().options().sequenceAutoPadding().stream()
-                        .map(SequenceAutoPadding::valueOf)
+                        .map(SequenceAutoPadding::fromString)
                         .collect(Collectors.toList());
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
