@@ -35,6 +35,7 @@ import javax.annotation.Nullable;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The difference with {@link FileStoreSourceReader} is that only after the allocated splits are
@@ -53,8 +54,9 @@ public class AlignedSourceReader extends FileStoreSourceReader
             TableRead tableRead,
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>>
-                    elementsQueue) {
-        super(readerContext, tableRead, limit, elementsQueue);
+                    elementsQueue,
+            ConcurrentHashMap<Integer, Long> consumedRecords) {
+        super(readerContext, tableRead, limit, elementsQueue, consumedRecords);
         this.elementsQueue = elementsQueue;
         this.nextCheckpointId = null;
     }

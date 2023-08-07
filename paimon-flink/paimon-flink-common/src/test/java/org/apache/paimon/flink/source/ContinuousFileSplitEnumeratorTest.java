@@ -45,6 +45,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
@@ -783,7 +784,13 @@ public class ContinuousFileSplitEnumeratorTest {
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, scan, bucketMode);
+                    context,
+                    initialSplits,
+                    null,
+                    discoveryInterval,
+                    scan,
+                    bucketMode,
+                    new ConcurrentHashMap<>());
         }
     }
 

@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -66,6 +67,7 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
                 context,
                 new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
                 null,
-                new FutureCompletingBlockingQueue<>(2));
+                new FutureCompletingBlockingQueue<>(2),
+                new ConcurrentHashMap<>());
     }
 }

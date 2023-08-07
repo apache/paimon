@@ -33,6 +33,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.flink.source.ContinuousFileSplitEnumeratorTest.createSnapshotSplit;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -167,7 +168,14 @@ public class AlignedContinuousFileSplitEnumeratorTest {
 
         public AlignedContinuousFileSplitEnumerator build() {
             return new AlignedContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, scan, bucketMode, timeout);
+                    context,
+                    initialSplits,
+                    null,
+                    discoveryInterval,
+                    scan,
+                    bucketMode,
+                    timeout,
+                    new ConcurrentHashMap<>());
         }
     }
 }

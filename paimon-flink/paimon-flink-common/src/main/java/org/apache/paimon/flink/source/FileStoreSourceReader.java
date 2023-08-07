@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.SourceReader;
@@ -39,10 +38,18 @@ public class FileStoreSourceReader
                 RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
     public FileStoreSourceReader(
-            SourceReaderContext readerContext, TableRead tableRead, @Nullable Long limit) {
+            SourceReaderContext readerContext,
+            TableRead tableRead,
+            @Nullable Long limit,
+            Map<Integer, Long> consumedRecords) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
-                () -> new FileStoreSourceSplitReader(tableRead, RecordLimiter.create(limit), new FileStoreSourceReaderMetrics(readerContext.metricGroup()), readerContext.getIndexOfSubtask()),
+                () ->
+                        new FileStoreSourceSplitReader(
+                                tableRead,
+                                RecordLimiter.create(limit),
+                                readerContext.getIndexOfSubtask(),
+                                consumedRecords),
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);
@@ -53,10 +60,16 @@ public class FileStoreSourceReader
             TableRead tableRead,
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<RecordIterator<RowData>>>
-                    elementsQueue) {
+                    elementsQueue,
+            Map<Integer, Long> consumedRecords) {
         super(
                 elementsQueue,
-                () -> new FileStoreSourceSplitReader(tableRead, RecordLimiter.create(limit), new FileStoreSourceReaderMetrics(readerContext.metricGroup()), readerContext.getIndexOfSubtask()),
+                () ->
+                        new FileStoreSourceSplitReader(
+                                tableRead,
+                                RecordLimiter.create(limit),
+                                readerContext.getIndexOfSubtask(),
+                                consumedRecords),
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);

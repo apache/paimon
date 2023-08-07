@@ -19,19 +19,27 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 
 import org.apache.flink.api.connector.source.Boundedness;
+import org.apache.flink.api.connector.source.SourceReader;
+import org.apache.flink.api.connector.source.SourceReaderContext;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
 
 /** Unbounded {@link FlinkSource} for reading records. It continuously monitors new snapshots. */
 public class ContinuousFileStoreSource extends FlinkSource {
@@ -40,6 +48,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
 
     protected final Map<String, String> options;
     protected final BucketMode bucketMode;
+    protected ConcurrentHashMap<Integer, Long> consumedRecords = new ConcurrentHashMap<>();
 
     public ContinuousFileStoreSource(
             ReadBuilder readBuilder, Map<String, String> options, @Nullable Long limit) {
@@ -54,6 +63,17 @@ public class ContinuousFileStoreSource extends FlinkSource {
         super(readBuilder, limit);
         this.options = options;
         this.bucketMode = bucketMode;
+    }
+
+    @Override
+    public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
+        IOManager ioManager =
+                new IOManagerImpl(
+                        splitPaths(
+                                context.getConfiguration()
+                                        .get(org.apache.flink.configuration.CoreOptions.TMP_DIRS)));
+        return new FileStoreSourceReader(
+                context, readBuilder.newRead().withIOManager(ioManager), limit, consumedRecords);
     }
 
     @Override
@@ -88,6 +108,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 nextSnapshotId,
                 CoreOptions.fromMap(options).continuousDiscoveryInterval().toMillis(),
                 scan,
-                bucketMode);
+                bucketMode,
+                consumedRecords);
     }
 }

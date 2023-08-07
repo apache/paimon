@@ -20,7 +20,6 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
-import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.source.Split;
@@ -42,6 +41,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
@@ -65,19 +65,23 @@ public class FileStoreSourceSplitReader
 
     private boolean paused;
 
-    private final FileStoreSourceReaderMetrics fileStoreSourceReaderMetrics;
-    private long currentPendingRecords;
-    private int subTask;
+    private long currentNumReadSinceStart;
+    private final int subTask;
+    private Map<Integer, Long> consumedRecords;
 
-    public FileStoreSourceSplitReader(TableRead tableRead, @Nullable RecordLimiter limiter, FileStoreSourceReaderMetrics fileStoreSourceReaderMetrics, int subTask) {
+    public FileStoreSourceSplitReader(
+            TableRead tableRead,
+            @Nullable RecordLimiter limiter,
+            Integer subTask,
+            Map<Integer, Long> consumedRecords) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
         this.paused = false;
-        this.fileStoreSourceReaderMetrics = fileStoreSourceReaderMetrics;
         this.subTask = subTask;
+        this.consumedRecords = consumedRecords;
     }
 
     @Override
@@ -132,7 +136,6 @@ public class FileStoreSourceSplitReader
         }
 
         splits.addAll(splitsChange.splits());
-        currentPendingRecords = splits.stream().map(split -> split.split().rowCount()).reduce(0L, Long::sum);
     }
 
     /**
@@ -177,7 +180,12 @@ public class FileStoreSourceSplitReader
         if (nextSplit == null) {
             throw new IOException("Cannot fetch from another split - no split remaining");
         }
-
+        // fetch a new split
+        if (currentSplitId == null) {
+            // Track consumed records by this reader
+            currentNumReadSinceStart += nextSplit.split().rowCount();
+            consumedRecords.put(subTask, currentNumReadSinceStart);
+        }
         currentSplitId = nextSplit.splitId();
         currentReader = new LazyRecordReader(nextSplit.split());
         currentNumRead = nextSplit.recordsToSkip();
@@ -186,10 +194,7 @@ public class FileStoreSourceSplitReader
         }
         if (currentNumRead > 0) {
             seek(currentNumRead);
-            currentPendingRecords -= currentNumRead;
         }
-        // Track this reader's record lag
-        fileStoreSourceReaderMetrics.updateRecordsLag(subTask, currentPendingRecords);
     }
 
     private void seek(long toSkip) throws IOException {
@@ -308,9 +313,5 @@ public class FileStoreSourceSplitReader
         public Set<String> finishedSplits() {
             return Collections.emptySet();
         }
-    }
-
-    public long getCurrentPendingRecords() {
-        return currentPendingRecords;
     }
 }

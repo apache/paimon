@@ -48,6 +48,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -77,13 +78,18 @@ public class ContinuousFileSplitEnumerator
 
     private boolean stopTriggerScan = false;
 
+    protected long discoveredRecords;
+
+    private ConcurrentHashMap<Integer, Long> readersFetchedRecords;
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
             StreamTableScan scan,
-            BucketMode bucketMode) {
+            BucketMode bucketMode,
+            ConcurrentHashMap<Integer, Long> readersFetchedRecords) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -92,6 +98,8 @@ public class ContinuousFileSplitEnumerator
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
         this.splitAssigner = createSplitAssigner(bucketMode);
+        this.readersFetchedRecords = readersFetchedRecords;
+        context.metricGroup().gauge("totalPendingRecords", this::getPendingRecords);
         addSplits(remainSplits);
     }
 
@@ -166,6 +174,7 @@ public class ContinuousFileSplitEnumerator
     protected synchronized PlanWithNextSnapshotId scanNextSnapshot() {
         TableScan.Plan plan = scan.plan();
         Long nextSnapshotId = scan.checkpoint();
+        discoveredRecords += plan.splits().stream().mapToLong(s -> s.rowCount()).sum();
         return new PlanWithNextSnapshotId(plan, nextSnapshotId);
     }
 
@@ -267,5 +276,11 @@ public class ContinuousFileSplitEnumerator
         public Long nextSnapshotId() {
             return nextSnapshotId;
         }
+    }
+
+    private long getPendingRecords() {
+        long totalReadersFetchedRecords =
+                readersFetchedRecords.values().stream().reduce((a, b) -> a + b).get();
+        return discoveredRecords - totalReadersFetchedRecords;
     }
 }

@@ -69,7 +69,8 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 limit,
                 new FutureCompletingBlockingQueue<>(
                         context.getConfiguration()
-                                .getInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)));
+                                .getInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)),
+                consumedRecords);
     }
 
     @Override
@@ -86,6 +87,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                 scan,
                 bucketMode,
-                options.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT).toMillis());
+                options.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT).toMillis(),
+                consumedRecords);
     }
 }

@@ -36,6 +36,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
@@ -108,7 +109,8 @@ public class FileStoreSourceReaderTest {
         return new FileStoreSourceReader(
                 context,
                 new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
-                null);
+                null,
+                new ConcurrentHashMap<>());
     }
 
     protected static FileStoreSourceSplit createTestFileSplit(String id) {

@@ -48,6 +48,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * An aligned continuously monitoring enumerator. It requires checkpoint to be aligned with
@@ -90,8 +91,16 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
             long discoveryInterval,
             StreamTableScan scan,
             BucketMode bucketMode,
-            long alignTimeout) {
-        super(context, remainSplits, nextSnapshotId, discoveryInterval, scan, bucketMode);
+            long alignTimeout,
+            ConcurrentHashMap<Integer, Long> consumedRecords) {
+        super(
+                context,
+                remainSplits,
+                nextSnapshotId,
+                discoveryInterval,
+                scan,
+                bucketMode,
+                consumedRecords);
         this.pendingPlans = new ArrayBlockingQueue<>(MAX_PENDING_PLAN);
         this.alignedAssigner = (AlignedSplitAssigner) super.splitAssigner;
         this.nextSnapshotId = nextSnapshotId;

@@ -49,7 +49,9 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -64,6 +66,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class FileStoreSourceSplitReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
+
+    private ConcurrentHashMap<Integer, Long> consumedRecords = new ConcurrentHashMap<>();
 
     @BeforeEach
     public void beforeEach() throws Exception {
@@ -107,7 +111,16 @@ public class FileStoreSourceSplitReaderTest {
 
     private FileStoreSourceSplitReader createReader(TableRead tableRead, @Nullable Long limit) {
         return new FileStoreSourceSplitReader(
-                tableRead, limit == null ? null : new RecordLimiter(limit));
+                tableRead, limit == null ? null : new RecordLimiter(limit), 0, consumedRecords);
+    }
+
+    private FileStoreSourceSplitReader createReader(
+            TableRead tableRead, @Nullable Long limit, int subtask) {
+        return new FileStoreSourceSplitReader(
+                tableRead,
+                limit == null ? null : new RecordLimiter(limit),
+                subtask,
+                consumedRecords);
     }
 
     private void innerTestOnce(boolean valueCountMode, int skip) throws Exception {
@@ -429,6 +442,112 @@ public class FileStoreSourceSplitReaderTest {
         assertRecords(records, "id2", "id2", 0, null);
 
         reader.close();
+    }
+
+    @Test
+    public void testReaderConsumedRecordsUpdated() throws Exception {
+        TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
+        FileStoreSourceSplitReader reader1 = createReader(rw.createReadWithKey(), null, 1);
+        FileStoreSourceSplitReader reader2 = createReader(rw.createReadWithKey(), null, 2);
+
+        // assign split1
+        List<Tuple2<Long, Long>> input1 = kvs();
+        List<DataFileMeta> files1 = rw.writeFiles(row(1), 0, input1);
+        assignSplit(reader1, newSourceSplit("id1", row(1), 0, files1));
+
+        List<Tuple2<Long, Long>> input2 = kvs();
+        List<DataFileMeta> files2 = rw.writeFiles(row(2), 1, input2);
+        assignSplit(reader1, newSourceSplit("id2", row(2), 1, files2));
+
+        // assign split2
+        List<Tuple2<Long, Long>> input3 = kvs();
+        List<DataFileMeta> files3 = rw.writeFiles(row(3), 2, input3);
+        assignSplit(reader2, newSourceSplit("id3", row(3), 2, files3));
+
+        // reader1 read split1
+        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records = reader1.fetch();
+        assertRecords(
+                records,
+                null,
+                "id1",
+                0,
+                input1.stream().map(t -> t.f1).collect(Collectors.toList()));
+        assertThat(consumedRecords)
+                .containsExactlyInAnyOrderEntriesOf(
+                        new HashMap<Integer, Long>() {
+                            {
+                                put(1, 6L);
+                            }
+                        });
+
+        records = reader1.fetch();
+        assertRecords(records, "id1", "id1", 0, null);
+        assertThat(consumedRecords)
+                .containsExactlyInAnyOrderEntriesOf(
+                        new HashMap<Integer, Long>() {
+                            {
+                                put(1, 6L);
+                            }
+                        });
+
+        // reader2 read split3
+        records = reader2.fetch();
+        assertRecords(
+                records,
+                null,
+                "id3",
+                0,
+                input3.stream().map(t -> t.f1).collect(Collectors.toList()));
+        assertThat(consumedRecords)
+                .containsExactlyInAnyOrderEntriesOf(
+                        new HashMap<Integer, Long>() {
+                            {
+                                put(1, 6L);
+                                put(2, 6L);
+                            }
+                        });
+
+        records = reader2.fetch();
+        assertRecords(records, "id3", "id3", 0, null);
+        assertThat(consumedRecords)
+                .containsExactlyInAnyOrderEntriesOf(
+                        new HashMap<Integer, Long>() {
+                            {
+                                put(1, 6L);
+                                put(2, 6L);
+                            }
+                        });
+
+        // reader1 read split2
+        records = reader1.fetch();
+        assertRecords(
+                records,
+                null,
+                "id2",
+                0,
+                input2.stream().map(t -> t.f1).collect(Collectors.toList()));
+        assertThat(consumedRecords)
+                .containsExactlyInAnyOrderEntriesOf(
+                        new HashMap<Integer, Long>() {
+                            {
+                                put(1, 12L);
+                                put(2, 6L);
+                            }
+                        });
+
+        records = reader1.fetch();
+        assertRecords(records, "id2", "id2", 0, null);
+        assertThat(consumedRecords)
+                .containsExactlyInAnyOrderEntriesOf(
+                        new HashMap<Integer, Long>() {
+                            {
+                                put(1, 12L);
+                                put(2, 6L);
+                            }
+                        });
+
+        reader1.close();
+        reader2.close();
     }
 
     private void assertRecords(
