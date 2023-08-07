@@ -21,7 +21,6 @@ import org.apache.paimon.WriteMode.CHANGE_LOG
 
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types._
-import org.scalactic.source.Position
 
 class InsertOverwriteTest extends PaimonSparkTestBase {
 
@@ -213,6 +212,47 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
         checkAnswer(
           spark.sql("SELECT * FROM T ORDER BY a"),
           Row(4, "d", sv2.value) :: Row(5, "e", sv1.value) :: Row(7, "g", sv1.value) :: Nil)
+      }
+  }
+
+  writeModes.foreach {
+    writeMode =>
+      bucketModes.foreach {
+        bucket =>
+          test(
+            s"dynamic insert overwrite single-partitioned table: write-mode: $writeMode, bucket: $bucket") {
+            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+              "'primary-key'='a,b',"
+            } else {
+              ""
+            }
+
+            spark.sql(
+              s"""
+                 |CREATE TABLE T (a INT, b INT, c STRING)
+                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
+                 |PARTITIONED BY (a)
+                 |""".stripMargin)
+
+            spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a, b"),
+              Row(1, 1, "1") :: Row(2, 2, "2") :: Nil)
+
+            // overwrite the whole table
+            spark.sql("INSERT OVERWRITE T VALUES (1, 3, '3'), (2, 4, '4')")
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a, b"),
+              Row(1, 3, "3") :: Row(2, 4, "4") :: Nil)
+
+            withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+              // overwrite the a=1 partition
+              spark.sql("INSERT OVERWRITE T VALUES (1, 5, '5'), (1, 7, '7')")
+              checkAnswer(
+                spark.sql("SELECT * FROM T ORDER BY a, b"),
+                Row(1, 5, "5") :: Row(1, 7, "7") :: Row(2, 4, "4") :: Nil)
+            }
+          }
       }
   }
 }

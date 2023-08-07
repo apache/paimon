@@ -168,7 +168,7 @@ case class WriteIntoPaimonTable(
         }
       case DynamicOverWrite =>
         dynamicPartitionOverwriteMode = true
-        throw new UnsupportedOperationException("Dynamic Overwrite is unsupported for now.")
+        Map.empty[String, String]
       case _ =>
         throw new UnsupportedOperationException(s" This mode is unsupported for now.")
     }
