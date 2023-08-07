@@ -360,3 +360,6 @@ padding for row kind flag, which will automatically distinguish between -U (-D) 
 2. Insufficient precision: If the provided `sequence.field` doesn't meet the precision, like a rough second or
 millisecond, you can set `sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision
 of sequence number will be made up to microsecond by system.
+
+3. Composite pattern: for example, "second-to-micro,row-kind-flag", first, add the micro to the second, and then
+pad the row kind flag.
