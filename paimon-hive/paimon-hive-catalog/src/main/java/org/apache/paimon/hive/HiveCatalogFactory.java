@@ -26,9 +26,10 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.paimon.hive.HiveCatalog.createHiveConf;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
@@ -37,6 +38,8 @@ import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
+
+    private static final Logger LOG = LoggerFactory.getLogger(HiveCatalogFactory.class);
 
     private static final ConfigOption<String> METASTORE_CLIENT_CLASS =
             ConfigOptions.key("metastore.client.class")
@@ -64,14 +67,17 @@ public class HiveCatalogFactory implements CatalogFactory {
         if (uri != null) {
             hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
         }
-        Preconditions.checkNotNull(
-                hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname),
-                "Can't find hive metastore uri to connect: "
-                        + " either set "
-                        + CatalogOptions.URI.key()
-                        + " for paimon "
-                        + IDENTIFIER
-                        + " catalog or set hive.metastore.uris in hive-site.xml or hadoop configurations.");
+
+        if (hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname) == null) {
+            LOG.error(
+                    "Can't find hive metastore uri to connect: "
+                            + " either set "
+                            + CatalogOptions.URI.key()
+                            + " for paimon "
+                            + IDENTIFIER
+                            + " catalog or set hive.metastore.uris in hive-site.xml or hadoop configurations."
+                            + " Will use empty metastore uris, which means we may use a embedded metastore. The may cause unpredictable consensus problem.");
+        }
 
         String clientClassName = context.options().get(METASTORE_CLIENT_CLASS);
 
