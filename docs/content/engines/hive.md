@@ -202,7 +202,7 @@ CREATE TABLE hive_test_table(
     a INT COMMENT 'The a field',
     b STRING COMMENT 'The b field'
 )
-STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler';
 ```
 
 ## Hive SQL: access Paimon Tables by External Table

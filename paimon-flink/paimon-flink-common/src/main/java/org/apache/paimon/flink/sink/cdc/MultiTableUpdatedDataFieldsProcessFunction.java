@@ -28,7 +28,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -38,12 +37,13 @@ import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+
+import static org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction.getSchemaChanges;
 
 /**
  * A {@link ProcessFunction} to handle schema changes. New schema is represented by a list of {@link
@@ -111,39 +111,7 @@ public class MultiTableUpdatedDataFieldsProcessFunction
 
     private List<SchemaChange> extractSchemaChanges(
             SchemaManager schemaManager, List<DataField> updatedDataFields) {
-        RowType oldRowType = schemaManager.latest().get().logicalRowType();
-        Map<String, DataField> oldFields = new HashMap<>();
-        for (DataField oldField : oldRowType.getFields()) {
-            oldFields.put(oldField.name(), oldField);
-        }
-
-        List<SchemaChange> result = new ArrayList<>();
-        for (DataField newField : updatedDataFields) {
-            if (oldFields.containsKey(newField.name())) {
-                DataField oldField = oldFields.get(newField.name());
-                // we compare by ignoring nullable, because partition keys and primary keys might be
-                // nullable in source database, but they can't be null in Paimon
-                if (oldField.type().equalsIgnoreNullable(newField.type())) {
-                    if (!Objects.equals(oldField.description(), newField.description())) {
-                        result.add(
-                                SchemaChange.updateColumnComment(
-                                        new String[] {newField.name()}, newField.description()));
-                    }
-                } else {
-                    result.add(SchemaChange.updateColumnType(newField.name(), newField.type()));
-                    if (newField.description() != null) {
-                        result.add(
-                                SchemaChange.updateColumnComment(
-                                        new String[] {newField.name()}, newField.description()));
-                    }
-                }
-            } else {
-                result.add(
-                        SchemaChange.addColumn(
-                                newField.name(), newField.type(), newField.description(), null));
-            }
-        }
-        return result;
+        return getSchemaChanges(updatedDataFields, schemaManager);
     }
 
     private void applySchemaChange(

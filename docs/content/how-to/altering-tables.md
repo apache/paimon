@@ -315,7 +315,7 @@ The following SQL changes comment of column `buy_count` to `buy count`.
 {{< tab "Flink" >}}
 
 ```sql
-ALTER TABLE my_table MODIFY buy_count BIGINT COMMENT 'buy count'
+ALTER TABLE my_table MODIFY buy_count BIGINT COMMENT 'buy count';
 ```
 
 {{< /tab >}}
@@ -451,7 +451,7 @@ The following SQL drops the watermark of table `my_table`.
 {{< tab "Flink" >}}
 
 ```sql
-ALTER TABLE my_table DROP WATERMARK
+ALTER TABLE my_table DROP WATERMARK;
 ```
 
 {{< /tab >}}

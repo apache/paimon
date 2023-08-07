@@ -33,7 +33,7 @@ be specified by value expressions or result from a query.
 ## Syntax
 
 ```sql
-INSERT { INTO | OVERWRITE } table_identifier [ part_spec ] [ column_list ] { value_expr | query }
+INSERT { INTO | OVERWRITE } table_identifier [ part_spec ] [ column_list ] { value_expr | query };
 ```
 - part_spec
 
@@ -103,7 +103,7 @@ Other engines will throw respective exception to announce this. We can use funct
 turn a nullable column into a non-null column to escape exception:
 
 ```sql
-INSERT INTO A key1 SELECT COALESCE(key2, <non-null expression>) FROM B
+INSERT INTO A key1 SELECT COALESCE(key2, <non-null expression>) FROM B;
 ```
 
 ## Applying Records/Changes to Tables
@@ -195,7 +195,7 @@ You can use `INSERT OVERWRITE` to purge tables by inserting empty value.
 {{< tab "Flink" >}}
 
 ```sql
-INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ SELECT * FROM MyTable WHERE false
+INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ SELECT * FROM MyTable WHERE false;
 ```
 
 {{< /tab >}}
@@ -217,7 +217,7 @@ Currently, Paimon supports two ways to purge partitions.
 ```sql
 -- Syntax
 INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
-PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM MyTable WHERE false
+PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM MyTable WHERE false;
 
 -- The following SQL is an example:
 -- table definition
@@ -229,11 +229,11 @@ CREATE TABLE MyTable (
 
 -- you can use
 INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
-PARTITION (k0 = 0) SELECT k1, v FROM MyTable WHERE false
+PARTITION (k0 = 0) SELECT k1, v FROM MyTable WHERE false;
 
 -- or
 INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
-PARTITION (k0 = 0, k1 = 0) SELECT v FROM MyTable WHERE false
+PARTITION (k0 = 0, k1 = 0) SELECT v FROM MyTable WHERE false;
 ```
 
 {{< /tab >}}

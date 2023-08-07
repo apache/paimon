@@ -43,6 +43,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Objects;
 
 /** A {@link PrepareCommitOperator} to write {@link RowData}. Record schema is fixed. */
 public class RowDataStoreWriteOperator extends TableWriteOperator<RowData> {
@@ -184,7 +185,7 @@ public class RowDataStoreWriteOperator extends TableWriteOperator<RowData> {
 
         if (logCallback != null) {
             try {
-                logSinkFunction.flush();
+                Objects.requireNonNull(logSinkFunction).flush();
             } catch (Exception e) {
                 throw new IOException(e);
             }

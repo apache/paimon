@@ -20,8 +20,6 @@ package org.apache.paimon.flink.source.align;
 
 import org.apache.flink.api.connector.source.SourceEvent;
 
-import javax.annotation.Nonnull;
-
 import java.util.Objects;
 
 /**
@@ -32,13 +30,12 @@ public class CheckpointEvent implements SourceEvent {
 
     private static final long serialVersionUID = 1L;
 
-    @Nonnull private final long checkpointId;
+    private final long checkpointId;
 
     public CheckpointEvent(long checkpointId) {
         this.checkpointId = checkpointId;
     }
 
-    @Nonnull
     public long getCheckpointId() {
         return checkpointId;
     }

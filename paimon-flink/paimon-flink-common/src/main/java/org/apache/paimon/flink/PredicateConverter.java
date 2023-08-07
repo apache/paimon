@@ -40,6 +40,7 @@ import org.apache.flink.table.types.logical.RowType;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.regex.Matcher;
@@ -120,12 +121,17 @@ public class PredicateConverter implements ExpressionVisitor<Predicate> {
                     .getFamilies()
                     .contains(LogicalTypeFamily.CHARACTER_STRING)) {
                 String sqlPattern =
-                        extractLiteral(fieldRefExpr.getOutputDataType(), children.get(1))
+                        Objects.requireNonNull(
+                                        extractLiteral(
+                                                fieldRefExpr.getOutputDataType(), children.get(1)))
                                 .toString();
                 String escape =
                         children.size() <= 2
                                 ? null
-                                : extractLiteral(fieldRefExpr.getOutputDataType(), children.get(2))
+                                : Objects.requireNonNull(
+                                                extractLiteral(
+                                                        fieldRefExpr.getOutputDataType(),
+                                                        children.get(2)))
                                         .toString();
                 String escapedSqlPattern = sqlPattern;
                 boolean allowQuick = false;
