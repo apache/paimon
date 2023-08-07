@@ -327,7 +327,7 @@ public class FilesTable implements ReadonlyTable {
                                                                 .apply(dataFileMeta.schemaId())
                                                                 .convert(dataFileMeta.minKey()))),
                         () ->
-                                dataFileMeta.minKey().getFieldCount() <= 0
+                                dataFileMeta.maxKey().getFieldCount() <= 0
                                         ? null
                                         : BinaryString.fromString(
                                                 Arrays.toString(
