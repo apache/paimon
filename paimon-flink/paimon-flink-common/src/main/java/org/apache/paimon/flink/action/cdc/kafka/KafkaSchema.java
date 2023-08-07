@@ -18,7 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.kafka.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.kafka.parser.RecordParser;
 import org.apache.paimon.types.DataType;
 
 import org.apache.flink.configuration.Configuration;
@@ -38,11 +39,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 
+import static org.apache.paimon.flink.action.cdc.kafka.DataFormat.getDataFormat;
+
 /** Utility class to load canal kafka schema. */
 public class KafkaSchema {
 
-    private static final int MAX_RETRY = 100;
-
+    private static final int MAX_RETRY = 5;
+    private static final int POLL_TIMEOUT_MILLIS = 100;
     private final String databaseName;
     private final String tableName;
     private final Map<String, DataType> fields;
@@ -107,15 +110,28 @@ public class KafkaSchema {
     public static KafkaSchema getKafkaSchema(Configuration kafkaConfig, String topic)
             throws Exception {
         KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig, topic);
-
         int retry = 0;
-        while (true) {
-            ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+        int retryInterval = 1000;
+
+        while (retry < MAX_RETRY) {
+            ConsumerRecords<String, String> records =
+                    consumer.poll(Duration.ofMillis(POLL_TIMEOUT_MILLIS));
+
+            // Check if records is empty.
+            if (records.isEmpty()) {
+                Thread.sleep(retryInterval);
+                retryInterval *= 2;
+                retry++;
+                continue;
+            }
+
             for (ConsumerRecord<String, String> record : records) {
-                String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
-                if ("canal-json".equals(format)) {
-                    CanalRecordParser parser = new CanalRecordParser(true, Collections.emptyList());
-                    KafkaSchema kafkaSchema = parser.getKafkaSchema(record.value());
+                DataFormat format = getDataFormat(kafkaConfig);
+                if (DataFormat.CANAL_JSON.equals(format)) {
+                    RecordParser canalRecordParser =
+                            format.createParser(
+                                    true, new TableNameConverter(true), Collections.emptyList());
+                    KafkaSchema kafkaSchema = canalRecordParser.getKafkaSchema(record.value());
                     if (kafkaSchema != null) {
                         return kafkaSchema;
                     }
@@ -124,12 +140,9 @@ public class KafkaSchema {
                             "This format: " + format + " is not support.");
                 }
             }
-            if (retry == MAX_RETRY) {
-                throw new Exception("Could not get metadata from server,topic :" + topic);
-            }
-            Thread.sleep(100);
-            retry++;
         }
+
+        throw new Exception("Could not get metadata from server,topic: " + topic);
     }
 
     @Override

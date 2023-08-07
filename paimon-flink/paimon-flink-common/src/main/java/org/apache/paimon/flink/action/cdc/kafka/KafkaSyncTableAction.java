@@ -24,7 +24,8 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.kafka.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.kafka.parser.RecordParser;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -159,13 +160,18 @@ public class KafkaSyncTableAction extends ActionBase {
             catalog.createTable(identifier, fromCanal, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
-        String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
-        EventParser.Factory<RichCdcMultiplexRecord> parserFactory;
-        if ("canal-json".equals(format)) {
-            parserFactory = RichCdcMultiplexRecordEventParser::new;
+        RecordParser canalRecordParser;
+        DataFormat format = DataFormat.getDataFormat(kafkaConfig);
+        if (DataFormat.CANAL_JSON.equals(format)) {
+            canalRecordParser =
+                    format.createParser(
+                            caseSensitive, new TableNameConverter(caseSensitive), computedColumns);
         } else {
             throw new UnsupportedOperationException("This format: " + format + " is not support.");
         }
+
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
+                RichCdcMultiplexRecordEventParser::new;
 
         CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new CdcSinkBuilder<RichCdcMultiplexRecord>()
@@ -174,9 +180,7 @@ public class KafkaSyncTableAction extends ActionBase {
                                                 source,
                                                 WatermarkStrategy.noWatermarks(),
                                                 "Kafka Source")
-                                        .flatMap(
-                                                new CanalRecordParser(
-                                                        caseSensitive, computedColumns)))
+                                        .flatMap(canalRecordParser))
                         .withParserFactory(parserFactory)
                         .withTable(table)
                         .withIdentifier(identifier)

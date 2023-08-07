@@ -16,11 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.canal;
+package org.apache.paimon.flink.action.cdc.kafka.parser.canal;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSchema;
+import org.apache.paimon.flink.action.cdc.kafka.parser.RecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -31,14 +32,8 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.NullNode;
-
-import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.util.Collector;
-
-import javax.annotation.Nullable;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -53,10 +48,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Convert canal-json format string to list of {@link RichCdcMultiplexRecord}s. */
-public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
+public class CanalRecordParser extends RecordParser {
 
-    private static final String FIELD_DATABASE = "database";
-    private static final String FIELD_TABLE = "table";
     private static final String FIELD_SQL = "sql";
     private static final String FIELD_MYSQL_TYPE = "mysqlType";
     private static final String FIELD_PRIMARY_KEYS = "pkNames";
@@ -67,96 +60,20 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
     private static final String OP_INSERT = "INSERT";
     private static final String OP_DELETE = "DELETE";
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
-
     private final boolean caseSensitive;
-    private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
-
-    private JsonNode root;
-    private String databaseName;
-    private String tableName;
-
-    public CanalRecordParser(boolean caseSensitive, List<ComputedColumn> computedColumns) {
-        this(caseSensitive, new TableNameConverter(caseSensitive), computedColumns);
-    }
-
-    public CanalRecordParser(boolean caseSensitive, TableNameConverter tableNameConverter) {
-        this(caseSensitive, tableNameConverter, Collections.emptyList());
-    }
 
     public CanalRecordParser(
             boolean caseSensitive,
             TableNameConverter tableNameConverter,
             List<ComputedColumn> computedColumns) {
+        super(tableNameConverter);
         this.caseSensitive = caseSensitive;
-        this.tableNameConverter = tableNameConverter;
         this.computedColumns = computedColumns;
     }
 
     @Override
-    public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) throws Exception {
-        root = objectMapper.readValue(value, JsonNode.class);
-        validateFormat();
-
-        databaseName = extractString(FIELD_DATABASE);
-        tableName = tableNameConverter.convert(extractString(FIELD_TABLE));
-
-        extractRecords().forEach(out::collect);
-    }
-
-    @Nullable
-    public KafkaSchema getKafkaSchema(String record) {
-        try {
-            root = objectMapper.readValue(record, JsonNode.class);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(e);
-        }
-        validateFormat();
-
-        if (isDdl()) {
-            return null;
-        }
-
-        LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
-        mySqlFieldTypes.forEach(
-                (name, type) -> paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type)));
-
-        return new KafkaSchema(
-                extractString(FIELD_DATABASE),
-                extractString(FIELD_TABLE),
-                paimonFieldTypes,
-                extractPrimaryKeys());
-    }
-
-    private void validateFormat() {
-        String errorMessageTemplate =
-                "Didn't find '%s' node in json. Only supports canal-json format,"
-                        + "please make sure your topic's format is correct.";
-
-        checkNotNull(root.get(FIELD_DATABASE), errorMessageTemplate, FIELD_DATABASE);
-        checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
-        checkNotNull(root.get(FIELD_TYPE), errorMessageTemplate, FIELD_TYPE);
-        checkNotNull(root.get(FIELD_DATA), errorMessageTemplate, FIELD_DATA);
-
-        if (isDdl()) {
-            checkNotNull(root.get(FIELD_SQL), errorMessageTemplate, FIELD_SQL);
-        } else {
-            checkNotNull(root.get(FIELD_MYSQL_TYPE), errorMessageTemplate, FIELD_MYSQL_TYPE);
-            checkNotNull(root.get(FIELD_PRIMARY_KEYS), errorMessageTemplate, FIELD_PRIMARY_KEYS);
-        }
-    }
-
-    private String extractString(String key) {
-        return root.get(key).asText();
-    }
-
-    private boolean isDdl() {
-        return root.get("isDdl") != null && root.get("isDdl").asBoolean();
-    }
-
-    private List<RichCdcMultiplexRecord> extractRecords() {
+    public List<RichCdcMultiplexRecord> extractRecords() {
         if (isDdl()) {
             return Collections.emptyList();
         }
@@ -231,6 +148,59 @@ public class CanalRecordParser implements FlatMapFunction<String, RichCdcMultipl
         }
 
         return records;
+    }
+
+    @Override
+    public KafkaSchema getKafkaSchema(String record) {
+        try {
+            root = objectMapper.readValue(record, JsonNode.class);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+        validateFormat();
+
+        if (isDdl()) {
+            return null;
+        }
+
+        LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
+        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
+        mySqlFieldTypes.forEach(
+                (name, type) -> paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type)));
+
+        return new KafkaSchema(
+                extractString(FIELD_DATABASE),
+                extractString(FIELD_TABLE),
+                paimonFieldTypes,
+                extractPrimaryKeys());
+    }
+
+    @Override
+    protected void validateFormat() {
+        String errorMessageTemplate =
+                "Didn't find '%s' node in json. Only supports canal-json format,"
+                        + "please make sure your topic's format is correct.";
+
+        checkNotNull(root.get(FIELD_DATABASE), errorMessageTemplate, FIELD_DATABASE);
+        checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
+        checkNotNull(root.get(FIELD_TYPE), errorMessageTemplate, FIELD_TYPE);
+        checkNotNull(root.get(FIELD_DATA), errorMessageTemplate, FIELD_DATA);
+
+        if (isDdl()) {
+            checkNotNull(root.get(FIELD_SQL), errorMessageTemplate, FIELD_SQL);
+        } else {
+            checkNotNull(root.get(FIELD_MYSQL_TYPE), errorMessageTemplate, FIELD_MYSQL_TYPE);
+            checkNotNull(root.get(FIELD_PRIMARY_KEYS), errorMessageTemplate, FIELD_PRIMARY_KEYS);
+        }
+    }
+
+    @Override
+    protected String extractString(String key) {
+        return root.get(key).asText();
+    }
+
+    private boolean isDdl() {
+        return root.get("isDdl") != null && root.get("isDdl").asBoolean();
     }
 
     private String toFieldName(String rawName) {
