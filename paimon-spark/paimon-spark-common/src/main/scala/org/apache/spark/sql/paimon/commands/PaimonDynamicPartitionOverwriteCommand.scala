@@ -60,12 +60,12 @@ case class PaimonDynamicPartitionOverwriteCommand(
       newChild: LogicalPlan): PaimonDynamicPartitionOverwriteCommand = copy(query = newChild)
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val table = sparkTable.getTable.asInstanceOf[FileStoreTable]
+    val fileStoreTable = sparkTable.getTable.asInstanceOf[FileStoreTable]
     WriteIntoPaimonTable(
-      table,
+      fileStoreTable,
       DynamicOverWrite,
       Dataset.ofRows(sparkSession, query),
-      Options.fromMap(table.options() ++ writeOptions)
+      Options.fromMap(fileStoreTable.options() ++ writeOptions)
     ).run(sparkSession)
   }
 
