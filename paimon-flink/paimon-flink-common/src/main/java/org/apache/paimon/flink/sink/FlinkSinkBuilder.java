@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
@@ -73,7 +74,9 @@ public class FlinkSinkBuilder {
             case FIXED:
                 return buildForFixedBucket();
             case DYNAMIC:
-                return buildDynamicBucketSink();
+                return buildDynamicBucketSink(false);
+            case GLOBAL_DYNAMIC:
+                return buildDynamicBucketSink(true);
             case UNAWARE:
                 return buildUnawareBucketSink();
             default:
@@ -81,9 +84,11 @@ public class FlinkSinkBuilder {
         }
     }
 
-    private DataStreamSink<?> buildDynamicBucketSink() {
+    private DataStreamSink<?> buildDynamicBucketSink(boolean globalIndex) {
         checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
-        return new RowDynamicBucketSink(table, overwritePartition).build(input, parallelism);
+        return globalIndex
+                ? new GlobalDynamicBucketSink(table, overwritePartition).build(input, parallelism)
+                : new RowDynamicBucketSink(table, overwritePartition).build(input, parallelism);
     }
 
     private DataStreamSink<?> buildForFixedBucket() {

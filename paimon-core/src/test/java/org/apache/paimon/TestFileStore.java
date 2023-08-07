@@ -105,6 +105,7 @@ public class TestFileStore extends KeyValueFileStore {
                 FileIOFinder.find(new Path(root)),
                 new SchemaManager(FileIOFinder.find(new Path(root)), options.path()),
                 0L,
+                false,
                 options,
                 partitionType,
                 keyType,

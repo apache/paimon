@@ -65,7 +65,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
         this.keyFilter = predicate;
-        this.bucketFilter.pushdown(predicate);
+        this.bucketKeyFilter.pushdown(predicate);
         return this;
     }
 

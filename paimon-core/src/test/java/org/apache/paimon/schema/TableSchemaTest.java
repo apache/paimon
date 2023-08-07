@@ -47,12 +47,9 @@ public class TableSchemaTest {
         List<String> primaryKeys = Collections.singletonList("f1");
         Map<String, String> options = new HashMap<>();
 
-        assertThatThrownBy(
-                        () ->
-                                new TableSchema(
-                                        1, fields, 10, partitionKeys, primaryKeys, options, ""))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Primary key constraint [f1] should include all partition fields [f0]");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
+        assertThat(schema.crossPartitionUpdate()).isTrue();
     }
 
     @Test

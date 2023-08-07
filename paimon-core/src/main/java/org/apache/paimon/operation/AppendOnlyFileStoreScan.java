@@ -62,7 +62,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
         this.filter = predicate;
-        this.bucketFilter.pushdown(predicate);
+        this.bucketKeyFilter.pushdown(predicate);
         return this;
     }
 

@@ -27,6 +27,7 @@ import org.apache.paimon.utils.TypeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -112,5 +113,17 @@ public class CdcRecordUtils {
             }
         }
         return Optional.of(genericRow);
+    }
+
+    public static CdcRecord fromGenericRow(GenericRow row, List<String> fieldNames) {
+        Map<String, String> fields = new HashMap<>();
+        for (int i = 0; i < row.getFieldCount(); i++) {
+            Object field = row.getField(i);
+            if (field != null) {
+                fields.put(fieldNames.get(i), field.toString());
+            }
+        }
+
+        return new CdcRecord(row.getRowKind(), fields);
     }
 }

@@ -67,16 +67,22 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
-        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1);
+        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1, false);
     }
 
     @Test
     @Timeout(120)
     public void testRandomCdcEventsDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(-1);
+        innerTestRandomCdcEvents(-1, false);
     }
 
-    private void innerTestRandomCdcEvents(int numBucket) throws Exception {
+    @Test
+    @Timeout(120)
+    public void testRandomCdcEventsGlobalDynamicBucket() throws Exception {
+        innerTestRandomCdcEvents(-1, true);
+    }
+
+    private void innerTestRandomCdcEvents(int numBucket, boolean globalIndex) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numEvents = random.nextInt(1500) + 1;
@@ -118,7 +124,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
                         fileIO,
                         testTable.initialRowType(),
                         Collections.singletonList("pt"),
-                        Arrays.asList("pt", "k"),
+                        globalIndex ? Collections.singletonList("k") : Arrays.asList("pt", "k"),
                         numBucket);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();

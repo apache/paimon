@@ -41,6 +41,7 @@ import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 
 import java.util.List;
@@ -63,6 +64,11 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
     @VisibleForTesting
     public AbstractInnerTableScan withBucket(int bucket) {
         snapshotReader.withBucket(bucket);
+        return this;
+    }
+
+    public AbstractInnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+        snapshotReader.withBucketFilter(bucketFilter);
         return this;
     }
 

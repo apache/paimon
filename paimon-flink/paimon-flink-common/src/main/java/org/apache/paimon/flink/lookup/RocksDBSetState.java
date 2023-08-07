@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 
 import org.rocksdb.ColumnFamilyHandle;
@@ -34,20 +33,20 @@ import java.util.List;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Rocksdb state for key -> Set values. */
-public class RocksDBSetState extends RocksDBState<List<byte[]>> {
+public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>> {
 
     private static final byte[] EMPTY = new byte[0];
 
     public RocksDBSetState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
-            Serializer<InternalRow> keySerializer,
-            Serializer<InternalRow> valueSerializer,
+            Serializer<K> keySerializer,
+            Serializer<V> valueSerializer,
             long lruCacheSize) {
         super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
-    public List<InternalRow> get(InternalRow key) throws IOException {
+    public List<V> get(K key) throws IOException {
         ByteArray keyBytes = wrap(serializeKey(key));
         List<byte[]> valueBytes = cache.getIfPresent(keyBytes);
         if (valueBytes == null) {
@@ -67,7 +66,7 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
             cache.put(keyBytes, valueBytes);
         }
 
-        List<InternalRow> values = new ArrayList<>(valueBytes.size());
+        List<V> values = new ArrayList<>(valueBytes.size());
         for (byte[] value : valueBytes) {
             valueInputView.setBuffer(value);
             values.add(valueSerializer.deserialize(valueInputView));
@@ -75,7 +74,7 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
         return values;
     }
 
-    public void retract(InternalRow key, InternalRow value) throws IOException {
+    public void retract(K key, V value) throws IOException {
         try {
             byte[] bytes = invalidKeyAndGetKVBytes(key, value);
             if (db.get(columnFamily, bytes) != null) {
@@ -86,7 +85,7 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
         }
     }
 
-    public void add(InternalRow key, InternalRow value) throws IOException {
+    public void add(K key, V value) throws IOException {
         try {
             byte[] bytes = invalidKeyAndGetKVBytes(key, value);
             db.put(columnFamily, writeOptions, bytes, EMPTY);
@@ -95,7 +94,7 @@ public class RocksDBSetState extends RocksDBState<List<byte[]>> {
         }
     }
 
-    private byte[] invalidKeyAndGetKVBytes(InternalRow key, InternalRow value) throws IOException {
+    private byte[] invalidKeyAndGetKVBytes(K key, V value) throws IOException {
         checkArgument(value != null);
 
         keyOutView.clear();
