@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -28,13 +27,19 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO;
+import static org.apache.paimon.CoreOptions.SequenceAutoPadding.ROW_KIND_FLAG;
+import static org.apache.paimon.CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -213,6 +218,24 @@ public class SequenceGeneratorTest {
         assertUnsupportedDatatype("_multiset");
     }
 
+    @Test
+    public void testGenerateWithPaddingRowKind() {
+        assertThat(generateWithPaddingOnRowKind(1L, RowKind.INSERT)).isEqualTo(3);
+        assertThat(generateWithPaddingOnRowKind(1L, RowKind.UPDATE_AFTER)).isEqualTo(3);
+        assertThat(generateWithPaddingOnRowKind(1L, RowKind.UPDATE_BEFORE)).isEqualTo(2);
+        assertThat(generateWithPaddingOnRowKind(1L, RowKind.DELETE)).isEqualTo(2);
+
+        long maxMicros =
+                Timestamp.fromLocalDateTime(LocalDateTime.parse("5000-01-01T00:00:00")).toMicros();
+        assertThat(generateWithPaddingOnRowKind(maxMicros, RowKind.INSERT))
+                .isEqualTo(191235168000000001L);
+
+        assertThat(generateWithPaddingOnMicrosAndRowKind(1L, RowKind.INSERT))
+                .isBetween(2001L, 3999L);
+        assertThat(generateWithPaddingOnMicrosAndRowKind(1L, RowKind.UPDATE_BEFORE))
+                .isBetween(2000L, 3998L);
+    }
+
     private SequenceGenerator getGenerator(String field) {
         return new SequenceGenerator(field, ALL_DATA_TYPE);
     }
@@ -224,7 +247,7 @@ public class SequenceGeneratorTest {
 
     private long generateWithPaddingOnSecond(String field) {
         return getGenerator(field)
-                .generateWithPadding(row, CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO);
+                .generateWithPadding(row, Collections.singletonList(SECOND_TO_MICRO));
     }
 
     private long getSecondFromGeneratedWithPadding(long generated) {
@@ -233,7 +256,21 @@ public class SequenceGeneratorTest {
 
     private long generateWithPaddingOnMillis(String field) {
         return getGenerator(field)
-                .generateWithPadding(row, CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO);
+                .generateWithPadding(row, Collections.singletonList(MILLIS_TO_MICRO));
+    }
+
+    private long generateWithPaddingOnRowKind(long sequence, RowKind rowKind) {
+        return getGenerator("_bigint")
+                .generateWithPadding(
+                        GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence),
+                        Collections.singletonList(ROW_KIND_FLAG));
+    }
+
+    private long generateWithPaddingOnMicrosAndRowKind(long sequence, RowKind rowKind) {
+        return getGenerator("_bigint")
+                .generateWithPadding(
+                        GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence),
+                        Arrays.asList(MILLIS_TO_MICRO, ROW_KIND_FLAG));
     }
 
     private long getMillisFromGeneratedWithPadding(long generated) {

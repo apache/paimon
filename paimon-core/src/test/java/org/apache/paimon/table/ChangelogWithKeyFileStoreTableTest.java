@@ -179,7 +179,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                             conf.set(CoreOptions.SEQUENCE_FIELD, "sec");
                             conf.set(
                                     CoreOptions.SEQUENCE_AUTO_PADDING,
-                                    CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO);
+                                    CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO.toString());
                         },
                         rowType);
         StreamTableWrite write = table.newWrite(commitUser);

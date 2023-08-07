@@ -353,19 +353,8 @@ changelog for the same record.
 By default, the primary key table determines the merge order according to the input order (the last input record will be the last to merge). However, in distributed computing,
 there will be some cases that lead to data disorder. At this time, you can use a time field as `sequence.field`, for example:
 
-{{< hint info >}}
-When the record is updated or deleted, the `sequence.field` must become larger and cannot remain unchanged. 
-For -U and +U, their sequence-fields must be different.
-
-If the provided `sequence.field` doesn't meet the precision, like a rough second or millisecond, you can set
-`sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision of sequence number will
-be made up to microsecond by system. 
-{{< /hint >}}
-
 {{< tabs "sequence.field" >}}
-
 {{< tab "Flink" >}}
-
 ```sql
 CREATE TABLE MyTable (
     pk BIGINT PRIMARY KEY NOT ENFORCED,
@@ -376,9 +365,24 @@ CREATE TABLE MyTable (
     'sequence.field' = 'dt'
 );
 ```
-
 {{< /tab >}}
-
 {{< /tabs >}}
 
 The record with the largest `sequence.field` value will be the last to merge, regardless of the input order.
+
+**Sequence Auto Padding**:
+
+When the record is updated or deleted, the `sequence.field` must become larger and cannot remain unchanged.
+For -U and +U, their sequence-fields must be different. If you cannot meet this requirement, Paimon provides
+option to automatically pad the sequence field for you.
+
+1. `'sequence.auto-padding' = 'row-kind-flag'`: If you are using same value for -U and +U, just like "`op_ts`"
+(the time that the change was made in the database) in Mysql Binlog. It is recommended to use the automatic
+padding for row kind flag, which will automatically distinguish between -U (-D) and +U (+I).
+
+2. Insufficient precision: If the provided `sequence.field` doesn't meet the precision, like a rough second or
+millisecond, you can set `sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision
+of sequence number will be made up to microsecond by system.
+
+3. Composite pattern: for example, "second-to-micro,row-kind-flag", first, add the micro to the second, and then
+pad the row kind flag.

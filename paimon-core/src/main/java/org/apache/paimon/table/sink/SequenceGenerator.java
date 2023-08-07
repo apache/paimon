@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.SequenceAutoPadding;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.CharType;
@@ -31,6 +31,7 @@ import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
@@ -40,6 +41,7 @@ import org.apache.paimon.utils.InternalRowUtils;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /** Generate sequence number. */
@@ -86,35 +88,52 @@ public class SequenceGenerator {
         return generator.generate(row, index);
     }
 
-    public long generateWithPadding(InternalRow row, CoreOptions.SequenceAutoPadding autoPadding) {
-        switch (autoPadding) {
-            case SECOND_TO_MICRO:
-                long value = generate(row);
-                // timestamp returns millis
-                long second = fieldType.is(DataTypeFamily.TIMESTAMP) ? value / 1000 : value;
-                return second * 1_000_000 + getCurrentMicroOfSeconds();
-            case MILLIS_TO_MICRO:
-                // Generated value is millis
-                long millis = generate(row);
-                return millis * 1_000 + getCurrentMicroOfMillis();
-            default:
-                throw new UnsupportedOperationException(
-                        "Unknown sequence padding mode " + autoPadding.name());
+    public long generateWithPadding(InternalRow row, List<SequenceAutoPadding> paddings) {
+        long sequence = generate(row);
+        for (SequenceAutoPadding padding : paddings) {
+            switch (padding) {
+                case ROW_KIND_FLAG:
+                    sequence = addRowKindFlag(sequence, row.getRowKind());
+                    break;
+                case SECOND_TO_MICRO:
+                    sequence = secondToMicro(sequence);
+                    break;
+                case MILLIS_TO_MICRO:
+                    sequence = millisToMicro(sequence);
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unknown sequence padding mode " + padding);
+            }
         }
+        return sequence;
+    }
+
+    private long addRowKindFlag(long sequence, RowKind rowKind) {
+        return (sequence << 1) | (rowKind.isAdd() ? 1 : 0);
+    }
+
+    private long millisToMicro(long sequence) {
+        // Generated value is millis
+        return sequence * 1_000 + getCurrentMicroOfMillis();
+    }
+
+    private long secondToMicro(long sequence) {
+        // timestamp returns millis
+        long second = fieldType.is(DataTypeFamily.TIMESTAMP) ? sequence / 1000 : sequence;
+        return second * 1_000_000 + getCurrentMicroOfSeconds();
     }
 
     private static long getCurrentMicroOfMillis() {
         long currentNanoTime = System.nanoTime();
         long mills = TimeUnit.MILLISECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        long microOfMillis = (currentNanoTime - mills * 1_000_000) / 1000;
-        return microOfMillis;
+        return (currentNanoTime - mills * 1_000_000) / 1000;
     }
 
     private static long getCurrentMicroOfSeconds() {
         long currentNanoTime = System.nanoTime();
         long seconds = TimeUnit.SECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        long microOfSecs = (currentNanoTime - seconds * 1_000_000_000) / 1000;
-        return microOfSecs;
+        return (currentNanoTime - seconds * 1_000_000_000) / 1000;
     }
 
     private interface Generator {
