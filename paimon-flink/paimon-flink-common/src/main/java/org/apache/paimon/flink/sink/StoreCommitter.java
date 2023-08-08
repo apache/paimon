@@ -99,26 +99,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
                 long dataFileSizeInc =
                         calcTotalFileSize(
                                 ((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
-                long changelogFileSizeInc =
-                        calcTotalFileSize(
-                                ((CommitMessageImpl) commitMessage)
-                                        .newFilesIncrement()
-                                        .changelogFiles());
-                long compactedDataFileSizeInc =
-                        calcTotalFileSize(
-                                ((CommitMessageImpl) commitMessage)
-                                        .compactIncrement()
-                                        .compactAfter());
-                long compactedChangelogFileSizeInc =
-                        calcTotalFileSize(
-                                ((CommitMessageImpl) commitMessage)
-                                        .compactIncrement()
-                                        .compactAfter());
-                bytesSend +=
-                        dataFileSizeInc
-                                + changelogFileSizeInc
-                                + compactedDataFileSizeInc
-                                + compactedChangelogFileSizeInc;
+                bytesSend += dataFileSizeInc;
             }
         }
         return bytesSend;
