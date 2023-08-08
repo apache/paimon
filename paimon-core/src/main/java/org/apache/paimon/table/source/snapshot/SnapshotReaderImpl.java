@@ -177,8 +177,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public Plan read() {
         FileStoreScan.Plan plan = scan.plan();
-        Long snapshotId =
-                plan.snapshotId() == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : plan.snapshotId();
+        Long snapshotId = plan.snapshotId();
 
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> files =
                 groupByPartFiles(plan.files(FileKind.ADD));
@@ -190,7 +189,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
             files = newFiles;
         }
         List<DataSplit> splits =
-                generateSplits(snapshotId, scanKind != ScanKind.ALL, splitGenerator, files);
+                generateSplits(
+                        snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
+                        scanKind != ScanKind.ALL,
+                        splitGenerator,
+                        files);
         return new Plan() {
             @Nullable
             @Override
