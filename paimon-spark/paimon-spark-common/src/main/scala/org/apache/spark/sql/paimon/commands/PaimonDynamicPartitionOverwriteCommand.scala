@@ -18,7 +18,7 @@
 package org.apache.spark.sql.paimon.commands
 
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{DynamicOverWrite, SparkTable}
+import org.apache.paimon.spark.DynamicOverWrite
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.table.FileStoreTable
 
@@ -39,7 +39,7 @@ import scala.collection.convert.ImplicitConversions._
  */
 case class PaimonDynamicPartitionOverwriteCommand(
     table: NamedRelation,
-    sparkTable: SparkTable,
+    fileStoreTable: FileStoreTable,
     query: LogicalPlan,
     writeOptions: Map[String, String],
     isByName: Boolean)
@@ -60,7 +60,6 @@ case class PaimonDynamicPartitionOverwriteCommand(
       newChild: LogicalPlan): PaimonDynamicPartitionOverwriteCommand = copy(query = newChild)
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val fileStoreTable = sparkTable.getTable.asInstanceOf[FileStoreTable]
     WriteIntoPaimonTable(
       fileStoreTable,
       DynamicOverWrite,

@@ -246,7 +246,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
               Row(1, 3, "3") :: Row(2, 4, "4") :: Nil)
 
             withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
-              // overwrite the a=1 partition
+              // dynamic overwrite the a=1 partition
               spark.sql("INSERT OVERWRITE T VALUES (1, 5, '5'), (1, 7, '7')")
               checkAnswer(
                 spark.sql("SELECT * FROM T ORDER BY a, b"),
@@ -255,4 +255,83 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
           }
       }
   }
+
+  writeModes.foreach {
+    writeMode =>
+      bucketModes.foreach {
+        bucket =>
+          test(
+            s"dynamic insert overwrite mutil-partitioned table: write-mode: $writeMode, bucket: $bucket") {
+            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+              "'primary-key'='a,pt1,pt2',"
+            } else {
+              ""
+            }
+
+            spark.sql(
+              s"""
+                 |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
+                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
+                 |PARTITIONED BY (pt1, pt2)
+                 |""".stripMargin)
+
+            spark.sql(
+              "INSERT INTO T values (1, 'a', 'ptv1', 11), (2, 'b', 'ptv1', 11), (3, 'c', 'ptv1', 22), (4, 'd', 'ptv2', 22)")
+            checkAnswer(
+              spark.sql("SELECT * FROM T ORDER BY a, b"),
+              Row(1, "a", "ptv1", 11) :: Row(2, "b", "ptv1", 11) :: Row(3, "c", "ptv1", 22) :: Row(
+                4,
+                "d",
+                "ptv2",
+                22) :: Nil)
+
+            withSQLConf("spark.sql.sources.partitionOverwriteMode" -> "dynamic") {
+              // dynamic overwrite the pt2=22 partition
+              spark.sql(
+                "INSERT OVERWRITE T PARTITION (pt2 = 22) VALUES (3, 'c2', 'ptv1'), (4, 'd2', 'ptv3')")
+              checkAnswer(
+                spark.sql("SELECT * FROM T ORDER BY a, b"),
+                Row(1, "a", "ptv1", 11) :: Row(2, "b", "ptv1", 11) :: Row(
+                  3,
+                  "c2",
+                  "ptv1",
+                  22) :: Row(4, "d", "ptv2", 22) :: Row(4, "d2", "ptv3", 22) :: Nil
+              )
+
+              // dynamic overwrite the pt1=ptv3 partition
+              spark.sql("INSERT OVERWRITE T PARTITION (pt1 = 'ptv3') VALUES (4, 'd3', 22)")
+              checkAnswer(
+                spark.sql("SELECT * FROM T ORDER BY a, b"),
+                Row(1, "a", "ptv1", 11) :: Row(2, "b", "ptv1", 11) :: Row(
+                  3,
+                  "c2",
+                  "ptv1",
+                  22) :: Row(4, "d", "ptv2", 22) :: Row(4, "d3", "ptv3", 22) :: Nil
+              )
+
+              // dynamic overwrite the pt1=ptv1, pt2=11 partition
+              spark.sql("INSERT OVERWRITE T PARTITION (pt1 = 'ptv1', pt2=11) VALUES (5, 'e')")
+              checkAnswer(
+                spark.sql("SELECT * FROM T ORDER BY a, b"),
+                Row(3, "c2", "ptv1", 22) :: Row(4, "d", "ptv2", 22) :: Row(
+                  4,
+                  "d3",
+                  "ptv3",
+                  22) :: Row(5, "e", "ptv1", 11) :: Nil)
+
+              // dynamic overwrite the whole table
+              spark.sql(
+                "INSERT OVERWRITE T VALUES (1, 'a5', 'ptv1', 11), (3, 'c5', 'ptv1', 22), (4, 'd5', 'ptv3', 22)")
+              checkAnswer(
+                spark.sql("SELECT * FROM T ORDER BY a, b"),
+                Row(1, "a5", "ptv1", 11) :: Row(3, "c5", "ptv1", 22) :: Row(
+                  4,
+                  "d",
+                  "ptv2",
+                  22) :: Row(4, "d5", "ptv3", 22) :: Nil)
+            }
+          }
+      }
+  }
+
 }

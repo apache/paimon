@@ -17,6 +17,8 @@
  */
 package org.apache.paimon.spark
 
+import org.apache.paimon.table.FileStoreTable
+
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, OverwritePartitionsDynamic}
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -36,11 +38,11 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 }
 
 object OverwritePartitionsDynamicPaimon {
-  def unapply(o: OverwritePartitionsDynamic): Option[(DataSourceV2Relation, SparkTable)] = {
+  def unapply(o: OverwritePartitionsDynamic): Option[(DataSourceV2Relation, FileStoreTable)] = {
     if (o.query.resolved) {
       o.table match {
         case r: DataSourceV2Relation if r.table.isInstanceOf[SparkTable] =>
-          Some((r, r.table.asInstanceOf[SparkTable]))
+          Some((r, r.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable]))
         case _ => None
       }
     } else {
