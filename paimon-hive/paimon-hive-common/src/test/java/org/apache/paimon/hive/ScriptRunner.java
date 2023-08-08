@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.hive;
 
 import java.io.IOException;
 import java.io.LineNumberReader;

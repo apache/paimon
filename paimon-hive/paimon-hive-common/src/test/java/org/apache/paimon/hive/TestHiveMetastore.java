@@ -22,10 +22,6 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.reflect.DynConstructors;
-import org.apache.paimon.reflect.DynMethods;
-import org.apache.paimon.utils.ScriptRunner;
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -35,8 +31,6 @@ import org.apache.hadoop.hive.metastore.HiveMetaStore;
 import org.apache.hadoop.hive.metastore.IHMSHandler;
 import org.apache.hadoop.hive.metastore.RetryingHMSHandler;
 import org.apache.hadoop.hive.metastore.TSetIpAddressProcessor;
-import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.thrift.TException;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.server.TServer;
 import org.apache.thrift.server.TThreadPoolServer;
@@ -62,53 +56,11 @@ import static java.nio.file.attribute.PosixFilePermissions.fromString;
 /**
  * A metastore to run locally.
  *
- * <p>Copied from iceberg.
+ * <p>Mostly copied from iceberg.
  */
 public class TestHiveMetastore {
 
-    private static final String DEFAULT_DATABASE_NAME = "default";
     private static final int DEFAULT_POOL_SIZE = 5;
-
-    // create the metastore handlers based on whether we're working with Hive2 or Hive3 dependencies
-    // we need to do this because there is a breaking API change between Hive2 and Hive3
-    private static final DynConstructors.Ctor<HiveMetaStore.HMSHandler> HMS_HANDLER_CTOR =
-            DynConstructors.builder()
-                    .impl(HiveMetaStore.HMSHandler.class, String.class, Configuration.class)
-                    .impl(HiveMetaStore.HMSHandler.class, String.class, HiveConf.class)
-                    .build();
-
-    private static final DynMethods.StaticMethod GET_BASE_HMS_HANDLER =
-            DynMethods.builder("getProxy")
-                    .impl(
-                            RetryingHMSHandler.class,
-                            Configuration.class,
-                            IHMSHandler.class,
-                            boolean.class)
-                    .impl(
-                            RetryingHMSHandler.class,
-                            HiveConf.class,
-                            IHMSHandler.class,
-                            boolean.class)
-                    .buildStatic();
-
-    // Hive3 introduces background metastore tasks (MetastoreTaskThread) for performing various
-    // cleanup duties. These
-    // threads are scheduled and executed in a static thread pool
-    // (org.apache.hadoop.hive.metastore.ThreadPool).
-    // This thread pool is shut down normally as part of the JVM shutdown hook, but since we're
-    // creating and tearing down
-    // multiple metastore instances within the same JVM, we have to call this cleanup method
-    // manually,
-    // otherwise
-    // threads from our previous test suite will be stuck in the pool with stale config, and keep on
-    // being scheduled.
-    // This can lead to issues, e.g. accidental Persistence Manager closure by
-    // ScheduledQueryExecutionsMaintTask.
-    private static final DynMethods.StaticMethod METASTORE_THREADS_SHUTDOWN =
-            DynMethods.builder("shutdown")
-                    .impl("org.apache.hadoop.hive.metastore.ThreadPool")
-                    .orNoop()
-                    .buildStatic();
 
     // It's tricky to clear all static fields in an HMS instance in order to switch derby root dir.
     // Therefore, we reuse the same derby root between tests and remove it after JVM exits.
@@ -129,7 +81,7 @@ public class TestHiveMetastore {
                                     () -> {
                                         Path localDirPath =
                                                 new Path(HIVE_LOCAL_DIR.getAbsolutePath());
-                                        FileSystem fs = null;
+                                        FileSystem fs;
                                         try {
                                             fs =
                                                     FileSystem.get(
@@ -155,7 +107,6 @@ public class TestHiveMetastore {
     private ExecutorService executorService;
     private TServer server;
     private HiveMetaStore.HMSHandler baseHandler;
-    private HiveClientPool clientPool;
 
     /**
      * Starts a TestHiveMetastore with the default connection pool size (5) and the default
@@ -163,16 +114,6 @@ public class TestHiveMetastore {
      */
     public void start() {
         start(new HiveConf(new Configuration(), TestHiveMetastore.class), DEFAULT_POOL_SIZE);
-    }
-
-    /**
-     * Starts a TestHiveMetastore with the default connection pool size (5) with the provided
-     * HiveConf.
-     *
-     * @param conf The hive configuration to use
-     */
-    public void start(HiveConf conf) {
-        start(conf, DEFAULT_POOL_SIZE);
     }
 
     /**
@@ -198,8 +139,6 @@ public class TestHiveMetastore {
             System.setProperty(
                     HiveConf.ConfVars.METASTOREURIS.varname,
                     hiveConf.getVar(HiveConf.ConfVars.METASTOREURIS));
-
-            this.clientPool = new HiveClientPool(1, hiveConf);
         } catch (Exception e) {
             throw new RuntimeException("Cannot start TestHiveMetastore", e);
         }
@@ -207,9 +146,6 @@ public class TestHiveMetastore {
 
     public void stop() throws Exception {
         reset();
-        if (clientPool != null) {
-            clientPool.close();
-        }
         if (server != null) {
             server.stop();
         }
@@ -219,40 +155,9 @@ public class TestHiveMetastore {
         if (baseHandler != null) {
             baseHandler.shutdown();
         }
-        METASTORE_THREADS_SHUTDOWN.invoke();
-    }
-
-    public HiveConf hiveConf() {
-        return hiveConf;
-    }
-
-    public String getDatabasePath(String dbName) {
-        File dbDir = new File(HIVE_LOCAL_DIR, dbName + ".db");
-        return dbDir.getPath();
     }
 
     public void reset() throws Exception {
-        if (clientPool != null) {
-            for (String dbName : clientPool.run(client -> client.getAllDatabases())) {
-                for (String tblName : clientPool.run(client -> client.getAllTables(dbName))) {
-                    clientPool.run(
-                            client -> {
-                                client.dropTable(dbName, tblName, true, true, true);
-                                return null;
-                            });
-                }
-
-                if (!DEFAULT_DATABASE_NAME.equals(dbName)) {
-                    // Drop cascade, functions dropped by cascade
-                    clientPool.run(
-                            client -> {
-                                client.dropDatabase(dbName, true, true, true);
-                                return null;
-                            });
-                }
-            }
-        }
-
         Path warehouseRoot = new Path(HIVE_LOCAL_DIR.getAbsolutePath());
         FileSystem fs = FileSystem.get(warehouseRoot.toUri(), hiveConf);
         for (FileStatus fileStatus : fs.listStatus(warehouseRoot)) {
@@ -263,18 +168,14 @@ public class TestHiveMetastore {
         }
     }
 
-    public Table getTable(String dbName, String tableName) throws TException, InterruptedException {
-        return clientPool.run(client -> client.getTable(dbName, tableName));
-    }
-
     private TServer newThriftServer(TServerSocket socket, int poolSize, HiveConf conf)
             throws Exception {
         HiveConf serverConf = new HiveConf(conf);
         serverConf.set(
                 HiveConf.ConfVars.METASTORECONNECTURLKEY.varname,
                 "jdbc:derby:" + DERBY_PATH + ";create=true");
-        baseHandler = HMS_HANDLER_CTOR.newInstance("new db based metaserver", serverConf);
-        IHMSHandler handler = GET_BASE_HMS_HANDLER.invoke(serverConf, baseHandler, false);
+        baseHandler = new HiveMetaStore.HMSHandler("new db based metaserver", serverConf);
+        IHMSHandler handler = RetryingHMSHandler.getProxy(serverConf, baseHandler, false);
 
         TThreadPoolServer.Args args =
                 new TThreadPoolServer.Args(socket)

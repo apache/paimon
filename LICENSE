@@ -233,12 +233,7 @@ paimon-common/src/main/java/org/apache/paimon/options/ConfigOption.java
 from http://flink.apache.org/ version 1.17.0
 
 paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/SparkGenericCatalog.java
-paimon-common/src/main/java/org/apache/paimon/client/ClientPool.java
-paimon-common/src/main/java/org/apache/paimon/client/ClientPoolImpl.java
-paimon-common/src/main/java/org/apache/paimon/reflect/DynConstructors.java
-paimon-common/src/main/java/org/apache/paimon/reflect/DynMethods.java
-paimon-common/src/main/java/org/apache/paimon/utils/ScriptRunner.java
-paimon-hive/paimon-hive-common/src/main/java/org/apache/paimon/hive/HiveClientPool.java
+paimon-common/src/test/java/org/apache/paimon/hive/ScriptRunner.java
 paimon-hive/paimon-hive-common/src/test/java/org/apache/paimon/hive/TestHiveMetastore.java
 from http://iceberg.apache.org/ version 1.3.0
 
