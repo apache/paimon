@@ -32,6 +32,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -99,7 +100,8 @@ public class KafkaSchema {
         }
         int firstPartition =
                 partitionInfos.stream().map(PartitionInfo::partition).sorted().findFirst().get();
-        Collection<TopicPartition> topicPartitions = Collections.singletonList(new TopicPartition(topic, firstPartition));
+        Collection<TopicPartition> topicPartitions =
+                Collections.singletonList(new TopicPartition(topic, firstPartition));
         consumer.assign(topicPartitions);
 
         Map<TopicPartition, Long> beginningOffsets = consumer.beginningOffsets(topicPartitions);
