@@ -66,8 +66,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void commit(List<ManifestCommittable> committables, OperatorIOMetricGroup metricGroup)
             throws IOException, InterruptedException {
-        metricGroup.getNumBytesOutCounter().inc(calcDataBytesSend(committables));
         commit.commitMultiple(committables);
+        metricGroup.getNumBytesOutCounter().inc(calcDataBytesSend(committables));
     }
 
     @Override
@@ -100,7 +100,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
                                 .newFilesIncrement().newFiles().stream()
                                         .mapToLong(f -> f.fileSize())
                                         .reduce(Long::sum)
-                                        .getAsLong();
+                                        .orElse(0);
                 bytesSend += dataFileSizeInc;
             }
         }
