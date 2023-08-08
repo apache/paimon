@@ -45,6 +45,7 @@ import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -163,8 +164,7 @@ public class MySqlSyncTableAction extends ActionBase {
         Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
         List<ComputedColumn> computedColumns =
-                MySqlActionUtils.buildComputedColumns(
-                        computedColumnArgs, mySqlSchema.typeMapping());
+                buildComputedColumns(computedColumnArgs, mySqlSchema.typeMapping());
         Schema fromMySql =
                 MySqlActionUtils.buildPaimonSchema(
                         mySqlSchema,

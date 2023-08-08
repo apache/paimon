@@ -38,6 +38,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.kafkaPropertiesGroupId;
+
 /** Utility class to load canal kafka schema. */
 public class KafkaSchema {
 
@@ -81,9 +83,7 @@ public class KafkaSchema {
         props.put(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
                 kafkaConfig.get(KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS));
-        props.put(
-                ConsumerConfig.GROUP_ID_CONFIG,
-                kafkaConfig.get(KafkaConnectorOptions.PROPS_GROUP_ID));
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, kafkaPropertiesGroupId(kafkaConfig));
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());

@@ -19,13 +19,11 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.Expression;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
@@ -38,11 +36,11 @@ import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.util.CollectionUtil;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.TopicPartition;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -158,12 +156,12 @@ class KafkaActionUtils {
     }
 
     static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
+        validateKafkaConfig(kafkaConfig);
         KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
-        String groupId = kafkaConfig.get(KafkaConnectorOptions.PROPS_GROUP_ID);
         kafkaSourceBuilder
                 .setTopics(kafkaConfig.get(KafkaConnectorOptions.TOPIC))
                 .setValueOnlyDeserializer(new SimpleStringSchema())
-                .setGroupId(StringUtils.isEmpty(groupId) ? UUID.randomUUID().toString() : groupId);
+                .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
         Properties properties = new Properties();
         for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
             String key = entry.getKey();
@@ -263,54 +261,6 @@ class KafkaActionUtils {
                                                         .collect(Collectors.joining(",")))));
     }
 
-    static List<ComputedColumn> buildComputedColumns(
-            List<String> computedColumnArgs, Map<String, DataType> typeMapping) {
-        List<ComputedColumn> computedColumns = new ArrayList<>();
-        for (String columnArg : computedColumnArgs) {
-            String[] kv = columnArg.split("=");
-            if (kv.length != 2) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Invalid computed column argument: %s. Please use format 'column-name=expr-name(args, ...)'.",
-                                columnArg));
-            }
-            String columnName = kv[0].trim();
-            String expression = kv[1].trim();
-            // parse expression
-            int left = expression.indexOf('(');
-            int right = expression.indexOf(')');
-            Preconditions.checkArgument(
-                    left > 0 && right > left,
-                    String.format(
-                            "Invalid expression: %s. Please use format 'expr-name(args, ...)'.",
-                            expression));
-
-            String exprName = expression.substring(0, left);
-            String[] args = expression.substring(left + 1, right).split(",");
-            checkArgument(args.length >= 1, "Computed column needs at least one argument.");
-
-            String fieldReference = args[0].trim();
-            String[] literals =
-                    Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
-            checkArgument(
-                    typeMapping.containsKey(fieldReference),
-                    String.format(
-                            "Referenced field '%s' is not in given MySQL fields: %s.",
-                            fieldReference, typeMapping.keySet()));
-
-            computedColumns.add(
-                    new ComputedColumn(
-                            columnName,
-                            Expression.create(
-                                    exprName,
-                                    fieldReference,
-                                    typeMapping.get(fieldReference),
-                                    literals)));
-        }
-
-        return computedColumns;
-    }
-
     /**
      * Parses specificOffsets String to Map.
      *
@@ -359,5 +309,33 @@ class KafkaActionUtils {
             }
         }
         return offsetMap;
+    }
+
+    private static void validateKafkaConfig(Configuration kafkaConfig) {
+        checkArgument(
+                kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT) != null,
+                String.format(
+                        "kafka-conf [%s] must be specified.",
+                        KafkaConnectorOptions.VALUE_FORMAT.key()));
+
+        checkArgument(
+                !CollectionUtil.isNullOrEmpty(kafkaConfig.get(KafkaConnectorOptions.TOPIC)),
+                String.format(
+                        "kafka-conf [%s] must be specified.", KafkaConnectorOptions.TOPIC.key()));
+
+        checkArgument(
+                kafkaConfig.get(KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS) != null,
+                String.format(
+                        "kafka-conf [%s] must be specified.",
+                        KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS.key()));
+    }
+
+    public static String kafkaPropertiesGroupId(Configuration kafkaConfig) {
+        String groupId = kafkaConfig.get(KafkaConnectorOptions.PROPS_GROUP_ID);
+        if (StringUtils.isEmpty(groupId)) {
+            groupId = UUID.randomUUID().toString();
+            kafkaConfig.set(KafkaConnectorOptions.PROPS_GROUP_ID, groupId);
+        }
+        return groupId;
     }
 }

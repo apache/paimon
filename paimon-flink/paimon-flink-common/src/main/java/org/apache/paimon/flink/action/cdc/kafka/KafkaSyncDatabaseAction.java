@@ -35,7 +35,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
-import org.apache.flink.util.CollectionUtil;
 
 import javax.annotation.Nullable;
 
@@ -119,13 +118,6 @@ public class KafkaSyncDatabaseAction extends ActionBase {
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
-        checkArgument(
-                kafkaConfig.contains(KafkaConnectorOptions.VALUE_FORMAT),
-                KafkaConnectorOptions.VALUE_FORMAT.key() + " cannot be null.");
-        checkArgument(
-                !CollectionUtil.isNullOrEmpty(kafkaConfig.get(KafkaConnectorOptions.TOPIC)),
-                KafkaConnectorOptions.TOPIC.key() + " cannot be null.");
-
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {
