@@ -71,7 +71,7 @@ public class FileStoreSourceSplitReader
     public FileStoreSourceSplitReader(
             TableRead tableRead,
             @Nullable RecordLimiter limiter,
-            FileStoreSourceReaderMetrics sourceReaderMetrics) {
+            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
@@ -134,10 +134,11 @@ public class FileStoreSourceSplitReader
 
         splits.addAll(splitsChange.splits());
         DataSplit dataSplit = (DataSplit) splits.peek().split();
-        if (currentSnapshotId == FileStoreSourceReaderMetrics.UNDEFINED
-                || dataSplit.snapshotId() != currentSnapshotId) {
+        if (sourceReaderMetrics != null
+                && (currentSnapshotId == FileStoreSourceReaderMetrics.UNDEFINED
+                        || dataSplit.snapshotId() != currentSnapshotId)) {
             currentSnapshotId = dataSplit.snapshotId();
-            sourceReaderMetrics.recordSnapshotUpdate(dataSplit.snapshotTimestamp());
+            sourceReaderMetrics.recordSnapshotUpdate(dataSplit.getLatestFileCreationTime());
         }
     }
 

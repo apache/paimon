@@ -190,12 +190,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             files = newFiles;
         }
         List<DataSplit> splits =
-                generateSplits(
-                        snapshotId,
-                        snapshotManager.snapshot(snapshotId).timeMillis(),
-                        scanKind != ScanKind.ALL,
-                        splitGenerator,
-                        files);
+                generateSplits(snapshotId, scanKind != ScanKind.ALL, splitGenerator, files);
         return new Plan() {
             @Nullable
             @Override
@@ -288,8 +283,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 DataSplit split =
                         DataSplit.builder()
                                 .withSnapshot(plan.snapshotId())
-                                .withSnapshotTimestamp(
-                                        snapshotManager.snapshot(plan.snapshotId()).timeMillis())
                                 .withPartition(part)
                                 .withBucket(bucket)
                                 .withBeforeFiles(before)
@@ -344,7 +337,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @VisibleForTesting
     public static List<DataSplit> generateSplits(
             long snapshotId,
-            long snapshotTimestamp,
             boolean isStreaming,
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
@@ -359,7 +351,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 DataSplit.Builder builder =
                         DataSplit.builder()
                                 .withSnapshot(snapshotId)
-                                .withSnapshotTimestamp(snapshotTimestamp)
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .isStreaming(isStreaming);

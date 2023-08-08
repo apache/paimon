@@ -42,8 +42,6 @@ public class DataSplit implements Split {
     private static final long serialVersionUID = 3L;
 
     private long snapshotId = 0;
-
-    private long snapshotTimestamp = 0;
     private boolean isStreaming = false;
     private List<DataFileMeta> beforeFiles = new ArrayList<>();
 
@@ -55,10 +53,6 @@ public class DataSplit implements Split {
 
     public long snapshotId() {
         return snapshotId;
-    }
-
-    public long snapshotTimestamp() {
-        return snapshotTimestamp;
     }
 
     public BinaryRow partition() {
@@ -79,6 +73,16 @@ public class DataSplit implements Split {
 
     public boolean isStreaming() {
         return isStreaming;
+    }
+
+    public long getLatestFileCreationTime() {
+        if (this.dataFiles.size() > 0) {
+            return this.dataFiles.stream()
+                    .mapToLong(f -> f.creationTime().getMillisecond())
+                    .max()
+                    .getAsLong();
+        }
+        return -1;
     }
 
     @Override
@@ -126,12 +130,10 @@ public class DataSplit implements Split {
         this.beforeFiles = other.beforeFiles;
         this.dataFiles = other.dataFiles;
         this.isStreaming = other.isStreaming;
-        this.snapshotTimestamp = other.snapshotTimestamp;
     }
 
     public void serialize(DataOutputView out) throws IOException {
         out.writeLong(snapshotId);
-        out.writeLong(snapshotTimestamp);
         SerializationUtils.serializeBinaryRow(partition, out);
         out.writeInt(bucket);
 
@@ -151,7 +153,6 @@ public class DataSplit implements Split {
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
         long snapshotId = in.readLong();
-        long snapshotTimestamp = in.readLong();
         BinaryRow partition = SerializationUtils.deserializeBinaryRow(in);
         int bucket = in.readInt();
 
@@ -172,7 +173,6 @@ public class DataSplit implements Split {
 
         return builder()
                 .withSnapshot(snapshotId)
-                .withSnapshotTimestamp(snapshotTimestamp)
                 .withPartition(partition)
                 .withBucket(bucket)
                 .withBeforeFiles(beforeFiles)
@@ -192,11 +192,6 @@ public class DataSplit implements Split {
 
         public Builder withSnapshot(long snapshot) {
             this.split.snapshotId = snapshot;
-            return this;
-        }
-
-        public Builder withSnapshotTimestamp(long snapshotTimestamp) {
-            this.split.snapshotTimestamp = snapshotTimestamp;
             return this;
         }
 

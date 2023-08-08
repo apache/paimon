@@ -31,7 +31,7 @@ public class FileStoreSourceReaderMetrics {
     // Source reader metric group
     private final MetricGroup sourceReaderMetricGroup;
 
-    private long lastSnapshotTime = UNDEFINED;
+    private long latestFileCreationTime = UNDEFINED;
     private long lastSplitUpdateTime = UNDEFINED;
 
     public static final long UNDEFINED = -1L;
@@ -43,22 +43,22 @@ public class FileStoreSourceReaderMetrics {
                 MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
     }
 
-    /** Called when splits updated with snapshot timestamp. */
-    public void recordSnapshotUpdate(long snapshotTime) {
-        lastSnapshotTime = snapshotTime;
+    /** Called when consumed snapshot changes. */
+    public void recordSnapshotUpdate(long fileCreationTime) {
+        this.latestFileCreationTime = fileCreationTime;
         lastSplitUpdateTime = clock.absoluteTimeMillis();
     }
 
     long getFetchTimeLag() {
-        if (lastSnapshotTime != UNDEFINED) {
-            return lastSplitUpdateTime - lastSnapshotTime;
+        if (latestFileCreationTime != UNDEFINED) {
+            return lastSplitUpdateTime - latestFileCreationTime;
         }
         return UNDEFINED;
     }
 
     @VisibleForTesting
-    long getLastSnapshotTime() {
-        return lastSnapshotTime;
+    long getLatestFileCreationTime() {
+        return latestFileCreationTime;
     }
 
     @VisibleForTesting

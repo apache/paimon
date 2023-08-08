@@ -30,12 +30,12 @@ class FileStoreSourceReaderMetricsTest {
 
         final FileStoreSourceReaderMetrics sourceReaderMetrics =
                 FileStoreSourceReaderMetrics.mock(metricListener.getMetricGroup());
-        assertThat(sourceReaderMetrics.getLastSnapshotTime())
+        assertThat(sourceReaderMetrics.getLatestFileCreationTime())
                 .isEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
         assertThat(sourceReaderMetrics.getLastSplitUpdateTime())
                 .isEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
         sourceReaderMetrics.recordSnapshotUpdate(123);
-        assertThat(sourceReaderMetrics.getLastSnapshotTime()).isEqualTo(123);
+        assertThat(sourceReaderMetrics.getLatestFileCreationTime()).isEqualTo(123);
         assertThat(sourceReaderMetrics.getLastSplitUpdateTime())
                 .isGreaterThan(FileStoreSourceReaderMetrics.UNDEFINED);
     }
