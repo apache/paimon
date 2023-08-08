@@ -46,9 +46,4 @@
         <value>thrift://localhost:9083</value>
         <description>Thrift URI for the remote metastore. Used by metastore client to connect to remote metastore.</description>
     </property>
-
-<!--    <property>-->
-<!--        <name>javax.jdo.option.ConnectionURL</name>-->
-<!--        <value>jdbc:derby:memory:test;create=true</value>-->
-<!--    </property>-->
 </configuration>
