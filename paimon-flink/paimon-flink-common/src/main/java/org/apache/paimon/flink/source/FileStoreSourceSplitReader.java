@@ -66,7 +66,6 @@ public class FileStoreSourceSplitReader
 
     private boolean paused;
     private final FileStoreSourceReaderMetrics sourceReaderMetrics;
-    private long currentSnapshotId = FileStoreSourceReaderMetrics.UNDEFINED;
 
     public FileStoreSourceSplitReader(
             TableRead tableRead,
@@ -133,13 +132,6 @@ public class FileStoreSourceSplitReader
         }
 
         splits.addAll(splitsChange.splits());
-        DataSplit dataSplit = (DataSplit) splits.peek().split();
-        if (sourceReaderMetrics != null
-                && (currentSnapshotId == FileStoreSourceReaderMetrics.UNDEFINED
-                        || dataSplit.snapshotId() != currentSnapshotId)) {
-            currentSnapshotId = dataSplit.snapshotId();
-            sourceReaderMetrics.recordSnapshotUpdate(dataSplit.getLatestFileCreationTime());
-        }
     }
 
     /**
@@ -183,6 +175,15 @@ public class FileStoreSourceSplitReader
         final FileStoreSourceSplit nextSplit = splits.poll();
         if (nextSplit == null) {
             throw new IOException("Cannot fetch from another split - no split remaining");
+        }
+
+        // update metric when split changes
+        if (sourceReaderMetrics != null) {
+            long eventTime =
+                    ((DataSplit) nextSplit.split())
+                            .getLatestFileCreationTime()
+                            .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
+            sourceReaderMetrics.recordSnapshotUpdate(eventTime);
         }
 
         currentSplitId = nextSplit.splitId();

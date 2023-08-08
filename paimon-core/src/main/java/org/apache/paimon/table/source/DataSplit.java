@@ -33,6 +33,7 @@ import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -75,14 +76,8 @@ public class DataSplit implements Split {
         return isStreaming;
     }
 
-    public long getLatestFileCreationTime() {
-        if (this.dataFiles.size() > 0) {
-            return this.dataFiles.stream()
-                    .mapToLong(f -> f.creationTime().getMillisecond())
-                    .max()
-                    .getAsLong();
-        }
-        return -1;
+    public OptionalLong getLatestFileCreationTime() {
+        return this.dataFiles.stream().mapToLong(f -> f.creationTime().getMillisecond()).max();
     }
 
     @Override
