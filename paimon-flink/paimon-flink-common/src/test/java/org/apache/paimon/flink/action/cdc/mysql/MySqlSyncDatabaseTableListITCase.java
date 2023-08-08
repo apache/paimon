@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Timeout;
 
 import java.sql.Statement;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -47,7 +48,7 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testActionRunResult() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", ".*shard_.*");
@@ -78,9 +79,9 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
         waitJobRunning(client);
 
         try (Statement statement = getStatement()) {
-            Thread.sleep(5_000);
             Catalog catalog = catalog();
-            assertThat(catalog.listTables(database))
+            List<String> tables = waitingAllTables(catalog, 10, 10);
+            assertThat(tables)
                     .containsExactlyInAnyOrder(
                             "shard_1_t11",
                             "shard_1_t2",
@@ -126,9 +127,9 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                 statement.executeUpdate(
                         "CREATE TABLE s4 (k INT, name VARCHAR(100), PRIMARY KEY (k))");
 
-                Thread.sleep(5_000);
+                tables = waitingAllTables(catalog, 12, 10);
 
-                assertThat(catalog.listTables(database))
+                assertThat(tables)
                         .containsExactlyInAnyOrder(
                                 // old
                                 "shard_1_t11",
@@ -146,5 +147,17 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                                 "shard_3_tab");
             }
         }
+    }
+
+    private List<String> waitingAllTables(Catalog catalog, int numberOfTables, int maxAttempt)
+            throws Exception {
+        List<String> tables;
+        int attempt = 0;
+        do {
+            Thread.sleep(5_000);
+            tables = catalog.listTables(database);
+        } while (tables.size() < numberOfTables && ++attempt < maxAttempt);
+
+        return tables;
     }
 }
