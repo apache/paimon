@@ -243,14 +243,4 @@ public class CommitMetrics {
     long getInitChangelogFilesCount() {
         return initChangelogFilesCount;
     }
-
-    @VisibleForTesting
-    FileStorePathFactory getPathFactory() {
-        return pathFactory;
-    }
-
-    @VisibleForTesting
-    FileIO getFileIO() {
-        return fileIO;
-    }
 }

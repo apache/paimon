@@ -123,52 +123,6 @@ public class CommitMetricsTest {
         assertThat(commitMetrics.getInitChangelogFilesCount()).isEqualTo(2);
     }
 
-    private CommitMetrics getCommitMetricsWithTableWrite(boolean withPartition, String tableName)
-            throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(BUCKET.key(), "2");
-        options.put(BUCKET_KEY.key(), "a");
-        options.put(CHANGELOG_PRODUCER.key(), "input");
-        Path tablePath = new Path(tempDir.toString(), tableName);
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
-                        new String[] {"pt", "a", "b"});
-        List<String> partitionList = new ArrayList<>();
-        if (withPartition) {
-            partitionList.add("pt");
-        }
-        TableSchema tableSchema =
-                SchemaUtils.forceCommit(
-                        new SchemaManager(LocalFileIO.create(), tablePath),
-                        new Schema(
-                                rowType.getFields(),
-                                partitionList,
-                                Arrays.asList("pt", "a"),
-                                options,
-                                ""));
-        FileStoreTable table =
-                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        BatchTableWrite write = writeBuilder.newWrite();
-        BatchTableCommit commit = writeBuilder.newCommit();
-        write.write(GenericRow.of(1, 1, 2));
-        write.write(GenericRow.of(1, 2, 2));
-        write.write(GenericRow.of(2, 1, 2));
-        write.write(GenericRow.of(2, 2, 2));
-
-        commit.commit(write.prepareCommit());
-        write.close();
-        commit.close();
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(
-                        tablePath,
-                        RowType.of(new IntType()),
-                        "default",
-                        CoreOptions.FILE_FORMAT.defaultValue().toString());
-        return new CommitMetrics(pathFactory, LocalFileIO.create());
-    }
-
     /** Tests that the metrics are updated properly. */
     @Test
     public void testMetricsAreUpdated() {
@@ -376,6 +330,52 @@ public class CommitMetricsTest {
         FileStorePathFactory pathFactory =
                 new FileStorePathFactory(
                         path,
+                        RowType.of(new IntType()),
+                        "default",
+                        CoreOptions.FILE_FORMAT.defaultValue().toString());
+        return new CommitMetrics(pathFactory, LocalFileIO.create());
+    }
+
+    private CommitMetrics getCommitMetricsWithTableWrite(boolean withPartition, String tableName)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(BUCKET.key(), "2");
+        options.put(BUCKET_KEY.key(), "a");
+        options.put(CHANGELOG_PRODUCER.key(), "input");
+        Path tablePath = new Path(tempDir.toString(), tableName);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT()},
+                        new String[] {"pt", "a", "b"});
+        List<String> partitionList = new ArrayList<>();
+        if (withPartition) {
+            partitionList.add("pt");
+        }
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                partitionList,
+                                Arrays.asList("pt", "a"),
+                                options,
+                                ""));
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+        write.write(GenericRow.of(1, 1, 2));
+        write.write(GenericRow.of(1, 2, 2));
+        write.write(GenericRow.of(2, 1, 2));
+        write.write(GenericRow.of(2, 2, 2));
+
+        commit.commit(write.prepareCommit());
+        write.close();
+        commit.close();
+        FileStorePathFactory pathFactory =
+                new FileStorePathFactory(
+                        tablePath,
                         RowType.of(new IntType()),
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString());
