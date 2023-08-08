@@ -99,7 +99,14 @@ public class KafkaSchema {
         }
         int firstPartition =
                 partitionInfos.stream().map(PartitionInfo::partition).sorted().findFirst().get();
-        consumer.assign(Collections.singletonList(new TopicPartition(topic, firstPartition)));
+        Collection<TopicPartition> topicPartitions = Collections.singletonList(new TopicPartition(topic, firstPartition));
+        consumer.assign(topicPartitions);
+
+        Map<TopicPartition, Long> beginningOffsets = consumer.beginningOffsets(topicPartitions);
+        for (TopicPartition tp : topicPartitions) {
+            Long offset = beginningOffsets.get(tp);
+            consumer.seek(tp, offset);
+        }
 
         return consumer;
     }
@@ -110,7 +117,7 @@ public class KafkaSchema {
 
         int retry = 0;
         while (true) {
-            ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
+            ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(1000));
             for (ConsumerRecord<String, String> record : records) {
                 String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
                 if ("canal-json".equals(format)) {
