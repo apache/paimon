@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -96,14 +97,34 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
             List<CommitMessage> commitMessages = committable.fileCommittables();
             for (CommitMessage commitMessage : commitMessages) {
                 long dataFileSizeInc =
-                        ((CommitMessageImpl) commitMessage)
-                                .newFilesIncrement().newFiles().stream()
-                                        .mapToLong(f -> f.fileSize())
-                                        .reduce(Long::sum)
-                                        .orElse(0);
-                bytesSend += dataFileSizeInc;
+                        calcTotalFileSize(
+                                ((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
+                long changelogFileSizeInc =
+                        calcTotalFileSize(
+                                ((CommitMessageImpl) commitMessage)
+                                        .newFilesIncrement()
+                                        .changelogFiles());
+                long compactedDataFileSizeInc =
+                        calcTotalFileSize(
+                                ((CommitMessageImpl) commitMessage)
+                                        .compactIncrement()
+                                        .compactAfter());
+                long compactedChangelogFileSizeInc =
+                        calcTotalFileSize(
+                                ((CommitMessageImpl) commitMessage)
+                                        .compactIncrement()
+                                        .compactAfter());
+                bytesSend +=
+                        dataFileSizeInc
+                                + changelogFileSizeInc
+                                + compactedDataFileSizeInc
+                                + compactedChangelogFileSizeInc;
             }
         }
         return bytesSend;
+    }
+
+    private static long calcTotalFileSize(List<DataFileMeta> files) {
+        return files.stream().mapToLong(f -> f.fileSize()).reduce(Long::sum).orElse(0);
     }
 }
