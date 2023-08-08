@@ -198,7 +198,6 @@ public class TestHiveMetastore {
                 HiveConf.ConfVars.METASTORE_DISALLOW_INCOMPATIBLE_COL_TYPE_CHANGES.varname,
                 "false");
         conf.set("iceberg.hive.client-pool-size", "2");
-        // Setting this to avoid thrift exception during running Iceberg tests outside Iceberg.
         conf.set(
                 HiveConf.ConfVars.HIVE_IN_TEST.varname,
                 HiveConf.ConfVars.HIVE_IN_TEST.getDefaultValue());

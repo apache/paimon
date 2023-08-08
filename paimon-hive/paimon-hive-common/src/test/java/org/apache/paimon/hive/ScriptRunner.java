@@ -55,34 +55,6 @@ public class ScriptRunner {
         this.stopOnError = stopOnError;
     }
 
-    public void setDelimiter(String newDelimiter, boolean newFullLineDelimiter) {
-        this.delimiter = newDelimiter;
-        this.fullLineDelimiter = newFullLineDelimiter;
-    }
-
-    /**
-     * Setter for logWriter property.
-     *
-     * @param logWriter - the new value of the logWriter property.
-     */
-    public void setLogWriter(PrintWriter logWriter) {
-        this.logWriter = logWriter;
-    }
-
-    /**
-     * Setter for errorLogWriter property.
-     *
-     * @param errorLogWriter - the new value of the errorLogWriter property.
-     */
-    public void setErrorLogWriter(PrintWriter errorLogWriter) {
-        this.errorLogWriter = errorLogWriter;
-    }
-
-    /**
-     * Runs an SQL script (read in using the Reader parameter).
-     *
-     * @param reader - the source of the script.
-     */
     public void runScript(Reader reader) throws IOException, SQLException {
         try {
             boolean originalAutoCommit = connection.getAutoCommit();
