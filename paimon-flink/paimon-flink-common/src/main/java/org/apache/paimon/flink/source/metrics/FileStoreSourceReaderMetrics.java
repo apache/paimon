@@ -21,12 +21,9 @@ package org.apache.paimon.flink.source.metrics;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.metrics.MetricNames;
-import org.apache.flink.util.clock.Clock;
-import org.apache.flink.util.clock.SystemClock;
 
 /** Source reader metrics. */
 public class FileStoreSourceReaderMetrics {
-    private final Clock clock;
 
     // Source reader metric group
     private final MetricGroup sourceReaderMetricGroup;
@@ -38,7 +35,6 @@ public class FileStoreSourceReaderMetrics {
 
     public FileStoreSourceReaderMetrics(MetricGroup sourceReaderMetricGroup) {
         this.sourceReaderMetricGroup = sourceReaderMetricGroup;
-        this.clock = SystemClock.getInstance();
         this.sourceReaderMetricGroup.gauge(
                 MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
     }
@@ -46,7 +42,7 @@ public class FileStoreSourceReaderMetrics {
     /** Called when consumed snapshot changes. */
     public void recordSnapshotUpdate(long fileCreationTime) {
         this.latestFileCreationTime = fileCreationTime;
-        lastSplitUpdateTime = clock.absoluteTimeMillis();
+        lastSplitUpdateTime = System.currentTimeMillis();
     }
 
     long getFetchTimeLag() {
@@ -64,10 +60,5 @@ public class FileStoreSourceReaderMetrics {
     @VisibleForTesting
     long getLastSplitUpdateTime() {
         return lastSplitUpdateTime;
-    }
-
-    @VisibleForTesting
-    public static FileStoreSourceReaderMetrics mock(MetricGroup metricGroup) {
-        return new FileStoreSourceReaderMetrics(metricGroup);
     }
 }

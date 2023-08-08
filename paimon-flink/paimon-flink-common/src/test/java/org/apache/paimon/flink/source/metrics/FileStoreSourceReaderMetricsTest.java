@@ -29,7 +29,7 @@ class FileStoreSourceReaderMetricsTest {
         MetricListener metricListener = new MetricListener();
 
         final FileStoreSourceReaderMetrics sourceReaderMetrics =
-                FileStoreSourceReaderMetrics.mock(metricListener.getMetricGroup());
+                new FileStoreSourceReaderMetrics(metricListener.getMetricGroup());
         assertThat(sourceReaderMetrics.getLatestFileCreationTime())
                 .isEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
         assertThat(sourceReaderMetrics.getLastSplitUpdateTime())
@@ -45,7 +45,7 @@ class FileStoreSourceReaderMetricsTest {
         MetricListener metricListener = new MetricListener();
 
         final FileStoreSourceReaderMetrics sourceReaderMetrics =
-                FileStoreSourceReaderMetrics.mock(metricListener.getMetricGroup());
+                new FileStoreSourceReaderMetrics(metricListener.getMetricGroup());
         assertThat(sourceReaderMetrics.getFetchTimeLag())
                 .isEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
         sourceReaderMetrics.recordSnapshotUpdate(123);
