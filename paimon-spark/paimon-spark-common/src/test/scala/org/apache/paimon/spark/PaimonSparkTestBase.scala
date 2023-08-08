@@ -15,12 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark.sql
+package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.{Catalog, CatalogContext, CatalogFactory, Identifier}
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{PaimonSparkSessionExtension, SparkCatalog}
 import org.apache.paimon.spark.catalog.Catalogs
+import org.apache.paimon.spark.sql.WithTableOptions
 import org.apache.paimon.table.AbstractFileStoreTable
 
 import org.apache.spark.paimon.Utils

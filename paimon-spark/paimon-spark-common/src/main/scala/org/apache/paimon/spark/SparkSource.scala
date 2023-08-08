@@ -20,12 +20,15 @@ package org.apache.paimon.spark
 import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
+import org.apache.paimon.spark.sources.PaimonSink
 import org.apache.paimon.table.{FileStoreTable, FileStoreTableFactory}
 
 import org.apache.spark.sql.{DataFrame, SaveMode => SparkSaveMode, SparkSession, SQLContext}
 import org.apache.spark.sql.connector.catalog.{SessionConfigSupport, Table}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.sources.{BaseRelation, CreatableRelationProvider, DataSourceRegister}
+import org.apache.spark.sql.execution.streaming.Sink
+import org.apache.spark.sql.sources.{BaseRelation, CreatableRelationProvider, DataSourceRegister, StreamSinkProvider}
+import org.apache.spark.sql.streaming.OutputMode
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
@@ -36,7 +39,8 @@ import scala.collection.JavaConverters._
 class SparkSource
   extends DataSourceRegister
   with SessionConfigSupport
-  with CreatableRelationProvider {
+  with CreatableRelationProvider
+  with StreamSinkProvider {
 
   override def shortName(): String = SparkSource.NAME
 
@@ -78,6 +82,20 @@ class SparkSource
       SparkSession.active.sessionState.newHadoopConf())
     FileStoreTableFactory.create(catalogContext)
   }
+
+  override def createSink(
+      sqlContext: SQLContext,
+      parameters: Map[String, String],
+      partitionColumns: Seq[String],
+      outputMode: OutputMode): Sink = {
+    if (outputMode != OutputMode.Append && outputMode != OutputMode.Complete) {
+      throw new RuntimeException("Paimon supports only Complete and Append output mode.")
+    }
+    val table = loadTable(parameters.asJava)
+    val options = Options.fromMap(parameters.asJava)
+    new PaimonSink(sqlContext, table, partitionColumns, outputMode, options)
+  }
+
 }
 
 object SparkSource {

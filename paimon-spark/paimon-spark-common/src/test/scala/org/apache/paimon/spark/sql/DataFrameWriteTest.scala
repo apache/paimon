@@ -18,9 +18,9 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.WriteMode._
+import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
-import org.scalactic.source.Position
 
 import java.sql.Date
 
