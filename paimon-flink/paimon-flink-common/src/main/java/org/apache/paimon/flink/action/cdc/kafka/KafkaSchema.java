@@ -43,7 +43,6 @@ public class KafkaSchema {
 
     private static final int MAX_RETRY = 5;
     private static final int POLL_TIMEOUT_MILLIS = 100;
-
     private final String databaseName;
     private final String tableName;
     private final Map<String, DataType> fields;
@@ -110,19 +109,9 @@ public class KafkaSchema {
         KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig, topic);
         int retry = 0;
         int retryInterval = 1000;
-
-        while (retry < MAX_RETRY) {
+        while (true) {
             ConsumerRecords<String, String> records =
                     consumer.poll(Duration.ofMillis(POLL_TIMEOUT_MILLIS));
-
-            // Check if records is empty.
-            if (records.isEmpty()) {
-                Thread.sleep(retryInterval);
-                retryInterval *= 2;
-                retry++;
-                continue;
-            }
-
             for (ConsumerRecord<String, String> record : records) {
                 String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
                 if ("canal-json".equals(format)) {
@@ -136,9 +125,14 @@ public class KafkaSchema {
                             "This format: " + format + " is not support.");
                 }
             }
+            if (retry == MAX_RETRY) {
+                throw new Exception(
+                        String.format("Could not get metadata from server,topic:%s", topic));
+            }
+            Thread.sleep(retryInterval);
+            retryInterval *= 2;
+            retry++;
         }
-
-        throw new Exception("Could not get metadata from server,topic :" + topic);
     }
 
     @Override
