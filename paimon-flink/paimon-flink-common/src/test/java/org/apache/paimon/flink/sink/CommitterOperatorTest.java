@@ -36,6 +36,7 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.watermark.Watermark;
@@ -342,10 +343,11 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             manifestCommittable.addFileCommittable(commitMessage);
         }
         write.close();
-        assertThat(
-                        StoreCommitter.calcDataBytesSend(
-                                new ArrayList<>(Arrays.asList(manifestCommittable))))
-                .isEqualTo(275);
+        Tuple2<Long, Long> numBytesAndRecords =
+                StoreCommitter.calcDataBytesAndRecordsSend(
+                        new ArrayList<>(Arrays.asList(manifestCommittable)));
+        assertThat(numBytesAndRecords.f0).isEqualTo(275);
+        assertThat(numBytesAndRecords.f1).isEqualTo(2);
     }
 
     // ------------------------------------------------------------------------
