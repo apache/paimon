@@ -32,6 +32,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -235,29 +236,46 @@ public abstract class FormatReadWriteTest {
     }
 
     private void validateFullTypesResult(InternalRow actual, InternalRow expected) {
-        if (formatType.equals("avro") || formatType.equals("orc")) {
+        if (formatType.equals("avro")) {
             assertThat(actual).isEqualTo(expected);
         } else {
             RowType rowType = rowTypeForFullTypesTest();
             InternalRow.FieldGetter[] fieldGetters = rowType.fieldGetters();
             for (int i = 0; i < fieldGetters.length; i++) {
+                String name = rowType.getFieldNames().get(i);
                 Object actualField = fieldGetters[i].getFieldOrNull(actual);
                 Object expectedField = fieldGetters[i].getFieldOrNull(expected);
-                System.out.println(i);
-                if (i == 3) {
-                    validateInternalMap((InternalMap) actualField, (InternalMap) expectedField);
-                } else if (i == 4) {
-                    validateInternalArray(
-                            (InternalArray) actualField,
-                            (InternalArray) expectedField,
-                            DataTypes.STRING());
-                } else if (i == 5) {
-                    validateInternalArray(
-                            (InternalArray) actualField,
-                            (InternalArray) expectedField,
-                            DataTypes.INT());
-                } else {
-                    assertThat(actualField).isEqualTo(expectedField);
+                switch (name) {
+                    case "locations":
+                        validateInternalMap((InternalMap) actualField, (InternalMap) expectedField);
+                        break;
+                    case "strArray":
+                        validateInternalArray(
+                                (InternalArray) actualField,
+                                (InternalArray) expectedField,
+                                DataTypes.STRING());
+                        break;
+                    case "intArray":
+                        validateInternalArray(
+                                (InternalArray) actualField,
+                                (InternalArray) expectedField,
+                                DataTypes.INT());
+                        break;
+                    case "rowArray":
+                        validateInternalArray(
+                                (InternalArray) actualField,
+                                (InternalArray) expectedField,
+                                ((ArrayType)
+                                                rowType.getFields().stream()
+                                                        .filter(f -> f.name().equals("rowArray"))
+                                                        .findAny()
+                                                        .get()
+                                                        .type())
+                                        .getElementType());
+                        break;
+                    default:
+                        assertThat(actualField).isEqualTo(expectedField);
+                        break;
                 }
             }
         }
@@ -265,11 +283,12 @@ public abstract class FormatReadWriteTest {
 
     private void validateInternalMap(InternalMap actualMap, InternalMap expectedMap) {
         validateInternalArray(actualMap.keyArray(), expectedMap.keyArray(), DataTypes.STRING());
-        validateInternalArray(actualMap.valueArray(), expectedMap.valueArray(), DataTypes.DOUBLE());
+        validateInternalArray(actualMap.valueArray(), expectedMap.valueArray(), getMapValueType());
     }
 
     private void validateInternalArray(
             InternalArray actualArray, InternalArray expectedArray, DataType elementType) {
+        assertThat(actualArray.size()).isEqualTo(expectedArray.size());
         switch (elementType.getTypeRoot()) {
             case VARCHAR:
                 for (int i = 0; i < actualArray.size(); i++) {
@@ -281,6 +300,21 @@ public abstract class FormatReadWriteTest {
                 break;
             case INTEGER:
                 assertThat(actualArray.toIntArray()).isEqualTo(expectedArray.toIntArray());
+                break;
+            case ROW:
+                InternalArray.ElementGetter getter = InternalArray.createElementGetter(elementType);
+                RowType rowType = (RowType) elementType;
+                for (int i = 0; i < expectedArray.size(); i++) {
+                    InternalRow actual = (InternalRow) getter.getElementOrNull(actualArray, i);
+                    InternalRow expected = (InternalRow) getter.getElementOrNull(expectedArray, i);
+                    assertThat(actual.getFieldCount()).isEqualTo(expected.getFieldCount());
+                    for (int j = 0; j < actual.getFieldCount(); j++) {
+                        InternalRow.FieldGetter fieldGetter =
+                                InternalRow.createFieldGetter(rowType.getTypeAt(j), j);
+                        assertThat(fieldGetter.getFieldOrNull(expected))
+                                .isEqualTo(fieldGetter.getFieldOrNull(actual));
+                    }
+                }
                 break;
             default:
                 throw new UnsupportedOperationException(
