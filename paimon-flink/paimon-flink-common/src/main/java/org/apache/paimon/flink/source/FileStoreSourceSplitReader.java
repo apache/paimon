@@ -178,7 +178,7 @@ public class FileStoreSourceSplitReader
         }
 
         // update metric when split changes
-        if (sourceReaderMetrics != null) {
+        if (sourceReaderMetrics != null && nextSplit.split() instanceof DataSplit) {
             long eventTime =
                     ((DataSplit) nextSplit.split())
                             .getLatestFileCreationTime()
