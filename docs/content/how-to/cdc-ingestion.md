@@ -196,7 +196,7 @@ under database `source_db`. The command to submit the job looks like:
     --table-conf bucket=4 \
     --table-conf changelog-producer=input \
     --table-conf sink.parallelism=4 \
-    --including-tables 'product|user|address'
+    --including-tables 'source_db.product|source_db.user|source_db.address'
 ```
 
 At a later point we would like the job to also synchronize tables [order, custom], 
@@ -222,7 +222,7 @@ The command to recover from previous snapshot and add new tables to synchronize 
     --catalog-conf metastore=hive \
     --catalog-conf uri=thrift://hive-metastore:9083 \
     --table-conf bucket=4 \
-    --including-tables 'product|user|address|order|custom'
+    --including-tables 'source_db.product|source_db.user|source_db.address|source_db.order|source_db.custom'
 ```
 
 {{< hint info >}}
@@ -249,7 +249,7 @@ synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... 
     --table-conf bucket=4 \
     --table-conf changelog-producer=input \
     --table-conf sink.parallelism=4 \
-    --including-tables 'tbl.+'
+    --including-tables 'db.+.tbl.+'
 ```
 
 By setting database-name to a regular expression, the synchronization job will capture all tables under matched databases 

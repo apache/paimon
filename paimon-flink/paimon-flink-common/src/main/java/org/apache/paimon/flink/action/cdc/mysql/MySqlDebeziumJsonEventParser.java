@@ -155,7 +155,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         try {
             root = objectMapper.readValue(rawEvent, JsonNode.class);
             payload = root.get("payload");
-            currentTable = payload.get("source").get("table").asText();
+            currentTable = getDatabaseName() + "." + payload.get("source").get("table").asText();
             shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -164,7 +164,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     @Override
     public String parseTableName() {
-        return tableNameConverter.convert(Identifier.create(getDatabaseName(), currentTable));
+        String tableName = payload.get("source").get("table").asText();
+        return tableNameConverter.convert(Identifier.create(getDatabaseName(), tableName));
     }
 
     private boolean isSchemaChange() {
