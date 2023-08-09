@@ -98,7 +98,9 @@ public class FilesTable implements ReadonlyTable {
                                     11, "min_value_stats", SerializationUtils.newStringType(false)),
                             new DataField(
                                     12, "max_value_stats", SerializationUtils.newStringType(false)),
-                            new DataField(13, "creation_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(13, "min_sequence_number", new BigIntType(true)),
+                            new DataField(14, "max_sequence_number", new BigIntType(true)),
+                            new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS())));
 
     private final FileStoreTable storeTable;
 
@@ -337,6 +339,8 @@ public class FilesTable implements ReadonlyTable {
                         () -> BinaryString.fromString(statsGetter.nullValueCounts().toString()),
                         () -> BinaryString.fromString(statsGetter.lowerValueBounds().toString()),
                         () -> BinaryString.fromString(statsGetter.upperValueBounds().toString()),
+                        dataFileMeta::minSequenceNumber,
+                        dataFileMeta::maxSequenceNumber,
                         dataFileMeta::creationTime
                     };
 
