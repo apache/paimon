@@ -129,12 +129,19 @@ public abstract class FileFormat {
                         readBatchSize));
     }
 
-    protected List<String> getDictionaryDisabledFields(
-            RowType type, DictionaryOptions dictionaryOptions) {
-        if (dictionaryOptions != null) {
-            return dictionaryOptions.getDictionaryDisabledFields(type.getFieldNames());
-        } else {
-            return Lists.newArrayList();
+    protected List<String> getAllFieldPath(RowType type) {
+        throw new RuntimeException("Unsupported");
+    }
+
+    protected List<String> getDicDisabledFieldPath(
+            RowType rowType, DictionaryOptions dictionaryOptions) {
+        List<String> disableDictionaryFields = Lists.newArrayList();
+
+        // dictionary option has been set
+        if (dictionaryOptions != null && !dictionaryOptions.isEnableAllFieldsDic()) {
+            List<String> fieldPaths = getAllFieldPath(rowType);
+            disableDictionaryFields.addAll(dictionaryOptions.getDicDisabledFields(fieldPaths));
         }
+        return disableDictionaryFields;
     }
 }

@@ -338,7 +338,7 @@ public class SchemaValidation {
         DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
 
         Map<String, Boolean> fieldsDictionaryEnabled =
-                dictionaryOptions.getFieldsDictionaryEnabled();
+                dictionaryOptions.getfieldsDictionaryOption();
         for (String dictionaryField : fieldsDictionaryEnabled.keySet()) {
             if (!fieldNames.contains(dictionaryField)) {
                 throw new IllegalArgumentException(

@@ -26,27 +26,52 @@ import java.util.stream.Collectors;
 /** the helper class of specifying the dictionary option for parquet/orc format. */
 public class DictionaryOptions {
     private final boolean tableDictionaryEnable;
-    private final Map<String, Boolean> fieldsDictionaryEnabled;
+    private final Map<String, Boolean> fieldsDicOption;
 
-    public DictionaryOptions(
-            boolean tableDictionaryEnable, Map<String, Boolean> fieldsDictionaryEnabled) {
+    public DictionaryOptions(boolean tableDictionaryEnable, Map<String, Boolean> fieldsDicOption) {
         this.tableDictionaryEnable = tableDictionaryEnable;
-        this.fieldsDictionaryEnabled = fieldsDictionaryEnabled;
+        this.fieldsDicOption = fieldsDicOption;
     }
 
-    public List<String> getDictionaryDisabledFields(List<String> fieldNames) {
+    public List<String> getDicDisabledFields(List<String> fieldPaths) {
         Map<String, Boolean> result = new HashMap<>();
-        for (String fieldName : fieldNames) {
+        for (String fieldName : fieldPaths) {
             result.put(fieldName, tableDictionaryEnable);
         }
-        result.putAll(fieldsDictionaryEnabled);
+
+        Map<String, List<String>> pathGroupByField =
+                fieldPaths.stream()
+                        .collect(
+                                Collectors.groupingBy(
+                                        path ->
+                                                path.contains(".")
+                                                        ? path.substring(0, path.indexOf("."))
+                                                        : path));
+
+        // Specify the dictionary config for the child paths which field has dictionary config.
+        for (Map.Entry<String, Boolean> fieldOption : fieldsDicOption.entrySet()) {
+            String field = fieldOption.getKey();
+            boolean dictionaryConfig = fieldOption.getValue();
+            List<String> paths = pathGroupByField.get(field);
+            if (paths != null) {
+                for (String path : paths) {
+                    result.put(path, dictionaryConfig);
+                }
+            }
+        }
+
         return result.entrySet().stream()
                 .filter(entry -> !entry.getValue())
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
     }
 
-    public Map<String, Boolean> getFieldsDictionaryEnabled() {
-        return fieldsDictionaryEnabled;
+    public Map<String, Boolean> getfieldsDictionaryOption() {
+        return fieldsDicOption;
+    }
+
+    public boolean isEnableAllFieldsDic() {
+        boolean allEnable = fieldsDicOption.entrySet().stream().allMatch(Map.Entry::getValue);
+        return tableDictionaryEnable && (fieldsDicOption.isEmpty() || allEnable);
     }
 }

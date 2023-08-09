@@ -28,10 +28,13 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.assertj.core.api.Assertions;
-import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -47,7 +50,6 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
         options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, false);
         // a22 enable dictionary
         options.set("fields.a22.dictionary-enable", "true");
-        options.set("fields.a18.b1.dictionary-enable", "false");
         CoreOptions coreOptions = new CoreOptions(options);
         FileFormatFactory.FormatContext formatContext =
                 new FileFormatFactory.FormatContext(
@@ -66,8 +68,8 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
         ArrayList<String> expected =
                 Lists.newArrayList(
                         "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", "a11",
-                        "a12", "a13", "a14", "a15", "a16", "a17", "a18", "a19", "a20", "a21");
-        Assertions.assertThat(fileFormat.disableDictionaryFields).hasSameElementsAs(expected);
+                        "a12", "a13", "a14", "a15", "a16", "a17", "a18.b1", "a19", "a20", "a21");
+        Assertions.assertThat(fileFormat.disableDictionaryPaths).hasSameElementsAs(expected);
     }
 
     @Test
@@ -78,22 +80,49 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
         ParquetReaderFactory readerFactory =
                 (ParquetReaderFactory) fileFormat.createReaderFactory(rowType);
         RecordReader<InternalRow> reader = readerFactory.createReader(LocalFileIO.create(), path);
+        reader.readBatch();
+
         reader.forEachRemaining(InternalRow::getFieldCount);
         System.out.println(reader);
     }
 
+    @Test
+    public void testFieldsPath() {
+        RowType build =
+                RowType.builder()
+                        .field(
+                                "a",
+                                RowType.builder()
+                                        .field(
+                                                "b",
+                                                RowType.builder()
+                                                        .field("c", DataTypes.STRING())
+                                                        .build())
+                                        .build())
+                        .field(
+                                "d",
+                                RowType.builder()
+                                        .field("e", DataTypes.STRING())
+                                        .field("f", DataTypes.STRING())
+                                        .build())
+                        .build();
+        ArrayList<String> expected = Lists.newArrayList("x.d.e", "x.d.f", "x.a.b.c");
+        Assertions.assertThat(ParquetFileFormat.traversal(Pair.of("x", build)))
+                .hasSameElementsAs(expected);
+    }
+
     class MockParquetFormat extends ParquetFileFormat {
-        private List<String> disableDictionaryFields;
+        private List<String> disableDictionaryPaths;
 
         public MockParquetFormat(FileFormatFactory.FormatContext formatContext) {
             super(formatContext);
         }
 
         @Override
-        protected List<String> getDictionaryDisabledFields(
+        protected List<String> getDicDisabledFieldPath(
                 RowType type, DictionaryOptions dictionaryOptions) {
-            disableDictionaryFields = super.getDictionaryDisabledFields(type, dictionaryOptions);
-            return disableDictionaryFields;
+            disableDictionaryPaths = super.getDicDisabledFieldPath(type, dictionaryOptions);
+            return disableDictionaryPaths;
         }
     }
 }

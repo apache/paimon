@@ -136,7 +136,7 @@ public abstract class AbstractDictionaryReaderWriterTest {
             CoreOptions coreOptions = new CoreOptions(options);
             List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
             DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
-            assertThat(dictionaryOptions.getDictionaryDisabledFields(fieldNames))
+            assertThat(dictionaryOptions.getDicDisabledFields(fieldNames))
                     .hasSameElementsAs(fieldNames);
         }
 
@@ -148,7 +148,7 @@ public abstract class AbstractDictionaryReaderWriterTest {
             DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
             List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
             List<String> disableDictionaryField =
-                    dictionaryOptions.getDictionaryDisabledFields(fieldNames);
+                    dictionaryOptions.getDicDisabledFields(fieldNames);
             assertThat(disableDictionaryField).hasSameElementsAs(Lists.newArrayList("a", "b", "d"));
         }
 
@@ -160,7 +160,7 @@ public abstract class AbstractDictionaryReaderWriterTest {
             DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
             List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
             List<String> disableDictionaryField =
-                    dictionaryOptions.getDictionaryDisabledFields(fieldNames);
+                    dictionaryOptions.getDicDisabledFields(fieldNames);
             assertThat(disableDictionaryField).hasSameElementsAs(Lists.newArrayList("c"));
         }
     }
