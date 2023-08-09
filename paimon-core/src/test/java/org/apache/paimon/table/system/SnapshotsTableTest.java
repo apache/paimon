@@ -52,6 +52,9 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Tests for {@link SnapshotsTable}.
+ * */
 public class SnapshotsTableTest extends TableTestBase {
     private static final String tableName = "MyTable";
 
