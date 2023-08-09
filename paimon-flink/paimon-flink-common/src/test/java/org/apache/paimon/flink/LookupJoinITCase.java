@@ -524,7 +524,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         String query =
                 "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
                         + " 'retry-strategy'='fixed_delay', 'async'='true', 'output-mode'='allow_unordered', 'fixed-delay'='1s','max-attempts'='60') */"
-                        + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
+                        + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM /*+ OPTIONS('lookup.async'='true') */ for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
         sql("INSERT INTO T VALUES (3)");

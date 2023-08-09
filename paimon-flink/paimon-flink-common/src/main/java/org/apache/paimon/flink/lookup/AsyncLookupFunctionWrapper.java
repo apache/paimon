@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.utils.ExecutorThreadFactory;
+
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.functions.AsyncLookupFunction;
 import org.apache.flink.table.functions.FunctionContext;
@@ -26,16 +28,20 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
-
-import static org.apache.paimon.utils.FileUtils.COMMON_IO_FORK_JOIN_POOL;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /** A {@link AsyncLookupFunction} to wrap sync function. */
 public class AsyncLookupFunctionWrapper extends AsyncLookupFunction {
 
     private final NewLookupFunction function;
+    private final int threadNumber;
 
-    public AsyncLookupFunctionWrapper(NewLookupFunction function) {
+    private transient ExecutorService lazyExecutor;
+
+    public AsyncLookupFunctionWrapper(NewLookupFunction function, int threadNumber) {
         this.function = function;
+        this.threadNumber = threadNumber;
     }
 
     @Override
@@ -55,11 +61,25 @@ public class AsyncLookupFunctionWrapper extends AsyncLookupFunction {
 
     @Override
     public CompletableFuture<Collection<RowData>> asyncLookup(RowData keyRow) {
-        return CompletableFuture.supplyAsync(() -> lookup(keyRow), COMMON_IO_FORK_JOIN_POOL);
+        return CompletableFuture.supplyAsync(() -> lookup(keyRow), executor());
     }
 
     @Override
     public void close() throws Exception {
         function.close();
+        if (lazyExecutor != null) {
+            lazyExecutor.shutdownNow();
+            lazyExecutor = null;
+        }
+    }
+
+    private ExecutorService executor() {
+        if (lazyExecutor == null) {
+            lazyExecutor =
+                    Executors.newFixedThreadPool(
+                            threadNumber,
+                            new ExecutorThreadFactory(Thread.currentThread().getName() + "-async"));
+        }
+        return lazyExecutor;
     }
 }

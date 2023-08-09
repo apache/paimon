@@ -24,7 +24,8 @@ import org.apache.flink.table.connector.source.TableFunctionProvider;
 /** Factory to create {@link LookupRuntimeProvider}. */
 public class LookupRuntimeProviderFactory {
 
-    public static LookupRuntimeProvider create(FileStoreLookupFunction function) {
+    public static LookupRuntimeProvider create(
+            FileStoreLookupFunction function, boolean enableAsync, int asyncThreadNumber) {
         return TableFunctionProvider.of(new OldLookupFunction(function));
     }
 }

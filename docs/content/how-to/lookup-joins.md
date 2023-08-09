@@ -101,14 +101,15 @@ ON o.customer_id = c.id;
 ### Async Retry Lookup
 
 The problem with synchronous retry is that one record will block subsequent records, causing the entire job to be blocked.
-You can consider using async to avoid blocking.
+You can consider using async + allow_unordered to avoid blocking, the records that join missing will no longer block
+other records.
 
 ```sql
 -- enrich each order with customer information
 SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'async'='true', 'output-mode'='allow_unordered', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
 o.order_id, o.total, c.country, c.zip
 FROM Orders AS o
-JOIN customers
+JOIN customers /*+ OPTIONS('lookup.async'='true', 'lookup.async-thread-number'='16') */
 FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```

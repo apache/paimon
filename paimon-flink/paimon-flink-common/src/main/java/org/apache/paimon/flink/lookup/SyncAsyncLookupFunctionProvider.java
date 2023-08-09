@@ -28,14 +28,16 @@ public class SyncAsyncLookupFunctionProvider
         implements LookupFunctionProvider, AsyncLookupFunctionProvider {
 
     private final NewLookupFunction function;
+    private final int asyncThreadNumber;
 
-    public SyncAsyncLookupFunctionProvider(NewLookupFunction function) {
+    public SyncAsyncLookupFunctionProvider(NewLookupFunction function, int asyncThreadNumber) {
         this.function = function;
+        this.asyncThreadNumber = asyncThreadNumber;
     }
 
     @Override
     public AsyncLookupFunction createAsyncLookupFunction() {
-        return new AsyncLookupFunctionWrapper(function);
+        return new AsyncLookupFunctionWrapper(function, asyncThreadNumber);
     }
 
     @Override
