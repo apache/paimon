@@ -582,3 +582,39 @@ For more information of 'merge-into', see
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## file-clean the orphan files in the specified table
+
+Paimon supports "File clean" via submitting the 'file-clean' job through `flink run`.
+
+{{< tabs "file-clean table" >}}
+
+{{< tab "Flink 1.16-" >}}
+
+Paimon only supports deleting records via submitting the 'file-clean' job through `flink run`.
+
+Run the following command to submit a 'file-clean' job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    file-clean \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name>  ...]]
+```
+
+
+For more information of 'file-clean', see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    file-clean --help
+```
+
+{{< /tab >}}
+
+{{< tab "Flink 1.16+" >}}
+
+{{< tab "Flink" >}}

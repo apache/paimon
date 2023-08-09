@@ -400,6 +400,43 @@ public class FlinkActionsE2eTest extends E2eTestBase {
         checkResult();
     }
 
+    @Test
+    public void testFileClean() throws Exception {
+        String tableTDdl =
+                "CREATE TABLE IF NOT EXISTS T (\n"
+                        + "    k INT,\n"
+                        + "    v STRING,\n"
+                        + "    PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ");\n";
+
+        // 3 snapshots
+        String inserts =
+                "INSERT INTO T VALUES (1, 'Hi');\n"
+                        + "INSERT INTO T VALUES (2, 'Hello');\n"
+                        + "INSERT INTO T VALUES (3, 'Paimon');\n";
+
+        runSql("SET 'table.dml-sync' = 'true';\n" + inserts, catalogDdl, useCatalogCmd, tableTDdl);
+        // add tmp  test data
+        String tmpTable = warehousePath + "/manifest.tmp";
+
+        writeSharedFile(tmpTable, String.join("\n", "orphan_tmp_file"));
+        // create tag at snapshot 2 and check
+        Container.ExecResult execResult =
+                jobManager.execInContainer(
+                        "bin/flink",
+                        "run",
+                        "lib/paimon-flink-action.jar",
+                        "file-clean",
+                        "--warehouse",
+                        warehousePath,
+                        "--database",
+                        "default",
+                        "--table",
+                        "T");
+        LOG.info(execResult.getStdout());
+        LOG.info(execResult.getStderr());
+    }
+
     private void runSql(String sql, String... ddls) throws Exception {
         runSql(String.join("\n", ddls) + "\n" + sql);
     }
