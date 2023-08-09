@@ -215,9 +215,18 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                     unmonitor(mySqlSchema);
                 }
             } catch (Catalog.TableNotExistException e) {
-                catalog.createTable(identifier, fromMySql, false);
-                table = (FileStoreTable) catalog.getTable(identifier);
-                fileStoreTables.add(table);
+                try {
+                    // TODO : add hive test case.
+                    catalog.createTable(identifier, fromMySql, false);
+                    table = (FileStoreTable) catalog.getTable(identifier);
+                    fileStoreTables.add(table);
+                } catch (Exception ex) {
+                    LOG.error(
+                            String.format(
+                                    "create table %s error in the database synchronize.",
+                                    identifier.getFullName()),
+                            ex);
+                }
             }
         }
 
