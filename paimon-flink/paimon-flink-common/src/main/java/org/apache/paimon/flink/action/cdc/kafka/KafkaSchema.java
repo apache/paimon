@@ -103,12 +103,7 @@ public class KafkaSchema {
         Collection<TopicPartition> topicPartitions =
                 Collections.singletonList(new TopicPartition(topic, firstPartition));
         consumer.assign(topicPartitions);
-
-        Map<TopicPartition, Long> beginningOffsets = consumer.beginningOffsets(topicPartitions);
-        for (TopicPartition tp : topicPartitions) {
-            Long offset = beginningOffsets.get(tp);
-            consumer.seek(tp, offset);
-        }
+        consumer.seekToBeginning(topicPartitions);
 
         return consumer;
     }
