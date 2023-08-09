@@ -686,7 +686,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(Exception.class)
-                .hasMessage("Could not get metadata from server,topic :no_non_ddl_data");
+                .hasMessage("Could not get metadata from server,topic:no_non_ddl_data");
     }
 
     @Test
