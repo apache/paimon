@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputView;
@@ -31,9 +32,10 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.OptionalLong;
+import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -76,8 +78,10 @@ public class DataSplit implements Split {
         return isStreaming;
     }
 
-    public OptionalLong getLatestFileCreationTime() {
-        return this.dataFiles.stream().mapToLong(f -> f.creationTime().getMillisecond()).max();
+    public Optional<Timestamp> getLatestFileCreationTime() {
+        return this.dataFiles.stream()
+                .map(f -> f.creationTime())
+                .max(Comparator.comparing(Timestamp::getMillisecond));
     }
 
     @Override

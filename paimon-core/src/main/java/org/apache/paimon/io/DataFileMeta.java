@@ -31,6 +31,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -211,6 +212,14 @@ public class DataFileMeta {
 
     public Timestamp creationTime() {
         return creationTime;
+    }
+
+    public static long convertCreationTimeToEpoch(Timestamp creationTime) {
+        return creationTime
+                .toLocalDateTime()
+                .atZone(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli();
     }
 
     public DataFileMeta upgrade(int newLevel) {
