@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
@@ -110,7 +111,9 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            return new LookupMergeFunction(wrapped.create(projection), keyType, rowType);
+            RowType valueType =
+                    projection == null ? rowType : Projection.of(projection).project(rowType);
+            return new LookupMergeFunction(wrapped.create(projection), keyType, valueType);
         }
     }
 }
