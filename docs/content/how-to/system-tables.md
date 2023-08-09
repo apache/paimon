@@ -66,7 +66,7 @@ SELECT * FROM MyTable$schemas;
 
 /*
 +-----------+--------------------------------+----------------+--------------+---------+---------+-------------------------+
-| schema_id |                         fields | partition_keys | primary_keys | options | comment |      effective_time     |
+| schema_id |                         fields | partition_keys | primary_keys | options | comment |       update_time       |
 +-----------+--------------------------------+----------------+--------------+---------+---------+-------------------------+
 |         0 | [{"id":0,"name":"word","typ... |             [] |     ["word"] |      {} |         | 2022-10-28 11:44:20.600 |
 |         1 | [{"id":0,"name":"word","typ... |             [] |     ["word"] |      {} |         | 2022-10-27 11:44:15.600 |

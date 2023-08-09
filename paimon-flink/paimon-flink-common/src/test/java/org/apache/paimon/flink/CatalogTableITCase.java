@@ -181,7 +181,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "  `primary_keys` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `options` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `comment` VARCHAR(2147483647),\n"
-                                + "  `effective_time` TIMESTAMP(3) NOT NULL\n"
+                                + "  `update_time` TIMESTAMP(3) NOT NULL\n"
                                 + ") ]]");
 
         List<Row> result =

@@ -78,7 +78,7 @@ public class SchemasTable implements ReadonlyTable {
                                     3, "primary_keys", SerializationUtils.newStringType(false)),
                             new DataField(4, "options", SerializationUtils.newStringType(false)),
                             new DataField(5, "comment", SerializationUtils.newStringType(true)),
-                            new DataField(6, "effective_time", new TimestampType(false, 3))));
+                            new DataField(6, "update_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
     private final Path location;
