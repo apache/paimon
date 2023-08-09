@@ -61,6 +61,10 @@ public class SparkTable
         this.table = table;
     }
 
+    public Table getTable() {
+        return table;
+    }
+
     @Override
     public ScanBuilder newScanBuilder(CaseInsensitiveStringMap options) {
         Table newTable = table.copy(options.asCaseSensitiveMap());
@@ -83,6 +87,7 @@ public class SparkTable
         capabilities.add(TableCapability.BATCH_READ);
         capabilities.add(TableCapability.V1_BATCH_WRITE);
         capabilities.add(TableCapability.OVERWRITE_BY_FILTER);
+        capabilities.add(TableCapability.OVERWRITE_DYNAMIC);
         return capabilities;
     }
 
