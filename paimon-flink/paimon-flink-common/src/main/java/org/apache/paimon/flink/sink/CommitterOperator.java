@@ -168,7 +168,9 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     public void close() throws Exception {
         committablesPerCheckpoint.clear();
         inputs.clear();
-        committer.close();
+        if (committer != null) {
+            committer.close();
+        }
         super.close();
     }
 
