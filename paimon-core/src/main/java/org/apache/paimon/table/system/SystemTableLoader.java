@@ -48,7 +48,7 @@ public class SystemTableLoader {
             case MANIFESTS:
                 return new ManifestsTable(fileIO, location, dataTable);
             case SNAPSHOTS:
-                return new SnapshotsTable(fileIO, location);
+                return new SnapshotsTable(fileIO, location, dataTable);
             case OPTIONS:
                 return new OptionsTable(fileIO, location);
             case SCHEMAS:

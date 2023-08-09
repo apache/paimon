@@ -26,8 +26,11 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -37,6 +40,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IteratorRecordReader;
@@ -77,17 +81,34 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(
                                     4, "commit_kind", SerializationUtils.newStringType(false)),
                             new DataField(5, "commit_time", new TimestampType(false, 3)),
-                            new DataField(6, "total_record_count", new BigIntType(true)),
-                            new DataField(7, "delta_record_count", new BigIntType(true)),
-                            new DataField(8, "changelog_record_count", new BigIntType(true)),
-                            new DataField(9, "watermark", new BigIntType(true))));
+                            new DataField(
+                                    6,
+                                    "base_manifest_list",
+                                    SerializationUtils.newStringType(false)),
+                            new DataField(
+                                    7,
+                                    "delta_manifest_list",
+                                    SerializationUtils.newStringType(false)),
+                            new DataField(
+                                    8,
+                                    "changelog_manifest_list",
+                                    SerializationUtils.newStringType(true)),
+                            new DataField(9, "total_record_count", new BigIntType(true)),
+                            new DataField(10, "delta_record_count", new BigIntType(true)),
+                            new DataField(11, "changelog_record_count", new BigIntType(true)),
+                            new DataField(12, "added_file_count", new IntType(true)),
+                            new DataField(13, "delete_file_count", new IntType(true)),
+                            new DataField(14, "watermark", new BigIntType(true))));
 
     private final FileIO fileIO;
     private final Path location;
 
-    public SnapshotsTable(FileIO fileIO, Path location) {
+    private final FileStoreTable dataTable;
+
+    public SnapshotsTable(FileIO fileIO, Path location, FileStoreTable dataTable) {
         this.fileIO = fileIO;
         this.location = location;
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -112,12 +133,12 @@ public class SnapshotsTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new SnapshotsRead(fileIO);
+        return new SnapshotsRead(fileIO, dataTable);
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SnapshotsTable(fileIO, location);
+        return new SnapshotsTable(fileIO, location, dataTable.copy(dynamicOptions));
     }
 
     private class SnapshotsScan extends ReadOnceTableScan {
@@ -178,8 +199,11 @@ public class SnapshotsTable implements ReadonlyTable {
         private final FileIO fileIO;
         private int[][] projection;
 
-        public SnapshotsRead(FileIO fileIO) {
+        private final FileStoreTable dataTable;
+
+        public SnapshotsRead(FileIO fileIO, FileStoreTable dataTable) {
             this.fileIO = fileIO;
+            this.dataTable = dataTable;
         }
 
         @Override
@@ -206,7 +230,8 @@ public class SnapshotsTable implements ReadonlyTable {
             }
             Path location = ((SnapshotsSplit) split).location;
             Iterator<Snapshot> snapshots = new SnapshotManager(fileIO, location).snapshots();
-            Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
+            Iterator<InternalRow> rows =
+                    Iterators.transform(snapshots, snapshot -> toRow(snapshot, dataTable));
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -215,7 +240,8 @@ public class SnapshotsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(Snapshot snapshot) {
+        private InternalRow toRow(Snapshot snapshot, FileStoreTable dataTable) {
+            FileStoreScan.Plan plan = dataTable.store().newScan().withSnapshot(snapshot).plan();
             return GenericRow.of(
                     snapshot.id(),
                     snapshot.schemaId(),
@@ -226,9 +252,14 @@ public class SnapshotsTable implements ReadonlyTable {
                             LocalDateTime.ofInstant(
                                     Instant.ofEpochMilli(snapshot.timeMillis()),
                                     ZoneId.systemDefault())),
+                    BinaryString.fromString(snapshot.baseManifestList()),
+                    BinaryString.fromString(snapshot.deltaManifestList()),
+                    BinaryString.fromString(snapshot.changelogManifestList()),
                     snapshot.totalRecordCount(),
                     snapshot.deltaRecordCount(),
                     snapshot.changelogRecordCount(),
+                    plan.files(FileKind.ADD).size(),
+                    plan.files(FileKind.DELETE).size(),
                     snapshot.watermark());
         }
     }
