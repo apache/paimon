@@ -563,7 +563,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     public void testIncludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_including",
-                "paimon_sync_database_including.flink|paimon_sync_database_including.paimon.+",
+                "flink|paimon.+",
                 null,
                 Arrays.asList("flink", "paimon_1", "paimon_2"),
                 Collections.singletonList("ignored"));
@@ -575,58 +575,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_excluding",
                 null,
-                "paimon_sync_database_excluding.flink|paimon_sync_database_excluding.paimon.+",
+                "flink|paimon.+",
                 Collections.singletonList("sync"),
                 Arrays.asList("flink", "paimon_1", "paimon_2"));
-    }
-
-    @Test
-    @Timeout(60)
-    public void testSameTableNameInDifferentDatabase() throws Exception {
-        String databaseName = "paimon_sync_database_excluding|paimon_sync_database_including";
-        String includingTables = "paimon_sync_database_including.paimon_1";
-        String excludingTables = "paimon_sync_database_excluding.paimon_1";
-
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", databaseName);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        true,
-                        null,
-                        null,
-                        includingTables,
-                        excludingTables,
-                        Collections.emptyMap(),
-                        tableConfig,
-                        DIVIDED);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-
-        try (Statement statement = getStatement()) {
-            statement.executeUpdate(
-                    "INSERT INTO paimon_sync_database_including.paimon_1 VALUES (1),(2)");
-            statement.executeUpdate(
-                    "INSERT INTO paimon_sync_database_excluding.paimon_1 VALUES (3),(4)");
-
-            FileStoreTable table = getFileStoreTable("paimon_1");
-            RowType rowType =
-                    RowType.of(new DataType[] {DataTypes.INT().notNull()}, new String[] {"k"});
-            List<String> primaryKeys = Collections.singletonList("k");
-            // only the paimon_sync_database_including.paimon_1 is synchronized
-            waitForResult(Arrays.asList("+I[1]", "+I[2]"), table, rowType, primaryKeys);
-        }
     }
 
     @Test
@@ -634,8 +585,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     public void testIncludingAndExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 "paimon_sync_database_in_excluding",
-                "paimon_sync_database_in_excluding.flink|paimon_sync_database_in_excluding.paimon.+",
-                "paimon_sync_database_in_excluding.paimon_1",
+                "flink|paimon.+",
+                "paimon_1",
                 Arrays.asList("flink", "paimon_2"),
                 Arrays.asList("paimon_1", "test"));
     }
@@ -805,8 +756,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         true,
                         null,
                         null,
-                        mySqlDatabase + ".t.+",
-                        mySqlDatabase + "..*a$",
+                        "t.+",
+                        ".*a$",
                         Collections.emptyMap(),
                         tableConfig,
                         COMBINED);
@@ -1106,7 +1057,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         true,
                         null,
                         null,
-                        databaseName + ".t.+",
+                        "t.+",
                         null,
                         catalogConfig,
                         tableConfig,

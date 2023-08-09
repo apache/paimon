@@ -295,8 +295,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         schema.identifier());
                 return false;
             }
-            return shouldMonitorTable(
-                    schema.identifier().getDatabaseName() + "." + schema.tableName());
+            return shouldMonitorTable(schema.tableName());
         };
     }
 
@@ -410,8 +409,14 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
             // a table can be monitored only when its name meets the including pattern and doesn't
             // be excluded by excluding pattern at the same time
+            String includingPattern =
+                    String.format(
+                            "%s%s(%s)",
+                            mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME),
+                            separatorRex,
+                            includingTables);
             if (excludedTables.isEmpty()) {
-                return includingTables;
+                return includingPattern;
             }
 
             String excludingPattern =
@@ -425,7 +430,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                                             + t.getObjectName()))
                             .collect(Collectors.joining("|"));
             excludingPattern = "?!" + excludingPattern;
-            return String.format("(%s)(%s)", excludingPattern, includingTables);
+            return String.format("(%s)(%s)", excludingPattern, includingPattern);
         }
 
         throw new UnsupportedOperationException("Unknown DatabaseSyncMode: " + mode);
