@@ -316,3 +316,27 @@ CREATE TABLE t1 (
     _date VARCHAR(10),
     PRIMARY KEY (pk)
 );
+
+
+-- ################################################################################
+--  testSyncMultipleTable
+-- ################################################################################
+
+CREATE DATABASE paimon_multiple_table;
+USE paimon_multiple_table;
+
+CREATE TABLE t1 (
+    id INT,
+    name VARCHAR(10),
+    PRIMARY KEY (id)
+);
+
+INSERT INTO t1 VALUES (1, 'flink');
+
+CREATE TABLE t2 (
+    id INT,
+    name VARCHAR(10),
+    PRIMARY KEY (id)
+);
+
+INSERT INTO t2 VALUES (2, 'paimon');

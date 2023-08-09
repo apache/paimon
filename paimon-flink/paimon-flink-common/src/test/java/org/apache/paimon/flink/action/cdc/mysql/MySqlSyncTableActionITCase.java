@@ -1035,6 +1035,46 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 Arrays.asList("pk", "pt"));
     }
 
+    @Test
+    public void testSyncMultipleTable() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "paimon_multiple_table");
+        mySqlConfig.put("table-name", "t1|t2");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(
+                        mySqlConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.emptyList(),
+                        Collections.singletonList("id"),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        Collections.emptyMap());
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        FileStoreTable table = getFileStoreTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10),
+                        },
+                        new String[] {"id", "name"});
+        waitForResult(
+                Arrays.asList("+I[1, flink]", "+I[2, paimon]"),
+                table,
+                rowType,
+                Collections.singletonList("id"));
+    }
+
     private FileStoreTable getFileStoreTable() throws Exception {
         return getFileStoreTable(tableName);
     }
