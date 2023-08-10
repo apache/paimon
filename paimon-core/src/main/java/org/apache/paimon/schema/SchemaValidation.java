@@ -97,7 +97,7 @@ public class SchemaValidation {
                 && changelogProducer != ChangelogProducer.NONE) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "Can not set %s on table without primary keys.",
+                            "Can not set %s on table without primary keys, please define primary keys.",
                             CHANGELOG_PRODUCER.key()));
         }
 

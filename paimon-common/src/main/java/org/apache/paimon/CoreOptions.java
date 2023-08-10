@@ -378,7 +378,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether to double write to a changelog file. "
                                     + "This changelog file keeps the details of data changes, "
-                                    + "it can be read directly during stream reads.");
+                                    + "it can be read directly during stream reads. This can be applied to tables with primary keys. ");
 
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_ROW_DEDUPLICATE =
             key("changelog-producer.row-deduplicate")
