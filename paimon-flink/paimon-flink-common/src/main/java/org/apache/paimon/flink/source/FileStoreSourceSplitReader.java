@@ -184,7 +184,7 @@ public class FileStoreSourceSplitReader
             Optional<DataFileMeta> latestFile = ((DataSplit) nextSplit.split()).getLatestFile();
             long eventTime =
                     latestFile.isPresent()
-                            ? latestFile.get().convertCreationTimeToEpoch()
+                            ? latestFile.get().creationTimeEpochMillis()
                             : FileStoreSourceReaderMetrics.UNDEFINED;
             sourceReaderMetrics.recordSnapshotUpdate(eventTime);
         }

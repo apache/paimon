@@ -214,7 +214,7 @@ public class DataFileMeta {
         return creationTime;
     }
 
-    public long convertCreationTimeToEpoch() {
+    public long creationTimeEpochMillis() {
         return creationTime
                 .toLocalDateTime()
                 .atZone(ZoneId.systemDefault())
