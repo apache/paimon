@@ -21,13 +21,13 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.AbstractDictionaryReaderWriterTest;
-import org.apache.paimon.format.DictionaryOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -73,6 +73,42 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
     }
 
     @Test
+    public void testFieldPath() {
+        List<String> allFieldPath = RowtypeToFieldPathConverter.getAllFieldPath(getRowType());
+        ArrayList<String> expected =
+                Lists.newArrayList(
+                        "a0",
+                        "a1",
+                        "a2",
+                        "a3",
+                        "a4",
+                        "a5",
+                        "a6.list.element",
+                        "a7",
+                        "a8",
+                        "a9",
+                        "a10",
+                        "a11",
+                        "a12",
+                        "a13",
+                        "a14",
+                        "a15",
+                        "a16",
+                        "a17.key_value.key",
+                        "a17.key_value.value",
+                        "a19",
+                        "a20",
+                        "a21.key_value.key",
+                        "a22",
+                        "a18.b1",
+                        "a23.b2.b3.key_value.key",
+                        "a23.b2.b3.key_value.value",
+                        "a23.b2.b4.list.element",
+                        "a23.b2.b5.key_value.key");
+        Assertions.assertThat(allFieldPath).hasSameElementsAs(expected);
+    }
+
+    @Test
     public void test() throws IOException {
         FormatWriterFactory writerFactory = fileFormat.createWriterFactory(rowType);
         Assertions.assertThat(writerFactory).isInstanceOf(ParquetWriterFactory.class);
@@ -81,14 +117,12 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
                 (ParquetReaderFactory) fileFormat.createReaderFactory(rowType);
         RecordReader<InternalRow> reader = readerFactory.createReader(LocalFileIO.create(), path);
         reader.readBatch();
-
-        reader.forEachRemaining(InternalRow::getFieldCount);
         System.out.println(reader);
     }
 
     @Test
-    public void testFieldsPath() {
-        RowType build =
+    public void testTraversalRowType() {
+        RowType rowType1 =
                 RowType.builder()
                         .field(
                                 "a",
@@ -97,6 +131,9 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
                                                 "b",
                                                 RowType.builder()
                                                         .field("c", DataTypes.STRING())
+                                                        .field(
+                                                                "h",
+                                                                DataTypes.ARRAY(DataTypes.STRING()))
                                                         .build())
                                         .build())
                         .field(
@@ -104,11 +141,37 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
                                 RowType.builder()
                                         .field("e", DataTypes.STRING())
                                         .field("f", DataTypes.STRING())
+                                        .field(
+                                                "g",
+                                                DataTypes.MAP(
+                                                        DataTypes.STRING(), DataTypes.STRING()))
                                         .build())
                         .build();
-        ArrayList<String> expected = Lists.newArrayList("x.d.e", "x.d.f", "x.a.b.c");
-        Assertions.assertThat(ParquetFileFormat.traversal(Pair.of("x", build)))
-                .hasSameElementsAs(expected);
+
+        {
+            List<Pair<String, DataType>> expected =
+                    Lists.newArrayList(
+                            Pair.of("x.d.e", DataTypes.STRING()),
+                            Pair.of("x.d.f", DataTypes.STRING()),
+                            Pair.of("x.a.b.c", DataTypes.STRING()),
+                            Pair.of("x.d.g", DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())),
+                            Pair.of("x.a.b.h", DataTypes.ARRAY(DataTypes.STRING())));
+            Assertions.assertThat(RowtypeToFieldPathConverter.traversalRowType("x", rowType1))
+                    .hasSameElementsAs(expected);
+        }
+
+        {
+            List<String> allFieldPath = RowtypeToFieldPathConverter.getAllFieldPath(rowType1);
+            List<String> expected =
+                    Lists.newArrayList(
+                            "a.b.c",
+                            "a.b.h.list.element",
+                            "d.e",
+                            "d.f",
+                            "d.g.key_value.key",
+                            "d.g.key_value.value");
+            Assertions.assertThat(allFieldPath).hasSameElementsAs(expected);
+        }
     }
 
     class MockParquetFormat extends ParquetFileFormat {
@@ -116,13 +179,6 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
 
         public MockParquetFormat(FileFormatFactory.FormatContext formatContext) {
             super(formatContext);
-        }
-
-        @Override
-        protected List<String> getDicDisabledFieldPath(
-                RowType type, DictionaryOptions dictionaryOptions) {
-            disableDictionaryPaths = super.getDicDisabledFieldPath(type, dictionaryOptions);
-            return disableDictionaryPaths;
         }
     }
 }

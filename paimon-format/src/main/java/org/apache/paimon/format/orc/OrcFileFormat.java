@@ -20,6 +20,7 @@ package org.apache.paimon.format.orc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.DictionaryOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.format.FormatReaderFactory;
@@ -43,6 +44,8 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.orc.TypeDescription;
 
@@ -145,9 +148,15 @@ public class OrcFileFormat extends FileFormat {
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf, fieldsDisableDictionary);
     }
 
-    @Override
-    public List<String> getAllFieldPath(RowType type) {
-        return type.getFieldNames();
+    private List<String> getDicDisabledFieldPath(
+            RowType rowType, DictionaryOptions dictionaryOptions) {
+        List<String> disableDictionaryFields = Lists.newArrayList();
+        // dictionary option has been set
+        if (dictionaryOptions != null) {
+            List<String> fieldPaths = rowType.getFieldNames();
+            disableDictionaryFields.addAll(dictionaryOptions.getDisableDicFields(fieldPaths));
+        }
+        return disableDictionaryFields;
     }
 
     private static Properties getOrcProperties(Options options) {

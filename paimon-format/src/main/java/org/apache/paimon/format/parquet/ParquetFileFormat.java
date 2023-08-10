@@ -28,15 +28,9 @@ import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Projection;
 
-import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Optional;
 
@@ -68,55 +62,11 @@ public class ParquetFileFormat extends FileFormat {
 
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
-        List<String> disableDictionaryFields =
-                getDicDisabledFieldPath(type, formatContext.getDictionaryOptions());
         return new ParquetWriterFactory(
                 new RowDataParquetBuilder(
                         type,
                         getParquetConfiguration(formatContext.formatOptions()),
-                        disableDictionaryFields));
-    }
-
-    @Override
-    public List<String> getAllFieldPath(RowType type) {
-        List<String> result = new ArrayList<>();
-
-        List<DataField> fields = type.getFields();
-        for (DataField field : fields) {
-            DataType dataType = field.type();
-            if (dataType.getTypeRoot() == DataTypeRoot.ROW) {
-                result.addAll(traversal(Pair.of(field.name(), (RowType) dataType)));
-            } else {
-                result.add(field.name());
-            }
-        }
-
-        return result;
-    }
-
-    public static List<String> traversal(Pair<String, RowType> pathPrefixAndRow) {
-        List<String> result = new ArrayList<>();
-
-        LinkedList<Pair<String, RowType>> queue = new LinkedList<>();
-        queue.offer(pathPrefixAndRow);
-        while (!queue.isEmpty()) {
-            Pair<String, RowType> polled = queue.poll();
-
-            String pathPrefix = polled.getKey();
-            List<DataField> datafields = polled.getValue().getFields();
-            for (DataField dataField : datafields) {
-                DataType dataType = dataField.type();
-                String name = dataField.name();
-                String path = String.format("%s.%s", pathPrefix, name);
-                if (dataType.getTypeRoot() != DataTypeRoot.ROW) {
-                    result.add(path);
-                } else {
-                    queue.offer(Pair.of(path, (RowType) dataType));
-                }
-            }
-        }
-
-        return result;
+                        formatContext.getDictionaryOptions()));
     }
 
     @Override

@@ -47,8 +47,12 @@ import static org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName.INT64;
 /** Schema converter converts Parquet schema to and from Paimon internal types. */
 public class ParquetSchemaConverter {
 
-    static final String MAP_REPEATED_NAME = "key_value";
-    static final String LIST_ELEMENT_NAME = "element";
+    public static final String MAP_REPEATED_NAME = "key_value";
+    public static final String MAP_KEY_NAME = "key";
+    public static final String MAP_VALUE_NAME = "value";
+    public static final String LIST_ELEMENT_NAME = "element";
+
+    public static final String LIST_REPEATED_NAME = "list";
 
     public static MessageType convertToParquetMessageType(String name, RowType rowType) {
         Type[] types = new Type[rowType.getFieldCount()];
@@ -136,16 +140,16 @@ public class ParquetSchemaConverter {
                         repetition,
                         name,
                         MAP_REPEATED_NAME,
-                        convertToParquetType("key", mapType.getKeyType()),
-                        convertToParquetType("value", mapType.getValueType()));
+                        convertToParquetType(MAP_KEY_NAME, mapType.getKeyType()),
+                        convertToParquetType(MAP_VALUE_NAME, mapType.getValueType()));
             case MULTISET:
                 MultisetType multisetType = (MultisetType) type;
                 return ConversionPatterns.mapType(
                         repetition,
                         name,
                         MAP_REPEATED_NAME,
-                        convertToParquetType("key", multisetType.getElementType()),
-                        convertToParquetType("value", new IntType(false)));
+                        convertToParquetType(MAP_KEY_NAME, multisetType.getElementType()),
+                        convertToParquetType(MAP_VALUE_NAME, new IntType(false)));
             case ROW:
                 RowType rowType = (RowType) type;
                 return new GroupType(repetition, name, convertToParquetTypes(rowType));

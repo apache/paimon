@@ -18,7 +18,6 @@
 
 package org.apache.paimon.format;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -28,22 +27,15 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.Collections;
-import java.util.List;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT Case for the read/writer of format. */
 public abstract class AbstractDictionaryReaderWriterTest {
@@ -79,6 +71,29 @@ public abstract class AbstractDictionaryReaderWriterTest {
                         .field("a20", DataTypes.VARBINARY(100))
                         .field("a21", DataTypes.MULTISET(DataTypes.STRING()))
                         .field("a22", DataTypes.STRING())
+                        .field(
+                                "a23",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(
+                                                101,
+                                                "b2",
+                                                DataTypes.ROW(
+                                                        DataTypes.FIELD(
+                                                                102,
+                                                                "b3",
+                                                                DataTypes.MAP(
+                                                                        DataTypes.STRING(),
+                                                                        DataTypes.STRING())),
+                                                        DataTypes.FIELD(
+                                                                103,
+                                                                "b4",
+                                                                DataTypes.ARRAY(
+                                                                        DataTypes.STRING())),
+                                                        DataTypes.FIELD(
+                                                                104,
+                                                                "b5",
+                                                                DataTypes.MULTISET(
+                                                                        DataTypes.STRING()))))))
                         .build();
         FormatWriterFactory writerFactory = getFileFormat().createWriterFactory(rowType);
         path = new Path(tempDir.toUri().toString(), "1." + getFileFormat().getFormatIdentifier());
@@ -87,7 +102,7 @@ public abstract class AbstractDictionaryReaderWriterTest {
         FormatWriter formatWriter = writerFactory.create(out, null);
 
         for (int i = 0; i < 1024; i++) {
-            GenericRow row = new GenericRow(23);
+            GenericRow row = new GenericRow(24);
             row.setField(0, 1);
             row.setField(1, (byte) 1);
             row.setField(2, (short) 1);
@@ -117,6 +132,18 @@ public abstract class AbstractDictionaryReaderWriterTest {
                     21,
                     new GenericMap(Collections.singletonMap(BinaryString.fromString("set"), 1)));
             row.setField(22, BinaryString.fromString("a"));
+            row.setField(
+                    23,
+                    GenericRow.of(
+                            GenericRow.of(
+                                    new GenericMap(
+                                            Collections.singletonMap(
+                                                    BinaryString.fromString("k"),
+                                                    BinaryString.fromString("v"))),
+                                    new GenericArray(new Object[] {BinaryString.fromString("1")}),
+                                    new GenericMap(
+                                            Collections.singletonMap(
+                                                    BinaryString.fromString("set"), 1)))));
 
             formatWriter.addElement(row);
         }
@@ -126,42 +153,9 @@ public abstract class AbstractDictionaryReaderWriterTest {
         out.close();
     }
 
-    protected abstract FileFormat getFileFormat();
-
-    @Test
-    public void testFormatDictionaryOpt() {
-        {
-            Options options = new Options();
-            options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, false);
-            CoreOptions coreOptions = new CoreOptions(options);
-            List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
-            DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
-            assertThat(dictionaryOptions.getDicDisabledFields(fieldNames))
-                    .hasSameElementsAs(fieldNames);
-        }
-
-        {
-            Options options = new Options();
-            options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, false);
-            options.set("fields.c.dictionary-enable", "true");
-            CoreOptions coreOptions = new CoreOptions(options);
-            DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
-            List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
-            List<String> disableDictionaryField =
-                    dictionaryOptions.getDicDisabledFields(fieldNames);
-            assertThat(disableDictionaryField).hasSameElementsAs(Lists.newArrayList("a", "b", "d"));
-        }
-
-        {
-            Options options = new Options();
-            options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, true);
-            options.set("fields.c.dictionary-enable", "false");
-            CoreOptions coreOptions = new CoreOptions(options);
-            DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
-            List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
-            List<String> disableDictionaryField =
-                    dictionaryOptions.getDicDisabledFields(fieldNames);
-            assertThat(disableDictionaryField).hasSameElementsAs(Lists.newArrayList("c"));
-        }
+    public RowType getRowType() {
+        return rowType;
     }
+
+    protected abstract FileFormat getFileFormat();
 }

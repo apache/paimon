@@ -18,6 +18,9 @@
 
 package org.apache.paimon.format;
 
+import javax.annotation.Nonnull;
+
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,18 +31,42 @@ public class DictionaryOptions {
     private final boolean tableDictionaryEnable;
     private final Map<String, Boolean> fieldsDicOption;
 
-    public DictionaryOptions(boolean tableDictionaryEnable, Map<String, Boolean> fieldsDicOption) {
+    public DictionaryOptions(
+            boolean tableDictionaryEnable, @Nonnull Map<String, Boolean> fieldsDicOption) {
         this.tableDictionaryEnable = tableDictionaryEnable;
         this.fieldsDicOption = fieldsDicOption;
     }
 
-    public List<String> getDicDisabledFields(List<String> fieldPaths) {
+    public List<String> getDisableDicFields(List<String> fieldPaths) {
+        Map<String, Boolean> fieldAndDictionaryOpt = mergeFieldsDictionaryOpt(fieldPaths);
+        List<String> result = new ArrayList<>();
+        for (Map.Entry<String, Boolean> entry : fieldAndDictionaryOpt.entrySet()) {
+            if (!entry.getValue()) {
+                result.add(entry.getKey());
+            }
+        }
+        return result;
+    }
+
+    public Map<String, Boolean> mergeFieldsDictionaryOpt(List<String> fieldPaths) {
         Map<String, Boolean> result = new HashMap<>();
+
+        // global table dictionary opt
         for (String fieldName : fieldPaths) {
             result.put(fieldName, tableDictionaryEnable);
         }
 
-        Map<String, List<String>> pathGroupByField =
+        // fields dictionary opt
+        Map<String, Boolean> fieldsDicOption = getFieldsDicOptionFromFieldPath(fieldPaths);
+        result.putAll(fieldsDicOption);
+
+        return result;
+    }
+
+    public Map<String, Boolean> getFieldsDicOptionFromFieldPath(List<String> fieldPaths) {
+        Map<String, Boolean> result = new HashMap<>();
+
+        Map<String, List<String>> pathsGroupByField =
                 fieldPaths.stream()
                         .collect(
                                 Collectors.groupingBy(
@@ -48,30 +75,29 @@ public class DictionaryOptions {
                                                         ? path.substring(0, path.indexOf("."))
                                                         : path));
 
-        // Specify the dictionary config for the child paths which field has dictionary config.
+        // Specify the dictionary config for the child paths of the field which has dictionary config.
         for (Map.Entry<String, Boolean> fieldOption : fieldsDicOption.entrySet()) {
             String field = fieldOption.getKey();
             boolean dictionaryConfig = fieldOption.getValue();
-            List<String> paths = pathGroupByField.get(field);
+            List<String> paths = pathsGroupByField.get(field);
             if (paths != null) {
                 for (String path : paths) {
                     result.put(path, dictionaryConfig);
                 }
             }
         }
-
-        return result.entrySet().stream()
-                .filter(entry -> !entry.getValue())
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toList());
+        return result;
     }
 
-    public Map<String, Boolean> getfieldsDictionaryOption() {
+    public Map<String, Boolean> getFieldsDictOption() {
         return fieldsDicOption;
     }
 
-    public boolean isEnableAllFieldsDic() {
-        boolean allEnable = fieldsDicOption.entrySet().stream().allMatch(Map.Entry::getValue);
-        return tableDictionaryEnable && (fieldsDicOption.isEmpty() || allEnable);
+    public boolean hasFieldsDicOption() {
+        return !fieldsDicOption.isEmpty();
+    }
+
+    public boolean isTableDictionaryEnable() {
+        return tableDictionaryEnable;
     }
 }

@@ -26,8 +26,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -127,21 +125,5 @@ public abstract class FileFormat {
                         options.removePrefix(formatIdentifier + "."),
                         coreOptions.getDictionaryOptions(),
                         readBatchSize));
-    }
-
-    protected List<String> getAllFieldPath(RowType type) {
-        throw new RuntimeException("Unsupported");
-    }
-
-    protected List<String> getDicDisabledFieldPath(
-            RowType rowType, DictionaryOptions dictionaryOptions) {
-        List<String> disableDictionaryFields = Lists.newArrayList();
-
-        // dictionary option has been set
-        if (dictionaryOptions != null && !dictionaryOptions.isEnableAllFieldsDic()) {
-            List<String> fieldPaths = getAllFieldPath(rowType);
-            disableDictionaryFields.addAll(dictionaryOptions.getDicDisabledFields(fieldPaths));
-        }
-        return disableDictionaryFields;
     }
 }

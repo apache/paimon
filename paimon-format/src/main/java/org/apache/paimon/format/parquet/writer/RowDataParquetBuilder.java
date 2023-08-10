@@ -19,6 +19,8 @@
 package org.apache.paimon.format.parquet.writer;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.DictionaryOptions;
+import org.apache.paimon.format.parquet.RowtypeToFieldPathConverter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
@@ -31,8 +33,8 @@ import org.apache.parquet.io.OutputFile;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
@@ -40,17 +42,17 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
     private final RowType rowType;
     private final Options conf;
 
-    private final List<String> disableDictionaryFields;
+    private final DictionaryOptions dictionaryOptions;
 
     public RowDataParquetBuilder(RowType rowType, Options conf) {
-        this(rowType, conf, new ArrayList<>());
+        this(rowType, conf, null);
     }
 
     public RowDataParquetBuilder(
-            RowType rowType, Options conf, List<String> disableDictionaryFields) {
+            RowType rowType, Options conf, DictionaryOptions dictionaryOptions) {
         this.rowType = rowType;
         this.conf = conf;
-        this.disableDictionaryFields = disableDictionaryFields;
+        this.dictionaryOptions = dictionaryOptions;
     }
 
     @Override
@@ -88,10 +90,20 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                                                 ParquetOutputFormat.WRITER_VERSION,
                                                 ParquetProperties.DEFAULT_WRITER_VERSION
                                                         .toString())));
-
-        for (String field : disableDictionaryFields) {
-            parquetRowDataBuilder = parquetRowDataBuilder.withDictionaryEncoding(field, false);
+        if (dictionaryOptions != null) {
+            parquetRowDataBuilder.withDictionaryEncoding(
+                    dictionaryOptions.isTableDictionaryEnable());
+            if (dictionaryOptions.hasFieldsDicOption()) {
+                List<String> allFieldPath = RowtypeToFieldPathConverter.getAllFieldPath(rowType);
+                Map<String, Boolean> fieldsDicOptions =
+                        dictionaryOptions.getFieldsDicOptionFromFieldPath(allFieldPath);
+                for (Map.Entry<String, Boolean> fieldsDicOption : fieldsDicOptions.entrySet()) {
+                    parquetRowDataBuilder.withDictionaryEncoding(
+                            fieldsDicOption.getKey(), fieldsDicOption.getValue());
+                }
+            }
         }
+
         return parquetRowDataBuilder.build();
     }
 
