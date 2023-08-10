@@ -39,14 +39,15 @@ public class FileStoreSourceReader
                 RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
     public FileStoreSourceReader(
-            SourceReaderContext readerContext, TableRead tableRead, @Nullable Long limit) {
+            SourceReaderContext readerContext,
+            TableRead tableRead,
+            @Nullable Long limit,
+            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
                 () ->
                         new FileStoreSourceSplitReader(
-                                tableRead,
-                                RecordLimiter.create(limit),
-                                new FileStoreSourceReaderMetrics(readerContext.metricGroup())),
+                                tableRead, RecordLimiter.create(limit), sourceReaderMetrics),
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);
@@ -57,14 +58,13 @@ public class FileStoreSourceReader
             TableRead tableRead,
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<RecordIterator<RowData>>>
-                    elementsQueue) {
+                    elementsQueue,
+            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
         super(
                 elementsQueue,
                 () ->
                         new FileStoreSourceSplitReader(
-                                tableRead,
-                                RecordLimiter.create(limit),
-                                new FileStoreSourceReaderMetrics(readerContext.metricGroup())),
+                                tableRead, RecordLimiter.create(limit), sourceReaderMetrics),
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);
