@@ -19,6 +19,9 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
@@ -95,10 +98,19 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
 
         // test newly created tables
         if (mode == COMBINED) {
-            // wait checkpointing to step into incremental phase
-            Thread.sleep(5_000);
-
             try (Statement statement = getStatement()) {
+                // ensure the job steps into incremental phase
+                statement.executeUpdate("USE shard_1");
+                statement.executeUpdate("INSERT INTO t2 VALUES (1, 'A')");
+                waitForResult(
+                        Collections.singletonList("+I[1, A]"),
+                        getFileStoreTable("shard_1_t2"),
+                        RowType.of(
+                                new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(100)},
+                                new String[] {"k", "name"}),
+                        Collections.singletonList("k"));
+                Thread.sleep(5_000);
+
                 // case 1: new tables in existed database
                 statement.executeUpdate("USE shard_2");
                 // ignored: ta
