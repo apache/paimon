@@ -18,13 +18,15 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.catalog.*;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
@@ -141,6 +143,54 @@ public class CreateTableITCase extends HiveTestBase {
         assertThat(tableSchema.get().partitionKeys()).contains("dt", "hh");
         assertThat(tableSchema.get().options())
                 .containsEntry(METASTORE_PARTITIONED_TABLE.key(), "true");
+    }
+
+    @Test
+    public void testLowerTableName() throws Catalog.TableNotExistException {
+        // Use `partitioned by` to create hive partition table
+        String tableName = "UPPER_NAME";
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + tableName + " (",
+                                "user_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The user_id field',",
+                                "item_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The item_id field',",
+                                "behavior "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The behavior field'",
+                                ")",
+                                "PARTITIONED BY ( ",
+                                "dt "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The dt field',",
+                                "hh "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The hh field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "TBLPROPERTIES (",
+                                "  'primary-key'='dt,hh,user_id'",
+                                ")"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+
+        // check the paimon table name and schema
+        Identifier identifier = Identifier.create(DATABASE_TEST, tableName.toLowerCase());
+        Path tablePath = AbstractCatalog.dataTableLocation(path, identifier);
+        Options conf = new Options();
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        CatalogContext catalogContext = CatalogContext.create(conf);
+        Catalog catalog = CatalogFactory.createCatalog(catalogContext);
+        Table table = catalog.getTable(identifier);
+        assertThat(table.name()).isEqualTo(tableName.toLowerCase());
+        Optional<TableSchema> tableSchema =
+                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+        assertThat(tableSchema).isPresent();
     }
 
     @Test

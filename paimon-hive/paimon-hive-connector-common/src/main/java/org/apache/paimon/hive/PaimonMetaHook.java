@@ -74,6 +74,7 @@ public class PaimonMetaHook implements HiveMetaHook {
 
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
+        table.setTableName(table.getTableName().toLowerCase());
         String location = LocationKeyExtractor.getPaimonLocation(conf, table);
         if (location == null) {
             String warehouse = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
