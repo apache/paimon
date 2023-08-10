@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.io.DataInputView;
@@ -78,10 +77,9 @@ public class DataSplit implements Split {
         return isStreaming;
     }
 
-    public Optional<Timestamp> getLatestFileCreationTime() {
+    public Optional<DataFileMeta> getLatestFile() {
         return this.dataFiles.stream()
-                .map(f -> f.creationTime())
-                .max(Comparator.comparing(Timestamp::getMillisecond));
+                .max(Comparator.comparingLong(f -> f.creationTime().getMillisecond()));
     }
 
     @Override
