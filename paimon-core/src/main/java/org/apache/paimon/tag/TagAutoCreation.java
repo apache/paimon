@@ -274,8 +274,8 @@ public class TagAutoCreation {
         protected DateTimeFormatter formatter() {
             return DAY_FORMATTER;
         }
-		
-		@Override
+
+        @Override
         public LocalDateTime tagToTime(String tag) {
             return LocalDate.parse(tag, formatter()).atStartOfDay();
         }
