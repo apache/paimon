@@ -109,7 +109,6 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                                 new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(100)},
                                 new String[] {"k", "name"}),
                         Collections.singletonList("k"));
-                Thread.sleep(5_000);
 
                 // case 1: new tables in existed database
                 statement.executeUpdate("USE shard_2");
