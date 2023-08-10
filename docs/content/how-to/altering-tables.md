@@ -229,7 +229,7 @@ ALTER TABLE my_table RENAME COLUMN c0 TO c1;
 
 ## Dropping Columns
 
-The following SQL drops two columns `c1` and `c2` from table `my_table`. In hive catalog, you need to ensure disable `hive.metastore.disallow.incompatible.col.type.changes`,
+The following SQL drops two columns `c1` and `c2` from table `my_table`. In hive catalog, you need to ensure disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server,
 otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the existing columns in their respective positions`.
 
 {{< tabs "drop-columns-example" >}}
