@@ -19,8 +19,8 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReadWriteTest;
-import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.options.Options;
 
 /** An orc {@link FormatReadWriteTest}. */
@@ -32,6 +32,6 @@ public class OrcFormatReadWriteTest extends FormatReadWriteTest {
 
     @Override
     protected FileFormat fileFormat() {
-        return new AvroFileFormat(new Options());
+        return new OrcFileFormat(new FileFormatFactory.FormatContext(new Options(), 1024));
     }
 }
