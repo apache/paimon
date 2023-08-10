@@ -405,7 +405,7 @@ ALTER TABLE my_table MODIFY col_a DOUBLE;
 {{< tab "Spark3" >}}
 
 ```sql
-ALTER TABLE my_table ALTER COLUMN col_a TYPE 'DOUBLE';
+ALTER TABLE my_table ALTER COLUMN col_a TYPE DOUBLE;
 ```
 
 {{< /tab >}}
