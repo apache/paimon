@@ -231,12 +231,24 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         try {
             Field field = context.getClass().getDeclaredField("context");
             field.setAccessible(true);
-            StreamingRuntimeContext runtimeContext = (StreamingRuntimeContext) field.get(context);
+            StreamingRuntimeContext runtimeContext =
+                    extractStreamingRuntimeContext(field.get(context));
             String[] tmpDirectories =
                     runtimeContext.getTaskManagerRuntimeInfo().getTmpDirectories();
             return tmpDirectories[ThreadLocalRandom.current().nextInt(tmpDirectories.length)];
         } catch (NoSuchFieldException | IllegalAccessException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static StreamingRuntimeContext extractStreamingRuntimeContext(Object runtimeContext)
+            throws NoSuchFieldException, IllegalAccessException {
+        if (runtimeContext instanceof StreamingRuntimeContext) {
+            return (StreamingRuntimeContext) runtimeContext;
+        }
+
+        Field field = runtimeContext.getClass().getDeclaredField("runtimeContext");
+        field.setAccessible(true);
+        return extractStreamingRuntimeContext(field.get(runtimeContext));
     }
 }

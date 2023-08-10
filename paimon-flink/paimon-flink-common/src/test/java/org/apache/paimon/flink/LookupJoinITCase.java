@@ -518,6 +518,29 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testAsyncRetryLookup() throws Exception {
+        sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String query =
+                "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
+                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='1s','max-attempts'='60') */"
+                        + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM /*+ OPTIONS('lookup.async'='true') */ for system_time as of T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (3)");
+        sql("INSERT INTO T VALUES (2)");
+        sql("INSERT INTO T VALUES (1)");
+        Thread.sleep(2000); // wait
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111, 1111), Row.of(2, 22, 222, 2222));
+
+        sql("INSERT INTO DIM VALUES (3, 33, 333, 3333)");
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, 33, 333, 3333));
+
+        iterator.close();
+    }
+
+    @Test
     public void testLookupPartitionedTable() throws Exception {
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN PARTITIONED_DIM for system_time as of T.proctime AS D ON T.i = D.i";
