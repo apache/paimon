@@ -24,6 +24,8 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.schema.Schema;
@@ -143,34 +145,21 @@ public class MySqlSyncTableAction extends ActionBase {
             validateCaseInsensitive();
         }
 
-        List<MySqlSchema> mySqlSchemaList =
-                MySqlActionUtils.getMySqlSchemaList(
+        MySqlSchemasInfo mySqlSchemasInfo =
+                MySqlActionUtils.getMySqlTableInfos(
                         mySqlConfig, monitorTablePredication(), new ArrayList<>());
-
-        String tableList =
-                mySqlSchemaList.stream()
-                        .map(m -> m.identifier().getDatabaseName() + "." + m.tableName())
-                        .collect(Collectors.joining("|"));
-
-        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig, tableList);
-
-        MySqlSchema mySqlSchema =
-                mySqlSchemaList.stream()
-                        .reduce(MySqlSchema::merge)
-                        .orElseThrow(
-                                () ->
-                                        new RuntimeException(
-                                                "No table satisfies the given database name and table name"));
+        validateMySqlTableInfos(mySqlSchemasInfo);
 
         catalog.createDatabase(database, true);
 
+        MySqlTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
         Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
         List<ComputedColumn> computedColumns =
-                buildComputedColumns(computedColumnArgs, mySqlSchema.typeMapping());
+                buildComputedColumns(computedColumnArgs, tableInfo.schema().typeMapping());
         Schema fromMySql =
                 MySqlActionUtils.buildPaimonSchema(
-                        mySqlSchema,
+                        tableInfo,
                         partitionKeys,
                         primaryKeys,
                         computedColumns,
@@ -195,6 +184,12 @@ public class MySqlSyncTableAction extends ActionBase {
             catalog.createTable(identifier, fromMySql, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
+
+        String tableList =
+                mySqlSchemasInfo.pkTables().stream()
+                        .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
+                        .collect(Collectors.joining("|"));
+        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig, tableList);
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
@@ -247,11 +242,25 @@ public class MySqlSyncTableAction extends ActionBase {
         }
     }
 
-    private Predicate<MySqlSchema> monitorTablePredication() {
-        return schema -> {
+    private void validateMySqlTableInfos(MySqlSchemasInfo mySqlSchemasInfo) {
+        List<Identifier> nonPkTables = mySqlSchemasInfo.nonPkTables();
+        checkArgument(
+                nonPkTables.isEmpty(),
+                "Source tables of MySQL table synchronization job cannot contain table "
+                        + "which doesn't have primary keys.\n"
+                        + "They are: %s",
+                nonPkTables.stream().map(Identifier::getFullName).collect(Collectors.joining(",")));
+
+        checkArgument(
+                !mySqlSchemasInfo.pkTables().isEmpty(),
+                "No table satisfies the given database name and table name.");
+    }
+
+    private Predicate<String> monitorTablePredication() {
+        return tableName -> {
             Pattern tableNamePattern =
                     Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME));
-            return tableNamePattern.matcher(schema.tableName()).matches();
+            return tableNamePattern.matcher(tableName).matches();
         };
     }
 

@@ -16,44 +16,42 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc.mysql.schema;
 
-import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
-
-import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.paimon.utils.Pair;
 
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.paimon.utils.Preconditions.checkState;
+import java.util.stream.Collectors;
 
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchema {
 
-    private final String databaseName;
-    private final String tableName;
-    private final LinkedHashMap<String, Tuple2<DataType, String>> fields;
+    private final LinkedHashMap<String, Pair<DataType, String>> fields;
     private final List<String> primaryKeys;
 
-    private boolean hasMerged = false;
+    private MySqlSchema(
+            LinkedHashMap<String, Pair<DataType, String>> fields, List<String> primaryKeys) {
+        this.fields = fields;
+        this.primaryKeys = primaryKeys;
+    }
 
-    public MySqlSchema(
+    public static MySqlSchema buildSchema(
             DatabaseMetaData metaData,
             String databaseName,
             String tableName,
             boolean convertTinyintToBool)
-            throws Exception {
-        this.databaseName = databaseName;
-        this.tableName = tableName;
-
-        fields = new LinkedHashMap<>();
+            throws SQLException {
+        LinkedHashMap<String, Pair<DataType, String>> fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
@@ -70,77 +68,76 @@ public class MySqlSchema {
                 }
                 fields.put(
                         fieldName,
-                        Tuple2.of(
+                        Pair.of(
                                 MySqlTypeUtils.toDataType(
                                         fieldType, precision, scale, convertTinyintToBool),
                                 fieldComment));
             }
         }
 
-        primaryKeys = new ArrayList<>();
+        List<String> primaryKeys = new ArrayList<>();
         try (ResultSet rs = metaData.getPrimaryKeys(databaseName, null, tableName)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
                 primaryKeys.add(fieldName);
             }
         }
+
+        return new MySqlSchema(fields, primaryKeys);
     }
 
-    public String tableName() {
-        return tableName;
-    }
-
-    public Identifier identifier() {
-        checkState(!hasMerged, "Cannot get table identifier from merged schema.");
-        return Identifier.create(databaseName, tableName);
-    }
-
-    public LinkedHashMap<String, Tuple2<DataType, String>> fields() {
+    public LinkedHashMap<String, Pair<DataType, String>> fields() {
         return fields;
-    }
-
-    public Map<String, DataType> typeMapping() {
-        Map<String, DataType> typeMapping = new HashMap<>();
-        fields.forEach((name, tuple) -> typeMapping.put(name, tuple.f0));
-        return typeMapping;
     }
 
     public List<String> primaryKeys() {
         return primaryKeys;
     }
 
-    public MySqlSchema merge(MySqlSchema other) {
-        hasMerged = true;
-        for (Map.Entry<String, Tuple2<DataType, String>> entry : other.fields.entrySet()) {
+    public Map<String, DataType> typeMapping() {
+        Map<String, DataType> typeMapping = new HashMap<>();
+        fields.forEach((name, pair) -> typeMapping.put(name, pair.getLeft()));
+        return typeMapping;
+    }
+
+    public MySqlSchema merge(String currentTable, String otherTable, MySqlSchema other) {
+        for (Map.Entry<String, Pair<DataType, String>> entry : other.fields.entrySet()) {
             String fieldName = entry.getKey();
-            DataType newType = entry.getValue().f0;
+            DataType newType = entry.getValue().getLeft();
             if (fields.containsKey(fieldName)) {
-                DataType oldType = fields.get(fieldName).f0;
+                DataType oldType = fields.get(fieldName).getLeft();
                 switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newType)) {
                     case CONVERT:
-                        fields.put(fieldName, Tuple2.of(newType, entry.getValue().f1));
+                        fields.put(fieldName, Pair.of(newType, entry.getValue().getRight()));
                         break;
                     case EXCEPTION:
                         throw new IllegalArgumentException(
                                 String.format(
-                                        "Column %s have different types in table %s.%s and table %s.%s",
+                                        "Column %s have different types when merging schemas.\n"
+                                                + "Current table '%s' fields: %s\n"
+                                                + "To be merged table '%s' fields: %s",
                                         fieldName,
-                                        databaseName,
-                                        tableName,
-                                        other.databaseName,
-                                        other.tableName));
+                                        currentTable,
+                                        fieldsToString(),
+                                        otherTable,
+                                        other.fieldsToString()));
                 }
             } else {
-                fields.put(fieldName, Tuple2.of(newType, entry.getValue().f1));
+                fields.put(fieldName, Pair.of(newType, entry.getValue().getRight()));
             }
         }
+
         if (!primaryKeys.equals(other.primaryKeys)) {
             primaryKeys.clear();
         }
         return this;
     }
 
-    public List<String> getPrimaryKeys() {
-        return primaryKeys;
+    private String fieldsToString() {
+        return "["
+                + fields.entrySet().stream()
+                        .map(e -> String.format("%s %s", e.getKey(), e.getValue().getLeft()))
+                        .collect(Collectors.joining(","))
+                + "]";
     }
 }

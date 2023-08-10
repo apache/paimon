@@ -432,11 +432,11 @@ CREATE TABLE t2 (
 );
 
 -- ################################################################################
---  testUnmonitorTablesWithMergingShards
+--  testMonitoredAndExcludedTablesWithMering
 -- ################################################################################
 
-CREATE DATABASE test_unmonitor_table_shard_1;
-USE test_unmonitor_table_shard_1;
+CREATE DATABASE monitored_and_excluded_shard_1;
+USE monitored_and_excluded_shard_1;
 
 CREATE TABLE t1 (
     k INT,
@@ -450,9 +450,15 @@ CREATE TABLE t2 (
     PRIMARY KEY (k)
 );
 
+CREATE TABLE t3 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
 
-CREATE DATABASE test_unmonitor_table_shard_2;
-USE test_unmonitor_table_shard_2;
+
+CREATE DATABASE monitored_and_excluded_shard_2;
+USE monitored_and_excluded_shard_2;
 
 CREATE TABLE t1 (
     k INT,
@@ -464,5 +470,10 @@ CREATE TABLE t2 (
     k INT,
     v2 DOUBLE,
     PRIMARY KEY (k)
+);
+
+CREATE TABLE t3 (
+    k INT,
+    v2 VARCHAR(10)
 );
 

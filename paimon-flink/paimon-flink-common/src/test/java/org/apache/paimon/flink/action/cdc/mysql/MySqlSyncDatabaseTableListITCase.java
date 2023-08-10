@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
@@ -30,7 +29,6 @@ import org.junit.jupiter.api.Timeout;
 
 import java.sql.Statement;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -51,7 +49,11 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
     @Timeout(120)
     public void testActionRunResult() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", ".*shard_.*");
+        mySqlConfig.put(
+                "database-name",
+                ThreadLocalRandom.current().nextBoolean()
+                        ? ".*shard_.*"
+                        : "shard_1|shard_2|shard_3|x_shard_1");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(2);
@@ -78,24 +80,25 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
-        try (Statement statement = getStatement()) {
-            Catalog catalog = catalog();
-            List<String> tables = waitingAllTables(catalog, 10, 10);
-            assertThat(tables)
-                    .containsExactlyInAnyOrder(
-                            "shard_1_t11",
-                            "shard_1_t2",
-                            "shard_1_t3",
-                            "shard_1_taa",
-                            "shard_1_s2",
-                            "shard_2_t1",
-                            "shard_2_t22",
-                            "shard_2_t3",
-                            "shard_2_tb",
-                            "x_shard_1_t1");
+        assertThat(catalog().listTables(database))
+                .containsExactlyInAnyOrder(
+                        "shard_1_t11",
+                        "shard_1_t2",
+                        "shard_1_t3",
+                        "shard_1_taa",
+                        "shard_1_s2",
+                        "shard_2_t1",
+                        "shard_2_t22",
+                        "shard_2_t3",
+                        "shard_2_tb",
+                        "x_shard_1_t1");
 
-            // test newly added tables
-            if (mode == COMBINED) {
+        // test newly created tables
+        if (mode == COMBINED) {
+            // wait checkpointing to step into incremental phase
+            Thread.sleep(5_000);
+
+            try (Statement statement = getStatement()) {
                 // case 1: new tables in existed database
                 statement.executeUpdate("USE shard_2");
                 // ignored: ta
@@ -127,37 +130,8 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                 statement.executeUpdate(
                         "CREATE TABLE s4 (k INT, name VARCHAR(100), PRIMARY KEY (k))");
 
-                tables = waitingAllTables(catalog, 12, 10);
-
-                assertThat(tables)
-                        .containsExactlyInAnyOrder(
-                                // old
-                                "shard_1_t11",
-                                "shard_1_t2",
-                                "shard_1_t3",
-                                "shard_1_taa",
-                                "shard_1_s2",
-                                "shard_2_t1",
-                                "shard_2_t22",
-                                "shard_2_t3",
-                                "shard_2_tb",
-                                "x_shard_1_t1",
-                                // new
-                                "shard_2_s3",
-                                "shard_3_tab");
+                waitingTables("shard_2_s3", "shard_3_tab");
             }
         }
-    }
-
-    private List<String> waitingAllTables(Catalog catalog, int numberOfTables, int maxAttempt)
-            throws Exception {
-        List<String> tables;
-        int attempt = 0;
-        do {
-            Thread.sleep(5_000);
-            tables = catalog.listTables(database);
-        } while (tables.size() < numberOfTables && ++attempt < maxAttempt);
-
-        return tables;
     }
 }
