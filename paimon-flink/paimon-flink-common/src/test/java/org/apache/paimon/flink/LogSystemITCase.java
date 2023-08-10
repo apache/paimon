@@ -213,10 +213,10 @@ public class LogSystemITCase extends KafkaTableTestBase {
                                 + "'log.system.partitions'='2', "
                                 + "'write-mode'='append-only', "
                                 + "'kafka.bootstrap.servers'='%s', "
-                                + "'kafka.topic'='T')",
+                                + "'kafka.topic'='Tt')",
                         getBootstrapServers()));
 
-        checkTopicExists("T", 2, 1);
+        checkTopicExists("Tt", 2, 1);
 
         tEnv.executeSql(
                 String.format(
