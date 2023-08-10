@@ -173,7 +173,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected void copyTableDefaultOptions(Map<String, String> options) {
+    public void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
     }
 

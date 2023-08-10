@@ -38,5 +38,11 @@ under the License.
             <td>Boolean</td>
             <td>If true, the register will automatically create and delete a topic in log system for Paimon table. Default kafka log store register is supported, users can implement customized register for log system, for example, create a new class which extends KafkaLogStoreFactory and return a customized LogStoreRegister for their kafka cluster to create/delete topics.</td>
         </tr>
+        <tr>
+            <td><h5>log.system.auto-register-timeout</h5></td>
+            <td style="word-wrap: break-word;">1 min</td>
+            <td>Duration</td>
+            <td>The timeout for register to create or delete topic in log system.</td>
+        </tr>
     </tbody>
 </table>

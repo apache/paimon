@@ -26,6 +26,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.DescribeTopicsResult;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.admin.TopicDescription;
 import org.apache.kafka.clients.admin.TopicListing;
@@ -58,7 +59,11 @@ import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Fail.fail;
 
 /** Base class for Kafka Table IT Cases. */
 public abstract class KafkaTableTestBase extends AbstractTestBase {
@@ -253,7 +258,7 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
     }
 
     /** Kafka container extension for junit5. */
-    private static class KafkaContainerExtension extends KafkaContainer
+    protected static class KafkaContainerExtension extends KafkaContainer
             implements BeforeAllCallback, AfterAllCallback {
         private KafkaContainerExtension(DockerImageName dockerImageName) {
             super(dockerImageName);
@@ -268,5 +273,36 @@ public abstract class KafkaTableTestBase extends AbstractTestBase {
         public void afterAll(ExtensionContext extensionContext) throws Exception {
             this.close();
         }
+    }
+
+    // ------------------------ For Kafka Test Purpose ----------------------------------
+    protected void checkTopicExists(String topic, int partition, int replicationFactor) {
+        try (AdminClient admin = createAdminClient()) {
+            DescribeTopicsResult topicDesc = admin.describeTopics(Collections.singleton(topic));
+            TopicDescription description =
+                    topicDesc.allTopicNames().get(10, TimeUnit.SECONDS).get(topic);
+
+            assertThat(description.partitions().size()).isEqualTo(partition);
+            assertThat(description.partitions().get(0).replicas().size())
+                    .isEqualTo(replicationFactor);
+        } catch (Exception e) {
+            fail(e.getMessage());
+        }
+    }
+
+    protected void checkTopicNotExist(String topic) {
+        try (AdminClient admin = createAdminClient()) {
+            assertThat(admin.describeTopics(Collections.emptyList()).allTopicNames().get())
+                    .doesNotContainKey(topic);
+        } catch (Exception e) {
+            fail(e.getMessage());
+        }
+    }
+
+    protected AdminClient createAdminClient() {
+        Properties properties = new Properties();
+        properties.put("bootstrap.servers", getBootstrapServers());
+
+        return AdminClient.create(properties);
     }
 }

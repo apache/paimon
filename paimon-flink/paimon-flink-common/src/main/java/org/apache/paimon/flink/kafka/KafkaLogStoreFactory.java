@@ -132,7 +132,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
 
     @Override
     public LogStoreRegister createRegister(RegisterContext context) {
-        throw new UnsupportedOperationException();
+        return new KafkaLogStoreRegister(context);
     }
 
     private int[] getPrimaryKeyIndexes(ResolvedSchema schema) {
