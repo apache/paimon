@@ -84,7 +84,7 @@ SELECT * FROM T;
 SELECT * FROM T VERSION AS OF '2023-07-26';
 
 -- Read Incremental between Tags
-SELECT * FROM T paimon_incremental_query('T', '2023-07-25', '2023-07-26');
+SELECT * FROM paimon_incremental_query('T', '2023-07-25', '2023-07-26');
 ```
 
 ## Create Tags
