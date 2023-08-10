@@ -18,7 +18,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.WriteMode.CHANGE_LOG
-import org.apache.paimon.spark.PaimonSparkSessionExtension
+import org.apache.paimon.spark.{PaimonSparkSessionExtension, PaimonSparkTestBase}
 
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row}
