@@ -106,7 +106,7 @@ other records.
 
 ```sql
 -- enrich each order with customer information
-SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'async'='true', 'output-mode'='allow_unordered', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
+SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'output-mode'='allow_unordered', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
 o.order_id, o.total, c.country, c.zip
 FROM Orders AS o
 JOIN customers /*+ OPTIONS('lookup.async'='true', 'lookup.async-thread-number'='16') */
