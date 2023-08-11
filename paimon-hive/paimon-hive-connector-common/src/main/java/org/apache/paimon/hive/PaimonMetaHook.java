@@ -143,7 +143,7 @@ public class PaimonMetaHook implements HiveMetaHook {
 
     @Override
     public void rollbackCreateTable(Table table) throws MetaException {
-        if (!MetaStoreUtils.isExternalTable(table)) {
+        if (MetaStoreUtils.isExternalTable(table)) {
             return;
         }
 

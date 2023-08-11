@@ -31,8 +31,13 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.metastore.HiveMetaHook;
+import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.ql.parse.ParseException;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+import org.assertj.core.api.Assertions;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -287,5 +292,93 @@ public class CreateTableITCase extends HiveTestBase {
                 .hasRootCauseInstanceOf(ParseException.class)
                 .hasMessageContaining(
                         "cannot recognize input near 'test' '$' 'schema' in table name");
+    }
+
+    @Test
+    public void testCreateTableFailing() throws Exception {
+        // Create a extern table
+
+        {
+            String tableName = "tes1";
+
+            Schema schema =
+                    new Schema(
+                            Lists.newArrayList(
+                                    new DataField(0, "col1", DataTypes.INT(), "first comment"),
+                                    new DataField(1, "col2", DataTypes.STRING(), "second comment"),
+                                    new DataField(
+                                            2, "col3", DataTypes.DECIMAL(5, 3), "last comment"),
+                                    new DataField(
+                                            3, "col4", DataTypes.DECIMAL(5, 3), "last comment")),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            Maps.newHashMap(),
+                            "");
+            Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
+            Path tablePath = AbstractCatalog.dataTableLocation(path, identifier);
+            new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
+
+            String hiveSql =
+                    String.join(
+                            "\n",
+                            Arrays.asList(
+                                    "CREATE EXTERNAL TABLE " + tableName + " ",
+                                    "STORED BY '" + MockPaimonStorageHandler.class.getName() + "'",
+                                    "LOCATION '" + tablePath.toUri().toString() + "'"));
+            try {
+                hiveShell.execute(hiveSql);
+            } catch (Throwable ignore) {
+            } finally {
+                Assertions.assertThat(LocalFileIO.create().exists(tablePath)).isTrue();
+            }
+        }
+
+        {
+            String tableName = "tes2";
+
+            hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+            String hiveSql =
+                    String.join(
+                            "\n",
+                            Arrays.asList(
+                                    "CREATE TABLE " + tableName + " (",
+                                    "user_id "
+                                            + TypeInfoFactory.longTypeInfo.getTypeName()
+                                            + " COMMENT 'The user_id field',",
+                                    "hh "
+                                            + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                            + " COMMENT 'The hh field'",
+                                    ")",
+                                    "STORED BY '"
+                                            + MockPaimonStorageHandler.class.getName()
+                                            + "'"));
+            try {
+                hiveShell.execute(hiveSql);
+            } catch (Exception ignore) {
+            } finally {
+                Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
+                Path tablePath = AbstractCatalog.dataTableLocation(path, identifier);
+                Assertions.assertThat(LocalFileIO.create().exists(tablePath)).isFalse();
+            }
+        }
+    }
+
+    public static class MockPaimonMetaHook extends PaimonMetaHook {
+
+        public MockPaimonMetaHook(Configuration conf) {
+            super(conf);
+        }
+
+        @Override
+        public void commitCreateTable(Table table) throws MetaException {
+            throw new RuntimeException("mock create table failed");
+        }
+    }
+
+    public static class MockPaimonStorageHandler extends PaimonStorageHandler {
+        @Override
+        public HiveMetaHook getMetaHook() {
+            return new MockPaimonMetaHook(getConf());
+        }
     }
 }
