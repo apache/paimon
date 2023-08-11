@@ -92,6 +92,15 @@ public class SchemaValidation {
                             WRITE_MODE.key(), APPEND_ONLY, CHANGELOG_PRODUCER.key()));
         }
 
+        if (options.writeMode() == WriteMode.AUTO
+                && schema.primaryKeys().isEmpty()
+                && changelogProducer != ChangelogProducer.NONE) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Can not set %s on table without primary keys, please define primary keys.",
+                            CHANGELOG_PRODUCER.key()));
+        }
+
         checkArgument(
                 options.snapshotNumRetainMin() > 0,
                 SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");

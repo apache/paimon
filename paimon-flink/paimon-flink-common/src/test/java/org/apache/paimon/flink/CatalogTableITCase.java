@@ -386,6 +386,23 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testChangelogProducerOnAppendOnlyTable() {
+        assertThatThrownBy(
+                        () -> sql("CREATE TABLE T (a INT) WITH ('changelog-producer' = 'input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
+
+        sql("CREATE TABLE T (a INT)");
+        assertThatThrownBy(() -> sql("ALTER TABLE T SET ('changelog-producer'='input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
+    }
+
+    @Test
     public void testFileFormatPerLevel() {
         sql(
                 "CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) "
