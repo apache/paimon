@@ -198,6 +198,57 @@ public class CreateTableITCase extends HiveTestBase {
     }
 
     @Test
+    public void testLowerDBName() throws Catalog.TableNotExistException {
+        String upperDB = "UPPER_DB";
+
+        hiveShell.execute(String.format("create database %s", upperDB));
+
+        String tableName = "UPPER_NAME";
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + upperDB + "." + tableName + " (",
+                                "user_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The user_id field',",
+                                "item_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The item_id field',",
+                                "behavior "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The behavior field'",
+                                ")",
+                                "PARTITIONED BY ( ",
+                                "dt "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The dt field',",
+                                "hh "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The hh field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "TBLPROPERTIES (",
+                                "  'primary-key'='dt,hh,user_id'",
+                                ")"));
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+
+        // check the paimon db name、table name and schema
+        Identifier identifier = Identifier.create(upperDB.toLowerCase(), tableName.toLowerCase());
+        Path tablePath = AbstractCatalog.dataTableLocation(path, identifier);
+        Options conf = new Options();
+        conf.set(CatalogOptions.WAREHOUSE, path);
+        CatalogContext catalogContext = CatalogContext.create(conf);
+        Catalog catalog = CatalogFactory.createCatalog(catalogContext);
+        Table table = catalog.getTable(identifier);
+        assertThat(table.name()).isEqualTo(tableName.toLowerCase());
+        Optional<TableSchema> tableSchema =
+                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+        assertThat(tableSchema).isPresent();
+    }
+
+    @Test
     public void testCreateTableWithPrimaryKey() {
         String tableName = "primary_key_table";
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
