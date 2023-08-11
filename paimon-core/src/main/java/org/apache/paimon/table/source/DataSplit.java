@@ -33,6 +33,7 @@ import java.io.ObjectOutputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -73,6 +74,10 @@ public class DataSplit implements Split {
 
     public boolean isStreaming() {
         return isStreaming;
+    }
+
+    public OptionalLong getLatestFileCreationEpochMillis() {
+        return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
     }
 
     @Override

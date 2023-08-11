@@ -25,6 +25,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -63,13 +64,16 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                         splitPaths(
                                 context.getConfiguration()
                                         .get(org.apache.flink.configuration.CoreOptions.TMP_DIRS)));
+        FileStoreSourceReaderMetrics sourceReaderMetrics =
+                new FileStoreSourceReaderMetrics(context.metricGroup());
         return new AlignedSourceReader(
                 context,
                 readBuilder.newRead().withIOManager(ioManager),
                 limit,
                 new FutureCompletingBlockingQueue<>(
                         context.getConfiguration()
-                                .getInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)));
+                                .getInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)),
+                sourceReaderMetrics);
     }
 
     @Override

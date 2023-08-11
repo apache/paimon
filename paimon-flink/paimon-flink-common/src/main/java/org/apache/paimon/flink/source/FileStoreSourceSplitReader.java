@@ -20,8 +20,10 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 
@@ -63,14 +65,19 @@ public class FileStoreSourceSplitReader
     private RecordIterator<InternalRow> currentFirstBatch;
 
     private boolean paused;
+    private final FileStoreSourceReaderMetrics sourceReaderMetrics;
 
-    public FileStoreSourceSplitReader(TableRead tableRead, @Nullable RecordLimiter limiter) {
+    public FileStoreSourceSplitReader(
+            TableRead tableRead,
+            @Nullable RecordLimiter limiter,
+            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
         this.paused = false;
+        this.sourceReaderMetrics = sourceReaderMetrics;
     }
 
     @Override
@@ -168,6 +175,15 @@ public class FileStoreSourceSplitReader
         final FileStoreSourceSplit nextSplit = splits.poll();
         if (nextSplit == null) {
             throw new IOException("Cannot fetch from another split - no split remaining");
+        }
+
+        // update metric when split changes
+        if (sourceReaderMetrics != null && nextSplit.split() instanceof DataSplit) {
+            long eventTime =
+                    ((DataSplit) nextSplit.split())
+                            .getLatestFileCreationEpochMillis()
+                            .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
+            sourceReaderMetrics.recordSnapshotUpdate(eventTime);
         }
 
         currentSplitId = nextSplit.splitId();

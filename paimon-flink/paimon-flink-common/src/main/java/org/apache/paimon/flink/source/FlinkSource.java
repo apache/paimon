@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.ReadBuilder;
 
 import org.apache.flink.api.connector.source.Source;
@@ -53,8 +54,13 @@ public abstract class FlinkSource
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
         IOManager ioManager =
                 new IOManagerImpl(splitPaths(context.getConfiguration().get(CoreOptions.TMP_DIRS)));
+        FileStoreSourceReaderMetrics sourceReaderMetrics =
+                new FileStoreSourceReaderMetrics(context.metricGroup());
         return new FileStoreSourceReader(
-                context, readBuilder.newRead().withIOManager(ioManager), limit);
+                context,
+                readBuilder.newRead().withIOManager(ioManager),
+                limit,
+                sourceReaderMetrics);
     }
 
     @Override

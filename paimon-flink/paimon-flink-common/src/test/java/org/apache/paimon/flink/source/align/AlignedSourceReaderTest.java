@@ -66,6 +66,7 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
                 context,
                 new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
                 null,
-                new FutureCompletingBlockingQueue<>(2));
+                new FutureCompletingBlockingQueue<>(2),
+                null);
     }
 }

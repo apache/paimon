@@ -108,6 +108,7 @@ public class FileStoreSourceReaderTest {
         return new FileStoreSourceReader(
                 context,
                 new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
+                null,
                 null);
     }
 

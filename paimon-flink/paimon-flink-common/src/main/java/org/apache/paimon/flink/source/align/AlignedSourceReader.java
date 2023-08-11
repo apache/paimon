@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source.align;
 import org.apache.paimon.flink.source.FileStoreSourceReader;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.FileStoreSourceSplitState;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.ExternallyInducedSourceReader;
@@ -53,8 +54,9 @@ public class AlignedSourceReader extends FileStoreSourceReader
             TableRead tableRead,
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>>
-                    elementsQueue) {
-        super(readerContext, tableRead, limit, elementsQueue);
+                    elementsQueue,
+            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
+        super(readerContext, tableRead, limit, elementsQueue, sourceReaderMetrics);
         this.elementsQueue = elementsQueue;
         this.nextCheckpointId = null;
     }
