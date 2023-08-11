@@ -19,113 +19,24 @@
 package org.apache.paimon.metrics.commit;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.metrics.Counter;
 import org.apache.paimon.metrics.DescriptiveStatisticsHistogram;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.groups.GenericMetricGroup;
 import org.apache.paimon.utils.FileStorePathFactory;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.stream.Collectors;
-
 /** Metrics to measure a commit. */
 public class CommitMetrics {
-    private static Logger log = LoggerFactory.getLogger(CommitMetrics.class);
     private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
     protected static final String GROUP_NAME = "commit";
 
     private final MetricGroup genericMetricGroup;
 
-    private final FileStorePathFactory pathFactory;
-    private final FileIO fileIO;
-
-    private long initTableFilesCount = 0;
-    private long initChangelogFilesCount = 0;
-
-    public CommitMetrics(FileStorePathFactory pathFactory, FileIO fileIO) {
+    public CommitMetrics(FileStorePathFactory pathFactory) {
         this.genericMetricGroup =
                 GenericMetricGroup.createGenericMetricGroup(
                         pathFactory.root().getName(), GROUP_NAME);
-        this.pathFactory = pathFactory;
-        this.fileIO = fileIO;
-        initDataFilesCount();
         registerGenericCommitMetrics();
-    }
-
-    @VisibleForTesting
-    void initDataFilesCount() {
-        try {
-            List<Path> dirs =
-                    Arrays.stream(fileIO.listStatus(pathFactory.root()))
-                            .map(f -> f.getPath())
-                            .collect(Collectors.toList());
-            boolean hasPartition = true;
-            for (Path dir : dirs) {
-                if (dir.getName().startsWith("bucket-")) {
-                    hasPartition = false;
-                    break;
-                }
-            }
-            if (hasPartition) {
-                List<Path> buckets = new ArrayList<>();
-                for (Path dir : dirs) {
-                    FileStatus[] fileStatuses = fileIO.listStatus(dir);
-                    buckets.addAll(
-                            Arrays.stream(fileStatuses)
-                                    .filter(
-                                            f ->
-                                                    f.isDir()
-                                                            && f.getPath()
-                                                                    .getName()
-                                                                    .startsWith("bucket-"))
-                                    .map(f -> f.getPath())
-                                    .collect(Collectors.toList()));
-                }
-                for (Path bucket : buckets) {
-                    FileStatus[] fileStatuses = fileIO.listStatus(bucket);
-                    accFilesCount(fileStatuses);
-                }
-            } else {
-                for (Path dir : dirs) {
-                    FileStatus[] fileStatuses = fileIO.listStatus(dir);
-                    accFilesCount(fileStatuses);
-                }
-            }
-        } catch (IOException ie) {
-            log.warn(
-                    "List table files failed, the 'total' prefixed commit metrics will calculate the number of total files since the job started. ");
-        }
-    }
-
-    private void accFilesCount(FileStatus[] fileStatuses) {
-        initTableFilesCount +=
-                Arrays.stream(fileStatuses)
-                        .filter(
-                                f ->
-                                        f.getPath()
-                                                .getName()
-                                                .startsWith(DataFilePathFactory.DATA_FILE_PREFIX))
-                        .count();
-        initChangelogFilesCount +=
-                Arrays.stream(fileStatuses)
-                        .filter(
-                                f ->
-                                        f.getPath()
-                                                .getName()
-                                                .startsWith(
-                                                        DataFilePathFactory.CHANGELOG_FILE_PREFIX))
-                        .count();
     }
 
     public MetricGroup getGenericMetricGroup() {
@@ -152,9 +63,6 @@ public class CommitMetrics {
 
     @VisibleForTesting
     static final String LAST_CHANGELOG_FILES_COMMIT_COMPACTED = "lastChangelogFileCommitCompacted";
-
-    @VisibleForTesting static final String TOTAL_TABLE_FILES = "totalTableFiles";
-    @VisibleForTesting static final String TOTAL_CHANGELOG_FILES = "totalChangelogFiles";
     @VisibleForTesting static final String LAST_GENERATED_SNAPSHOTS = "lastGeneratedSnapshots";
     @VisibleForTesting static final String LAST_DELTA_RECORDS_APPENDED = "lastDeltaRecordsAppended";
 
@@ -170,9 +78,6 @@ public class CommitMetrics {
 
     @VisibleForTesting static final String LAST_PARTITIONS_WRITTEN = "lastPartitionsWritten";
     @VisibleForTesting static final String LAST_BUCKETS_WRITTEN = "lastBucketsWritten";
-
-    transient Counter totalTableFilesCounter;
-    transient Counter totalChangelogFilesCounter;
 
     private void registerGenericCommitMetrics() {
         genericMetricGroup.gauge(
@@ -219,28 +124,10 @@ public class CommitMetrics {
         genericMetricGroup.gauge(
                 LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
                 () -> latestCommit == null ? 0L : latestCommit.getChangelogRecordsCompacted());
-        totalTableFilesCounter = genericMetricGroup.counter(TOTAL_TABLE_FILES);
-        totalTableFilesCounter.inc(initTableFilesCount);
-        totalChangelogFilesCounter = genericMetricGroup.counter(TOTAL_CHANGELOG_FILES);
-        totalChangelogFilesCounter.inc(initChangelogFilesCount);
     }
 
     public void reportCommit(CommitStats commitStats) {
         latestCommit = commitStats;
-        totalTableFilesCounter.inc(
-                commitStats.getTableFilesAdded() - commitStats.getTableFilesDeleted());
-        totalChangelogFilesCounter.inc(
-                commitStats.getChangelogFilesAppended() + commitStats.getChangelogFilesCompacted());
         durationHistogram.update(commitStats.getDuration());
-    }
-
-    @VisibleForTesting
-    long getInitTableFilesCount() {
-        return initTableFilesCount;
-    }
-
-    @VisibleForTesting
-    long getInitChangelogFilesCount() {
-        return initChangelogFilesCount;
     }
 }

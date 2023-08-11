@@ -152,7 +152,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
-        this.commitMetrics = new CommitMetrics(pathFactory, fileIO);
+        this.commitMetrics = new CommitMetrics(pathFactory);
     }
 
     @Override
