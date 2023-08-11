@@ -68,6 +68,20 @@ public class FlinkConnectorOptions {
                                                             + "."))
                                     .build());
 
+    public static final ConfigOption<Integer> LOG_SYSTEM_PARTITIONS =
+            ConfigOptions.key("log.system.partitions")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "The number of partitions of the log system. If log system is kafka, this is kafka partitions.");
+
+    public static final ConfigOption<Integer> LOG_SYSTEM_REPLICATION =
+            ConfigOptions.key("log.system.replication")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription(
+                            "The number of replication of the log system. If log system is kafka, this is kafka replicationFactor.");
+
     public static final ConfigOption<Integer> SINK_PARALLELISM =
             ConfigOptions.key("sink.parallelism")
                     .intType()

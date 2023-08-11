@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -70,6 +71,7 @@ import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -88,6 +90,8 @@ import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
+import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.log.LogStoreRegister.registerLogSystem;
@@ -107,16 +111,22 @@ public class FlinkCatalog extends AbstractCatalog {
     private final Catalog catalog;
     private final boolean logStoreAutoRegister;
 
+    private final Duration logStoreAutoRegisterTimeout;
+
+    private final Options options;
+
     public FlinkCatalog(
             Catalog catalog,
             String name,
             String defaultDatabase,
             ClassLoader classLoader,
-            boolean logStoreAutoRegister) {
+            Options options) {
         super(name, defaultDatabase);
         this.catalog = catalog;
         this.classLoader = classLoader;
-        this.logStoreAutoRegister = logStoreAutoRegister;
+        this.options = options;
+        this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);
+        this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
         try {
             this.catalog.createDatabase(defaultDatabase, true);
         } catch (Catalog.DatabaseAlreadyExistException ignore) {
@@ -256,6 +266,14 @@ public class FlinkCatalog extends AbstractCatalog {
 
         Identifier identifier = toIdentifier(tablePath);
         if (logStoreAutoRegister) {
+            // Although catalog.createTable will copy the default options, but we need this info
+            // here before create table, such as table-default.kafka.bootstrap.servers defined in
+            // catalog options. Temporarily, we copy the default options here.
+            if (catalog instanceof org.apache.paimon.catalog.AbstractCatalog) {
+                ((org.apache.paimon.catalog.AbstractCatalog) catalog)
+                        .copyTableDefaultOptions(options);
+            }
+            options.put(REGISTER_TIMEOUT.key(), logStoreAutoRegisterTimeout.toString());
             registerLogSystem(catalog, identifier, options, classLoader);
         }
         // remove table path

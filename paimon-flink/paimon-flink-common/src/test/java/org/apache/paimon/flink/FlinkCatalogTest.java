@@ -464,7 +464,7 @@ public class FlinkCatalogTest {
                         .field("comp", DataTypes.INT(), "test + 1")
                         .primaryKey("pk")
                         .build();
-        CatalogTable catalogTable = new CatalogTableImpl(schema, Collections.emptyMap(), "");
+        CatalogTable catalogTable = new CatalogTableImpl(schema, new HashMap<>(), "");
 
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(path1, catalogTable, false);
