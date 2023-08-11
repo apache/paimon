@@ -856,10 +856,10 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTinyInt1Convert() throws Exception {
+    public void testSpecialCastRules() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
-        mySqlConfig.put("table-name", "test_tinyint1_convert");
+        mySqlConfig.put("table-name", "test_special_cast_rules");
         mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -878,109 +878,66 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         Collections.emptyList(),
                         Collections.emptyMap(),
                         Collections.emptyMap());
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-
-        try (Statement statement = getStatement()) {
-            statement.execute("USE " + DATABASE_NAME);
-            statement.executeUpdate(
-                    "INSERT INTO test_tinyint1_convert VALUES (1, '2021-09-15 15:00:10', 21)");
-            statement.executeUpdate(
-                    "INSERT INTO test_tinyint1_convert VALUES (2, '2023-03-23 16:00:20', 42)");
-
-            FileStoreTable table = getFileStoreTable();
-            RowType rowType =
-                    RowType.of(
-                            new DataType[] {
-                                DataTypes.INT().notNull(),
-                                DataTypes.TIMESTAMP(0),
-                                DataTypes.TINYINT()
-                            },
-                            new String[] {"pk", "_datetime", "_tinyint1"});
-            List<String> expected =
-                    Arrays.asList(
-                            "+I[1, 2021-09-15T15:00:10, 21]", "+I[2, 2023-03-23T16:00:20, 42]");
-            waitForResult(expected, table, rowType, Collections.singletonList("pk"));
-        }
-    }
-
-    @Test
-    @Timeout(60)
-    public void testSchemaEvolutionWithTinyint1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_table_tinyint");
-        mySqlConfig.put("table-name", "schema_evolution_3");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.singletonMap(
-                                CatalogOptions.METASTORE.key(), "test-alter-table"),
-                        tableConfig);
+        action.setCastTimeToString(true);
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
 
         checkTableSchema(
-                "[{\"id\":0,\"name\":\"pt\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"_id\"},{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"}]");
+                "[{\"id\":0,\"name\":\"pk\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
+                        + "{\"id\":1,\"name\":\"_tinyint1\",\"type\":\"TINYINT\",\"description\":\"\"},"
+                        + "{\"id\":2,\"name\":\"_time\",\"type\":\"STRING\",\"description\":\"\"}]");
 
         try (Statement statement = getStatement()) {
-            testSchemaEvolutionImplWithTinyIntConvert(statement);
+            statement.execute("USE " + DATABASE_NAME);
+            statement.executeUpdate(
+                    "INSERT INTO test_special_cast_rules VALUES (1, 1, '00:01'), (2, 20, '00:02:03')");
+
+            FileStoreTable table = getFileStoreTable();
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.TINYINT(), DataTypes.STRING()
+                            },
+                            new String[] {"pk", "_tinyint1", "_time"});
+            waitForResult(
+                    Arrays.asList("+I[1, 1, 00:01]", "+I[2, 20, 00:02:03]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
+
+            // test schema evolution
+            // add TINYINT(1) and TIME column
+            statement.executeUpdate(
+                    "ALTER TABLE test_special_cast_rules ADD COLUMN _new_tinyint1 TINYINT(1)");
+            statement.executeUpdate(
+                    "ALTER TABLE test_special_cast_rules ADD COLUMN _new_time TIME");
+            statement.executeUpdate(
+                    "INSERT INTO test_special_cast_rules VALUES (3, 30, '00:00:00', 1, '12:21:30.001'), (4, 40, '00:00:00', 40, '23:59:59')");
+
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(),
+                                DataTypes.TINYINT(),
+                                DataTypes.STRING(),
+                                DataTypes.TINYINT(),
+                                DataTypes.STRING()
+                            },
+                            new String[] {
+                                "pk", "_tinyint1", "_time", "_new_tinyint1", "_new_time"
+                            });
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, 1, 00:01, NULL, NULL]",
+                            "+I[2, 20, 00:02:03, NULL, NULL]",
+                            // note that MySQL time precision is to second
+                            "+I[3, 30, 00:00, 1, 12:21:30]",
+                            "+I[4, 40, 00:00, 40, 23:59:59]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
         }
-    }
-
-    private void testSchemaEvolutionImplWithTinyIntConvert(Statement statement) throws Exception {
-        FileStoreTable table = getFileStoreTable();
-        statement.executeUpdate("USE paimon_sync_table_tinyint");
-
-        statement.executeUpdate("INSERT INTO schema_evolution_3 VALUES (1, 1, 'one')");
-        statement.executeUpdate(
-                "INSERT INTO schema_evolution_3 VALUES (1, 2, 'two'), (2, 4, 'four')");
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10)
-                        },
-                        new String[] {"pt", "_id", "v1"});
-        List<String> primaryKeys = Arrays.asList("pt", "_id");
-        List<String> expected = Arrays.asList("+I[1, 1, one]", "+I[1, 2, two]", "+I[2, 4, four]");
-        waitForResult(expected, table, rowType, primaryKeys);
-
-        statement.executeUpdate("ALTER TABLE schema_evolution_3 ADD COLUMN v2 TINYINT(1)");
-        statement.executeUpdate(
-                "INSERT INTO schema_evolution_3 VALUES (2, 3, 'three', 30), (1, 5, 'five', 50)");
-        rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10),
-                            DataTypes.TINYINT()
-                        },
-                        new String[] {"pt", "_id", "v1", "v2"});
-        expected =
-                Arrays.asList(
-                        "+I[1, 1, one, NULL]",
-                        "+I[1, 2, two, NULL]",
-                        "+I[2, 3, three, 30]",
-                        "+I[2, 4, four, NULL]",
-                        "+I[1, 5, five, 50]");
-        waitForResult(expected, table, rowType, primaryKeys);
     }
 
     @Test

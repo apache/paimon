@@ -23,6 +23,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.cdc.SpecialCastRules;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -45,8 +46,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
-
 /** Converts from MySQL type to {@link DataType}. */
 public class MySqlTypeUtils {
 
@@ -55,7 +54,7 @@ public class MySqlTypeUtils {
     private static final String BIT = "BIT";
     private static final String BOOLEAN = "BOOLEAN";
     private static final String BOOL = "BOOL";
-    private static final String TINYINT = "TINYINT";
+    public static final String TINYINT = "TINYINT";
     private static final String TINYINT_UNSIGNED = "TINYINT UNSIGNED";
     private static final String TINYINT_UNSIGNED_ZEROFILL = "TINYINT UNSIGNED ZEROFILL";
     private static final String SMALLINT = "SMALLINT";
@@ -100,7 +99,7 @@ public class MySqlTypeUtils {
     private static final String TEXT = "TEXT";
     private static final String LONGTEXT = "LONGTEXT";
     private static final String DATE = "DATE";
-    private static final String TIME = "TIME";
+    public static final String TIME = "TIME";
     private static final String DATETIME = "DATETIME";
     private static final String TIMESTAMP = "TIMESTAMP";
     private static final String YEAR = "YEAR";
@@ -142,31 +141,21 @@ public class MySqlTypeUtils {
                 MySqlTypeUtils.getShortType(mysqlType),
                 MySqlTypeUtils.getPrecision(mysqlType),
                 MySqlTypeUtils.getScale(mysqlType),
-                MYSQL_CONVERTER_TINYINT1_BOOL.defaultValue());
+                SpecialCastRules.defaultRules());
     }
 
     public static DataType toDataType(
             String type,
             @Nullable Integer length,
             @Nullable Integer scale,
-            Boolean tinyInt1ToBool) {
+            SpecialCastRules specialCastRules) {
         switch (type.toUpperCase()) {
             case BIT:
             case BOOLEAN:
             case BOOL:
                 return DataTypes.BOOLEAN();
             case TINYINT:
-                // MySQL haven't boolean type, it uses tinyint(1) to represents boolean type
-                // user should not use tinyint(1) to store number although jdbc url parameter
-                // tinyInt1isBit=false can help change the return value, it's not a general way.
-                // mybatis and mysql-connector-java map tinyint(1) to boolean by default, we behave
-                // the same way by default. To store number (-128~127), we can set the parameter
-                // tinyInt1ToByte (option 'mysql.converter.tinyint1-to-bool') to false, then
-                // tinyint(1)
-                // will be mapped to TinyInt.
-                return length != null && length == 1 && tinyInt1ToBool
-                        ? DataTypes.BOOLEAN()
-                        : DataTypes.TINYINT();
+                return specialCastRules.cast(TINYINT, length);
             case TINYINT_UNSIGNED:
             case TINYINT_UNSIGNED_ZEROFILL:
             case SMALLINT:
@@ -216,7 +205,7 @@ public class MySqlTypeUtils {
             case DATE:
                 return DataTypes.DATE();
             case TIME:
-                return DataTypes.TIME();
+                return specialCastRules.cast(TIME, length);
             case DATETIME:
             case TIMESTAMP:
                 if (length == null) {

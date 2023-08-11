@@ -25,11 +25,13 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.cdc.SpecialCastRules;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
+import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -172,13 +174,18 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         + "use mysql-sync-table instead.");
         boolean caseSensitive = catalog.caseSensitive();
 
+        SpecialCastRules specialCastRules =
+                new SpecialCastRules(
+                        mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL),
+                        catalog instanceof HiveCatalog);
+
         if (!caseSensitive) {
             validateCaseInsensitive();
         }
 
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig, this::shouldMonitorTable, excludedTables);
+                        mySqlConfig, this::shouldMonitorTable, excludedTables, specialCastRules);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
@@ -236,10 +243,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         MySqlTableSchemaBuilder schemaBuilder =
-                new MySqlTableSchemaBuilder(tableConfig, caseSensitive);
+                new MySqlTableSchemaBuilder(tableConfig, caseSensitive, specialCastRules);
         Pattern includingPattern = this.includingPattern;
         Pattern excludingPattern = this.excludingPattern;
-        Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
@@ -249,7 +255,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 schemaBuilder,
                                 includingPattern,
                                 excludingPattern,
-                                convertTinyint1ToBool);
+                                specialCastRules);
 
         String database = this.database;
         DatabaseSyncMode mode = this.mode;

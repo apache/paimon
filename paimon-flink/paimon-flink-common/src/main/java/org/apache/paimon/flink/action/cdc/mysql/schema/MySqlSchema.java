@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
+import org.apache.paimon.flink.action.cdc.SpecialCastRules;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
@@ -49,7 +50,7 @@ public class MySqlSchema {
             DatabaseMetaData metaData,
             String databaseName,
             String tableName,
-            boolean convertTinyintToBool)
+            SpecialCastRules specialCastRules)
             throws SQLException {
         LinkedHashMap<String, Pair<DataType, String>> fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
@@ -70,7 +71,7 @@ public class MySqlSchema {
                         fieldName,
                         Pair.of(
                                 MySqlTypeUtils.toDataType(
-                                        fieldType, precision, scale, convertTinyintToBool),
+                                        fieldType, precision, scale, specialCastRules),
                                 fieldComment));
             }
         }

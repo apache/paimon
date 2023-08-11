@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.SpecialCastRules;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchema;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
@@ -107,7 +108,8 @@ public class MySqlActionUtils {
     static MySqlSchemasInfo getMySqlTableInfos(
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
-            List<Identifier> excludedTables)
+            List<Identifier> excludedTables,
+            SpecialCastRules specialCastRules)
             throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
@@ -127,7 +129,7 @@ public class MySqlActionUtils {
                                                 metaData,
                                                 databaseName,
                                                 tableName,
-                                                mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
+                                                specialCastRules);
                                 Identifier identifier = Identifier.create(databaseName, tableName);
                                 if (monitorTablePredication.test(tableName)) {
                                     mySqlSchemasInfo.addSchema(identifier, mySqlSchema);

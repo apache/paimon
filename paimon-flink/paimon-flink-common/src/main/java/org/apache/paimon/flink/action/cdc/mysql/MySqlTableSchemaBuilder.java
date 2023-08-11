@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.cdc.SpecialCastRules;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
@@ -32,7 +33,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Schema builder for MySQL cdc. */
@@ -40,10 +40,15 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
+    private final SpecialCastRules specialCastRules;
 
-    public MySqlTableSchemaBuilder(Map<String, String> tableConfig, boolean caseSensitive) {
+    public MySqlTableSchemaBuilder(
+            Map<String, String> tableConfig,
+            boolean caseSensitive,
+            SpecialCastRules specialCastRules) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
+        this.specialCastRules = specialCastRules;
     }
 
     @Override
@@ -63,7 +68,7 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
                                     element.get("typeExpression").asText(),
                                     precision,
                                     scale,
-                                    MYSQL_CONVERTER_TINYINT1_BOOL.defaultValue())
+                                    specialCastRules)
                             .copy(element.get("optional").asBoolean()));
         }
 

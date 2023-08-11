@@ -438,6 +438,11 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 
 {{< generated/compute_column >}}
 
+## Special Data Type Conversions
+1. TINYINT(1) type in MySQL would be converted to Boolean by default. If you want to store number in it like MySQL, you 
+can specify that `--mysql-conf mysql.converter.tinyint1-to-bool=false`, then the column will be mapped to TINYINT in paimon table.
+2. Hive catalog doesn't support TIME type, so TIME type will be converted to STRING.
+
 ## FAQ
 1. Chinese characters in records ingested from MySQL are garbled.
 * Try to set `env.java.opts: -Dfile.encoding=UTF-8` in `flink-conf.yaml`

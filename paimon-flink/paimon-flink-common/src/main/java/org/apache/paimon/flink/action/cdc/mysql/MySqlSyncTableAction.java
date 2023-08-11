@@ -18,16 +18,19 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.SpecialCastRules;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -92,6 +95,9 @@ public class MySqlSyncTableAction extends ActionBase {
     private final List<String> computedColumnArgs;
     private final Map<String, String> tableConfig;
 
+    // for testing purpose
+    private Boolean castTimeToString;
+
     public MySqlSyncTableAction(
             Map<String, String> mySqlConfig,
             String warehouse,
@@ -145,9 +151,16 @@ public class MySqlSyncTableAction extends ActionBase {
             validateCaseInsensitive();
         }
 
+        SpecialCastRules specialCastRules =
+                new SpecialCastRules(
+                        mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL), castTimeToString());
+
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig, monitorTablePredication(), new ArrayList<>());
+                        mySqlConfig,
+                        monitorTablePredication(),
+                        new ArrayList<>(),
+                        specialCastRules);
         validateMySqlTableInfos(mySqlSchemasInfo);
 
         catalog.createDatabase(database, true);
@@ -193,11 +206,10 @@ public class MySqlSyncTableAction extends ActionBase {
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
-                                zoneId, caseSensitive, computedColumns, convertTinyint1ToBool);
+                                zoneId, caseSensitive, computedColumns, specialCastRules);
 
         CdcSinkBuilder<String> sinkBuilder =
                 new CdcSinkBuilder<String>()
@@ -262,6 +274,15 @@ public class MySqlSyncTableAction extends ActionBase {
                     Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME));
             return tableNamePattern.matcher(tableName).matches();
         };
+    }
+
+    private boolean castTimeToString() {
+        return castTimeToString == null ? catalog instanceof HiveCatalog : castTimeToString;
+    }
+
+    @VisibleForTesting
+    public void setCastTimeToString(boolean castTimeToString) {
+        this.castTimeToString = castTimeToString;
     }
 
     // ------------------------------------------------------------------------

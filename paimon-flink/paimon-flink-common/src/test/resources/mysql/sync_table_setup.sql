@@ -274,25 +274,15 @@ CREATE TABLE test_computed_column (
     PRIMARY KEY (pk)
 );
 
-CREATE TABLE test_tinyint1_convert (
+-- ################################################################################
+--  testSpecialCastRules
+-- ################################################################################
+
+CREATE TABLE test_special_cast_rules (
     pk INT,
-    _datetime DATETIME,
     _tinyint1 TINYINT(1),
+    _time TIME,
     PRIMARY KEY (pk)
-);
-
--- ################################################################################
---  testSchemaEvolutionWithTinyint1Convert
--- ################################################################################
-
-CREATE DATABASE paimon_sync_table_tinyint;
-USE paimon_sync_table_tinyint;
-
-CREATE TABLE schema_evolution_3 (
-    pt INT comment  'primary',
-    _id INT comment  '_id',
-    v1 VARCHAR(10) comment  'v1',
-    PRIMARY KEY (_id)
 );
 
 -- ################################################################################
