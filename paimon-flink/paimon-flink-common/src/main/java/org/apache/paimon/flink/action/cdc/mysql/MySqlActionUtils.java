@@ -20,11 +20,15 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchema;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.Pair;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -35,7 +39,6 @@ import com.ververica.cdc.connectors.mysql.table.JdbcUrlUtils;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -47,7 +50,6 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -102,14 +104,14 @@ public class MySqlActionUtils {
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
     }
 
-    static List<MySqlSchema> getMySqlSchemaList(
+    static MySqlSchemasInfo getMySqlTableInfos(
             Configuration mySqlConfig,
-            Predicate<MySqlSchema> monitorTablePredication,
+            Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables)
             throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
-        List<MySqlSchema> mySqlSchemaList = new ArrayList<>();
+        MySqlSchemasInfo mySqlSchemasInfo = new MySqlSchemasInfo();
         try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
             DatabaseMetaData metaData = conn.getMetaData();
             try (ResultSet schemas = metaData.getCatalogs()) {
@@ -121,15 +123,16 @@ public class MySqlActionUtils {
                             while (tables.next()) {
                                 String tableName = tables.getString("TABLE_NAME");
                                 MySqlSchema mySqlSchema =
-                                        new MySqlSchema(
+                                        MySqlSchema.buildSchema(
                                                 metaData,
                                                 databaseName,
                                                 tableName,
                                                 mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
-                                if (monitorTablePredication.test(mySqlSchema)) {
-                                    mySqlSchemaList.add(mySqlSchema);
+                                Identifier identifier = Identifier.create(databaseName, tableName);
+                                if (monitorTablePredication.test(tableName)) {
+                                    mySqlSchemasInfo.addSchema(identifier, mySqlSchema);
                                 } else {
-                                    excludedTables.add(mySqlSchema.identifier());
+                                    excludedTables.add(identifier);
                                 }
                             }
                         }
@@ -137,7 +140,7 @@ public class MySqlActionUtils {
                 }
             }
         }
-        return mySqlSchemaList;
+        return mySqlSchemasInfo;
     }
 
     static void assertSchemaCompatible(TableSchema paimonSchema, Schema mySqlSchema) {
@@ -173,7 +176,7 @@ public class MySqlActionUtils {
     }
 
     static Schema buildPaimonSchema(
-            MySqlSchema mySqlSchema,
+            MySqlTableInfo mySqlTableInfo,
             List<String> specifiedPartitionKeys,
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
@@ -181,23 +184,24 @@ public class MySqlActionUtils {
             boolean caseSensitive) {
         Schema.Builder builder = Schema.newBuilder();
         builder.options(paimonConfig);
+        MySqlSchema mySqlSchema = mySqlTableInfo.schema();
 
         // build columns and primary keys from mySqlSchema
-        LinkedHashMap<String, Tuple2<DataType, String>> mySqlFields;
+        LinkedHashMap<String, Pair<DataType, String>> mySqlFields;
         List<String> mySqlPrimaryKeys;
         if (caseSensitive) {
             mySqlFields = mySqlSchema.fields();
             mySqlPrimaryKeys = mySqlSchema.primaryKeys();
         } else {
             mySqlFields = new LinkedHashMap<>();
-            for (Map.Entry<String, Tuple2<DataType, String>> entry :
+            for (Map.Entry<String, Pair<DataType, String>> entry :
                     mySqlSchema.fields().entrySet()) {
                 String fieldName = entry.getKey();
                 checkArgument(
                         !mySqlFields.containsKey(fieldName.toLowerCase()),
                         String.format(
                                 "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, mySqlSchema.tableName()));
+                                fieldName, mySqlTableInfo.location()));
                 mySqlFields.put(fieldName.toLowerCase(), entry.getValue());
             }
             mySqlPrimaryKeys =
@@ -206,8 +210,8 @@ public class MySqlActionUtils {
                             .collect(Collectors.toList());
         }
 
-        for (Map.Entry<String, Tuple2<DataType, String>> entry : mySqlFields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue().f0, entry.getValue().f1);
+        for (Map.Entry<String, Pair<DataType, String>> entry : mySqlFields.entrySet()) {
+            builder.column(entry.getKey(), entry.getValue().getLeft(), entry.getValue().getRight());
         }
 
         for (ComputedColumn computedColumn : computedColumns) {

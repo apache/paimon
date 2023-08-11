@@ -1181,10 +1181,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 thread.start();
             }
 
-            Catalog catalog = catalog();
-            while (!catalog.listTables(database).containsAll(tables)) {
-                Thread.sleep(100);
-            }
+            waitingTables(tables);
 
             RowType newTableRowType =
                     RowType.of(
@@ -1202,7 +1199,13 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Timeout(60)
     public void testSyncMultipleShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "database_shard_.*");
+
+        // test table list
+        mySqlConfig.put(
+                "database-name",
+                ThreadLocalRandom.current().nextBoolean()
+                        ? "database_shard_.*"
+                        : "database_shard_1|database_shard_2");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(2);
@@ -1307,10 +1310,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         "CREATE TABLE database_shard_2.t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
                 statement.executeUpdate("INSERT INTO database_shard_2.t4 VALUES (2, 'db2_2')");
 
-                Catalog catalog = catalog();
-                while (!catalog.tableExists(Identifier.create(database, "t4"))) {
-                    Thread.sleep(100);
-                }
+                waitingTables("t4");
 
                 table = getFileStoreTable("t4");
                 rowType =
@@ -1428,13 +1428,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 statement.executeUpdate(
                         "INSERT INTO without_merging_shard_2.t3 VALUES (2, 'test')");
 
-                while (!catalog.listTables(database)
-                        .containsAll(
-                                Arrays.asList(
-                                        "without_merging_shard_1_t3",
-                                        "without_merging_shard_2_t3"))) {
-                    Thread.sleep(100);
-                }
+                waitingTables("without_merging_shard_1_t3", "without_merging_shard_2_t3");
 
                 table = getFileStoreTable("without_merging_shard_1_t3");
                 rowType =
@@ -1458,7 +1452,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testUnminitorTablesWithMergingShards() throws Exception {
+    public void testMonitoredAndExcludedTablesWithMering() throws Exception {
         // create an incompatible table named t2
         Catalog catalog = catalog();
         catalog.createDatabase(database, true);
@@ -1472,7 +1466,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         catalog.createTable(identifier, schema, false);
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "test_unmonitor_table_shard_.*");
+        mySqlConfig.put("database-name", "monitored_and_excluded_shard_.*");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
@@ -1494,8 +1488,17 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         assertThat(action.monitoredTables())
                 .containsOnly(
-                        Identifier.create("test_unmonitor_table_shard_1", "t1"),
-                        Identifier.create("test_unmonitor_table_shard_2", "t1"));
+                        Identifier.create("monitored_and_excluded_shard_1", "t1"),
+                        Identifier.create("monitored_and_excluded_shard_1", "t3"),
+                        Identifier.create("monitored_and_excluded_shard_2", "t1"));
+
+        assertThat(action.excludedTables())
+                .containsOnly(
+                        // t2 is merged, so all shards will be excluded
+                        Identifier.create("monitored_and_excluded_shard_1", "t2"),
+                        Identifier.create("monitored_and_excluded_shard_2", "t2"),
+                        // non pk table
+                        Identifier.create("monitored_and_excluded_shard_2", "t3"));
     }
 
     private void assertTableExists(List<String> tableNames) {
