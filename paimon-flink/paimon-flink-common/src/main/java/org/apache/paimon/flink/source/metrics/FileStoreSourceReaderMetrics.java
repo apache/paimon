@@ -25,17 +25,13 @@ import org.apache.flink.runtime.metrics.MetricNames;
 /** Source reader metrics. */
 public class FileStoreSourceReaderMetrics {
 
-    // Source reader metric group
-    private final MetricGroup sourceReaderMetricGroup;
-
     private long latestFileCreationTime = UNDEFINED;
     private long lastSplitUpdateTime = UNDEFINED;
 
     public static final long UNDEFINED = -1L;
 
     public FileStoreSourceReaderMetrics(MetricGroup sourceReaderMetricGroup) {
-        this.sourceReaderMetricGroup = sourceReaderMetricGroup;
-        this.sourceReaderMetricGroup.gauge(
+        sourceReaderMetricGroup.gauge(
                 MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
     }
 
@@ -45,6 +41,7 @@ public class FileStoreSourceReaderMetrics {
         lastSplitUpdateTime = System.currentTimeMillis();
     }
 
+    @VisibleForTesting
     long getFetchTimeLag() {
         if (latestFileCreationTime != UNDEFINED) {
             return lastSplitUpdateTime - latestFileCreationTime;
