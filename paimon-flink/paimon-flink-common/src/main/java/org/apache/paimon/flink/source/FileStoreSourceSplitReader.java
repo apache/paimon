@@ -21,7 +21,6 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.table.source.DataSplit;
@@ -45,7 +44,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 
@@ -181,11 +179,10 @@ public class FileStoreSourceSplitReader
 
         // update metric when split changes
         if (sourceReaderMetrics != null && nextSplit.split() instanceof DataSplit) {
-            Optional<DataFileMeta> latestFile = ((DataSplit) nextSplit.split()).getLatestFile();
             long eventTime =
-                    latestFile.isPresent()
-                            ? latestFile.get().creationTimeEpochMillis()
-                            : FileStoreSourceReaderMetrics.UNDEFINED;
+                    ((DataSplit) nextSplit.split())
+                            .getLatestFileCreationEpochMillis()
+                            .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
             sourceReaderMetrics.recordSnapshotUpdate(eventTime);
         }
 

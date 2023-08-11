@@ -31,10 +31,9 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -77,9 +76,8 @@ public class DataSplit implements Split {
         return isStreaming;
     }
 
-    public Optional<DataFileMeta> getLatestFile() {
-        return this.dataFiles.stream()
-                .max(Comparator.comparingLong(f -> f.creationTime().getMillisecond()));
+    public OptionalLong getLatestFileCreationEpochMillis() {
+        return this.dataFiles.stream().mapToLong(DataFileMeta::creationTimeEpochMillis).max();
     }
 
     @Override
