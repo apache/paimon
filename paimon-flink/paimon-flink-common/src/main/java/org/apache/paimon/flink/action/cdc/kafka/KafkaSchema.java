@@ -32,6 +32,7 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -44,7 +45,7 @@ import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.kafkaPro
 public class KafkaSchema {
 
     private static final int MAX_RETRY = 5;
-    private static final int POLL_TIMEOUT_MILLIS = 100;
+    private static final int POLL_TIMEOUT_MILLIS = 1000;
     private final String databaseName;
     private final String tableName;
     private final Map<String, DataType> fields;
@@ -99,7 +100,10 @@ public class KafkaSchema {
         }
         int firstPartition =
                 partitionInfos.stream().map(PartitionInfo::partition).sorted().findFirst().get();
-        consumer.assign(Collections.singletonList(new TopicPartition(topic, firstPartition)));
+        Collection<TopicPartition> topicPartitions =
+                Collections.singletonList(new TopicPartition(topic, firstPartition));
+        consumer.assign(topicPartitions);
+        consumer.seekToBeginning(topicPartitions);
 
         return consumer;
     }
