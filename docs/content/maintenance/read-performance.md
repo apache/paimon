@@ -39,7 +39,7 @@ this full-compaction option without any requirements, as it will have a signific
 ### Primary Key Table
 
 For Primary Key Table, it's a 'MergeOnRead' technology. When reading data, multiple layers of LSM data are merged,
-and the number of parallelism will be limited by the number of buckets. Although Paimon's merge will be efficient,
+and the number of parallelism will be limited by the number of buckets. Although Paimon's merge performance is efficient,
 it still cannot catch up with the ordinary AppendOnly table.
 
 If you want to query fast enough in certain scenarios, but can only find older data, you can:
@@ -51,9 +51,9 @@ You can flexibly balance query performance and data latency when reading.
 
 ### Append Only Table
 
-Small files can slow reading and affect DFS stability. By default, when there are more than 'compaction.max.file-num'
-(default 50) small files in a single bucket, a compaction is triggered. However, when there are multiple buckets, many
-small files will be generated.
+Small files will slow down reading performance and affect the stability of DFS. By default, when there are more than 
+'compaction.max.file-num' (default 50) small files in a single bucket, a compaction task will be triggered to compact 
+them. Furthermore, if there are multiple buckets, many small files will be generated.
 
 You can use full-compaction to reduce small files. Full-compaction will eliminate most small files.
 
