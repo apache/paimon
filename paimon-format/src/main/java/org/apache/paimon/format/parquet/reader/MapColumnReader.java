@@ -17,6 +17,7 @@
 
 package org.apache.paimon.format.parquet.reader;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.heap.HeapArrayVector;
 import org.apache.paimon.data.columnar.heap.HeapMapVector;
@@ -60,5 +61,15 @@ public class MapColumnReader implements ColumnReader<WritableColumnVector> {
     @Override
     public void readToVector(int readNumber, WritableColumnVector vector) throws IOException {
         readBatch(readNumber, vector);
+    }
+
+    @VisibleForTesting
+    public ArrayColumnReader getKeyReader() {
+        return keyReader;
+    }
+
+    @VisibleForTesting
+    public ArrayColumnReader getValueReader() {
+        return valueReader;
     }
 }

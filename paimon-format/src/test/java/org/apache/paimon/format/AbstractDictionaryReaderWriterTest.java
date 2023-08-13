@@ -42,7 +42,7 @@ public abstract class AbstractDictionaryReaderWriterTest {
     private @TempDir java.nio.file.Path tempDir;
 
     protected Path path;
-    protected RowType rowType;
+    private RowType rowType;
 
     @BeforeEach
     public void before() throws IOException {

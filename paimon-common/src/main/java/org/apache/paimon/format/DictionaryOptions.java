@@ -57,13 +57,13 @@ public class DictionaryOptions {
         }
 
         // fields dictionary opt
-        Map<String, Boolean> fieldsDicOption = getFieldsDicOptionFromFieldPath(fieldPaths);
+        Map<String, Boolean> fieldsDicOption = getFieldPathDicOptions(fieldPaths);
         result.putAll(fieldsDicOption);
 
         return result;
     }
 
-    public Map<String, Boolean> getFieldsDicOptionFromFieldPath(List<String> fieldPaths) {
+    public Map<String, Boolean> getFieldPathDicOptions(List<String> fieldPaths) {
         Map<String, Boolean> result = new HashMap<>();
 
         Map<String, List<String>> pathsGroupByField =
@@ -75,7 +75,7 @@ public class DictionaryOptions {
                                                         ? path.substring(0, path.indexOf("."))
                                                         : path));
 
-        // Specify the dictionary config for the child paths of the field which has dictionary config.
+        // Specify the dictionary for the child paths of the field which has dictionary config
         for (Map.Entry<String, Boolean> fieldOption : fieldsDicOption.entrySet()) {
             String field = fieldOption.getKey();
             boolean dictionaryConfig = fieldOption.getValue();

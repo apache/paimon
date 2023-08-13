@@ -24,9 +24,15 @@ import org.apache.paimon.format.AbstractDictionaryReaderWriterTest;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.parquet.reader.AbstractColumnReader;
+import org.apache.paimon.format.parquet.reader.ArrayColumnReader;
+import org.apache.paimon.format.parquet.reader.ColumnReader;
+import org.apache.paimon.format.parquet.reader.MapColumnReader;
+import org.apache.paimon.format.parquet.reader.RowColumnReader;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -38,6 +44,7 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -109,7 +116,10 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
     }
 
     @Test
-    public void test() throws IOException {
+    public void testFormatDictionaryReader()
+            throws IOException, ClassNotFoundException, NoSuchFieldException,
+                    IllegalAccessException {
+        RowType rowType = getRowType();
         FormatWriterFactory writerFactory = fileFormat.createWriterFactory(rowType);
         Assertions.assertThat(writerFactory).isInstanceOf(ParquetWriterFactory.class);
 
@@ -117,12 +127,102 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
                 (ParquetReaderFactory) fileFormat.createReaderFactory(rowType);
         RecordReader<InternalRow> reader = readerFactory.createReader(LocalFileIO.create(), path);
         reader.readBatch();
-        System.out.println(reader);
+        ColumnReader[] parquetReaders = getParquetReaders(reader);
+
+        List<DataField> dataFields = rowType.getFields();
+        for (int i = 0; i < dataFields.size(); i++) {
+            System.out.println(i);
+            DataField dataField = dataFields.get(i);
+            if ("a22".equals(dataField.name())) {
+                // the field of a22 is enable dictionary
+                AbstractColumnReader parquetReader = (AbstractColumnReader) parquetReaders[i];
+                Assertions.assertThat(parquetReader.isCurrentPageDictionaryEncoded()).isTrue();
+            } else {
+                ColumnReader parquetReader = parquetReaders[i];
+                assertDisableDictionary(parquetReader, dataField.type());
+            }
+        }
+    }
+
+    public void assertDisableDictionary(ColumnReader reader, DataType dataType) {
+        switch (dataType.getTypeRoot()) {
+            case CHAR:
+            case VARCHAR:
+            case BOOLEAN:
+            case BINARY:
+            case VARBINARY:
+            case DECIMAL:
+            case TINYINT:
+            case SMALLINT:
+            case INTEGER:
+            case BIGINT:
+            case FLOAT:
+            case DOUBLE:
+            case DATE:
+            case TIME_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                AbstractColumnReader abstractColumnReader = (AbstractColumnReader) reader;
+                Assertions.assertThat(abstractColumnReader.isCurrentPageDictionaryEncoded())
+                        .isFalse();
+                break;
+            case ARRAY:
+                checkArrayDisableDictionary((ArrayColumnReader) reader);
+                break;
+            case MAP:
+                checkMapDisableDictionary((MapColumnReader) reader);
+                break;
+            case MULTISET:
+                checkMultiSetDisableDictionary((MapColumnReader) reader);
+                break;
+            case ROW:
+                RowType rowType = (RowType) dataType;
+                RowColumnReader rowColumnReader = (RowColumnReader) reader;
+
+                List<ColumnReader> fieldReaders = rowColumnReader.getFieldReaders();
+                List<DataType> fieldTypes = rowType.getFieldTypes();
+                for (int i = 0; i < fieldReaders.size(); i++) {
+                    ColumnReader columnReader = fieldReaders.get(i);
+                    DataType dataField = fieldTypes.get(i);
+                    assertDisableDictionary(columnReader, dataField);
+                }
+                break;
+            default:
+                throw new RuntimeException("UnSupport Type:" + dataType.getTypeRoot());
+        }
+    }
+
+    private static void checkMapDisableDictionary(MapColumnReader reader) {
+        ArrayColumnReader keyReader = reader.getKeyReader();
+        checkArrayDisableDictionary(keyReader);
+
+        ArrayColumnReader valueReader = reader.getValueReader();
+        checkArrayDisableDictionary(valueReader);
+    }
+
+    private static void checkMultiSetDisableDictionary(MapColumnReader reader) {
+        ArrayColumnReader keyReader = reader.getKeyReader();
+        checkArrayDisableDictionary(keyReader);
+    }
+
+    private static void checkArrayDisableDictionary(ArrayColumnReader reader) {
+        ArrayColumnReader parquetReader = reader;
+        Assertions.assertThat(parquetReader.isCurrentPageDictionaryEncoded()).isFalse();
+    }
+
+    private static ColumnReader[] getParquetReaders(RecordReader<InternalRow> reader)
+            throws ClassNotFoundException, NoSuchFieldException, IllegalAccessException {
+        Class<?> aClass =
+                Class.forName(
+                        "org.apache.paimon.format.parquet.ParquetReaderFactory$ParquetReader");
+        Field field = aClass.getDeclaredField("columnReaders");
+        field.setAccessible(true);
+        return (ColumnReader[]) field.get(reader);
     }
 
     @Test
     public void testTraversalRowType() {
-        RowType rowType1 =
+        RowType rowType =
                 RowType.builder()
                         .field(
                                 "a",
@@ -156,12 +256,12 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
                             Pair.of("x.a.b.c", DataTypes.STRING()),
                             Pair.of("x.d.g", DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING())),
                             Pair.of("x.a.b.h", DataTypes.ARRAY(DataTypes.STRING())));
-            Assertions.assertThat(RowtypeToFieldPathConverter.traversalRowType("x", rowType1))
+            Assertions.assertThat(RowtypeToFieldPathConverter.traversalRowType("x", rowType))
                     .hasSameElementsAs(expected);
         }
 
         {
-            List<String> allFieldPath = RowtypeToFieldPathConverter.getAllFieldPath(rowType1);
+            List<String> allFieldPath = RowtypeToFieldPathConverter.getAllFieldPath(rowType);
             List<String> expected =
                     Lists.newArrayList(
                             "a.b.c",

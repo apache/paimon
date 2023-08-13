@@ -287,4 +287,8 @@ public abstract class BaseVectorizedColumnReader implements ColumnReader<Writabl
             return 0;
         }
     }
+
+    public boolean isCurrentPageDictionaryEncoded() {
+        return isCurrentPageDictionaryEncoded;
+    }
 }

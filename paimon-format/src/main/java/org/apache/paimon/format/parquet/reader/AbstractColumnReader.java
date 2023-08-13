@@ -295,4 +295,8 @@ public abstract class AbstractColumnReader<VECTOR extends WritableColumnVector>
      */
     protected abstract void readBatchFromDictionaryIds(
             int rowId, int num, VECTOR column, WritableIntVector dictionaryIds);
+
+    public boolean isCurrentPageDictionaryEncoded() {
+        return isCurrentPageDictionaryEncoded;
+    }
 }

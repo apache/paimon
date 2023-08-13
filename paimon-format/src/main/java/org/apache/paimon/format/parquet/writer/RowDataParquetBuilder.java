@@ -94,9 +94,14 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
             parquetRowDataBuilder.withDictionaryEncoding(
                     dictionaryOptions.isTableDictionaryEnable());
             if (dictionaryOptions.hasFieldsDicOption()) {
+                // Convert paimon row To parquet feild paths
                 List<String> allFieldPath = RowtypeToFieldPathConverter.getAllFieldPath(rowType);
+
+                // Get field paths dictionary options
                 Map<String, Boolean> fieldsDicOptions =
-                        dictionaryOptions.getFieldsDicOptionFromFieldPath(allFieldPath);
+                        dictionaryOptions.getFieldPathDicOptions(allFieldPath);
+
+                // Specify field path dictionary options to Parquet
                 for (Map.Entry<String, Boolean> fieldsDicOption : fieldsDicOptions.entrySet()) {
                     parquetRowDataBuilder.withDictionaryEncoding(
                             fieldsDicOption.getKey(), fieldsDicOption.getValue());

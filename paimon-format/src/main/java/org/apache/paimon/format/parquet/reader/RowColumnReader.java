@@ -17,6 +17,7 @@
 
 package org.apache.paimon.format.parquet.reader;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.columnar.heap.HeapRowVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 
@@ -54,5 +55,10 @@ public class RowColumnReader implements ColumnReader<WritableColumnVector> {
                 }
             }
         }
+    }
+
+    @VisibleForTesting
+    public List<ColumnReader> getFieldReaders() {
+        return fieldReaders;
     }
 }

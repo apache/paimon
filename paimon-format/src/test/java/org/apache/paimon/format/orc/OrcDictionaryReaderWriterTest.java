@@ -62,7 +62,7 @@ public class OrcDictionaryReaderWriterTest extends AbstractDictionaryReaderWrite
     @Test
     public void testOrcWriterOpt() {
         OrcWriterFactory writerFactory =
-                (OrcWriterFactory) getFileFormat().createWriterFactory(rowType);
+                (OrcWriterFactory) getFileFormat().createWriterFactory(getRowType());
         OrcFile.WriterOptions writerOptions = writerFactory.getWriterOptions();
         String[] directEncodingColumns = writerOptions.getDirectEncodingColumns().split(",");
         ArrayList<String> expected =
@@ -76,7 +76,7 @@ public class OrcDictionaryReaderWriterTest extends AbstractDictionaryReaderWrite
     private TreeReaderFactory.TreeReader[] getReaderChild()
             throws IOException, ClassNotFoundException, NoSuchFieldException,
                     IllegalAccessException {
-        FormatReaderFactory readerFactory = fileFormat.createReaderFactory(rowType);
+        FormatReaderFactory readerFactory = fileFormat.createReaderFactory(getRowType());
         RecordReader<InternalRow> reader = readerFactory.createReader(LocalFileIO.create(), path);
 
         Class<?> vectorizedReaderClass =
@@ -90,7 +90,7 @@ public class OrcDictionaryReaderWriterTest extends AbstractDictionaryReaderWrite
     }
 
     @Test
-    public void testFormatDictionaryIT()
+    public void testFormatDictionaryReader()
             throws IOException, NoSuchFieldException, ClassNotFoundException,
                     IllegalAccessException {
         TreeReaderFactory.TreeReader[] child = getReaderChild();
