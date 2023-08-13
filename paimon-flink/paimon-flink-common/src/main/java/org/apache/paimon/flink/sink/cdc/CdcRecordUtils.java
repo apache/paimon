@@ -22,6 +22,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.slf4j.Logger;
@@ -54,10 +55,10 @@ public class CdcRecordUtils {
         GenericRow genericRow = new GenericRow(dataFields.size());
         for (int i = 0; i < dataFields.size(); i++) {
             DataField dataField = dataFields.get(i);
-            genericRow.setField(
-                    i,
-                    TypeUtils.castFromString(
-                            record.fields().get(dataField.name()), dataField.type()));
+            String fieldValue = record.fields().get(dataField.name());
+            if (!StringUtils.isBlank(fieldValue)) {
+                genericRow.setField(i, TypeUtils.castFromString(fieldValue, dataField.type()));
+            }
         }
         return genericRow;
     }

@@ -50,6 +50,10 @@ public class TypeUtils {
     }
 
     public static Object castFromString(String s, DataType type) {
+        if (StringUtils.isBlank(s)) {
+            return null;
+        }
+
         BinaryString str = BinaryString.fromString(s);
         switch (type.getTypeRoot()) {
             case CHAR:
