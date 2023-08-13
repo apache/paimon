@@ -28,6 +28,7 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 
@@ -37,7 +38,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public interface Expression extends Serializable {
 
     List<String> SUPPORTED_EXPRESSION =
-            Arrays.asList("year", "month", "day", "hour", "substring", "truncate");
+            Arrays.asList("year", "month", "day", "hour", "date_format", "substring", "truncate");
 
     /** Return name of referenced field. */
     String fieldReference();
@@ -59,6 +60,8 @@ public interface Expression extends Serializable {
                 return day(fieldReference);
             case "hour":
                 return hour(fieldReference);
+            case "date_format":
+                return dateFormat(fieldReference, literals);
             case "substring":
                 return substring(fieldReference, literals);
             case "truncate":
@@ -86,6 +89,15 @@ public interface Expression extends Serializable {
 
     static Expression hour(String fieldReference) {
         return new HourComputer(fieldReference);
+    }
+
+    static Expression dateFormat(String fieldReference, String... literals) {
+        checkArgument(
+                literals.length == 1,
+                String.format(
+                        "'date_format' expression supports one argument, but found '%s'.",
+                        literals.length));
+        return new DateFormat(fieldReference, literals[0]);
     }
 
     static Expression substring(String fieldReference, String... literals) {
@@ -236,6 +248,36 @@ public interface Expression extends Serializable {
         public String eval(String input) {
             LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getHour());
+        }
+    }
+
+    /** date format from a time input. */
+    final class DateFormat implements Expression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String fieldReference;
+        private final DateTimeFormatter formatter;
+
+        private DateFormat(String fieldReference, String pattern) {
+            this.fieldReference = fieldReference;
+            this.formatter = DateTimeFormatter.ofPattern(pattern);
+        }
+
+        @Override
+        public String fieldReference() {
+            return fieldReference;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.STRING();
+        }
+
+        @Override
+        public String eval(String input) {
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
+            return localDateTime.format(formatter);
         }
     }
 
