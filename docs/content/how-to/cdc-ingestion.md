@@ -36,6 +36,8 @@ We currently support the following sync ways:
 3. [API Synchronizing Table]({{< ref "/api/flink-api#cdc-ingestion-table" >}}): synchronize your custom DataStream input into one Paimon table.
 4. Kafka Synchronizing Table: synchronize one Kafka topic's table into one Paimon table. 
 5. Kafka Synchronizing Database: synchronize one Kafka topic containing multiple tables or multiple topics containing one table each into one Paimon database.
+6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table. 
+7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
 
 ## MySQL
 
@@ -409,6 +411,103 @@ Synchronization from multiple Kafka topics to Paimon database.
     --kafka-conf topic=order\;logistic_order\;user \
     --kafka-conf properties.group.id=123456 \
     --kafka-conf value.format=canal-json \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4
+```
+## MongoDB
+
+### Prepare MongoDB Bundled Jar
+
+```
+flink-sql-connector-mongodb-*.jar
+```
+
+### Synchronizing Tables
+
+By using [MongoDBSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one collection from MongoDB into one Paimon table.
+
+To use this feature through `flink run`, run the following shell command.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-table
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--partition-keys <partition-keys>] \
+    [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+```
+
+{{< generated/mongodb_sync_table >}}
+
+If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified MongoDB collection. 
+
+Example 1: synchronize collection into one Paimon table
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition-keys pt \
+    --mongodb-conf hosts=127.0.0.1:27017 \
+    --mongodb-conf username=root \
+    --mongodb-conf password=123456 \
+    --mongodb-conf database='source_db' \
+    --mongodb-conf collection='source_table1' \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4
+```
+
+### Synchronizing Databases
+
+By using [MongoDBSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MongoDB database into one Paimon database.
+
+To use this feature through `flink run`, run the following shell command.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-database
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    [--table-prefix <paimon-table-prefix>] \
+    [--table-suffix <paimon-table-suffix>] \
+    [--including-tables <mongodb-table-name|name-regular-expr>] \
+    [--excluding-tables <mongodb-table-name|name-regular-expr>] \
+    [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+```
+
+{{< generated/mongodb_sync_database >}}
+
+All collections to be synchronized need to set _id as the primary key.
+For each MongoDB collection to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table. Its schema will be derived from all specified MongoDB collection. If the Paimon table already exists, its schema will be compared against the schema of all specified MongoDB collection.
+
+Example 1: synchronize entire database
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --mongodb-conf hosts=127.0.0.1 \
+    --mongodb-conf username=root \
+    --mongodb-conf password=123456 \
+    --mongodb-conf database=source_db \
     --catalog-conf metastore=hive \
     --catalog-conf uri=thrift://hive-metastore:9083 \
     --table-conf bucket=4 \
