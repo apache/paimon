@@ -367,6 +367,7 @@ public class CreateTableITCase extends HiveTestBase {
         }
     }
 
+    /** Mock create table failed. */
     public static class MockPaimonMetaHook extends PaimonMetaHook {
 
         public MockPaimonMetaHook(Configuration conf) {
@@ -379,6 +380,7 @@ public class CreateTableITCase extends HiveTestBase {
         }
     }
 
+    /** StorageHanlder with MockPaimonMetaHook. */
     public static class MockPaimonStorageHandler extends PaimonStorageHandler {
         @Override
         public HiveMetaHook getMetaHook() {

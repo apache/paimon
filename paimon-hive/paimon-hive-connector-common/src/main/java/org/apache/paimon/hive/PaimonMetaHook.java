@@ -64,7 +64,7 @@ public class PaimonMetaHook implements HiveMetaHook {
     private final Configuration conf;
 
     // paimon table existed before create hive table
-    private Set<Identifier> existingPaimonTable = new HashSet<>();
+    private final Set<Identifier> existingPaimonTable = new HashSet<>();
 
     public PaimonMetaHook(Configuration conf) {
         this.conf = conf;
