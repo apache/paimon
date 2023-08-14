@@ -120,7 +120,13 @@ public class TagAutoCreation {
                 tryToTag(snapshotManager.snapshot(nextSnapshot));
                 nextSnapshot++;
             } else {
-                break;
+                // avoid snapshot has been expired
+                Long earliest = snapshotManager.earliestSnapshotId();
+                if (earliest != null && earliest > nextSnapshot) {
+                    nextSnapshot = earliest;
+                } else {
+                    break;
+                }
             }
         }
     }

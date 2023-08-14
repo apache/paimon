@@ -35,6 +35,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 import static org.apache.paimon.CoreOptions.SINK_WATERMARK_TIME_ZONE;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_DELAY;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_PERIOD;
@@ -72,9 +74,21 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         assertThat(tagManager.tags().values())
                 .containsOnly("2023-07-18 12", "2023-07-18 13", "2023-07-18 14");
 
-        // test restore
-        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
-        commit.commit(new ManifestCommittable(5, utcMills("2023-07-18T16:00:00")));
+        // test restore with snapshot expiration
+        commit.commit(new ManifestCommittable(5, utcMills("2023-07-18T15:01:00")));
+        commit.commit(new ManifestCommittable(6, utcMills("2023-07-18T15:02:00")));
+
+        Options expireSetting = new Options();
+        expireSetting.set(SNAPSHOT_NUM_RETAINED_MIN, 1);
+        expireSetting.set(SNAPSHOT_NUM_RETAINED_MAX, 1);
+        commit = table.copy(expireSetting.toMap()).newCommit(commitUser).ignoreEmptyCommit(false);
+
+        // trigger snapshot expiration
+        commit.commit(new ManifestCommittable(7, utcMills("2023-07-18T15:03:00")));
+        commit.commit(new ManifestCommittable(8, utcMills("2023-07-18T15:04:00")));
+
+        // check tags
+        commit.commit(new ManifestCommittable(9, utcMills("2023-07-18T16:00:00")));
         assertThat(tagManager.tags().values())
                 .containsOnly("2023-07-18 13", "2023-07-18 14", "2023-07-18 15");
     }
