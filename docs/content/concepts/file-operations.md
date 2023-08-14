@@ -155,7 +155,7 @@ The second `commit` takes place and executing `SELECT * FROM T` will return
 10 rows. A new snapshot, namely `snapshot-2`, is created and gives us the 
 following physical file layout:
 ```bash
- % ls -atR . 
+ % ls -1tR . 
 ./T:
 dt=20230501
 dt=20230502	
@@ -178,12 +178,12 @@ EARLIEST
 snapshot-1
 
 ./T/manifest:
-manifest-list-9ac2-5e79-4978-a3bc-86c25f1a303f-1	 # delta manifest list for snapshot-2
-manifest-list-9ac2-5e79-4978-a3bc-86c25f1a303f-0  # base manifest list for snapshot-2	
+manifest-list-9ac2-5e79-4978-a3bc-86c25f1a303f-1 # delta manifest list for snapshot-2
+manifest-list-9ac2-5e79-4978-a3bc-86c25f1a303f-0 # base manifest list for snapshot-2	
 manifest-f1267033-e246-4470-a54c-5c27fdbdd074-0	 # manifest file for snapshot-2
 
-manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-1	 # delta manifest list for snapshot-1 
-manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-0  # base manifest list for snapshot-1
+manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-1 # delta manifest list for snapshot-1 
+manifest-list-4ccc-c07f-4090-958c-cfe3ce3889e5-0 # base manifest list for snapshot-1
 manifest-2b833ea4-d7dc-4de0-ae0d-ad76eced75cc-0  # manifest file for snapshot-1
 
 ./T/dt=20230501/bucket-0:
@@ -245,6 +245,7 @@ Let's trigger the full-compaction now, and run a dedicated compaction job throug
 {{< label Batch >}}
 ```bash  
 <FLINK_HOME>/bin/flink run \
+    -D execution.runtime-mode=batch \
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse <warehouse-path> \
