@@ -257,11 +257,12 @@ public interface Expression extends Serializable {
         private static final long serialVersionUID = 1L;
 
         private final String fieldReference;
-        private final DateTimeFormatter formatter;
+        private final String pattern;
+        private transient DateTimeFormatter formatter;
 
         private DateFormat(String fieldReference, String pattern) {
             this.fieldReference = fieldReference;
-            this.formatter = DateTimeFormatter.ofPattern(pattern);
+            this.pattern = pattern;
         }
 
         @Override
@@ -276,6 +277,9 @@ public interface Expression extends Serializable {
 
         @Override
         public String eval(String input) {
+            if (formatter == null) {
+                formatter = DateTimeFormatter.ofPattern(pattern);
+            }
             LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return localDateTime.format(formatter);
         }
