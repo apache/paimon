@@ -107,8 +107,7 @@ public class TagAutoCreation {
                     firstNonNull(snapshotManager.earliestSnapshotId(), FIRST_SNAPSHOT_ID);
         } else {
             Snapshot lastTag = tags.lastKey();
-            // avoid that job restarts and is initialized to expired snapshot
-            this.nextSnapshot = Math.max(snapshotManager.earliestSnapshotId(), lastTag.id()) + 1;
+            this.nextSnapshot = lastTag.id() + 1;
 
             LocalDateTime time = periodHandler.tagToTime(tags.get(lastTag));
             this.nextTag = periodHandler.nextTagTime(time);
@@ -116,6 +115,8 @@ public class TagAutoCreation {
     }
 
     public void run() {
+        // avoid snapshot has been expired
+        nextSnapshot = Math.max(snapshotManager.earliestSnapshotId(), nextSnapshot);
         while (true) {
             if (snapshotManager.snapshotExists(nextSnapshot)) {
                 tryToTag(snapshotManager.snapshot(nextSnapshot));
