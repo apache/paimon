@@ -378,6 +378,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(), // _id
                             DataTypes.DECIMAL(2, 1).notNull(), // pt
+                            DataTypes.BOOLEAN(), // _bit1
+                            DataTypes.BINARY(8), // _bit
                             DataTypes.BOOLEAN(), // _tinyint1
                             DataTypes.BOOLEAN(), // _boolean
                             DataTypes.BOOLEAN(), // _bool
@@ -455,6 +457,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new String[] {
                             "_id",
                             "pt",
+                            "_bit1",
+                            "_bit",
                             "_tinyint1",
                             "_boolean",
                             "_bool",
@@ -534,6 +538,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 Arrays.asList(
                         "+I["
                                 + "1, 1.1, "
+                                + "true, [-17, -65, -67, 7, 0, 0, 0, 0, 0, 0], "
                                 + "true, true, false, 1, 2, 3, "
                                 + "1000, 2000, 3000, "
                                 + "100000, 200000, 300000, "
@@ -578,6 +583,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "]",
                         "+I["
                                 + "2, 2.2, "
+                                + "NULL, NULL, "
                                 + "NULL, NULL, NULL, NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "

@@ -40,6 +40,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeRefe
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import io.debezium.data.Bits;
 import io.debezium.data.geometry.Geometry;
 import io.debezium.data.geometry.Point;
 import io.debezium.relational.history.TableChanges;
@@ -349,7 +350,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
             // pay attention to the temporal types
             // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
-            if ("bytes".equals(mySqlType) && className == null) {
+            if (("bytes".equals(mySqlType) && className == null)
+                    || Bits.LOGICAL_NAME.equals(className)) {
                 // MySQL binary, varbinary, blob
                 newValue = new String(Base64.getDecoder().decode(oldValue));
             } else if ("bytes".equals(mySqlType) && Decimal.LOGICAL_NAME.equals(className)) {

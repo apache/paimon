@@ -152,6 +152,11 @@ public class MySqlTypeUtils {
             Boolean tinyInt1ToBool) {
         switch (type.toUpperCase()) {
             case BIT:
+                if (length == null || length == 1) {
+                    return DataTypes.BOOLEAN();
+                } else {
+                    return DataTypes.BINARY((length + 7) / 8);
+                }
             case BOOLEAN:
             case BOOL:
                 return DataTypes.BOOLEAN();
