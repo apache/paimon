@@ -329,7 +329,9 @@ public class CreateTableITCase extends HiveTestBase {
                 hiveShell.execute(hiveSql);
             } catch (Throwable ignore) {
             } finally {
-                Assertions.assertThat(LocalFileIO.create().exists(tablePath)).isTrue();
+                boolean isPresent =
+                        new SchemaManager(LocalFileIO.create(), tablePath).latest().isPresent();
+                Assertions.assertThat(isPresent).isTrue();
             }
         }
 
@@ -358,7 +360,9 @@ public class CreateTableITCase extends HiveTestBase {
             } finally {
                 Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
                 Path tablePath = AbstractCatalog.dataTableLocation(path, identifier);
-                Assertions.assertThat(LocalFileIO.create().exists(tablePath)).isFalse();
+                boolean isPresent =
+                        new SchemaManager(LocalFileIO.create(), tablePath).latest().isPresent();
+                Assertions.assertThat(isPresent).isFalse();
             }
         }
     }

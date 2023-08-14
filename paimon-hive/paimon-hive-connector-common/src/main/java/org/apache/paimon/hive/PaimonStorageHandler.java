@@ -125,5 +125,4 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
         decomposed.pushedPredicate = (ExprNodeGenericFuncDesc) predicate;
         return decomposed;
     }
-
 }
