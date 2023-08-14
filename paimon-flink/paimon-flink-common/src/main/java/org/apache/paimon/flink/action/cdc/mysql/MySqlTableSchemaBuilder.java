@@ -32,7 +32,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Schema builder for MySQL cdc. */
@@ -40,10 +39,13 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
+    private final boolean convertTinyint1ToBool;
 
-    public MySqlTableSchemaBuilder(Map<String, String> tableConfig, boolean caseSensitive) {
+    public MySqlTableSchemaBuilder(
+            Map<String, String> tableConfig, boolean caseSensitive, boolean convertTinyint1ToBool) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
+        this.convertTinyint1ToBool = convertTinyint1ToBool;
     }
 
     @Override
@@ -63,7 +65,7 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
                                     element.get("typeExpression").asText(),
                                     precision,
                                     scale,
-                                    MYSQL_CONVERTER_TINYINT1_BOOL.defaultValue())
+                                    convertTinyint1ToBool)
                             .copy(element.get("optional").asBoolean()));
         }
 
