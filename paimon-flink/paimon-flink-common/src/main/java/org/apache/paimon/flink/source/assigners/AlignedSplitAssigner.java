@@ -114,6 +114,11 @@ public class AlignedSplitAssigner implements SplitAssigner {
                 "The head pending splits is not empty. This is a bug, please file an issue.");
     }
 
+    public Long minRemainingSnapshotId() {
+        PendingSnapshot head = pendingSplitAssignment.peek();
+        return head != null ? head.snapshotId : null;
+    }
+
     private static class PendingSnapshot {
         private final long snapshotId;
         private final boolean isPlaceHolder;
