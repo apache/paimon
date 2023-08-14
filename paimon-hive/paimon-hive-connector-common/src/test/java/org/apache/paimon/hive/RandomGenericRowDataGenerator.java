@@ -78,7 +78,7 @@ public class RandomGenericRowDataGenerator {
                     "string",
                     "binary",
                     "date",
-                    "time",
+                    "string",
                     "timestamp",
                     "array<bigint>",
                     "map<string,int>");
