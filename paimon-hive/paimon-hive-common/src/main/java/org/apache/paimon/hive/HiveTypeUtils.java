@@ -37,6 +37,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
@@ -170,6 +171,11 @@ public class HiveTypeUtils {
         @Override
         public TypeInfo visit(DateType dateType) {
             return TypeInfoFactory.dateTypeInfo;
+        }
+
+        @Override
+        public TypeInfo visit(TimeType timeType) {
+            return TypeInfoFactory.stringTypeInfo;
         }
 
         @Override

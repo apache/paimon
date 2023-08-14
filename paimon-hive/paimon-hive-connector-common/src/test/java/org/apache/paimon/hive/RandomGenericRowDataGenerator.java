@@ -57,6 +57,7 @@ public class RandomGenericRowDataGenerator {
                     DataTypes.STRING(),
                     DataTypes.VARBINARY(Integer.MAX_VALUE),
                     DataTypes.DATE(),
+                    DataTypes.TIME(),
                     DataTypes.TIMESTAMP(3),
                     DataTypes.ARRAY(DataTypes.BIGINT()),
                     DataTypes.MAP(DataTypes.STRING(), DataTypes.INT()));
@@ -77,6 +78,7 @@ public class RandomGenericRowDataGenerator {
                     "string",
                     "binary",
                     "date",
+                    "time",
                     "timestamp",
                     "array<bigint>",
                     "map<string,int>");
@@ -97,6 +99,7 @@ public class RandomGenericRowDataGenerator {
                     "f_string",
                     "f_binary",
                     "f_date",
+                    "f_time",
                     "f_timestamp",
                     "f_list_long",
                     "f_map_string_int");
@@ -117,6 +120,7 @@ public class RandomGenericRowDataGenerator {
                     "comment_string",
                     "comment_binary",
                     "comment_date",
+                    "comment_time",
                     "comment_timestamp",
                     "comment_list_long",
                     "comment_map_string_int");
@@ -166,6 +170,7 @@ public class RandomGenericRowDataGenerator {
                         BinaryString.fromString(randomString(100)),
                         randomBytes,
                         random.nextInt(10000),
+                        random.nextInt(86400),
                         Timestamp.fromEpochMillis(random.nextLong(Integer.MAX_VALUE)),
                         new GenericArray(randomLongArray),
                         new GenericMap(randomMap));

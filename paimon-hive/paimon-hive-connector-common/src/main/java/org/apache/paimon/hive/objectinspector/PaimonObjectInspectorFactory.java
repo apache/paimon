@@ -26,6 +26,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TimeType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
@@ -34,6 +35,8 @@ import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
 
 import java.util.List;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory to create {@link ObjectInspector}s according to the given {@link DataType}. */
 public class PaimonObjectInspectorFactory {
@@ -67,6 +70,10 @@ public class PaimonObjectInspectorFactory {
                 }
             case DATE:
                 return new PaimonDateObjectInspector();
+            case TIME_WITHOUT_TIME_ZONE:
+                TimeType timeType = (TimeType) logicalType;
+                checkArgument(timeType.getPrecision() <= 3, "TIME type precision must be <= 3.");
+                return new PaimonTimeObjectInspector();
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 return new PaimonTimestampObjectInspector();
             case ARRAY:
