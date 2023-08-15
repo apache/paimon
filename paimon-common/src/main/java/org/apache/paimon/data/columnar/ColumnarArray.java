@@ -116,7 +116,7 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
         if (byteArray.len == byteArray.data.length) {
             return byteArray.data;
         } else {
-            return Arrays.copyOfRange(byteArray.data, byteArray.offset, byteArray.len);
+            return Arrays.copyOfRange(byteArray.data, 0, byteArray.len);
         }
     }
 
