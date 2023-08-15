@@ -18,7 +18,6 @@
 
 package org.apache.paimon.hive.objectinspector;
 
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
@@ -48,7 +47,7 @@ public class PaimonTimeObjectInspector extends AbstractPrimitiveJavaObjectInspec
     }
 
     @Override
-    public BinaryString convert(Object value) {
-        return value == null ? null : BinaryString.fromString(getPrimitiveJavaObject(value));
+    public Integer convert(Object value) {
+        return value == null ? null : DateTimeUtils.parseTime((String) value);
     }
 }
