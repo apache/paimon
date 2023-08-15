@@ -62,7 +62,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
         List<String> lines =
-                readLines(String.format("kafka.canal/table/%s/canal-data-1.txt", sourceDir));
+                readLines(String.format("kafka/canal/table/%s/canal-data-1.txt", sourceDir));
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -118,7 +118,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         try {
             writeRecordsToKafka(
                     topic,
-                    readLines(String.format("kafka.canal/table/%s/canal-data-2.txt", sourceDir)));
+                    readLines(String.format("kafka/canal/table/%s/canal-data-2.txt", sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -144,7 +144,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         try {
             writeRecordsToKafka(
                     topic,
-                    readLines(String.format("kafka.canal/table/%s/canal-data-3.txt", sourceDir)));
+                    readLines(String.format("kafka/canal/table/%s/canal-data-3.txt", sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -171,7 +171,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         try {
             writeRecordsToKafka(
                     topic,
-                    readLines(String.format("kafka.canal/table/%s/canal-data-4.txt", sourceDir)));
+                    readLines(String.format("kafka/canal/table/%s/canal-data-4.txt", sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -202,7 +202,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         try {
             writeRecordsToKafka(
                     topic,
-                    readLines(String.format("kafka.canal/table/%s/canal-data-5.txt", sourceDir)));
+                    readLines(String.format("kafka/canal/table/%s/canal-data-5.txt", sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -238,7 +238,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
         List<String> lines =
-                readLines("kafka.canal/table/schemaevolutionmultiple/canal-data-1.txt");
+                readLines("kafka/canal/table/schemaevolutionmultiple/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -291,7 +291,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         try {
             writeRecordsToKafka(
-                    topic, readLines("kafka.canal/table/schemaevolutionmultiple/canal-data-2.txt"));
+                    topic, readLines("kafka/canal/table/schemaevolutionmultiple/canal-data-2.txt"));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -332,7 +332,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         createTestTopic(topic, 1, 1);
 
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/alltype/canal-data.txt");
+        List<String> lines = readLines("kafka/canal/table/alltype/canal-data.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -611,14 +611,14 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "not_support";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/schemaevolution/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/schemaevolution/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
+        kafkaConfig.put("value.format", "togg-json");
         kafkaConfig.put("topic", topic);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -644,7 +644,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("This format: ogg-json is not support.");
+                .hasMessage("This format: togg-json is not supported.");
     }
 
     @Test
@@ -653,7 +653,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "no_non_ddl_data";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/nononddldata/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/nononddldata/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -695,7 +695,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "assert_schema_compatible";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/schemaevolution/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/schemaevolution/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -752,7 +752,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "start_up_specific";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/startupmode/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -811,7 +811,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "start_up_latest";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/startupmode/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -848,7 +848,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         waitJobRunning(client);
 
         try {
-            writeRecordsToKafka(topic, readLines("kafka.canal/table/startupmode/canal-data-2.txt"));
+            writeRecordsToKafka(topic, readLines("kafka/canal/table/startupmode/canal-data-2.txt"));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -874,7 +874,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "start_up_timestamp";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/startupmode/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -913,7 +913,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         waitJobRunning(client);
 
         try {
-            writeRecordsToKafka(topic, readLines("kafka.canal/table/startupmode/canal-data-2.txt"));
+            writeRecordsToKafka(topic, readLines("kafka/canal/table/startupmode/canal-data-2.txt"));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -939,7 +939,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "start_up_earliest";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/startupmode/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -976,7 +976,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         waitJobRunning(client);
 
         try {
-            writeRecordsToKafka(topic, readLines("kafka.canal/table/startupmode/canal-data-2.txt"));
+            writeRecordsToKafka(topic, readLines("kafka/canal/table/startupmode/canal-data-2.txt"));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -1004,7 +1004,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "start_up_group";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/startupmode/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/startupmode/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -1041,7 +1041,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         waitJobRunning(client);
 
         try {
-            writeRecordsToKafka(topic, readLines("kafka.canal/table/startupmode/canal-data-2.txt"));
+            writeRecordsToKafka(topic, readLines("kafka/canal/table/startupmode/canal-data-2.txt"));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }

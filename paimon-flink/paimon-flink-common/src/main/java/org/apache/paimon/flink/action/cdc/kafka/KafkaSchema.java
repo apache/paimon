@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.kafka.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
+import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.types.DataType;
 
 import org.apache.flink.configuration.Configuration;
@@ -40,6 +42,7 @@ import java.util.Objects;
 import java.util.Properties;
 
 import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.kafkaPropertiesGroupId;
+import static org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat.getDataFormat;
 
 /** Utility class to load canal kafka schema. */
 public class KafkaSchema {
@@ -117,16 +120,13 @@ public class KafkaSchema {
             ConsumerRecords<String, String> records =
                     consumer.poll(Duration.ofMillis(POLL_TIMEOUT_MILLIS));
             for (ConsumerRecord<String, String> record : records) {
-                String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
-                if ("canal-json".equals(format)) {
-                    CanalRecordParser parser = new CanalRecordParser(true, Collections.emptyList());
-                    KafkaSchema kafkaSchema = parser.getKafkaSchema(record.value());
-                    if (kafkaSchema != null) {
-                        return kafkaSchema;
-                    }
-                } else {
-                    throw new UnsupportedOperationException(
-                            "This format: " + format + " is not support.");
+                DataFormat format = getDataFormat(kafkaConfig);
+                RecordParser recordParser =
+                        format.createParser(
+                                true, new TableNameConverter(true), Collections.emptyList());
+                KafkaSchema kafkaSchema = recordParser.getKafkaSchema(record.value());
+                if (kafkaSchema != null) {
+                    return kafkaSchema;
                 }
             }
             if (retry == MAX_RETRY) {

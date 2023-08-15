@@ -46,7 +46,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
-public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
+public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
@@ -54,32 +54,31 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         final String topic1 = "schema_evolution_0";
         final String topic2 = "schema_evolution_1";
-        final String topic3 = "schema_evolution_2";
         boolean writeOne = false;
-        int fileCount = 3;
-        List<String> topics = Arrays.asList(topic1, topic2, topic3);
+        int fileCount = 2;
+        List<String> topics = Arrays.asList(topic1, topic2);
         topics.forEach(
                 topic -> {
                     createTestTopic(topic, 1, 1);
                 });
 
-        // ---------- Write the Canal json into Kafka -------------------
+        // ---------- Write the ogg json into Kafka -------------------
 
         for (int i = 0; i < fileCount; i++) {
             try {
                 writeRecordsToKafka(
                         topics.get(i),
                         readLines(
-                                "kafka/canal/database/schemaevolution/topic"
+                                "kafka/ogg/database/schemaevolution/topic"
                                         + i
-                                        + "/canal-data-1.txt"));
+                                        + "/ogg-data-1.txt"));
             } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
+                throw new Exception("Failed to write ogg data to Kafka.", e);
             }
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -107,30 +106,30 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         final String topic = "schema_evolution";
         boolean writeOne = true;
-        int fileCount = 3;
+        int fileCount = 2;
         List<String> topics = Collections.singletonList(topic);
         topics.forEach(
                 t -> {
                     createTestTopic(t, 1, 1);
                 });
 
-        // ---------- Write the Canal json into Kafka -------------------
+        // ---------- Write the ogg json into Kafka -------------------
 
         for (int i = 0; i < fileCount; i++) {
             try {
                 writeRecordsToKafka(
                         topics.get(0),
                         readLines(
-                                "kafka/canal/database/schemaevolution/topic"
+                                "kafka/ogg/database/schemaevolution/topic"
                                         + i
-                                        + "/canal-data-1.txt"));
+                                        + "/ogg-data-1.txt"));
             } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
+                throw new Exception("Failed to write ogg data to Kafka.", e);
             }
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -154,122 +153,88 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     private void testSchemaEvolutionImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
-        waitTablesCreated("t1", "t2");
+        waitTablesCreated("T1", "T2");
 
-        FileStoreTable table1 = getFileStoreTable("t1");
-        FileStoreTable table2 = getFileStoreTable("t2");
+        FileStoreTable table1 = getFileStoreTable("T1");
+        FileStoreTable table2 = getFileStoreTable("T2");
 
         RowType rowType1 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
-                        new String[] {"k", "v1"});
-        List<String> primaryKeys1 = Collections.singletonList("k");
-        List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys1 = Collections.singletonList("id");
+        List<String> expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175]",
+                        "+I[102, car battery, 12V car battery, 8.100000381469727]");
         waitForResult(expected, table1, rowType1, primaryKeys1);
 
         RowType rowType2 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
-                            DataTypes.INT(),
-                            DataTypes.BIGINT()
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
                         },
-                        new String[] {"k1", "k2", "v1", "v2"});
-        List<String> primaryKeys2 = Arrays.asList("k1", "k2");
-        expected = Arrays.asList("+I[2, two, 20, 200]", "+I[4, four, 40, 400]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys2 = Collections.singletonList("id");
+        List<String> expected2 =
+                Arrays.asList(
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.800000011920929]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
+        waitForResult(expected2, table2, rowType2, primaryKeys2);
 
         for (int i = 0; i < fileCount; i++) {
             try {
                 writeRecordsToKafka(
                         writeOne ? topics.get(0) : topics.get(i),
                         readLines(
-                                "kafka/canal/database/schemaevolution/topic"
+                                "kafka/ogg/database/schemaevolution/topic"
                                         + i
-                                        + "/canal-data-2.txt"));
+                                        + "/ogg-data-2.txt"));
             } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
+                throw new Exception("Failed to write ogg data to Kafka.", e);
             }
         }
 
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
                         },
-                        new String[] {"k", "v1", "v2"});
+                        new String[] {"id", "name", "description", "weight", "age"});
         expected =
                 Arrays.asList(
-                        "+I[1, one, NULL]",
-                        "+I[3, three, NULL]",
-                        "+I[5, five, 50]",
-                        "+I[7, seven, 70]");
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175, NULL]",
+                        "+I[102, car battery, 12V car battery, 8.100000381469727, NULL]",
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.800000011920929, 19]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, 25]");
         waitForResult(expected, table1, rowType1, primaryKeys1);
 
         rowType2 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
-                            DataTypes.INT(),
-                            DataTypes.BIGINT(),
-                            DataTypes.VARCHAR(10)
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
                         },
-                        new String[] {"k1", "k2", "v1", "v2", "v3"});
+                        new String[] {"id", "name", "description", "weight", "address"});
         expected =
                 Arrays.asList(
-                        "+I[2, two, 20, 200, NULL]",
-                        "+I[4, four, 40, 400, NULL]",
-                        "+I[6, six, 60, 600, string_6]",
-                        "+I[8, eight, 80, 800, string_8]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
-
-        for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        writeOne ? topics.get(0) : topics.get(i),
-                        readLines(
-                                "kafka/canal/database/schemaevolution/topic"
-                                        + i
-                                        + "/canal-data-3.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
-            }
-        }
-
-        rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.BIGINT()
-                        },
-                        new String[] {"k", "v1", "v2"});
-        expected =
-                Arrays.asList(
-                        "+I[1, one, NULL]",
-                        "+I[3, three, NULL]",
-                        "+I[5, five, 50]",
-                        "+I[7, seven, 70]",
-                        "+I[9, nine, 9000000000000]");
-        waitForResult(expected, table1, rowType1, primaryKeys1);
-
-        rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
-                            DataTypes.INT(),
-                            DataTypes.BIGINT(),
-                            DataTypes.VARCHAR(20)
-                        },
-                        new String[] {"k1", "k2", "v1", "v2", "v3"});
-        expected =
-                Arrays.asList(
-                        "+I[2, two, 20, 200, NULL]",
-                        "+I[4, four, 40, 400, NULL]",
-                        "+I[6, six, 60, 600, string_6]",
-                        "+I[8, eight, 80, 800, string_8]",
-                        "+I[10, ten, 100, 1000, long_long_string_10]");
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.800000011920929, Beijing]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, Shanghai]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
     }
 
@@ -277,7 +242,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     public void testTopicIsEmpty() {
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("value.format", "ogg-json");
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         KafkaSyncDatabaseAction action =
@@ -299,12 +264,14 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         // create table t1
         Catalog catalog = catalog();
         catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, "test_prefix_t1_test_suffix");
+        Identifier identifier = Identifier.create(database, "TEST_PREFIX_T1_TEST_SUFFIX");
         Schema schema =
                 Schema.newBuilder()
-                        .column("k1", DataTypes.INT().notNull())
-                        .column("v0", DataTypes.VARCHAR(10))
-                        .primaryKey("k1")
+                        .column("id", DataTypes.STRING().notNull())
+                        .column("name", DataTypes.STRING())
+                        .column("description", DataTypes.STRING())
+                        .column("weight", DataTypes.STRING())
+                        .primaryKey("id")
                         .build();
         catalog.createTable(identifier, schema, false);
 
@@ -318,24 +285,21 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                     createTestTopic(topic, 1, 1);
                 });
 
-        // ---------- Write the Canal json into Kafka -------------------
+        // ---------- Write the ogg json into Kafka -------------------
 
         for (int i = 0; i < topics.size(); i++) {
             try {
                 writeRecordsToKafka(
                         topics.get(i),
-                        readLines(
-                                "kafka/canal/database/prefixsuffix/topic"
-                                        + i
-                                        + "/canal-data-1.txt"));
+                        readLines("kafka/ogg/database/prefixsuffix/topic" + i + "/ogg-data-1.txt"));
             } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
+                throw new Exception("Failed to write ogg data to Kafka.", e);
             }
         }
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -352,8 +316,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         kafkaConfig,
                         warehouse,
                         database,
-                        "test_prefix_",
-                        "_test_suffix",
+                        "TEST_PREFIX_",
+                        "_TEST_SUFFIX",
                         null,
                         null,
                         Collections.emptyMap(),
@@ -371,12 +335,14 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         // create table t1
         Catalog catalog = catalog();
         catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, "test_prefix_t1_test_suffix");
+        Identifier identifier = Identifier.create(database, "TEST_PREFIX_T1_TEST_SUFFIX");
         Schema schema =
                 Schema.newBuilder()
-                        .column("k1", DataTypes.INT().notNull())
-                        .column("v0", DataTypes.VARCHAR(10))
-                        .primaryKey("k1")
+                        .column("id", DataTypes.STRING().notNull())
+                        .column("name", DataTypes.STRING())
+                        .column("description", DataTypes.STRING())
+                        .column("weight", DataTypes.STRING())
+                        .primaryKey("id")
                         .build();
         catalog.createTable(identifier, schema, false);
 
@@ -389,28 +355,25 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                     createTestTopic(topic, 1, 1);
                 });
 
-        // ---------- Write the Canal json into Kafka -------------------
+        // ---------- Write the ogg json into Kafka -------------------
 
         for (int i = 0; i < fileCount; i++) {
             try {
                 writeRecordsToKafka(
                         topics.get(0),
-                        readLines(
-                                "kafka/canal/database/prefixsuffix/topic"
-                                        + i
-                                        + "/canal-data-1.txt"));
+                        readLines("kafka/ogg/database/prefixsuffix/topic" + i + "/ogg-data-1.txt"));
             } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
+                throw new Exception("Failed to write ogg data to Kafka.", e);
             }
         }
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
+        env.setParallelism(1);
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 
@@ -423,8 +386,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         kafkaConfig,
                         warehouse,
                         database,
-                        "test_prefix_",
-                        "_test_suffix",
+                        "TEST_PREFIX_",
+                        "_TEST_SUFFIX",
                         null,
                         null,
                         Collections.emptyMap(),
@@ -438,108 +401,82 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     private void testTableAffixImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
-        waitTablesCreated("test_prefix_t1_test_suffix", "test_prefix_t2_test_suffix");
+        waitTablesCreated("TEST_PREFIX_T1_TEST_SUFFIX", "TEST_PREFIX_T2_TEST_SUFFIX");
 
-        FileStoreTable table1 = getFileStoreTable("test_prefix_t1_test_suffix");
-        FileStoreTable table2 = getFileStoreTable("test_prefix_t2_test_suffix");
+        FileStoreTable table1 = getFileStoreTable("TEST_PREFIX_T1_TEST_SUFFIX");
+        FileStoreTable table2 = getFileStoreTable("TEST_PREFIX_T2_TEST_SUFFIX");
 
         RowType rowType1 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
-                        new String[] {"k1", "v0"});
-        List<String> primaryKeys1 = Collections.singletonList("k1");
-        List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys1 = Collections.singletonList("id");
+        List<String> expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175]",
+                        "+I[102, car battery, 12V car battery, 8.100000381469727]");
         waitForResult(expected, table1, rowType1, primaryKeys1);
 
         RowType rowType2 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
-                        new String[] {"k2", "v0"});
-        List<String> primaryKeys2 = Collections.singletonList("k2");
-        expected = Arrays.asList("+I[2, two]", "+I[4, four]");
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys2 = Collections.singletonList("id");
+        expected =
+                Arrays.asList(
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.800000011920929]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
 
         for (int i = 0; i < fileCount; i++) {
             try {
                 writeRecordsToKafka(
                         writeOne ? topics.get(0) : topics.get(i),
-                        readLines(
-                                "kafka/canal/database/prefixsuffix/topic"
-                                        + i
-                                        + "/canal-data-2.txt"));
+                        readLines("kafka/ogg/database/prefixsuffix/topic" + i + "/ogg-data-2.txt"));
             } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
+                throw new Exception("Failed to write ogg data to Kafka.", e);
             }
         }
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
                         },
-                        new String[] {"k1", "v0", "v1"});
+                        new String[] {"id", "name", "description", "weight", "address"});
         expected =
                 Arrays.asList(
-                        "+I[1, one, NULL]",
-                        "+I[3, three, NULL]",
-                        "+I[5, five, 50]",
-                        "+I[7, seven, 70]");
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175, Beijing]",
+                        "+I[102, car battery, 12V car battery, 8.100000381469727, Shanghai]");
         waitForResult(expected, table1, rowType1, primaryKeys1);
 
         rowType2 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.VARCHAR(10)
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
                         },
-                        new String[] {"k2", "v0", "v1"});
+                        new String[] {"id", "name", "description", "weight", "age"});
         expected =
                 Arrays.asList(
-                        "+I[2, two, NULL]",
-                        "+I[4, four, NULL]",
-                        "+I[6, six, s_6]",
-                        "+I[8, eight, s_8]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
-
-        for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        writeOne ? topics.get(0) : topics.get(i),
-                        readLines(
-                                "kafka/canal/database/prefixsuffix/topic"
-                                        + i
-                                        + "/canal-data-3.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
-            }
-        }
-
-        rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.BIGINT()
-                        },
-                        new String[] {"k1", "v0", "v1"});
-        expected =
-                Arrays.asList(
-                        "+I[1, one, NULL]",
-                        "+I[3, three, NULL]",
-                        "+I[5, five, 50]",
-                        "+I[7, seven, 70]",
-                        "+I[9, nine, 9000000000000]");
-        waitForResult(expected, table1, rowType1, primaryKeys1);
-
-        rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.VARCHAR(20)
-                        },
-                        new String[] {"k2", "v0", "v1"});
-        expected =
-                Arrays.asList(
-                        "+I[2, two, NULL]",
-                        "+I[4, four, NULL]",
-                        "+I[6, six, s_6]",
-                        "+I[8, eight, s_8]",
-                        "+I[10, ten, long_s_10]");
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.800000011920929, 19]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, 25]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
     }
 
@@ -547,10 +484,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Timeout(60)
     public void testIncludingTables() throws Exception {
         includingAndExcludingTablesImpl(
-                "flink|paimon.+",
+                "FLINK|PAIMON.+",
                 null,
-                Arrays.asList("flink", "paimon_1", "paimon_2"),
-                Collections.singletonList("ignore"));
+                Arrays.asList("FLINK", "PAIMON_1", "PAIMON_2"),
+                Collections.singletonList("IGNORE"));
     }
 
     @Test
@@ -558,19 +495,19 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     public void testExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
                 null,
-                "flink|paimon.+",
-                Collections.singletonList("ignore"),
-                Arrays.asList("flink", "paimon_1", "paimon_2"));
+                "FLINK|PAIMON.+",
+                Collections.singletonList("IGNORE"),
+                Arrays.asList("FLINK", "PAIMON_1", "PAIMON_2"));
     }
 
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
         includingAndExcludingTablesImpl(
-                "flink|paimon.+",
-                "paimon_1",
-                Arrays.asList("flink", "paimon_2"),
-                Arrays.asList("paimon_1", "ignore"));
+                "FLINK|PAIMON.+",
+                "PAIMON_1",
+                Arrays.asList("FLINK", "PAIMON_2"),
+                Arrays.asList("PAIMON_1", "IGNORE"));
     }
 
     private void includingAndExcludingTablesImpl(
@@ -586,22 +523,21 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                     createTestTopic(topic, 1, 1);
                 });
 
-        // ---------- Write the Canal json into Kafka -------------------
+        // ---------- Write the ogg json into Kafka -------------------
 
         try {
             writeRecordsToKafka(
-                    topics.get(0),
-                    readLines("kafka/canal/database/include/topic0/canal-data-1.txt"));
+                    topics.get(0), readLines("kafka/ogg/database/include/topic0/ogg-data-1.txt"));
         } catch (Exception e) {
-            throw new Exception("Failed to write canal data to Kafka.", e);
+            throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
+        env.setParallelism(1);
         env.enableCheckpointing(1000);
         env.setRestartStrategy(RestartStrategies.noRestart());
 

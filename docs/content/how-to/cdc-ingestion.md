@@ -294,10 +294,14 @@ If a message in a Kafka topic is a change event captured from another database u
         </tr>
         <tr>
          <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/ogg/">OGG CDC</a></td>
-        <td>False</td>
+        <td>True</td>
         </tr>
     </tbody>
 </table>
+
+**Note that**
+
+In Oracle GoldenGate, the data format synchronized to Kafka does not include field data type information. As a result, Paimon sets the data type for all fields to "String" by default.
 
 ### Synchronizing Tables
 

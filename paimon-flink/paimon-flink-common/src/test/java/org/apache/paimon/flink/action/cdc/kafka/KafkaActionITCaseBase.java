@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
@@ -25,6 +26,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -67,6 +69,7 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -368,5 +371,20 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
     protected FileStoreTable getFileStoreTable(String tableName) throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
         return (FileStoreTable) catalog().getTable(identifier);
+    }
+
+    protected void waitTablesCreated(String... tables) throws Exception {
+        CommonTestUtils.waitUtil(
+                () -> {
+                    try {
+                        List<String> existed = catalog().listTables(database);
+                        return existed.containsAll(Arrays.asList(tables));
+                    } catch (Catalog.DatabaseNotExistException e) {
+                        throw new RuntimeException(e);
+                    }
+                },
+                Duration.ofSeconds(50),
+                Duration.ofMillis(100),
+                "Failed to wait tables to be created in 5 seconds.");
     }
 }
