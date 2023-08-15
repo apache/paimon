@@ -20,7 +20,6 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.CoreOptions.SequenceAutoPadding;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.WriteMode;
@@ -245,14 +244,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
     public TableWriteImpl<KeyValue> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
         final SequenceGenerator sequenceGenerator =
-                store().options()
-                        .sequenceField()
-                        .map(field -> new SequenceGenerator(field, schema().logicalRowType()))
-                        .orElse(null);
-        final List<SequenceAutoPadding> sequenceAutoPadding =
-                store().options().sequenceAutoPadding().stream()
-                        .map(SequenceAutoPadding::fromString)
-                        .collect(Collectors.toList());
+                SequenceGenerator.create(schema(), store().options());
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser, manifestFilter),
@@ -261,10 +253,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                     long sequenceNumber =
                             sequenceGenerator == null
                                     ? KeyValue.UNKNOWN_SEQUENCE
-                                    : sequenceAutoPadding.isEmpty()
-                                            ? sequenceGenerator.generate(record.row())
-                                            : sequenceGenerator.generateWithPadding(
-                                                    record.row(), sequenceAutoPadding);
+                                    : sequenceGenerator.generate(record.row());
                     return kv.replace(
                             record.primaryKey(),
                             sequenceNumber,
