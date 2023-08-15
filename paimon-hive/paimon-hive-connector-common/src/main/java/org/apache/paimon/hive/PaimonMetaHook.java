@@ -35,7 +35,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
-import org.apache.hadoop.hive.metastore.MetaStoreUtils;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
@@ -43,8 +42,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.metastore.Warehouse.getDnsPath;
@@ -62,6 +63,9 @@ public class PaimonMetaHook implements HiveMetaHook {
     private static final String COMMENT = "comment";
     private final Configuration conf;
 
+    // paimon table existed before create hive table
+    private final Set<Identifier> existingPaimonTable = new HashSet<>();
+
     public PaimonMetaHook(Configuration conf) {
         this.conf = conf;
     }
@@ -75,12 +79,12 @@ public class PaimonMetaHook implements HiveMetaHook {
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
         String location = LocationKeyExtractor.getPaimonLocation(conf, table);
+        Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
         if (location == null) {
             String warehouse = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
             org.apache.hadoop.fs.Path hadoopPath =
                     getDnsPath(new org.apache.hadoop.fs.Path(warehouse), conf);
             warehouse = hadoopPath.toUri().toString();
-            Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
             location = AbstractCatalog.dataTableLocation(warehouse, identifier).toUri().toString();
             table.getSd().setLocation(location);
         }
@@ -97,6 +101,7 @@ public class PaimonMetaHook implements HiveMetaHook {
         SchemaManager schemaManager = new SchemaManager(fileIO, path);
         Optional<TableSchema> tableSchema = schemaManager.latest();
         if (tableSchema.isPresent()) {
+            existingPaimonTable.add(identifier);
             // paimon table already exists
             return;
         }
@@ -143,7 +148,8 @@ public class PaimonMetaHook implements HiveMetaHook {
 
     @Override
     public void rollbackCreateTable(Table table) throws MetaException {
-        if (!MetaStoreUtils.isExternalTable(table)) {
+        Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
+        if (existingPaimonTable.contains(identifier)) {
             return;
         }
 
