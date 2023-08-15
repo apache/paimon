@@ -977,6 +977,58 @@ public class PaimonStorageHandlerITCase {
     }
 
     @Test
+    public void testTime() throws Exception {
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        getBasicConf(),
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.INT().notNull(), DataTypes.TIME(), DataTypes.TIME(2)
+                                },
+                                new String[] {"pk", "time0", "time2"}),
+                        Collections.emptyList(),
+                        Collections.singletonList("pk"));
+
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+
+        write.write(GenericRow.of(1, 0, 0)); // 00:00
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(GenericRow.of(2, 86_399_999, 86_399_999)); // 23:59:59.999999
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(GenericRow.of(3, 45_001_000, 45_001_000)); // 12:30:01
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.write(GenericRow.of(4, null, null));
+        commit.commit(4, write.prepareCommit(true, 3));
+
+        write.close();
+
+        createExternalTable();
+
+        // the TIME column will be converted to STRING column
+        assertThat(hiveShell.executeQuery("SHOW CREATE TABLE " + externalTable))
+                .contains(
+                        "  `time0` string COMMENT 'from deserializer', ",
+                        "  `time2` string COMMENT 'from deserializer')");
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM " + externalTable))
+                .containsExactlyInAnyOrder(
+                        "1\t00:00\t00:00",
+                        "2\t23:59:59.999\t23:59:59.999",
+                        "3\t12:30:01\t12:30:01",
+                        "4\tNULL\tNULL");
+
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM " + externalTable + " WHERE time0 = '12:30:01'"))
+                .containsExactlyInAnyOrder("3\t12:30:01\t12:30:01");
+    }
+
+    @Test
     public void testMapKey() throws Exception {
         Options conf = getBasicConf();
         conf.set(

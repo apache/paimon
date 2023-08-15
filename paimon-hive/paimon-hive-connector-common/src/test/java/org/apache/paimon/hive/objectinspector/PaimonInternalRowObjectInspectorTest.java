@@ -59,6 +59,7 @@ public class PaimonInternalRowObjectInspectorTest {
                         ObjectInspector.Category.PRIMITIVE,
                         ObjectInspector.Category.PRIMITIVE,
                         ObjectInspector.Category.PRIMITIVE,
+                        ObjectInspector.Category.PRIMITIVE,
                         ObjectInspector.Category.LIST,
                         ObjectInspector.Category.MAP);
 
@@ -97,6 +98,7 @@ public class PaimonInternalRowObjectInspectorTest {
                                         "f_string:string",
                                         "f_binary:binary",
                                         "f_date:date",
+                                        "f_time:string",
                                         "f_timestamp:timestamp",
                                         "f_list_long:array<bigint>",
                                         "f_map_string_int:map<string,int>"))
