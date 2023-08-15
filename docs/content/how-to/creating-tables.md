@@ -267,7 +267,7 @@ CREATE TABLE MyTable (
     PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 ) PARTITIONED BY (dt, hh)
 with(
-    'fields.item_id.deafult-value'='0'
+    'fields.item_id.default-value'='0'
 );
 ```
 
@@ -284,7 +284,7 @@ CREATE TABLE MyTable (
     hh STRING
 ) PARTITIONED BY (dt, hh) TBLPROPERTIES (
     'primary-key' = 'dt,hh,user_id',
-    'fields.item_id.deafult-value'='0'
+    'fields.item_id.default-value'='0'
 );
 ```
 
@@ -306,7 +306,7 @@ STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
 TBLPROPERTIES (
     'primary-key' = 'dt,hh,user_id',
     'partition'='dt,hh',
-    'fields.item_id.deafult-value'='0'
+    'fields.item_id.default-value'='0'
 );
 ```
 
