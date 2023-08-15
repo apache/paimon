@@ -21,6 +21,7 @@ package org.apache.paimon.format.parquet.writer;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ArrayUtils;
 
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
@@ -37,17 +38,23 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
 
     private final RowType rowType;
     private final Options conf;
+    private final int[] projection;
 
     public RowDataParquetBuilder(RowType rowType, Options conf) {
+        this(rowType, conf, ArrayUtils.selfIncrementIntArray(rowType.getFieldCount()));
+    }
+
+    public RowDataParquetBuilder(RowType rowType, Options conf, int[] projection) {
         this.rowType = rowType;
         this.conf = conf;
+        this.projection = projection;
     }
 
     @Override
     public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
             throws IOException {
 
-        return new ParquetRowDataBuilder(out, rowType)
+        return new ParquetRowDataBuilder(out, rowType, projection)
                 .withCompressionCodec(CompressionCodecName.fromConf(getCompression(compression)))
                 .withRowGroupSize(
                         conf.getLong(

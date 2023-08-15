@@ -106,7 +106,8 @@ public class BulkFormatMapping {
 
             RowType keyType = new RowType(dataKeyFields);
             RowType valueType = new RowType(dataValueFields);
-            RowType dataRecordType = KeyValue.schema(keyType, valueType);
+            RowType expectedReadRowType = KeyValue.schema(keyType, valueType);
+            RowType storageRowType = RowTypeUtils.toStorageRowType(expectedReadRowType);
 
             int[][] dataKeyProjection =
                     SchemaEvolutionUtil.createDataProjection(
@@ -116,6 +117,10 @@ public class BulkFormatMapping {
                             tableValueFields, dataValueFields, valueProjection);
             int[][] dataProjection =
                     KeyValue.project(dataKeyProjection, dataValueProjection, dataKeyFields.size());
+
+            int[] projectionFromStorage =
+                    RowTypeUtils.projectionRowTypeWithKeyPrefix(
+                            storageRowType, expectedReadRowType);
 
             /**
              * We need to create index mapping on projection instead of key and value separately
@@ -158,7 +163,19 @@ public class BulkFormatMapping {
                     indexCastMapping.getCastMapping(),
                     formatDiscover
                             .discover(formatIdentifier)
-                            .createReaderFactory(dataRecordType, dataProjection, dataFilters));
+                            .createReaderFactory(
+                                    storageRowType,
+                                    projectionMatchStorage(dataProjection, projectionFromStorage),
+                                    dataFilters));
+        }
+
+        private int[][] projectionMatchStorage(int[][] projection, int[] projectionFromStorage) {
+            if (projectionFromStorage != null) {
+                for (int i = 0; i < projection.length; i++) {
+                    projection[i][0] = projectionFromStorage[projection[i][0]];
+                }
+            }
+            return projection;
         }
     }
 }

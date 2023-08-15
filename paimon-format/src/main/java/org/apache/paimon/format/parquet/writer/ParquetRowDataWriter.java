@@ -33,6 +33,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.ArrayUtils;
 
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.RecordConsumer;
@@ -57,10 +58,11 @@ public class ParquetRowDataWriter {
     private final RowWriter rowWriter;
     private final RecordConsumer recordConsumer;
 
-    public ParquetRowDataWriter(RecordConsumer recordConsumer, RowType rowType, GroupType schema) {
+    public ParquetRowDataWriter(
+            RecordConsumer recordConsumer, RowType rowType, GroupType schema, int[] projection) {
         this.recordConsumer = recordConsumer;
 
-        rowWriter = new RowWriter(rowType, schema);
+        rowWriter = new RowWriter(rowType, schema, projection);
     }
 
     /**
@@ -490,24 +492,30 @@ public class ParquetRowDataWriter {
     private class RowWriter implements FieldWriter {
         private final FieldWriter[] fieldWriters;
         private final String[] fieldNames;
+        private final int[] projection;
 
         public RowWriter(RowType rowType, GroupType groupType) {
+            this(rowType, groupType, ArrayUtils.selfIncrementIntArray(rowType.getFieldCount()));
+        }
+
+        public RowWriter(RowType rowType, GroupType groupType, int[] projection) {
             this.fieldNames = rowType.getFieldNames().toArray(new String[0]);
             List<DataType> fieldTypes = rowType.getFieldTypes();
             this.fieldWriters = new FieldWriter[rowType.getFieldCount()];
             for (int i = 0; i < fieldWriters.length; i++) {
                 fieldWriters[i] = createWriter(fieldTypes.get(i), groupType.getType(i));
             }
+            this.projection = projection;
         }
 
         public void write(InternalRow row) {
             for (int i = 0; i < fieldWriters.length; i++) {
-                if (!row.isNullAt(i)) {
+                if (!row.isNullAt(projection[i])) {
                     String fieldName = fieldNames[i];
                     FieldWriter writer = fieldWriters[i];
 
                     recordConsumer.startField(fieldName, i);
-                    writer.write(row, i);
+                    writer.write(row, projection[i]);
                     recordConsumer.endField(fieldName, i);
                 }
             }

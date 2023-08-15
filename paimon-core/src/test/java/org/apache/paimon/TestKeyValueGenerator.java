@@ -53,6 +53,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED;
 import static org.apache.paimon.TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED;
 import static org.apache.paimon.TestKeyValueGenerator.GeneratorMode.SINGLE_PARTITIONED;
+import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 
 /** Random {@link KeyValue} generator. */
 public class TestKeyValueGenerator {
@@ -116,7 +117,7 @@ public class TestKeyValueGenerator {
     public static final RowType KEY_TYPE =
             RowType.of(
                     new DataType[] {new IntType(false), new BigIntType(false)},
-                    new String[] {"key_shopId", "key_orderId"});
+                    new String[] {KEY_FIELD_PREFIX + "shopId", KEY_FIELD_PREFIX + "orderId"});
 
     public static final InternalRowSerializer DEFAULT_ROW_SERIALIZER =
             new InternalRowSerializer(DEFAULT_ROW_TYPE);
@@ -276,7 +277,7 @@ public class TestKeyValueGenerator {
     public static List<String> getPrimaryKeys(GeneratorMode mode) {
         List<String> trimmedPk =
                 KEY_TYPE.getFieldNames().stream()
-                        .map(f -> f.replaceFirst("key_", ""))
+                        .map(f -> f.replaceFirst(KEY_FIELD_PREFIX, ""))
                         .collect(Collectors.toList());
         if (mode != NON_PARTITIONED) {
             trimmedPk = new ArrayList<>(trimmedPk);
@@ -385,7 +386,13 @@ public class TestKeyValueGenerator {
         public List<DataField> keyFields(TableSchema schema) {
             return schema.fields().stream()
                     .filter(f -> KEY_NAME_LIST.contains(f.name()))
-                    .map(f -> new DataField(f.id(), "key_" + f.name(), f.type(), f.description()))
+                    .map(
+                            f ->
+                                    new DataField(
+                                            f.id(),
+                                            KEY_FIELD_PREFIX + f.name(),
+                                            f.type(),
+                                            f.description()))
                     .collect(Collectors.toList());
         }
 

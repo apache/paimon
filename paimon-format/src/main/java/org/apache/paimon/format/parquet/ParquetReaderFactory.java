@@ -42,6 +42,7 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetInputFormat;
+import org.apache.parquet.io.InvalidRecordException;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.Type;
@@ -78,6 +79,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     private final DataType[] projectedTypes;
     private final int batchSize;
     private final Set<Integer> unknownFieldsIndices = new HashSet<>();
+    private final Set<Integer> reuseVectorFields = new HashSet<>();
 
     public ParquetReaderFactory(Options conf, RowType projectedType, int batchSize) {
         this.conf = conf;
@@ -196,8 +198,21 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     private WritableColumnVector[] createWritableVectors(MessageType requestedSchema) {
         WritableColumnVector[] columns = new WritableColumnVector[projectedTypes.length];
+        List<ColumnDescriptor> columnDescriptors = requestedSchema.getColumns();
         List<Type> types = requestedSchema.getFields();
         for (int i = 0; i < projectedTypes.length; i++) {
+            ColumnDescriptor columnDescriptor = columnDescriptors.get(i);
+            String name = columnDescriptor.getPrimitiveType().getName();
+            int index = name.lastIndexOf("_$");
+            if (index != -1) {
+                try {
+                    columns[i] = columns[requestedSchema.getFieldIndex(name.substring(0, index))];
+                    reuseVectorFields.add(i);
+                    continue;
+                } catch (InvalidRecordException e) {
+                    // ignore
+                }
+            }
             columns[i] =
                     createWritableColumnVector(
                             batchSize,
@@ -301,7 +316,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             int num = (int) Math.min(batchSize, totalCountLoadedSoFar - rowsReturned);
             for (int i = 0; i < columnReaders.length; ++i) {
                 if (columnReaders[i] == null) {
-                    batch.writableVectors[i].fillWithNulls();
+                    if (!reuseVectorFields.contains(i)) {
+                        batch.writableVectors[i].fillWithNulls();
+                    }
                 } else {
                     //noinspection unchecked
                     columnReaders[i].readToVector(num, batch.writableVectors[i]);

@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -296,9 +297,16 @@ public class SchemaEvolutionUtil {
 
         PredicateReplaceVisitor visitor =
                 predicate -> {
+                    boolean isKey = false;
+                    String fieldName = predicate.fieldName();
+                    if (fieldName.startsWith(KEY_FIELD_PREFIX)
+                            && nameToTableFields.get(fieldName) == null) {
+                        fieldName = fieldName.substring(KEY_FIELD_PREFIX.length());
+                        isKey = true;
+                    }
                     DataField tableField =
                             checkNotNull(
-                                    nameToTableFields.get(predicate.fieldName()),
+                                    nameToTableFields.get(fieldName),
                                     String.format("Find no field %s", predicate.fieldName()));
                     DataField dataField = idToDataFields.get(tableField.id());
                     if (dataField == null) {
@@ -326,7 +334,7 @@ public class SchemaEvolutionUtil {
                                     predicate.function(),
                                     dataField.type(),
                                     indexOf(dataField, idToDataFields),
-                                    dataField.name(),
+                                    isKey ? KEY_FIELD_PREFIX + dataField.name() : dataField.name(),
                                     literals));
                 };
 

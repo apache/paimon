@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.ArrayUtils;
 
 import org.apache.avro.Schema;
 import org.apache.avro.io.Encoder;
@@ -196,8 +197,13 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     public class RowWriter implements FieldWriter {
 
         private final FieldWriter[] fieldWriters;
+        private final int[] projection;
 
         private RowWriter(Schema schema, List<DataType> fieldTypes) {
+            this(schema, fieldTypes, ArrayUtils.selfIncrementIntArray(schema.getFields().size()));
+        }
+
+        private RowWriter(Schema schema, List<DataType> fieldTypes, int[] projection) {
             List<Schema.Field> schemaFields = schema.getFields();
             this.fieldWriters = new FieldWriter[schemaFields.size()];
             for (int i = 0, fieldsSize = schemaFields.size(); i < fieldsSize; i++) {
@@ -205,6 +211,7 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
                 DataType type = fieldTypes.get(i);
                 fieldWriters[i] = visit(field.schema(), type);
             }
+            this.projection = projection;
         }
 
         @Override
@@ -215,12 +222,12 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
 
         public void writeRow(InternalRow row, Encoder encoder) throws IOException {
             for (int i = 0; i < fieldWriters.length; i += 1) {
-                fieldWriters[i].write(row, i, encoder);
+                fieldWriters[i].write(row, projection[i], encoder);
             }
         }
     }
 
-    public RowWriter createRowWriter(Schema schema, List<DataType> fieldTypes) {
-        return new RowWriter(schema, fieldTypes);
+    public RowWriter createRowWriter(Schema schema, List<DataType> fieldTypes, int[] projection) {
+        return new RowWriter(schema, fieldTypes, projection);
     }
 }

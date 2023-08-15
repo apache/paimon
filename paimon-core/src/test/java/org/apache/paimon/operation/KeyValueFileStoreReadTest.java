@@ -59,6 +59,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KeyValueFileStoreRead}. */
@@ -272,7 +273,11 @@ public class KeyValueFileStoreReadTest {
                                 ? Collections.emptyList()
                                 : Stream.concat(
                                                 keyType.getFieldNames().stream()
-                                                        .map(field -> field.replace("key_", "")),
+                                                        .map(
+                                                                field ->
+                                                                        field.replace(
+                                                                                KEY_FIELD_PREFIX,
+                                                                                "")),
                                                 partitionType.getFieldNames().stream())
                                         .collect(Collectors.toList()),
                         Collections.emptyMap(),

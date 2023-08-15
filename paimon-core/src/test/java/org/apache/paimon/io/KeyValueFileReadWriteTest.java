@@ -86,6 +86,11 @@ public class KeyValueFileReadWriteTest {
     }
 
     @RepeatedTest(10)
+    public void testWriteAndReadDataFileWithStatsCollectingRollingFileOrc() throws Exception {
+        testWriteAndReadDataFileImpl("orc");
+    }
+
+    @RepeatedTest(10)
     public void testWriteAndReadDataFileWithFileExtractingRollingFile() throws Exception {
         testWriteAndReadDataFileImpl("avro-extract");
     }

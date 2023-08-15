@@ -122,8 +122,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
         // create and initialize the row batch
         ColumnVector[] vectors = new ColumnVector[selectedFields.length];
         for (int i = 0; i < vectors.length; i++) {
-            String name = tableFieldNames.get(selectedFields[i]);
-            DataType type = tableFieldTypes.get(selectedFields[i]);
+            int dataIndex = selectedFields[i];
+            String name = tableFieldNames.get(dataIndex);
+            DataType type = tableFieldTypes.get(dataIndex);
             vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
         }
         return new OrcReaderBatch(orcBatch, new VectorizedColumnBatch(vectors), recycler);

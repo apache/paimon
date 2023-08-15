@@ -29,6 +29,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.RowTypeUtils;
 
 import javax.annotation.Nullable;
 
@@ -45,6 +46,7 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
 
     @Nullable private final TableStatsExtractor tableStatsExtractor;
     @Nullable private TableStatsCollector tableStatsCollector = null;
+    private final int[] projection;
 
     public StatsCollectingSingleFileWriter(
             FileIO fileIO,
@@ -60,6 +62,8 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
         if (this.tableStatsExtractor == null) {
             this.tableStatsCollector = new TableStatsCollector(writeSchema, statsCollectors);
         }
+        RowType storageSchema = RowTypeUtils.toStorageRowType(writeSchema);
+        projection = RowTypeUtils.projectionRowTypeWithKeyPrefix(storageSchema, writeSchema);
         Preconditions.checkArgument(
                 statsCollectors.length == writeSchema.getFieldCount(),
                 "The stats collector is not aligned to write schema.");
@@ -76,7 +80,12 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     public FieldStats[] fieldStats() throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
         if (tableStatsExtractor != null) {
-            return tableStatsExtractor.extract(fileIO, path);
+            FieldStats[] storageState = tableStatsExtractor.extract(fileIO, path);
+            FieldStats[] writeState = new FieldStats[projection.length];
+            for (int i = 0; i < projection.length; i++) {
+                writeState[i] = storageState[projection[i]];
+            }
+            return writeState;
         } else {
             return tableStatsCollector.extract();
         }

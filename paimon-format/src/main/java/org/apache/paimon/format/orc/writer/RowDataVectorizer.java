@@ -29,6 +29,7 @@ import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.ArrayUtils;
 
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.ql.exec.vector.BytesColumnVector;
@@ -48,17 +49,23 @@ import java.sql.Timestamp;
 public class RowDataVectorizer extends Vectorizer<InternalRow> {
 
     private final DataType[] fieldTypes;
+    private final int[] projection;
 
     public RowDataVectorizer(String schema, DataType[] fieldTypes) {
+        this(schema, fieldTypes, ArrayUtils.selfIncrementIntArray(fieldTypes.length));
+    }
+
+    public RowDataVectorizer(String schema, DataType[] fieldTypes, int[] projection) {
         super(schema);
         this.fieldTypes = fieldTypes;
+        this.projection = projection;
     }
 
     @Override
     public void vectorize(InternalRow row, VectorizedRowBatch batch) {
         int rowId = batch.size++;
-        for (int i = 0; i < row.getFieldCount(); ++i) {
-            setColumn(rowId, batch.cols[i], fieldTypes[i], row, i);
+        for (int i = 0; i < fieldTypes.length; ++i) {
+            setColumn(rowId, batch.cols[i], fieldTypes[i], row, projection[i]);
         }
     }
 

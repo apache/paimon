@@ -354,4 +354,18 @@ public class ArrayUtils {
         }
         return result;
     }
+
+    /**
+     * This method returns a self-incremental int array.
+     *
+     * @param length the array length
+     * @return the self-incremental int array
+     */
+    public static int[] selfIncrementIntArray(int length) {
+        int[] array = new int[length];
+        for (int i = 0; i < length; i++) {
+            array[i] = i;
+        }
+        return array;
+    }
 }

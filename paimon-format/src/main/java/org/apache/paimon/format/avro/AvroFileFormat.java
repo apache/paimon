@@ -68,8 +68,8 @@ public class AvroFileFormat extends FileFormat {
     }
 
     @Override
-    public FormatWriterFactory createWriterFactory(RowType type) {
-        return new RowAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
+    public FormatWriterFactory createWriterFactory(RowType type, int[] projection) {
+        return new RowAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC), projection);
     }
 
     @Override
@@ -85,12 +85,13 @@ public class AvroFileFormat extends FileFormat {
 
         private final AvroWriterFactory<InternalRow> factory;
 
-        private RowAvroWriterFactory(RowType rowType, String codec) {
+        private RowAvroWriterFactory(RowType rowType, String codec, int[] projection) {
             this.factory =
                     new AvroWriterFactory<>(
                             out -> {
                                 Schema schema = AvroSchemaConverter.convertToSchema(rowType);
-                                AvroRowDatumWriter datumWriter = new AvroRowDatumWriter(rowType);
+                                AvroRowDatumWriter datumWriter =
+                                        new AvroRowDatumWriter(rowType, projection);
                                 DataFileWriter<InternalRow> dataFileWriter =
                                         new DataFileWriter<>(datumWriter);
 

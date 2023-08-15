@@ -25,6 +25,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ArrayUtils;
 
 import javax.annotation.Nullable;
 
@@ -60,7 +61,12 @@ public abstract class FileFormat {
             RowType type, int[][] projection, @Nullable List<Predicate> filters);
 
     /** Create a {@link FormatWriterFactory} from the type. */
-    public abstract FormatWriterFactory createWriterFactory(RowType type);
+    public abstract FormatWriterFactory createWriterFactory(RowType type, int[] projection);
+
+    public FormatWriterFactory createWriterFactory(RowType rowType) {
+        return createWriterFactory(
+                rowType, ArrayUtils.selfIncrementIntArray(rowType.getFieldCount()));
+    }
 
     /** Validate data field type supported or not. */
     public abstract void validateDataFields(RowType rowType);

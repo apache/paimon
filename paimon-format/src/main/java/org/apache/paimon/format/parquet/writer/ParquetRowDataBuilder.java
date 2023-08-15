@@ -37,10 +37,12 @@ public class ParquetRowDataBuilder
         extends ParquetWriter.Builder<InternalRow, ParquetRowDataBuilder> {
 
     private final RowType rowType;
+    private final int[] projection;
 
-    public ParquetRowDataBuilder(OutputFile path, RowType rowType) {
+    public ParquetRowDataBuilder(OutputFile path, RowType rowType, int[] projection) {
         super(path);
         this.rowType = rowType;
+        this.projection = projection;
     }
 
     @Override
@@ -66,7 +68,7 @@ public class ParquetRowDataBuilder
 
         @Override
         public void prepareForWrite(RecordConsumer recordConsumer) {
-            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema);
+            this.writer = new ParquetRowDataWriter(recordConsumer, rowType, schema, projection);
         }
 
         @Override

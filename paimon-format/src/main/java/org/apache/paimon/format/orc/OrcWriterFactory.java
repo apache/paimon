@@ -55,6 +55,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
 
     private OrcFile.WriterOptions writerOptions;
     private final CoreOptions coreOptions;
+    private int[] projection;
 
     /**
      * Creates a new OrcBulkWriterFactory using the provided Vectorizer implementation.
@@ -97,6 +98,7 @@ public class OrcWriterFactory implements FormatWriterFactory {
             confMap.put(entry.getKey(), entry.getValue());
         }
         coreOptions = new CoreOptions(this.confMap);
+        this.projection = projection;
     }
 
     @Override

@@ -46,8 +46,8 @@ public class FileStatsExtractingAvroFormat extends FileFormat {
     }
 
     @Override
-    public FormatWriterFactory createWriterFactory(RowType type) {
-        return avro.createWriterFactory(type);
+    public FormatWriterFactory createWriterFactory(RowType type, int[] projection) {
+        return avro.createWriterFactory(type, projection);
     }
 
     @Override

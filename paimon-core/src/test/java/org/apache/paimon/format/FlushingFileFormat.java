@@ -46,10 +46,10 @@ public class FlushingFileFormat extends FileFormat {
     }
 
     @Override
-    public FormatWriterFactory createWriterFactory(RowType type) {
+    public FormatWriterFactory createWriterFactory(RowType type, int[] projection) {
         return (PositionOutputStream, level) -> {
             FormatWriter wrapped =
-                    format.createWriterFactory(type)
+                    format.createWriterFactory(type, projection)
                             .create(
                                     PositionOutputStream,
                                     CoreOptions.FILE_COMPRESSION.defaultValue());

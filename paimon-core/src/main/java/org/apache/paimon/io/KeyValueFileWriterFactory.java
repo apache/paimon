@@ -31,6 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.RowTypeUtils;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
@@ -164,11 +165,14 @@ public class KeyValueFileWriterFactory {
         public KeyValueFileWriterFactory build(
                 BinaryRow partition, int bucket, CoreOptions options) {
             RowType fileRowType = KeyValue.schema(keyType, valueType);
+            RowType storageRowType = RowTypeUtils.toStorageRowType(fileRowType);
             WriteFormatContext context =
                     new WriteFormatContext(
                             partition,
                             bucket,
-                            fileRowType,
+                            storageRowType,
+                            RowTypeUtils.projectionRowTypeWithKeyPrefix(
+                                    fileRowType, storageRowType),
                             fileFormat,
                             format2PathFactory,
                             options);
@@ -190,6 +194,7 @@ public class KeyValueFileWriterFactory {
                 BinaryRow partition,
                 int bucket,
                 RowType rowType,
+                int[] projection,
                 FileFormat defaultFormat,
                 Map<String, FileStorePathFactory> parentFactories,
                 CoreOptions options) {
@@ -217,7 +222,8 @@ public class KeyValueFileWriterFactory {
                 FileFormat fileFormat = FileFormat.getFileFormat(options.toConfiguration(), format);
                 format2Extractor.put(
                         format, fileFormat.createStatsExtractor(rowType, statsCollectorFactories));
-                format2WriterFactory.put(format, fileFormat.createWriterFactory(rowType));
+                format2WriterFactory.put(
+                        format, fileFormat.createWriterFactory(rowType, projection));
             }
         }
 

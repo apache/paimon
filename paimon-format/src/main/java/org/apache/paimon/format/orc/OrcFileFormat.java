@@ -131,13 +131,13 @@ public class OrcFileFormat extends FileFormat {
      * @return The factory of the writer
      */
     @Override
-    public FormatWriterFactory createWriterFactory(RowType type) {
+    public FormatWriterFactory createWriterFactory(RowType type, int[] projection) {
         DataType refinedType = refineDataType(type);
         DataType[] orcTypes = getFieldTypes(refinedType).toArray(new DataType[0]);
 
         TypeDescription typeDescription = OrcSplitReaderUtil.toOrcType(refinedType);
         Vectorizer<InternalRow> vectorizer =
-                new RowDataVectorizer(typeDescription.toString(), orcTypes);
+                new RowDataVectorizer(typeDescription.toString(), orcTypes, projection);
 
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf);
     }

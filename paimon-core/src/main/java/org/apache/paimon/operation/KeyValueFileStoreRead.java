@@ -39,7 +39,10 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory.AdjustedProjection;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -63,6 +66,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 
 /** {@link FileStoreRead} implementation for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
@@ -143,37 +147,69 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     }
 
     @Override
-    public FileStoreRead<KeyValue> withFilter(Predicate predicate) {
-        List<Predicate> allFilters = new ArrayList<>();
-        List<Predicate> pkFilters = null;
-        List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();
-        Set<String> nonPrimaryKeys =
-                tableSchema.fieldNames().stream()
-                        .filter(name -> !primaryKeys.contains(name))
-                        .collect(Collectors.toSet());
-        for (Predicate sub : splitAnd(predicate)) {
-            allFilters.add(sub);
-            if (!containsFields(sub, nonPrimaryKeys)) {
-                if (pkFilters == null) {
-                    pkFilters = new ArrayList<>();
+    public FileStoreRead<KeyValue> withFilter(@Nullable Predicate predicate) {
+        if (predicate != null) {
+            List<Predicate> allFilters = new ArrayList<>();
+            List<Predicate> pkFilters = null;
+            List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();
+            Set<String> nonPrimaryKeys =
+                    tableSchema.fieldNames().stream()
+                            .filter(name -> !primaryKeys.contains(name))
+                            .collect(Collectors.toSet());
+            PredicateVisitor<Predicate> visitor =
+                    new PredicateVisitor<Predicate>() {
+
+                        @Override
+                        public Predicate visit(LeafPredicate predicate) {
+                            String fieldName = predicate.fieldName();
+                            if (primaryKeys.contains(fieldName)) {
+                                fieldName = KEY_FIELD_PREFIX + fieldName;
+                                return new LeafPredicate(
+                                        predicate.function(),
+                                        predicate.type(),
+                                        predicate.index(),
+                                        fieldName,
+                                        predicate.literals());
+                            }
+                            return predicate;
+                        }
+
+                        @Override
+                        public Predicate visit(CompoundPredicate predicate) {
+                            List<Predicate> child = new ArrayList<>();
+                            for (Predicate childPredicate : predicate.children()) {
+                                child.add(childPredicate.visit(this));
+                            }
+                            return new CompoundPredicate(predicate.function(), child);
+                        }
+                    };
+            predicate = predicate.visit(visitor);
+            for (Predicate sub : splitAnd(predicate)) {
+                if (!containsFields(sub, nonPrimaryKeys)) {
+                    if (pkFilters == null) {
+                        pkFilters = new ArrayList<>();
+                    }
+                    // TODO Actually, the index is wrong, but it is OK.
+                    //  The orc filter just use name instead of index.
+                    pkFilters.add(sub);
                 }
-                // TODO Actually, the index is wrong, but it is OK.
-                //  The orc filter just use name instead of index.
-                pkFilters.add(sub);
+                allFilters.add(sub);
             }
+            // Consider this case:
+            // Denote (seqNumber, key, value) as a record. We have two overlapping runs in a
+            // section:
+            //   * First run: (1, k1, 100), (2, k2, 200)
+            //   * Second run: (3, k1, 10), (4, k2, 20)
+            // If we push down filter "value >= 100" for this section, only the first run will be
+            // read,
+            // and the second run is lost. This will produce incorrect results.
+            //
+            // So for sections with overlapping runs, we only push down key filters.
+            // For sections with only one run, as each key only appears once, it is OK to push down
+            // value filters.
+            filtersForNonOverlappedSection = allFilters;
+            filtersForOverlappedSection = valueCountMode ? allFilters : pkFilters;
         }
-        // Consider this case:
-        // Denote (seqNumber, key, value) as a record. We have two overlapping runs in a section:
-        //   * First run: (1, k1, 100), (2, k2, 200)
-        //   * Second run: (3, k1, 10), (4, k2, 20)
-        // If we push down filter "value >= 100" for this section, only the first run will be read,
-        // and the second run is lost. This will produce incorrect results.
-        //
-        // So for sections with overlapping runs, we only push down key filters.
-        // For sections with only one run, as each key only appears once, it is OK to push down
-        // value filters.
-        filtersForNonOverlappedSection = allFilters;
-        filtersForOverlappedSection = valueCountMode ? allFilters : pkFilters;
         return this;
     }
 

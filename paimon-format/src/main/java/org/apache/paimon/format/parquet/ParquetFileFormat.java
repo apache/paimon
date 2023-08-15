@@ -61,10 +61,10 @@ public class ParquetFileFormat extends FileFormat {
     }
 
     @Override
-    public FormatWriterFactory createWriterFactory(RowType type) {
+    public FormatWriterFactory createWriterFactory(RowType type, int[] projection) {
         return new ParquetWriterFactory(
                 new RowDataParquetBuilder(
-                        type, getParquetConfiguration(formatContext.formatOptions())));
+                        type, getParquetConfiguration(formatContext.formatOptions()), projection));
     }
 
     @Override

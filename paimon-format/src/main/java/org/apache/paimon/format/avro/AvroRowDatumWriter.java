@@ -32,12 +32,14 @@ import java.io.IOException;
 public class AvroRowDatumWriter implements DatumWriter<InternalRow> {
 
     private final RowType rowType;
+    private final int[] projection;
 
     private RowWriter writer;
     private boolean isUnion;
 
-    public AvroRowDatumWriter(RowType rowType) {
+    public AvroRowDatumWriter(RowType rowType, int[] projection) {
         this.rowType = rowType;
+        this.projection = projection;
     }
 
     @Override
@@ -47,7 +49,9 @@ public class AvroRowDatumWriter implements DatumWriter<InternalRow> {
             this.isUnion = true;
             schema = schema.getTypes().get(1);
         }
-        this.writer = new FieldWriterFactory().createRowWriter(schema, rowType.getFieldTypes());
+        this.writer =
+                new FieldWriterFactory()
+                        .createRowWriter(schema, rowType.getFieldTypes(), projection);
     }
 
     @Override
