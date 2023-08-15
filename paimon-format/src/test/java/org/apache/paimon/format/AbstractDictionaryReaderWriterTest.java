@@ -135,30 +135,32 @@ public abstract class AbstractDictionaryReaderWriterTest {
             options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, false);
             CoreOptions coreOptions = new CoreOptions(options);
             List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
-            List<String> disableDictionaryField =
-                    coreOptions.getDisableDictionaryFields(fieldNames);
-            assertThat(disableDictionaryField).hasSameElementsAs(fieldNames);
+            DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
+            assertThat(dictionaryOptions.getDictionaryDisabledFields(fieldNames))
+                    .hasSameElementsAs(fieldNames);
         }
 
         {
             Options options = new Options();
             options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, false);
-            options.set("format.fields-dictionary.c.enable", "true");
+            options.set("fields.c.dictionary-enable", "true");
             CoreOptions coreOptions = new CoreOptions(options);
+            DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
             List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
             List<String> disableDictionaryField =
-                    coreOptions.getDisableDictionaryFields(fieldNames);
+                    dictionaryOptions.getDictionaryDisabledFields(fieldNames);
             assertThat(disableDictionaryField).hasSameElementsAs(Lists.newArrayList("a", "b", "d"));
         }
 
         {
             Options options = new Options();
             options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, true);
-            options.set("format.fields-dictionary.c.enable", "false");
+            options.set("fields.c.dictionary-enable", "false");
             CoreOptions coreOptions = new CoreOptions(options);
+            DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
             List<String> fieldNames = Lists.newArrayList("a", "b", "c", "d");
             List<String> disableDictionaryField =
-                    coreOptions.getDisableDictionaryFields(fieldNames);
+                    dictionaryOptions.getDictionaryDisabledFields(fieldNames);
             assertThat(disableDictionaryField).hasSameElementsAs(Lists.newArrayList("c"));
         }
     }

@@ -31,25 +31,26 @@ public interface FileFormatFactory {
     class FormatContext {
         private final Options formatOptions;
 
-        private final Options unifyOptions;
+        private final DictionaryOptions dictionaryOptions;
         private final int readBatchSize;
 
         public FormatContext(Options formatOptions, int readBatchSize) {
-            this(formatOptions, new Options(), readBatchSize);
+            this(formatOptions, null, readBatchSize);
         }
 
-        public FormatContext(Options formatOptions, Options unifyOptions, int readBatchSize) {
+        public FormatContext(
+                Options formatOptions, DictionaryOptions dictionaryOptions, int readBatchSize) {
             this.formatOptions = formatOptions;
             this.readBatchSize = readBatchSize;
-            this.unifyOptions = unifyOptions;
+            this.dictionaryOptions = dictionaryOptions;
         }
 
         public Options formatOptions() {
             return formatOptions;
         }
 
-        public Options getUnifyOptions() {
-            return unifyOptions;
+        public DictionaryOptions getDictionaryOptions() {
+            return dictionaryOptions;
         }
 
         public int readBatchSize() {

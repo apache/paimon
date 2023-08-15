@@ -40,7 +40,7 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
         return new ParquetFileFormat(
                 new FormatContext(
                         supplyDefaultOptions(formatContext.formatOptions()),
-                        formatContext.getUnifyOptions(),
+                        formatContext.getDictionaryOptions(),
                         formatContext.readBatchSize()));
     }
 

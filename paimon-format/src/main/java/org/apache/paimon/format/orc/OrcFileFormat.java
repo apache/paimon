@@ -140,7 +140,7 @@ public class OrcFileFormat extends FileFormat {
                 new RowDataVectorizer(typeDescription.toString(), orcTypes);
 
         List<String> fieldsDisableDictionary =
-                mergeDictionaryOptions(type, formatContext.getUnifyOptions());
+                getDictionaryDisabledFields(type, formatContext.getDictionaryOptions());
 
         return new OrcWriterFactory(vectorizer, orcProperties, writerConf, fieldsDisableDictionary);
     }

@@ -26,6 +26,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -118,16 +120,21 @@ public abstract class FileFormat {
 
     public static FileFormat getFileFormat(Options options, String formatIdentifier) {
         int readBatchSize = options.get(CoreOptions.READ_BATCH_SIZE);
+        CoreOptions coreOptions = new CoreOptions(options);
         return FileFormat.fromIdentifier(
                 formatIdentifier,
                 new FormatContext(
                         options.removePrefix(formatIdentifier + "."),
-                        options.filterPrefixOptions(CoreOptions.FORMAT_PREFIX + "."),
+                        coreOptions.getDictionaryOptions(),
                         readBatchSize));
     }
 
-    public static List<String> mergeDictionaryOptions(RowType rowType, Options options) {
-        CoreOptions coreOptions = new CoreOptions(options);
-        return coreOptions.getDisableDictionaryFields(rowType.getFieldNames());
+    protected List<String> getDictionaryDisabledFields(
+            RowType type, DictionaryOptions dictionaryOptions) {
+        if (dictionaryOptions != null) {
+            return dictionaryOptions.getDictionaryDisabledFields(type.getFieldNames());
+        } else {
+            return Lists.newArrayList();
+        }
     }
 }

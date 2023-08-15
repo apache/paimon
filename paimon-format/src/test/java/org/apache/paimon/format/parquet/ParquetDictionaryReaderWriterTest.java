@@ -21,11 +21,10 @@ package org.apache.paimon.format.parquet;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.AbstractDictionaryReaderWriterTest;
+import org.apache.paimon.format.DictionaryOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriterFactory;
-import org.apache.paimon.format.parquet.writer.ParquetBulkWriter;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
@@ -47,12 +46,12 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
         Options options = new Options();
         options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, false);
         // a22 enable dictionary
-        options.set("format.fields-dictionary.a22.enable", "true");
+        options.set("fields.a22.dictionary-enable", "true");
+        options.set("fields.a18.b1.dictionary-enable", "false");
+        CoreOptions coreOptions = new CoreOptions(options);
         FileFormatFactory.FormatContext formatContext =
                 new FileFormatFactory.FormatContext(
-                        options.removePrefix("parquet."),
-                        options.filterPrefixOptions(CoreOptions.FORMAT_PREFIX + "."),
-                        1024);
+                        options.removePrefix("parquet."), coreOptions.getDictionaryOptions(), 1024);
         MockParquetFormat mockParquetFormat = new MockParquetFormat(formatContext);
         fileFormat = mockParquetFormat;
     }
@@ -76,16 +75,10 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
         FormatWriterFactory writerFactory = fileFormat.createWriterFactory(rowType);
         Assertions.assertThat(writerFactory).isInstanceOf(ParquetWriterFactory.class);
 
-        LocalFileIO localFileIO = LocalFileIO.create();
-        ParquetBulkWriter formatWriter =
-                (ParquetBulkWriter)
-                        writerFactory.create(
-                                localFileIO.newOutputStream(
-                                        new Path(path.getParent(), "2.parquet"), false),
-                                null);
         ParquetReaderFactory readerFactory =
                 (ParquetReaderFactory) fileFormat.createReaderFactory(rowType);
         RecordReader<InternalRow> reader = readerFactory.createReader(LocalFileIO.create(), path);
+        reader.forEachRemaining(InternalRow::getFieldCount);
         System.out.println(reader);
     }
 
@@ -97,8 +90,9 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
         }
 
         @Override
-        protected List<String> getDisableDictionaryFields(RowType type) {
-            disableDictionaryFields = super.getDisableDictionaryFields(type);
+        protected List<String> getDictionaryDisabledFields(
+                RowType type, DictionaryOptions dictionaryOptions) {
+            disableDictionaryFields = super.getDictionaryDisabledFields(type, dictionaryOptions);
             return disableDictionaryFields;
         }
     }

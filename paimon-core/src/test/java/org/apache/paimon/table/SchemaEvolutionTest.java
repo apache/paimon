@@ -206,11 +206,8 @@ public class SchemaEvolutionTest {
             Map<String, String> option = new HashMap<>();
             option.put(
                     String.format(
-                            "%s.%s.%s.%s",
-                            CoreOptions.FORMAT_PREFIX,
-                            CoreOptions.DICTIONARY_PREFIX,
-                            "c",
-                            "enable"),
+                            "%s.%s.%s",
+                            CoreOptions.FIELDS_PREFIX, "c", CoreOptions.DICTIONARY_PREFIX),
                     "true");
             Schema schema =
                     new Schema(
@@ -227,7 +224,7 @@ public class SchemaEvolutionTest {
                             "");
             assertThatThrownBy(() -> schemaManager.createTable(schema))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasRootCauseMessage("field c not found in table");
+                    .hasMessageContaining("field c not found in table");
         }
     }
 

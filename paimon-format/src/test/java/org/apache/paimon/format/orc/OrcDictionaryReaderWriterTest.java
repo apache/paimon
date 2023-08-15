@@ -47,7 +47,7 @@ public class OrcDictionaryReaderWriterTest extends AbstractDictionaryReaderWrite
         Options options = new Options();
         options.set(CoreOptions.FORMAT_FIELDS_DICTIONARY, false);
         // a22 enable dictionary
-        options.set("format.fields-dictionary.a22.enable", "true");
+        options.set("fields.a22.dictionary-enable", "true");
         fileFormat = FileFormat.getFileFormat(options, "orc");
     }
 

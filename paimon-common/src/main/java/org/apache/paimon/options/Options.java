@@ -152,17 +152,6 @@ public class Options implements Serializable {
         return new Options(newData);
     }
 
-    public synchronized Options filterPrefixOptions(String prefix) {
-        Map<String, String> newData = new HashMap<>();
-        data.forEach(
-                (k, v) -> {
-                    if (k.startsWith(prefix)) {
-                        newData.put(k, v);
-                    }
-                });
-        return new Options(newData);
-    }
-
     public synchronized boolean containsKey(String key) {
         return data.containsKey(key);
     }

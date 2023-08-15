@@ -38,7 +38,7 @@ public class OrcFileFormatFactory implements FileFormatFactory {
         return new OrcFileFormat(
                 new FormatContext(
                         supplyDefaultOptions(formatContext.formatOptions()),
-                        formatContext.getUnifyOptions(),
+                        formatContext.getDictionaryOptions(),
                         formatContext.readBatchSize()));
     }
 

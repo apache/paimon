@@ -24,6 +24,7 @@ import org.apache.paimon.WriteMode;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.format.DictionaryOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
@@ -38,10 +39,12 @@ import org.apache.paimon.types.VarCharType;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
@@ -330,11 +333,17 @@ public class SchemaValidation {
     }
 
     private static void validateFormatDictionaryOpt(TableSchema schema) {
-        try {
-            CoreOptions coreOptions = new CoreOptions(schema.options());
-            coreOptions.getDisableDictionaryFields(schema.fieldNames());
-        } catch (Exception e) {
-            throw new IllegalArgumentException("Format dictionary option valid failed", e);
+        CoreOptions coreOptions = new CoreOptions(schema.options());
+        Set<String> fieldNames = new HashSet<>(schema.fieldNames());
+        DictionaryOptions dictionaryOptions = coreOptions.getDictionaryOptions();
+
+        Map<String, Boolean> fieldsDictionaryEnabled =
+                dictionaryOptions.getFieldsDictionaryEnabled();
+        for (String dictionaryField : fieldsDictionaryEnabled.keySet()) {
+            if (!fieldNames.contains(dictionaryField)) {
+                throw new IllegalArgumentException(
+                        String.format("field %s not found in table", dictionaryField));
+            }
         }
     }
 
