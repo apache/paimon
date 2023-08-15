@@ -43,6 +43,7 @@ import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
@@ -183,6 +184,16 @@ public class CreateTableITCase extends HiveTestBase {
                                 ")"));
         assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
 
+        // check table path from hive metastore
+        List<String> queryResult =
+                hiveShell.executeQuery(String.format("describe formatted %s", tableName));
+        for (String result : queryResult) {
+            if (result.contains("Location")) {
+                String location = result.split("\t")[1];
+                String tableNameFromPath = location.substring(location.lastIndexOf("/") + 1);
+                assertThat(tableNameFromPath).isEqualTo(tableName.toLowerCase());
+            }
+        }
         // check the paimon table name and schema
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName.toLowerCase());
         Path tablePath = AbstractCatalog.dataTableLocation(path, identifier);
@@ -233,6 +244,20 @@ public class CreateTableITCase extends HiveTestBase {
                                 "  'primary-key'='dt,hh,user_id'",
                                 ")"));
         assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+
+        // check table path from hive metastore
+        hiveShell.execute("USE " + upperDB);
+        List<String> queryResult =
+                hiveShell.executeQuery(String.format("describe formatted %s", tableName));
+        for (String result : queryResult) {
+            if (result.contains("Location")) {
+                String location = result.split("\t")[1];
+                int index = location.lastIndexOf(upperDB.toLowerCase() + ".db");
+                assertThat(index).isGreaterThan(0);
+                String dbNameFromPath = location.substring(index, location.lastIndexOf("/"));
+                assertThat(dbNameFromPath).isEqualTo(upperDB.toLowerCase() + ".db");
+            }
+        }
 
         // check the paimon db name、table name and schema
         Identifier identifier = Identifier.create(upperDB.toLowerCase(), tableName.toLowerCase());
