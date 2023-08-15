@@ -50,7 +50,7 @@ import java.util.List;
 
 /** IT Case for the read/writer of parquet. */
 public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderWriterTest {
-    private MockParquetFormat fileFormat;
+    private ParquetFileFormat fileFormat;
 
     public ParquetDictionaryReaderWriterTest() {
         Options options = new Options();
@@ -61,22 +61,12 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
         FileFormatFactory.FormatContext formatContext =
                 new FileFormatFactory.FormatContext(
                         options.removePrefix("parquet."), coreOptions.getDictionaryOptions(), 1024);
-        MockParquetFormat mockParquetFormat = new MockParquetFormat(formatContext);
-        fileFormat = mockParquetFormat;
+        fileFormat = new ParquetFileFormat(formatContext);
     }
 
     @Override
     protected FileFormat getFileFormat() {
         return fileFormat;
-    }
-
-    @Test
-    public void testWriterFormatOpt() {
-        ArrayList<String> expected =
-                Lists.newArrayList(
-                        "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", "a11",
-                        "a12", "a13", "a14", "a15", "a16", "a17", "a18.b1", "a19", "a20", "a21");
-        Assertions.assertThat(fileFormat.disableDictionaryPaths).hasSameElementsAs(expected);
     }
 
     @Test
@@ -271,14 +261,6 @@ public class ParquetDictionaryReaderWriterTest extends AbstractDictionaryReaderW
                             "d.g.key_value.key",
                             "d.g.key_value.value");
             Assertions.assertThat(allFieldPath).hasSameElementsAs(expected);
-        }
-    }
-
-    class MockParquetFormat extends ParquetFileFormat {
-        private List<String> disableDictionaryPaths;
-
-        public MockParquetFormat(FileFormatFactory.FormatContext formatContext) {
-            super(formatContext);
         }
     }
 }
