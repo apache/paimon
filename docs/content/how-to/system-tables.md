@@ -86,7 +86,7 @@ SELECT s.snapshot_id, t.schema_id, t.fields
 
 ### Options Table
 
-You can query the table's option information which is specified from the DDL through options table. The options not shown will be the default value. You can take reference to  [Configuration].
+You can query the table's option information which is specified from the DDL through options table. The options not shown will be the default value. You can take reference to [Configuration]({{< ref "maintenance/configurations#coreoptions" >}}).
 
 ```sql
 SELECT * FROM MyTable$options;
