@@ -144,7 +144,7 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testTagDaily() {
+    public void testTagDaily() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
@@ -159,6 +159,13 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         // test second create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-19T12:00:01")));
         assertThat(tagManager.tags().values()).containsOnly("2023-07-17", "2023-07-18");
+
+        // test newCommit create
+        commit.close();
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-20T12:00:01")));
+        assertThat(tagManager.tags().values())
+                .containsOnly("2023-07-17", "2023-07-18", "2023-07-19");
     }
 
     private long utcMills(String timestamp) {
