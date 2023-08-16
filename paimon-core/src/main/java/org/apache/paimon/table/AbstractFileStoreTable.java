@@ -270,7 +270,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     private List<CommitCallback> createCommitCallbacks() {
         List<CommitCallback> callbacks = new ArrayList<>(loadCommitCallbacks());
         if (coreOptions().partitionedTableInMetastore()
-                && catalogEnvironment.metastoreClientFactory() != null) {
+                && catalogEnvironment.metastoreClientFactory() != null
+                && tableSchema.partitionKeys().size() > 0) {
             callbacks.add(
                     new AddPartitionCommitCallback(
                             catalogEnvironment.metastoreClientFactory().create()));

@@ -831,6 +831,24 @@ public abstract class HiveCatalogITCaseBase {
                         "ptb=3b/pta=3");
     }
 
+    @Test
+    public void testAddPartitionsToMetastoreForUnpartitionedTable() throws Exception {
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE TABLE t (",
+                        "    k INT,",
+                        "    v BIGINT,",
+                        "    PRIMARY KEY (k) NOT ENFORCED",
+                        ") WITH (",
+                        "    'bucket' = '2',",
+                        "    'metastore.partitioned-table' = 'true'",
+                        ")"));
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
+        assertThat(hiveShell.executeQuery("SELECT * FROM t ORDER BY k"))
+                .containsExactlyInAnyOrder("1\t10", "2\t20");
+    }
+
     protected List<Row> collect(String sql) throws Exception {
         List<Row> result = new ArrayList<>();
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {
