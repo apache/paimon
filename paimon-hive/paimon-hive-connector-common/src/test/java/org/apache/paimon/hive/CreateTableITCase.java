@@ -40,7 +40,6 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
 import org.apache.hadoop.hive.metastore.api.MetaException;
-import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.ql.parse.ParseException;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.assertj.core.api.Assertions;
