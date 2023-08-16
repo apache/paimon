@@ -44,8 +44,6 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
 
         String warehouse = params.get("warehouse");
         String database = params.get("database");
-        boolean mergeShards =
-                !params.has("merge-shards") || Boolean.parseBoolean(params.get("merge-shards"));
         String tablePrefix = params.get("table-prefix");
         String tableSuffix = params.get("table-suffix");
         String includingTables = params.get("including-tables");
@@ -59,7 +57,6 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
                         mongodbConfigOption,
                         warehouse,
                         database,
-                        mergeShards,
                         tablePrefix,
                         tableSuffix,
                         includingTables,
@@ -74,14 +71,13 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
                 "Action \"mongodb-sync-database\" creates a streaming job "
                         + "with a Flink MongoDB CDC source and multiple Paimon table sinks "
                         + "to synchronize a whole MongoDB database into one Paimon database.\n"
-                        + "Only MongoDB tables with primary keys will be considered. "
-                        + "Newly created MongoDB tables after the job starts will not be included.");
+                        + "Only MongoDB tables with a primary key that includes `_id` will be taken into consideration."
+                        + "Any MongoDB tables created after the commencement of the task will automatically be included.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
                 "  mongodb-sync-database --warehouse <warehouse-path> --database <database-name> "
-                        + "[--merge-shards <true/false>] "
                         + "[--table-prefix <paimon-table-prefix>] "
                         + "[--table-suffix <paimon-table-suffix>] "
                         + "[--including-tables <mongodb-table-name|name-regular-expr>] "
@@ -89,13 +85,6 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
                         + "[--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
-        System.out.println();
-
-        System.out.println(
-                "--merge-shards is default true, in this case, if some tables in different databases have the same name, "
-                        + "their schemas will be merged and their records will be synchronized into one Paimon table. "
-                        + "Otherwise, each table's records will be synchronized to a corresponding Paimon table, "
-                        + "and the Paimon table will be named to 'databaseName_tableName' to avoid potential name conflict.");
         System.out.println();
 
         System.out.println(
@@ -119,7 +108,7 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
         System.out.println(
                 "'hosts', 'username', 'password' and 'database' "
                         + "are required configurations, others are optional. "
-                        + "Note that 'database-name' should be the exact name "
+                        + "Note that 'database' should be the exact name "
                         + "of the MongoDB database you want to synchronize. "
                         + "It can't be a regular expression.");
         System.out.println(
@@ -140,7 +129,7 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
                 "  mongodb-sync-database \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
-                        + "    --mongodb-conf hosts=127.0.0.1 \\\n"
+                        + "    --mongodb-conf hosts=127.0.0.1:27017 \\\n"
                         + "    --mongodb-conf username=root \\\n"
                         + "    --mongodb-conf password=123456 \\\n"
                         + "    --mongodb-conf database=source_db \\\n"

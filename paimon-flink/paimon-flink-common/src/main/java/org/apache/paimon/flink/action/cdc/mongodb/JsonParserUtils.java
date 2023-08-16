@@ -79,7 +79,7 @@ public class JsonParserUtils implements Serializable {
     static Map<String, Object> extractObjectCache = new HashCache<>();
     static Map<String, String[]> pathExprCache = new HashCache<>();
     static Map<String, ArrayList<String>> indexListCache = new HashCache<>();
-    static Map<String, String> mKeyGroup1Cache = new HashCache<>();
+    static Map<String, String> mKeyGroupCache = new HashCache<>();
     static Map<String, Boolean> mKeyMatchesCache = new HashCache<>();
 
     public static String evaluate(String jsonString, String pathString) {
@@ -141,13 +141,13 @@ public class JsonParserUtils implements Serializable {
         }
 
         // Cache mkey.group(1)
-        String mKeyGroup1 = mKeyGroup1Cache.get(path);
+        String mKeyGroup1 = mKeyGroupCache.get(path);
         if (mKeyGroup1 == null) {
             if (mKey == null) {
                 mKey = patternKey.matcher(path);
             }
             mKeyGroup1 = mKey.group(1);
-            mKeyGroup1Cache.put(path, mKeyGroup1);
+            mKeyGroupCache.put(path, mKeyGroup1);
         }
         json = extract_json_key(json, mKeyGroup1);
 

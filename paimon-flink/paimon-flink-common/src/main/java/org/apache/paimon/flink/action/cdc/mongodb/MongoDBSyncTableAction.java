@@ -61,7 +61,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class MongoDBSyncTableAction extends ActionBase {
     public final Configuration mongodbConfig;
     public final String database;
-    public final String collection;
+    public final String table;
     public final List<String> partitionKeys;
     public final Map<String, String> tableConfig;
 
@@ -69,14 +69,14 @@ public class MongoDBSyncTableAction extends ActionBase {
             Map<String, String> mongodbConfig,
             String warehouse,
             String database,
-            String collection,
+            String table,
             List<String> partitionKeys,
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
         super(warehouse, catalogConfig);
         this.mongodbConfig = Configuration.fromMap(mongodbConfig);
         this.database = database;
-        this.collection = collection;
+        this.table = table;
         this.partitionKeys = partitionKeys;
         this.tableConfig = tableConfig;
     }
@@ -104,7 +104,7 @@ public class MongoDBSyncTableAction extends ActionBase {
         MongodbSchema mongodbSchema = MongodbSchema.getMongodbSchema(mongodbConfig);
         catalog.createDatabase(database, true);
 
-        Identifier identifier = new Identifier(database, collection);
+        Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
                 RichCdcMultiplexRecordEventParser::new;
@@ -146,10 +146,10 @@ public class MongoDBSyncTableAction extends ActionBase {
                         "Database name [%s] cannot contain upper case in case-insensitive catalog.",
                         database));
         checkArgument(
-                collection.equals(collection.toLowerCase()),
+                table.equals(table.toLowerCase()),
                 String.format(
                         "Collection prefix [%s] cannot contain upper case in case-insensitive catalog.",
-                        collection));
+                        table));
         for (String part : partitionKeys) {
             checkArgument(
                     part.equals(part.toLowerCase()),

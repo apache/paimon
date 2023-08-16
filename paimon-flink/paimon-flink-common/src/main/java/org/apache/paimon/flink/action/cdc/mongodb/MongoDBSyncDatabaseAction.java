@@ -76,7 +76,6 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     private final String tablePrefix;
     private final String tableSuffix;
     private final Map<String, String> tableConfig;
-    private final boolean mergeShards;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     @Nullable private final String includingTables;
@@ -91,7 +90,6 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                 mongodbConfig,
                 warehouse,
                 database,
-                true,
                 null,
                 null,
                 null,
@@ -104,7 +102,6 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
             Map<String, String> kafkaConfig,
             String warehouse,
             String database,
-            boolean mergeShards,
             @Nullable String tablePrefix,
             @Nullable String tableSuffix,
             @Nullable String includingTables,
@@ -112,7 +109,6 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
         super(warehouse, catalogConfig);
-        this.mergeShards = mergeShards;
         this.mongodbConfig = Configuration.fromMap(kafkaConfig);
         this.database = database;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
@@ -132,7 +128,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
 
         catalog.createDatabase(database, true);
         TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
+                new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
         List<Identifier> excludedTables = new ArrayList<>();
 
         MongoDBSource<String> source =

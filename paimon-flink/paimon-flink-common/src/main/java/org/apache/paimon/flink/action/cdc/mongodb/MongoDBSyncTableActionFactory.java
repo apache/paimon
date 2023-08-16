@@ -99,6 +99,11 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                 "'hosts', 'username', 'password', 'database' and 'collection' "
                         + "are required configurations, others are optional.");
         System.out.println(
+                "The 'mongodb-conf' introduces the 'schema.start.mode' parameter on top of the MongoDB CDC source configuration. 'schema.start.mode' provides two modes: 'dynamic' (default) and 'specified'."
+                        + "In 'dynamic' mode, MongoDB schema information is parsed at one level, which forms the basis for schema change evolution."
+                        + "In 'specified' mode, synchronization takes place according to specified criteria."
+                        + "This can be done by configuring 'field.name' to specify the synchronization fields and 'parser.path' to specify the JSON parsing path for those fields.");
+        System.out.println(
                 "For a complete list of supported configurations, "
                         + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mongodb-cdc.html#connector-options");
         System.out.println();
@@ -117,7 +122,7 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                         + "    --database test_db \\\n"
                         + "    --table test_table \\\n"
                         + "    --partition-keys pt \\\n"
-                        + "    --mongodb-conf hosts=127.0.0.1 \\\n"
+                        + "    --mongodb-conf hosts=127.0.0.1:27017 \\\n"
                         + "    --mongodb-conf username=root \\\n"
                         + "    --mongodb-conf password=123456 \\\n"
                         + "    --mongodb-conf database=source_db \\\n"

@@ -20,6 +20,6 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 /** schema acquisition mode. */
 public enum ModeEnum {
-    SPECIFIED(),
-    DYNAMIC()
+    SPECIFIED,
+    DYNAMIC
 }
