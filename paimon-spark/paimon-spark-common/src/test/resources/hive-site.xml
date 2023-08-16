@@ -41,6 +41,7 @@
         <name>datanucleus.schema.autoCreateAll</name>
         <value>true</value>
     </property>
+
     <property>
         <name>hive.metastore.uris</name>
         <value>thrift://localhost:9083</value>
