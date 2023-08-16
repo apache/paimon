@@ -194,6 +194,11 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
+    public static final ConfigOption<Integer> SNAPSHOT_CLEAN_LIMIT =
+            key("snapshot.clean-limit")
+                    .intType()
+                    .defaultValue(200)
+                    .withDescription("The maximum quantity of snapshots to be cleared at once.");
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
             key("continuous.discovery-interval")
                     .durationType()
@@ -933,6 +938,9 @@ public class CoreOptions implements Serializable {
         return options.get(SNAPSHOT_TIME_RETAINED);
     }
 
+    public Integer snapshotCleanLimit() {
+        return options.get(SNAPSHOT_CLEAN_LIMIT);
+    }
     public int manifestMergeMinCount() {
         return options.get(MANIFEST_MERGE_MIN_COUNT);
     }

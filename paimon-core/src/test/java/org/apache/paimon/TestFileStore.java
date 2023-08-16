@@ -132,10 +132,12 @@ public class TestFileStore extends KeyValueFileStore {
 
     public FileStoreExpireImpl newExpire(
             int numRetainedMin, int numRetainedMax, long millisRetained) {
+        int cleanLimit = options.snapshotCleanLimit();
         return new FileStoreExpireImpl(
                 numRetainedMin,
                 numRetainedMax,
                 millisRetained,
+                cleanLimit,
                 snapshotManager(),
                 newSnapshotDeletion(),
                 new TagManager(fileIO, options.path()));
