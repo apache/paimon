@@ -1,0 +1,83 @@
+version: "2.2"
+services:
+  spark-master:
+    image: docker.io/bitnami/spark:3.3.2
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - SPARK_USER=spark
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    networks:
+      - spark-network
+    volumes:
+      - ./custom_jars/paimon-spark-3.3-0.5-20230816.001807-122.jar:/opt/bitnami/spark/lib/paimon-spark-3.3-0.5-20230816.001807-122.jar
+      - ./tmp:/tmp
+
+  spark-worker-1:
+    image: bitnami/spark:3.3.2
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=6G
+      - SPARK_WORKER_CORES=6
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - SPARK_USER=spark
+    networks:
+      - spark-network
+    volumes:
+      - ./custom_jars/paimon-spark-3.3-0.5-20230816.001807-122.jar:/opt/bitnami/spark/lib/paimon-spark-3.3-0.5-20230816.001807-122.jar
+      - ./tmp:/tmp
+
+  spark-sql:
+    image: bitnami/spark:3.3.2
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - SPARK_USER=spark
+    command: [ "./bin/spark-sql",
+               "--jars", "/opt/bitnami/spark/lib/paimon-spark-3.3-0.5-20230816.001807-122.jar",
+               "--conf", "spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog",
+               "--conf", "spark.sql.catalog.paimon.warehouse=file:/tmp/paimo" ]
+    working_dir: /opt/bitnami/spark
+    networks:
+      - spark-network
+    volumes:
+      - ./custom_jars/paimon-spark-3.3-0.5-20230816.001807-122.jar:/opt/bitnami/spark/lib/paimon-spark-3.3-0.5-20230816.001807-122.jar
+      - ./tmp:/tmp
+
+  spark-shell:
+    image: bitnami/spark:3.3.2
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - SPARK_USER=spark
+    command: /bin/sh -c "ls -l /tmp ; /opt/bitnami/spark/bin/spark-shell --jars /opt/bitnami/spark/lib/paimon-spark-3.3-0.5-20230816.001807-122.jar"
+    networks:
+      - spark-network
+    volumes:
+      - ./custom_jars/paimon-spark-3.3-0.5-20230816.001807-122.jar:/opt/bitnami/spark/lib/paimon-spark-3.3-0.5-20230816.001807-122.jar
+      - ./tmp:/tmp
+
+networks:
+  spark-network:
+    driver: bridge
