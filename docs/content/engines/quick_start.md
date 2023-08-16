@@ -204,3 +204,98 @@ Flink SQL> SELECT `interval`, COUNT(*) AS interval_cnt FROMOUP BY `interval`;
 Flink SQL>
 ```
 
+
+## Use paimon in spark3
+
+spark version: 3.3.x
+
+### Step 1: Prepare the dependent jar files
+
+[https://paimon.apache.org/docs/master/engines/spark3/](https://paimon.apache.org/docs/master/engines/spark3/)
+
+Check the mapping between paimon and Spark versions, and download the corresponding jar file to a proper path,
+for example,./incubator-paimon/docker/custom_jars
+
+### Step 2: Start the spark3 cluster with docker compose
+Open a CMD window and run the commands shown below.
+```shell
+# Start a spark master and a spark worker container
+PS .\incubator-paimon\docker> docker-compose -f spark3_docker_compose.yml up -d spark-master spark-worker-1
+time="2023-08-16T16:36:26+08:00" level=warning msg="Found orphan containers ([docker_sql-client_run_5b32db156b76 docker-taskmanager-1 docker-jobmanager-1]) for this
+project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+[+] Running 2/2
+ - Container docker-spark-master-1    Started                                                                                                                   1.2s
+ - Container docker-spark-worker-1-1  Started                                                                                                                   1.7s
+
+
+# Start a Spark-SQL container connected to the spark cluster
+PS .\incubator-paimon\docker> docker-compose -f spark3_docker_compose.yml run spark-sql
+time="2023-08-16T16:37:34+08:00" level=warning msg="Found orphan containers ([docker_sql-client_run_5b32db156b76 docker-taskmanager-1 docker-jobmanager-1]) for this
+project. If you removed or renamed this service in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+[+] Running 1/0
+ - Container docker-spark-master-1  Running                                                                                                                     0.0s
+spark 08:37:35.46 
+spark 08:37:35.46 Welcome to the Bitnami spark container
+spark 08:37:35.46 Subscribe to project updates by watching https://github.com/bitnami/containers
+spark 08:37:35.46 Submit issues and feature requests at https://github.com/bitnami/containers/issues
+spark 08:37:35.47 
+spark 08:37:35.47 INFO  ==> ** Starting Spark setup **
+spark 08:37:35.48 ERROR ==> Invalid mode sql. Supported types are 'master/worker'
+PS .\incubator-paimon\docker> docker-compose -f spark3_docker_compose.yml up -d spark-master spark-worker-1
+time="2023-08-16T16:40:13+08:00" level=warning msg="Found otime="2023-08-16T16:40:13+08:00" level=warning msg="Found orphan containers ([docker_sql-client_run_5b32db156b76 docker-taskmanager-1 docker-jobmanager-1]) for this project. If you removed or renamed this serv
+ice in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+[+] Running 2/2
+ - Container docker-spark-master-1    Started                                                                                                                   2.5s
+ - Container docker-spark-worker-1-1  Started                                                                                                                   2.9s
+PS .\incubator-paimon\docker> docker-compose -f spark3_docker_compose.yml run spark-sql
+time="2023-08-16T20:22:18+08:00" level=warning msg="Found orphan containers ([docker_sql-client_run_5b32db156b76 docker-taskmanager-1 docker-jobmanager-1]) for this project. If you removed or renamed this serv
+ice in your compose file, you can run this command with the --remove-orphans flag to clean it up."
+[+] Running 1/0
+ - Container docker-spark-master-1  Running                                                                                                                                                                 0.0s
+spark 12:22:19.68 
+spark 12:22:19.68 Welcome to the Bitnami spark container
+spark 12:22:19.68 Subscribe to project updates by watching https://github.com/bitnami/containers
+spark 12:22:19.68 Submit issues and feature requests at https://github.com/bitnami/containers/issues
+spark 12:22:19.68 
+
+23/08/16 12:22:21 WARN NativeCodeLoader: Unable to load native-hadoop library for your platform... using builtin-java classes where applicable
+Setting default log level to "WARN".
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+23/08/16 12:22:24 WARN HiveConf: HiveConf of name hive.stats.jdbc.timeout does not exist
+23/08/16 12:22:24 WARN HiveConf: HiveConf of name hive.stats.retries.wait does not exist
+23/08/16 12:22:29 WARN ObjectStore: Version information not found in metastore. hive.metastore.schema.verification is not enabled so recording the schema version 2.3.0
+23/08/16 12:22:29 WARN ObjectStore: setMetaStoreSchemaVersion called but recording version is disabled: version = 2.3.0, comment = Set by MetaStore UNKNOWN@192.168.112.4
+23/08/16 12:22:29 WARN ObjectStore: Failed to get database default, returning NoSuchObjectException
+Spark master: local[*], Application Id: local-1692188542905
+spark-sql> 
+```
+
+### Step 3: Specify Paimon Catalog 、Create a table and Write Some Records 、Query table、Update the Records
+```shell
+spark-sql> USE paimon;
+23/08/16 12:23:09 WARN ObjectStore: Failed to get database global_temp, returning NoSuchObjectException
+Time taken: 1.425 seconds
+spark-sql> USE default;
+Time taken: 0.075 seconds
+spark-sql> create table my_table (
+         >     k int,
+         >     v string
+         > ) tblproperties (
+         >     'primary-key' = 'k'
+         > );
+Time taken: 0.156 seconds
+spark-sql> INSERT INTO my_table VALUES (1, 'Hi'), (2, 'Hello');
+Time taken: 6.633 seconds
+spark-sql> SELECT * FROM my_table;
+1       Hi
+2       Hello
+Time taken: 1.324 seconds, Fetched 2 row(s)
+spark-sql> INSERT INTO my_table VALUES (1, 'Hi Again'), (3, 'Test');
+Time taken: 3.681 seconds
+spark-sql> SELECT * FROM my_table;
+1       Hi Again
+2       Hello
+3       Test
+Time taken: 1.074 seconds, Fetched 3 row(s)
+spark-sql> exit;
+```
