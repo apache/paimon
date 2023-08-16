@@ -78,6 +78,8 @@ public class PaimonMetaHook implements HiveMetaHook {
 
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
+        table.setDbName(table.getDbName().toLowerCase());
+        table.setTableName(table.getTableName().toLowerCase());
         String location = LocationKeyExtractor.getPaimonLocation(conf, table);
         Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
         if (location == null) {
