@@ -504,7 +504,8 @@ public class CreateTableITCase extends HiveTestBase {
         }
 
         @Override
-        public void commitCreateTable(Table table) throws MetaException {
+        public void commitCreateTable(org.apache.hadoop.hive.metastore.api.Table table)
+                throws MetaException {
             throw new RuntimeException("mock create table failed");
         }
     }
