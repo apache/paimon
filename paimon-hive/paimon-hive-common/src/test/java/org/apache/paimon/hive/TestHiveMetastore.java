@@ -42,10 +42,12 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.LineNumberReader;
 import java.io.Reader;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -205,12 +207,57 @@ public class TestHiveMetastore {
 
     private static void setupMetastoreDB(String dbURL) throws SQLException, IOException {
         Connection connection = DriverManager.getConnection(dbURL);
-        ScriptRunner scriptRunner = new ScriptRunner(connection, true, true);
-
         ClassLoader classLoader = ClassLoader.getSystemClassLoader();
         InputStream inputStream = classLoader.getResourceAsStream("hive-schema-3.1.0.derby.sql");
         try (Reader reader = new InputStreamReader(inputStream)) {
-            scriptRunner.runScript(reader);
+            runScript(connection, reader);
+        }
+    }
+
+    // This method is copied from iceberg `ScriptRunner`
+    private static void runScript(Connection conn, Reader reader) throws SQLException, IOException {
+        StringBuilder command = null;
+        try {
+            LineNumberReader lineReader = new LineNumberReader(reader);
+            String line;
+            while ((line = lineReader.readLine()) != null) {
+                if (command == null) {
+                    command = new StringBuilder();
+                }
+                String trimmedLine = line.trim();
+                if (trimmedLine.startsWith("--")) {
+                    // Do nothing
+                } else if (trimmedLine.length() < 1 || trimmedLine.startsWith("//")) {
+                    // Do nothing
+                } else if (trimmedLine.length() < 1 || trimmedLine.startsWith("--")) {
+                    // Do nothing
+                } else if (trimmedLine.endsWith(";")) {
+                    command.append(line.substring(0, line.lastIndexOf(";")));
+                    command.append(" ");
+                    Statement statement = conn.createStatement();
+
+                    statement.execute(command.toString());
+
+                    if (!conn.getAutoCommit()) {
+                        conn.commit();
+                    }
+                    command = null;
+                    try {
+                        statement.close();
+                    } catch (Exception e) {
+                        // Ignore to workaround a bug in Jakarta DBCP
+                    }
+                    Thread.yield();
+                } else {
+                    command.append(line);
+                    command.append(" ");
+                }
+            }
+        } catch (IOException | SQLException e) {
+            e.fillInStackTrace();
+            throw e;
+        } finally {
+            conn.rollback();
         }
     }
 }
