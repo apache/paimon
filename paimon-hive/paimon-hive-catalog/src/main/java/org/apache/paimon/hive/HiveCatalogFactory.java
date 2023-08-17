@@ -26,10 +26,13 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.Options;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.File;
 
 import static org.apache.paimon.hive.HiveCatalog.createHiveConf;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
@@ -58,17 +61,15 @@ public class HiveCatalogFactory implements CatalogFactory {
     @Override
     public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
         String uri = context.options().get(CatalogOptions.URI);
-        String hiveConfDir = context.options().get(HIVE_CONF_DIR);
-        String hadoopConfDir = context.options().get(HADOOP_CONF_DIR);
+        String hadoopConfDir = possibleHadoopConfPath(context.options());
+        String hiveConfDir = possibleHiveConfPath(context.options());
         HiveConf hiveConf = createHiveConf(hiveConfDir, hadoopConfDir);
 
         // always using user-set parameters overwrite hive-site.xml parameters
         context.options().toMap().forEach(hiveConf::set);
         if (uri != null) {
             hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
-        }
-
-        if (hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname) == null) {
+        } else if (hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname) == null) {
             LOG.error(
                     "Can't find hive metastore uri to connect: "
                             + " either set "
@@ -87,5 +88,29 @@ public class HiveCatalogFactory implements CatalogFactory {
                 clientClassName,
                 context.options().toMap(),
                 warehouse.toUri().toString());
+    }
+
+    public static String possibleHadoopConfPath(Options options) {
+        String possiblePath = options.get(HADOOP_CONF_DIR);
+        if (possiblePath == null && System.getenv("HADOOP_CONF_DIR") != null) {
+            possiblePath = System.getenv("HADOOP_CONF_DIR");
+        } else if (possiblePath == null && System.getenv("HADOOP_HOME") != null) {
+            String possiblePath1 = System.getenv("HADOOP_HOME") + "/conf";
+            String possiblePath2 = System.getenv("HADOOP_HOME") + "/etc/hadoop";
+            if (new File(possiblePath1).exists()) {
+                possiblePath = possiblePath1;
+            } else if (new File(possiblePath2).exists()) {
+                possiblePath = possiblePath2;
+            }
+        }
+        return possiblePath;
+    }
+
+    public static String possibleHiveConfPath(Options options) {
+        String possiblePath = options.get(HIVE_CONF_DIR);
+        if (possiblePath == null) {
+            possiblePath = System.getenv("HIVE_CONF_DIR");
+        }
+        return possiblePath;
     }
 }
