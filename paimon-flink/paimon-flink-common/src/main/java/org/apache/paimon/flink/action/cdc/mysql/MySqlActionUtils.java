@@ -107,7 +107,9 @@ public class MySqlActionUtils {
                     String databaseName = schemas.getString("TABLE_CAT");
                     Matcher databaseMatcher = databasePattern.matcher(databaseName);
                     if (databaseMatcher.matches()) {
-                        try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
+                        try (ResultSet tables =
+                                metaData.getTables(
+                                        databaseName, null, "%", new String[] {"TABLE"})) {
                             while (tables.next()) {
                                 String tableName = tables.getString("TABLE_NAME");
                                 MySqlSchema mySqlSchema =
