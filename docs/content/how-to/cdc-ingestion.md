@@ -36,6 +36,8 @@ We currently support the following sync ways:
 3. [API Synchronizing Table]({{< ref "/api/flink-api#cdc-ingestion-table" >}}): synchronize your custom DataStream input into one Paimon table.
 4. Kafka Synchronizing Table: synchronize one Kafka topic's table into one Paimon table. 
 5. Kafka Synchronizing Database: synchronize one Kafka topic containing multiple tables or multiple topics containing one table each into one Paimon database.
+6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table. 
+7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
 
 ## MySQL
 
@@ -414,6 +416,166 @@ Synchronization from multiple Kafka topics to Paimon database.
     --table-conf bucket=4 \
     --table-conf changelog-producer=input \
     --table-conf sink.parallelism=4
+```
+## MongoDB
+
+### Prepare MongoDB Bundled Jar
+
+```
+flink-sql-connector-mongodb-*.jar
+```
+
+### Synchronizing Tables
+
+By using [MongoDBSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one collection from MongoDB into one Paimon table.
+
+To use this feature through `flink run`, run the following shell command.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-table
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--partition-keys <partition-keys>] \
+    [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+```
+Here are a few points to take note of:
+
+1. The "mongodb-conf" introduces the "schema.start.mode" parameter on top of the MongoDB CDC source configuration."schema.start.mode" provides two modes: "dynamic" (default) and "specified".
+In "dynamic" mode, MongoDB schema information is parsed at one level, which forms the basis for schema change evolution.
+In "specified" mode, synchronization takes place according to specified criteria.
+This can be done by configuring "field.name" to specify the synchronization fields and "parser.path" to specify the JSON parsing path for those fields.
+The difference between the two is that the "specify" mode requires the user to explicitly identify the fields to be used and create a mapping table based on those fields.
+Dynamic mode, on the other hand, ensures that Paimon and MongoDB always keep the top-level fields consistent, eliminating the need to focus on specific fields.
+Further processing of the data table is required when using values from nested fields.
+
+2. The synchronized table is required to have its primary key set as `_id`. 
+This is because MongoDB's change events are recorded before updates in messages. 
+Consequently, we can only convert them into Flink's UPSERT change log stream. 
+The upstart stream demands a unique key, which is why we must declare `_id` as the primary key. 
+Declaring other columns as primary keys is not feasible, as delete operations only encompass the _id and sharding key, excluding other keys and values.
+
+3. MongoDB Change Streams are designed to return simple JSON documents without any data type definitions. This is because MongoDB is a document-oriented database, and one of its core features is the dynamic schema, where documents can contain different fields, and the data types of fields can be flexible. Therefore, the absence of data type definitions in Change Streams is to maintain this flexibility and extensibility.
+For this reason, we have set all field data types for synchronizing MongoDB to Paimon as String to address the issue of not being able to obtain data types.
+
+{{< generated/mongodb_sync_table >}}
+
+If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from MongoDB collection. 
+
+Example 1: synchronize collection into one Paimon table
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition-keys pt \
+    --mongodb-conf hosts=127.0.0.1:27017 \
+    --mongodb-conf username=root \
+    --mongodb-conf password=123456 \
+    --mongodb-conf database=source_db \
+    --mongodb-conf collection=source_table1 \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4
+```
+
+Example 2: Synchronize collection into a Paimon table according to the specified field mapping.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition-keys pt \
+    --mongodb-conf hosts=127.0.0.1:27017 \
+    --mongodb-conf username=root \
+    --mongodb-conf password=123456 \
+    --mongodb-conf database=source_db \
+    --mongodb-conf collection=source_table1 \
+    --mongodb-conf schema.start.mode=specified \
+    --mongodb-conf field.name=_id,name,description \
+    --mongodb-conf parser.path=_id,name,description \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4
+```
+
+### Synchronizing Databases
+
+By using [MongoDBSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MongoDB database into one Paimon database.
+
+To use this feature through `flink run`, run the following shell command.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-database
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    [--table-prefix <paimon-table-prefix>] \
+    [--table-suffix <paimon-table-suffix>] \
+    [--including-tables <mongodb-table-name|name-regular-expr>] \
+    [--excluding-tables <mongodb-table-name|name-regular-expr>] \
+    [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+```
+
+{{< generated/mongodb_sync_database >}}
+
+All collections to be synchronized need to set _id as the primary key.
+For each MongoDB collection to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table. 
+Its schema will be derived from all specified MongoDB collection. If the Paimon table already exists, its schema will be compared against the schema of all specified MongoDB collection.
+Any MongoDB tables created after the commencement of the task will automatically be included.
+
+Example 1: synchronize entire database
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    mongodb-sync-database \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --mongodb-conf hosts=127.0.0.1:27017 \
+    --mongodb-conf username=root \
+    --mongodb-conf password=123456 \
+    --mongodb-conf database=source_db \
+    --catalog-conf metastore=hive \
+    --catalog-conf uri=thrift://hive-metastore:9083 \
+    --table-conf bucket=4 \
+    --table-conf changelog-producer=input \
+    --table-conf sink.parallelism=4
+```
+Example 2: Synchronize the specified table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+--fromSavepoint savepointPath \
+/path/to/paimon-flink-action-{{< version >}}.jar \
+mongodb-sync-database \
+--warehouse hdfs:///path/to/warehouse \
+--database test_db \
+--mongodb-conf hosts=127.0.0.1:27017 \
+--mongodb-conf username=root \
+--mongodb-conf password=123456 \
+--mongodb-conf database=source_db \
+--catalog-conf metastore=hive \
+--catalog-conf uri=thrift://hive-metastore:9083 \
+--table-conf bucket=4 \
+--including-tables 'product|user|address|order|custom'
 ```
 
 ## Schema Change Evolution

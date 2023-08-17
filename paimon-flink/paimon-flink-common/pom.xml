@@ -38,6 +38,8 @@ under the License.
         <flink.cdc.version>2.3.0</flink.cdc.version>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
         <geometry.version>2.2.0</geometry.version>
+        <avro.version>1.11.1</avro.version>
+        <mongodb.testcontainers.version>1.18.3</mongodb.testcontainers.version>
     </properties>
 
     <dependencies>
@@ -88,6 +90,26 @@ under the License.
             <groupId>com.ververica</groupId>
             <artifactId>flink-connector-mysql-cdc</artifactId>
             <version>${flink.cdc.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ververica</groupId>
+            <artifactId>flink-connector-mongodb-cdc</artifactId>
+            <version>2.4.1</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.avro</groupId>
+                    <artifactId>avro</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>${avro.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -265,6 +287,13 @@ under the License.
             <groupId>org.testcontainers</groupId>
             <artifactId>mysql</artifactId>
             <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>mongodb</artifactId>
+            <version>${mongodb.testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
