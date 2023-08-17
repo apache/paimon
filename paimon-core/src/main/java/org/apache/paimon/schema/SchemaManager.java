@@ -137,7 +137,7 @@ public class SchemaManager implements Serializable {
                 }
                 String pk = options.get(CoreOptions.PRIMARY_KEY.key());
                 primaryKeys = Arrays.asList(pk.split(","));
-                boolean exists = primaryKeys.stream().allMatch(columnNames::contains);
+                boolean exists = columnNames.containsAll(primaryKeys);
                 if (!exists) {
                     throw new RuntimeException(
                             String.format(
@@ -154,7 +154,7 @@ public class SchemaManager implements Serializable {
                 }
                 String partitions = options.get(CoreOptions.PARTITION.key());
                 partitionKeys = Arrays.asList(partitions.split(","));
-                boolean exists = partitionKeys.stream().allMatch(columnNames::contains);
+                boolean exists = columnNames.containsAll(partitionKeys);
                 if (!exists) {
                     throw new RuntimeException(
                             String.format(
