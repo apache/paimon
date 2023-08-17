@@ -37,7 +37,6 @@ jobs:
         with:
           java-version: 8
           distribution: 'adopt'
-
       - name: Build
         run: |
           set -o pipefail
@@ -51,3 +50,5 @@ jobs:
           mvn ${{ env.MVN_COMMON_OPTIONS }} exec:java@check-licensing -N \
             -Dexec.args="${{ env.MVN_BUILD_OUTPUT_FILE }} $(pwd) ${{ env.MVN_VALIDATION_DIR }}" \
             -Dlog4j.configurationFile=file://$(pwd)/tools/ci/log4j.properties
+        env:
+          MAVEN_OPTS: -Xmx4096m
