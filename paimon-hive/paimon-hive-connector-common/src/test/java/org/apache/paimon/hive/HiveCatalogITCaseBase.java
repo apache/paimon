@@ -345,6 +345,22 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testHiveCreateAndFlinkInsertRead() throws Exception {
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+        hiveShell.execute(
+                "CREATE TABLE hive_test_table ( a INT, b STRING ) "
+                        + "STORED BY '"
+                        + PaimonStorageHandler.class.getName()
+                        + "'"
+                        + "TBLPROPERTIES ("
+                        + "  'primary-key'='a'"
+                        + ")");
+        tEnv.executeSql("INSERT INTO hive_test_table VALUES (1, 'Apache'), (2, 'Paimon')");
+        List<Row> actual = collect("SELECT * FROM hive_test_table");
+        assertThat(actual).contains(Row.of(1, "Apache"), Row.of(2, "Paimon"));
+    }
+
+    @Test
     public void testCreateTableAs() throws Exception {
         tEnv.executeSql("CREATE TABLE t (a INT)").await();
         tEnv.executeSql("INSERT INTO t VALUES(1)").await();

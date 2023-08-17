@@ -146,7 +146,22 @@ public class SchemaManager implements Serializable {
                 }
                 options.remove(CoreOptions.PRIMARY_KEY.key());
             }
-
+            List<String> finalPrimaryKeys = primaryKeys;
+            fields =
+                    fields.stream()
+                            .map(
+                                    field -> {
+                                        if (finalPrimaryKeys.contains(field.name())) {
+                                            return new DataField(
+                                                    field.id(),
+                                                    field.name(),
+                                                    field.type().notNull(),
+                                                    field.description());
+                                        } else {
+                                            return field;
+                                        }
+                                    })
+                            .collect(Collectors.toList());
             if (options.containsKey(CoreOptions.PARTITION.key())) {
                 if (!partitionKeys.isEmpty()) {
                     throw new RuntimeException(
