@@ -321,7 +321,7 @@ public class HiveCatalog extends AbstractCatalog {
             throw new RuntimeException(
                     "Failed to commit changes of table "
                             + identifier.getFullName()
-                            + " to underlying files",
+                            + " to underlying files.",
                     e);
         }
         Table table = newHmsTable(identifier);
@@ -358,9 +358,28 @@ public class HiveCatalog extends AbstractCatalog {
 
         try {
             checkIdentifierUpperCase(toTable);
+
+            // Rename the file system's table directory. Maintain consistency between tables in the
+            // file system and tables in the Hive Metastore.
+            Path fromPath = getDataTableLocation(fromTable);
+            Path toPath = getDataTableLocation(toTable);
+            try {
+                fileIO.rename(fromPath, toPath);
+            } catch (IOException e) {
+                throw new RuntimeException(
+                        "Failed to rename changes of table "
+                                + toTable.getFullName()
+                                + " to underlying files.",
+                        e);
+            }
+
             String fromDB = fromTable.getDatabaseName();
             String fromTableName = fromTable.getObjectName();
             Table table = client.getTable(fromDB, fromTableName);
+
+            // update location
+            locationHelper.specifyTableLocation(table, toPath.toString());
+
             table.setDbName(toTable.getDatabaseName());
             table.setTableName(toTable.getObjectName());
             client.alter_table(fromDB, fromTableName, table);
