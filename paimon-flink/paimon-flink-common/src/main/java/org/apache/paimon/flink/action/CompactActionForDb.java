@@ -1,0 +1,166 @@
+package org.apache.paimon.flink.action;
+
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.flink.sink.CompactorSinkBuilderForDb;
+import org.apache.paimon.flink.source.MonitorCompactorSourceBuilder;
+import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
+
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.util.CloseableIterator;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+
+/** this is a doc. */
+public class CompactActionForDb extends ActionBase {
+
+    private String warehouse;
+    private String database;
+    private BucketMode bucketMode;
+
+    private Options options;
+    private CoreOptions coreOptions;
+
+    public CompactActionForDb(
+            String warehouse,
+            String database,
+            BucketMode bucketMode,
+            Options options,
+            CoreOptions coreOptions) {
+        this(warehouse, database, Collections.emptyMap(), bucketMode, options, coreOptions);
+    }
+
+    public CompactActionForDb(
+            String warehouse,
+            String database,
+            Map<String, String> catalogConfig,
+            BucketMode bucketMode,
+            Options options,
+            CoreOptions coreOptions) {
+        super(warehouse, catalogConfig);
+        this.database = database;
+        this.bucketMode = bucketMode;
+        this.options = options;
+        this.coreOptions = coreOptions;
+        //        table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(),
+        // "false"));
+    }
+
+    // ------------------------------------------------------------------------
+    //  Java API
+    // ------------------------------------------------------------------------
+
+    public void build(StreamExecutionEnvironment env) {
+        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        boolean isStreaming =
+                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
+
+        switch (bucketMode) {
+            case UNAWARE:
+                {
+                    //                    buildForUnawareBucketCompaction(
+                    //                            env, (AppendOnlyFileStoreTable) table,
+                    // isStreaming);
+                    break;
+                }
+            case FIXED:
+            case DYNAMIC:
+            default:
+                {
+                    buildForTraditionalCompaction(env, isStreaming);
+                }
+        }
+    }
+
+    private void buildForTraditionalCompaction(
+            StreamExecutionEnvironment env, boolean isStreaming) {
+        List<FileStoreTable> tables = new ArrayList<>();
+        try {
+            for (String tableName : catalog.listTables(database)) {
+                FileStoreTable table =
+                        (FileStoreTable) catalog.getTable(new Identifier(database, tableName));
+                tables.add(table);
+            }
+        } catch (Catalog.DatabaseNotExistException | Catalog.TableNotExistException e) {
+            e.printStackTrace();
+        }
+        MonitorCompactorSourceBuilder sourceBuilder =
+                new MonitorCompactorSourceBuilder(database, tables);
+        CompactorSinkBuilderForDb sinkBuilder =
+                new CompactorSinkBuilderForDb(catalogLoader(), bucketMode, options, coreOptions);
+
+        DataStream<RowData> source =
+                sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
+
+//        CloseableIterator<RowData> it = null;
+//        try {
+//            it = source.executeAndCollect();
+//            while (it.hasNext()) {
+//                System.out.println(toString2(it.next()));
+//            }
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//        }
+
+        sinkBuilder.withInput(source).build();
+    }
+
+    //    private void buildForUnawareBucketCompaction(
+    //            StreamExecutionEnvironment env, AppendOnlyFileStoreTable table, boolean
+    // isStreaming) {
+    //        UnawareBucketCompactionTopoBuilder unawareBucketCompactionTopoBuilder =
+    //                new UnawareBucketCompactionTopoBuilder(env, identifier.getFullName(), table);
+    //
+    //        unawareBucketCompactionTopoBuilder.withPartitions(partitions);
+    //        unawareBucketCompactionTopoBuilder.withContinuousMode(isStreaming);
+    //        unawareBucketCompactionTopoBuilder.build();
+    //    }
+
+    @Override
+    public void run() throws Exception {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        build(env);
+        execute(env, "Compact job");
+    }
+
+    private String toString2(RowData rowData) {
+        DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
+        int numFiles;
+        try {
+            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(3)).size();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+        BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
+
+        return String.format(
+                "%s %d|%s|%d|%d|%d|%s|%s",
+                rowData.getRowKind().shortString(),
+                rowData.getLong(0),
+                partition.getString(0),
+                partition.getInt(1),
+                rowData.getInt(2),
+                numFiles,
+                rowData.getString(4),
+                rowData.getString(5));
+    }
+}
