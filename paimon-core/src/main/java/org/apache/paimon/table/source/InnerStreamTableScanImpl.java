@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
+import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -238,9 +239,14 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     }
 
     @Override
-    public void restore(@Nullable Long nextSnapshotId, ScanMode scanMode) {
-        restore(nextSnapshotId);
-        snapshotReader.withMode(scanMode);
+    public void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot) {
+        if (nextSnapshotId != null && scanAllSnapshot) {
+            startingScanner =
+                    new StaticFromSnapshotStartingScanner(snapshotManager, nextSnapshotId);
+            restore(null);
+        } else {
+            restore(nextSnapshotId);
+        }
     }
 
     @Override

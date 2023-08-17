@@ -867,7 +867,7 @@ public class ContinuousFileSplitEnumeratorTest {
         public void restore(Long state) {}
 
         @Override
-        public void restore(@Nullable Long nextSnapshotId, ScanMode scanMode) {}
+        public void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot) {}
 
         public void allowEnd(boolean allowEnd) {
             this.allowEnd = allowEnd;
