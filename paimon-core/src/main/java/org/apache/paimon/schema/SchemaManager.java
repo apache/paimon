@@ -151,7 +151,8 @@ public class SchemaManager implements Serializable {
                     fields.stream()
                             .map(
                                     field -> {
-                                        if (finalPrimaryKeys.contains(field.name())) {
+                                        if (finalPrimaryKeys.contains(field.name())
+                                                && field.type().isNullable()) {
                                             return new DataField(
                                                     field.id(),
                                                     field.name(),
