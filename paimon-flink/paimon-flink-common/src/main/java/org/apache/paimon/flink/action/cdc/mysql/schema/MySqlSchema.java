@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
+import org.apache.paimon.flink.action.cdc.DataTypeMapMode;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
 
 import java.sql.DatabaseMetaData;
@@ -49,29 +51,41 @@ public class MySqlSchema {
             DatabaseMetaData metaData,
             String databaseName,
             String tableName,
-            boolean convertTinyintToBool)
+            boolean convertTinyintToBool,
+            DataTypeMapMode dataTypeMapMode)
             throws SQLException {
         LinkedHashMap<String, Pair<DataType, String>> fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
-                String fieldType = rs.getString("TYPE_NAME");
-                Integer precision = rs.getInt("COLUMN_SIZE");
                 String fieldComment = rs.getString("REMARKS");
+                DataType paimonType;
 
-                if (rs.wasNull()) {
-                    precision = null;
-                }
-                Integer scale = rs.getInt("DECIMAL_DIGITS");
-                if (rs.wasNull()) {
-                    scale = null;
-                }
-                fields.put(
-                        fieldName,
-                        Pair.of(
+                switch (dataTypeMapMode) {
+                    case IDENTITY:
+                        String fieldType = rs.getString("TYPE_NAME");
+
+                        Integer precision = rs.getInt("COLUMN_SIZE");
+                        if (rs.wasNull()) {
+                            precision = null;
+                        }
+
+                        Integer scale = rs.getInt("DECIMAL_DIGITS");
+                        if (rs.wasNull()) {
+                            scale = null;
+                        }
+                        paimonType =
                                 MySqlTypeUtils.toDataType(
-                                        fieldType, precision, scale, convertTinyintToBool),
-                                fieldComment));
+                                        fieldType, precision, scale, convertTinyintToBool);
+                        break;
+                    case ALL_TO_STRING:
+                        paimonType = DataTypes.STRING();
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unsupported data type map mode: " + dataTypeMapMode);
+                }
+                fields.put(fieldName, Pair.of(paimonType, fieldComment));
             }
         }
 

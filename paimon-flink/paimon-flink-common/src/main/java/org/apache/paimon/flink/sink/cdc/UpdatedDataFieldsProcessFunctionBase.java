@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.DataTypeMapMode;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -27,6 +28,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -41,6 +43,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.flink.action.cdc.DataTypeMapMode.ALL_TO_STRING;
 
 /** Base class for update data fields process function. */
 public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends ProcessFunction<I, O> {
@@ -49,6 +54,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
     protected Catalog catalog;
     protected final Catalog.Loader catalogLoader;
+    private final DataTypeMapMode dataTypeMapMode;
     private static final List<DataTypeRoot> STRING_TYPES =
             Arrays.asList(DataTypeRoot.CHAR, DataTypeRoot.VARCHAR);
     private static final List<DataTypeRoot> BINARY_TYPES =
@@ -62,8 +68,10 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final List<DataTypeRoot> FLOATING_POINT_TYPES =
             Arrays.asList(DataTypeRoot.FLOAT, DataTypeRoot.DOUBLE);
 
-    protected UpdatedDataFieldsProcessFunctionBase(Catalog.Loader catalogLoader) {
+    protected UpdatedDataFieldsProcessFunctionBase(
+            Catalog.Loader catalogLoader, DataTypeMapMode dataTypeMapMode) {
         this.catalogLoader = catalogLoader;
+        this.dataTypeMapMode = dataTypeMapMode;
     }
 
     @Override
@@ -164,8 +172,15 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         return ConvertAction.EXCEPTION;
     }
 
-    protected List<SchemaChange> getSchemaChanges(
-            List<DataField> updatedDataFields, SchemaManager schemaManager) {
+    protected List<SchemaChange> extractSchemaChanges(
+            SchemaManager schemaManager, List<DataField> updatedDataFields) {
+        if (dataTypeMapMode == ALL_TO_STRING) {
+            updatedDataFields =
+                    updatedDataFields.stream()
+                            .map(dataField -> dataField.newType(DataTypes.STRING()))
+                            .collect(Collectors.toList());
+        }
+
         RowType oldRowType = schemaManager.latest().get().logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();
         for (DataField oldField : oldRowType.getFields()) {

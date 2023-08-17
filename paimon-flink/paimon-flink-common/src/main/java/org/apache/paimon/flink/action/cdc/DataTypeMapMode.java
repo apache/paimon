@@ -18,18 +18,32 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import java.io.Serializable;
+import javax.annotation.Nullable;
 
 /**
- * There are two modes for database sync.
+ * Describe how to map MySQL data type to Paimon data type. Currently, there are two modes:
  *
- * <p>1) DIVIDED mode, start a sink for each table, the synchronization of the new table requires
- * restarting the job.
- *
- * <p>2) COMBINED mode, start a single combined sink for all tables, the new table will be
- * automatically synchronized.
+ * <ul>
+ *   <li>IDENTITY: keep the original types.
+ *   <li>ALL_TO_STRING: map all MySQL types to STRING.
+ * </ul>
  */
-public enum DatabaseSyncMode implements Serializable {
-    DIVIDED,
-    COMBINED
+public enum DataTypeMapMode {
+    IDENTITY,
+    ALL_TO_STRING;
+
+    public static DataTypeMapMode fromString(@Nullable String mode) {
+        if (mode == null) {
+            return IDENTITY;
+        }
+
+        switch (mode.toLowerCase()) {
+            case "identity":
+                return IDENTITY;
+            case "all-to-string":
+                return ALL_TO_STRING;
+            default:
+                throw new UnsupportedOperationException("Unsupported data type map mode: " + mode);
+        }
+    }
 }

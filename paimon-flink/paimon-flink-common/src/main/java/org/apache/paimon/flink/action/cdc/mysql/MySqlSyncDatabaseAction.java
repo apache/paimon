@@ -24,7 +24,8 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.cdc.DataTypeMapMode;
+import org.apache.paimon.flink.action.cdc.SinkMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
@@ -48,14 +49,16 @@ import javax.annotation.Nullable;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.DataTypeMapMode.IDENTITY;
+import static org.apache.paimon.flink.action.cdc.SinkMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.SinkMode.DIVIDED;
 import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -99,68 +102,87 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncDatabaseAction.class);
 
-    private final Configuration mySqlConfig;
     private final String database;
-    private final boolean ignoreIncompatible;
-    private final boolean mergeShards;
-    private final String tablePrefix;
-    private final String tableSuffix;
-    private final Pattern includingPattern;
-    @Nullable private final Pattern excludingPattern;
-    private final Map<String, String> tableConfig;
-    private final String includingTables;
-    private final DatabaseSyncMode mode;
+    private final Configuration mySqlConfig;
 
+    private Map<String, String> tableConfig = new HashMap<>();
+    private boolean ignoreIncompatible = false;
+    private boolean mergeShards = true;
+    private String tablePrefix = "";
+    private String tableSuffix = "";
+    private String includingTables = ".*";
+    @Nullable String excludingTables;
+    private SinkMode sinkMode = DIVIDED;
+    private DataTypeMapMode dataTypeMapMode = IDENTITY;
+
+    // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
     private final List<Identifier> excludedTables = new ArrayList<>();
 
     public MySqlSyncDatabaseAction(
-            Map<String, String> mySqlConfig,
-            String warehouse,
-            String database,
-            boolean ignoreIncompatible,
-            Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
-        this(
-                mySqlConfig,
-                warehouse,
-                database,
-                ignoreIncompatible,
-                true,
-                null,
-                null,
-                null,
-                null,
-                catalogConfig,
-                tableConfig,
-                DIVIDED);
+            String warehouse, String database, Map<String, String> mySqlConfig) {
+        this(warehouse, database, Collections.emptyMap(), mySqlConfig);
     }
 
     public MySqlSyncDatabaseAction(
-            Map<String, String> mySqlConfig,
             String warehouse,
             String database,
-            boolean ignoreIncompatible,
-            boolean mergeShards,
-            @Nullable String tablePrefix,
-            @Nullable String tableSuffix,
-            @Nullable String includingTables,
-            @Nullable String excludingTables,
             Map<String, String> catalogConfig,
-            Map<String, String> tableConfig,
-            DatabaseSyncMode mode) {
+            Map<String, String> mySqlConfig) {
         super(warehouse, catalogConfig);
-        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.database = database;
-        this.ignoreIncompatible = ignoreIncompatible;
-        this.mergeShards = mergeShards;
-        this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
-        this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
-        this.includingTables = includingTables == null ? ".*" : includingTables;
-        this.includingPattern = Pattern.compile(this.includingTables);
-        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
+        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
+    }
+
+    public MySqlSyncDatabaseAction withTableConfig(Map<String, String> tableConfig) {
         this.tableConfig = tableConfig;
-        this.mode = mode;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction ignoreIncompatible(boolean ignoreIncompatible) {
+        this.ignoreIncompatible = ignoreIncompatible;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction mergeShards(boolean mergeShards) {
+        this.mergeShards = mergeShards;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction withTablePrefix(@Nullable String tablePrefix) {
+        if (tablePrefix != null) {
+            this.tablePrefix = tablePrefix;
+        }
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction withTableSuffix(@Nullable String tableSuffix) {
+        if (tableSuffix != null) {
+            this.tableSuffix = tableSuffix;
+        }
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction includingTables(@Nullable String includingTables) {
+        if (includingTables != null) {
+            this.includingTables = includingTables;
+        }
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction excludingTables(@Nullable String excludingTables) {
+        this.excludingTables = excludingTables;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction withSinkMode(SinkMode sinkMode) {
+        this.sinkMode = sinkMode;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction withDataTypeMapMode(DataTypeMapMode dataTypeMapMode) {
+        this.dataTypeMapMode = dataTypeMapMode;
+        return this;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
@@ -176,9 +198,16 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             validateCaseInsensitive();
         }
 
+        Pattern includingPattern = Pattern.compile(includingTables);
+        Pattern excludingPattern =
+                excludingTables == null ? null : Pattern.compile(excludingTables);
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig, this::shouldMonitorTable, excludedTables);
+                        mySqlConfig,
+                        tableName ->
+                                shouldMonitorTable(tableName, includingPattern, excludingPattern),
+                        excludedTables,
+                        dataTypeMapMode);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
@@ -236,10 +265,11 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
+        DataTypeMapMode dataTypeMapMode = this.dataTypeMapMode;
         MySqlTableSchemaBuilder schemaBuilder =
-                new MySqlTableSchemaBuilder(tableConfig, caseSensitive, convertTinyint1ToBool);
-        Pattern includingPattern = this.includingPattern;
-        Pattern excludingPattern = this.excludingPattern;
+                new MySqlTableSchemaBuilder(
+                        tableConfig, caseSensitive, convertTinyint1ToBool, dataTypeMapMode);
+
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
@@ -252,7 +282,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 convertTinyint1ToBool);
 
         String database = this.database;
-        DatabaseSyncMode mode = this.mode;
+        SinkMode sinkMode = this.sinkMode;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
@@ -262,7 +292,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         .withDatabase(database)
                         .withCatalogLoader(catalogLoader())
                         .withTables(fileStoreTables)
-                        .withMode(mode);
+                        .withSinkMode(sinkMode)
+                        .withDataTypeMapMode(dataTypeMapMode);
 
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
@@ -302,7 +333,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         }
     }
 
-    private boolean shouldMonitorTable(String mySqlTableName) {
+    private boolean shouldMonitorTable(
+            String mySqlTableName, Pattern includingPattern, @Nullable Pattern excludingPattern) {
         boolean shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
         if (excludingPattern != null) {
             shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();
@@ -356,12 +388,12 @@ public class MySqlSyncDatabaseAction extends ActionBase {
      */
     private String buildTableList() {
         String separatorRex = "\\.";
-        if (mode == DIVIDED) {
+        if (sinkMode == DIVIDED) {
             // In DIVIDED mode, we only concern about existed tables
             return monitoredTables.stream()
                     .map(t -> t.getDatabaseName() + separatorRex + t.getObjectName())
                     .collect(Collectors.joining("|"));
-        } else if (mode == COMBINED) {
+        } else if (sinkMode == COMBINED) {
             // In COMBINED mode, we should consider both existed tables and possible newly created
             // tables, so we should use regular expression to monitor all valid tables and exclude
             // certain invalid tables
@@ -400,7 +432,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             return String.format("(%s)(%s)", excludingPattern, includingPattern);
         }
 
-        throw new UnsupportedOperationException("Unknown DatabaseSyncMode: " + mode);
+        throw new UnsupportedOperationException("Unknown DatabaseSyncMode: " + sinkMode);
     }
 
     // ------------------------------------------------------------------------

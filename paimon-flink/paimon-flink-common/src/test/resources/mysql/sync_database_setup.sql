@@ -476,4 +476,3 @@ CREATE TABLE t3 (
     k INT,
     v2 VARCHAR(10)
 );
-

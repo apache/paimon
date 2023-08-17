@@ -76,12 +76,16 @@ public final class DataField implements Serializable {
         return type;
     }
 
-    public DataField newId(int newid) {
-        return new DataField(newid, name, type, description);
+    public DataField newId(int newId) {
+        return new DataField(newId, name, type, description);
     }
 
     public DataField newName(String newName) {
         return new DataField(id, newName, type, description);
+    }
+
+    public DataField newType(DataType newType) {
+        return new DataField(id, name, newType.copy(type.isNullable()), description);
     }
 
     public DataField newDescription(String newDescription) {

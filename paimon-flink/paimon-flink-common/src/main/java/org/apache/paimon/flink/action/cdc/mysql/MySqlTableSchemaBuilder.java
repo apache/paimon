@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.cdc.DataTypeMapMode;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
@@ -40,12 +42,17 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
     private final boolean convertTinyint1ToBool;
+    private final DataTypeMapMode dataTypeMapMode;
 
     public MySqlTableSchemaBuilder(
-            Map<String, String> tableConfig, boolean caseSensitive, boolean convertTinyint1ToBool) {
+            Map<String, String> tableConfig,
+            boolean caseSensitive,
+            boolean convertTinyint1ToBool,
+            DataTypeMapMode dataTypeMapMode) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
         this.convertTinyint1ToBool = convertTinyint1ToBool;
+        this.dataTypeMapMode = dataTypeMapMode;
     }
 
     @Override
@@ -55,18 +62,31 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
         ArrayNode columns = (ArrayNode) jsonTable.get("columns");
         LinkedHashMap<String, DataType> fields = new LinkedHashMap<>();
 
+        DataType dataType;
         for (JsonNode element : columns) {
-            Integer precision = element.has("length") ? element.get("length").asInt() : null;
-            Integer scale = element.has("scale") ? element.get("scale").asInt() : null;
-            fields.put(
-                    element.get("name").asText(),
-                    // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
-                    MySqlTypeUtils.toDataType(
-                                    element.get("typeExpression").asText(),
-                                    precision,
-                                    scale,
-                                    convertTinyint1ToBool)
-                            .copy(element.get("optional").asBoolean()));
+            switch (dataTypeMapMode) {
+                case IDENTITY:
+                    Integer precision =
+                            element.has("length") ? element.get("length").asInt() : null;
+                    Integer scale = element.has("scale") ? element.get("scale").asInt() : null;
+                    dataType =
+                            MySqlTypeUtils.toDataType(
+                                            element.get("typeExpression").asText(),
+                                            precision,
+                                            scale,
+                                            convertTinyint1ToBool)
+                                    .copy(element.get("optional").asBoolean());
+                    break;
+                case ALL_TO_STRING:
+                    dataType = DataTypes.STRING();
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Unsupported data type map mode: " + dataTypeMapMode);
+            }
+
+            // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
+            fields.put(element.get("name").asText(), dataType);
         }
 
         ArrayNode arrayNode = (ArrayNode) jsonTable.get("primaryKeyColumnNames");

@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.DataTypeMapMode;
 import org.apache.paimon.flink.sink.index.GlobalDynamicCdcBucketSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
@@ -35,6 +36,7 @@ import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 
 import javax.annotation.Nullable;
 
+import static org.apache.paimon.flink.action.cdc.DataTypeMapMode.IDENTITY;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
@@ -50,8 +52,8 @@ public class CdcSinkBuilder<T> {
     private Table table = null;
     private Identifier identifier = null;
     private Catalog.Loader catalogLoader = null;
-
     @Nullable private Integer parallelism;
+    private DataTypeMapMode dataTypeMapMode = IDENTITY;
 
     public CdcSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -83,6 +85,11 @@ public class CdcSinkBuilder<T> {
         return this;
     }
 
+    public CdcSinkBuilder<T> withDataTypeMapMode(DataTypeMapMode dataTypeMapMode) {
+        this.dataTypeMapMode = dataTypeMapMode;
+        return this;
+    }
+
     public DataStreamSink<?> build() {
         Preconditions.checkNotNull(input, "Input DataStream can not be null.");
         Preconditions.checkNotNull(parserFactory, "Event ParserFactory can not be null.");
@@ -109,7 +116,8 @@ public class CdcSinkBuilder<T> {
                                 new UpdatedDataFieldsProcessFunction(
                                         new SchemaManager(dataTable.fileIO(), dataTable.location()),
                                         identifier,
-                                        catalogLoader));
+                                        catalogLoader,
+                                        dataTypeMapMode));
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
