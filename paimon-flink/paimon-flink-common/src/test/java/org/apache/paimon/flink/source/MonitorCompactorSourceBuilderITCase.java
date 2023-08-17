@@ -39,6 +39,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,15 +69,22 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
     public void testBatchRead(boolean defaultOptions) throws Exception {
-        FileStoreTable table = createFileStoreTable();
+        FileStoreTable table1 = createFileStoreTable("table1");
+        FileStoreTable table2 = createFileStoreTable("table2");
         if (!defaultOptions) {
             // change options to test whether CompactorSourceBuilder work normally
-            table = table.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
+            table1 = table1.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
+            table2 = table2.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
         }
         StreamWriteBuilder streamWriteBuilder =
-                table.newStreamWriteBuilder().withCommitUser(commitUser);
+                table1.newStreamWriteBuilder().withCommitUser(commitUser);
         StreamTableWrite write = streamWriteBuilder.newWrite();
         StreamTableCommit commit = streamWriteBuilder.newCommit();
+
+        StreamWriteBuilder streamWriteBuilder2 =
+                table2.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write2 = streamWriteBuilder2.newWrite();
+        StreamTableCommit commit2 = streamWriteBuilder2.newCommit();
 
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
@@ -85,9 +94,22 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
         write.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
         commit.commit(1, write.prepareCommit(true, 1));
 
+        write2.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        write2.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
+        commit2.commit(0, write2.prepareCommit(true, 0));
+
+        write2.write(rowData(1, 1511, BinaryString.fromString("20221208"), 15));
+        write2.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
+        commit2.commit(1, write2.prepareCommit(true, 1));
+
+        write2.write(rowData(1, 1512, BinaryString.fromString("20221208"), 15));
+        write2.write(rowData(1, 1510, BinaryString.fromString("20221209"), 16));
+        commit2.commit(2, write2.prepareCommit(true, 2));
+
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         DataStream<RowData> compactorSource =
-                new MonitorCompactorSourceBuilder("test", table)
+                new MonitorCompactorSourceBuilder(
+                                "testdb", Stream.of(table1, table2).collect(Collectors.toList()))
                         .withContinuousMode(false)
                         .withEnv(env)
                         .build();
@@ -95,7 +117,7 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
 
         List<String> actual = new ArrayList<>();
         while (it.hasNext()) {
-            actual.add(toString(it.next()));
+            actual.add(toString2(it.next()));
         }
         assertThat(actual)
                 .hasSameElementsAs(
@@ -156,7 +178,7 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         DataStream<RowData> compactorSource =
-                new MonitorCompactorSourceBuilder("test", table)
+                new MonitorCompactorSourceBuilder("test", Collections.singletonList(table))
                         .withContinuousMode(true)
                         .withEnv(env)
                         .build();
@@ -250,7 +272,7 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         DataStream<RowData> compactorSource =
-                new MonitorCompactorSourceBuilder("test", table)
+                new MonitorCompactorSourceBuilder("test", Collections.singletonList(table))
                         .withContinuousMode(isStreaming)
                         .withEnv(env)
                         .withPartitions(specifiedPartitions)
@@ -288,6 +310,28 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
                 numFiles);
     }
 
+    private String toString2(RowData rowData) {
+        int numFiles;
+        try {
+            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(3)).size();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+        BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
+
+        return String.format(
+                "%s %d|%s|%d|%d|%d|%s|%s",
+                rowData.getRowKind().shortString(),
+                rowData.getLong(0),
+                partition.getString(0),
+                partition.getInt(1),
+                rowData.getInt(2),
+                numFiles,
+                rowData.getString(4),
+                rowData.getString(5));
+    }
+
     private GenericRow rowData(Object... values) {
         return GenericRow.of(values);
     }
@@ -312,5 +356,20 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
                                 Collections.emptyMap(),
                                 ""));
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
+    }
+
+    private FileStoreTable createFileStoreTable(String path) throws Exception {
+        path = tablePath.toString() + "/" + path;
+        Path location = new Path(path);
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), location);
+        TableSchema tableSchema =
+                schemaManager.createTable(
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Arrays.asList("dt", "hh"),
+                                Arrays.asList("dt", "hh", "k"),
+                                Collections.emptyMap(),
+                                ""));
+        return FileStoreTableFactory.create(LocalFileIO.create(), location, tableSchema);
     }
 }

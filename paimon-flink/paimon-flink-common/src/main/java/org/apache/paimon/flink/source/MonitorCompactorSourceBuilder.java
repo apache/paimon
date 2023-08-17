@@ -5,9 +5,8 @@ import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.source.operator.BatchMonitorFunction;
 import org.apache.paimon.flink.source.operator.StreamMonitorFunction;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.system.BucketsTable;
+import org.apache.paimon.table.system.BucketsTable2;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -21,19 +20,20 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /** this is a doc. */
 public class MonitorCompactorSourceBuilder {
-    private final String tableIdentifier;
-    private final FileStoreTable table;
+    private final String databaseName;
+    private final List<FileStoreTable> tables;
 
     private boolean isContinuous = false;
     private StreamExecutionEnvironment env;
     @Nullable private List<Map<String, String>> specifiedPartitions = null;
 
-    public MonitorCompactorSourceBuilder(String tableIdentifier, FileStoreTable table) {
-        this.tableIdentifier = tableIdentifier;
-        this.table = table;
+    public MonitorCompactorSourceBuilder(String databaseName, List<FileStoreTable> tables) {
+        this.databaseName = databaseName;
+        this.tables = tables;
     }
 
     public MonitorCompactorSourceBuilder withContinuousMode(boolean isContinuous) {
@@ -61,35 +61,56 @@ public class MonitorCompactorSourceBuilder {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
 
-        BucketsTable bucketsTable = new BucketsTable(table, isContinuous);
+        List<BucketsTable2> bucketsTables =
+                tables.stream()
+                        .map(
+                                fileStoreTable ->
+                                        new BucketsTable2(
+                                                fileStoreTable,
+                                                isContinuous,
+                                                databaseName,
+                                                fileStoreTable.name()))
+                        .collect(Collectors.toList());
         Predicate partitionPredicate = null;
-        if (specifiedPartitions != null) {
-            // This predicate is based on the row type of the original table, not bucket table.
-            // Because TableScan in BucketsTable is the same with FileStoreTable,
-            // and partition filter is done by scan.
-            partitionPredicate =
-                    PredicateBuilder.or(
-                            specifiedPartitions.stream()
-                                    .map(p -> PredicateBuilder.partition(p, table.rowType()))
-                                    .toArray(Predicate[]::new));
-        }
-        RowType produceType = bucketsTable.rowType();
+        //        if (specifiedPartitions != null) {
+        //            // This predicate is based on the row type of the original table, not bucket
+        // table.
+        //            // Because TableScan in BucketsTable is the same with FileStoreTable,
+        //            // and partition filter is done by scan.
+        //            partitionPredicate =
+        //                    PredicateBuilder.or(
+        //                            specifiedPartitions.stream()
+        //                                    .map(p -> PredicateBuilder.partition(p,
+        // table.rowType()))
+        //                                    .toArray(Predicate[]::new));
+        //        }
+        RowType produceType = bucketsTables.get(0).rowType();
         if (isContinuous) {
-            bucketsTable = bucketsTable.copy(streamingCompactOptions());
+            for (BucketsTable2 bucketsTable : bucketsTables) {
+                bucketsTable = bucketsTable.copy(streamingCompactOptions());
+            }
             return StreamMonitorFunction.buildSource(
                     env,
                     "source",
                     InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)),
-                    bucketsTable.newReadBuilder().withFilter(partitionPredicate),
+                    bucketsTables.get(0).newReadBuilder().withFilter(partitionPredicate),
                     10,
                     false);
         } else {
-            bucketsTable = bucketsTable.copy(batchCompactOptions());
+            for (BucketsTable2 bucketsTable : bucketsTables) {
+                bucketsTable = bucketsTable.copy(batchCompactOptions());
+            }
             return BatchMonitorFunction.buildSource(
                     env,
                     "source",
                     InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)),
-                    bucketsTable.newReadBuilder().withFilter(partitionPredicate),
+                    bucketsTables.stream()
+                            .map(
+                                    bucketsTable ->
+                                            bucketsTable
+                                                    .newReadBuilder()
+                                                    .withFilter(partitionPredicate))
+                            .collect(Collectors.toList()),
                     10,
                     false);
         }

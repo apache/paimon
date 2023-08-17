@@ -10,11 +10,13 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
@@ -31,13 +33,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /** this is a doc. */
-public class BatchMonitorFunction extends RichSourceFunction<Split>
+public class BatchMonitorFunction extends RichSourceFunction<Tuple2<Split, String>>
         implements CheckpointedFunction, CheckpointListener {
     private static final long serialVersionUID = 1L;
 
@@ -46,30 +51,33 @@ public class BatchMonitorFunction extends RichSourceFunction<Split>
     // readBuilder 和 scan 都与 table 强相关，用来读取某个 table 的信息
     // 如果考虑整库的数据表同步，需要能够读取整库中所有数据表的 readBuilder
     // 所以应该有一个 readBuilderList，从这个 readBuilderList 产出 scanList
-    private final ReadBuilder readBuilder;
+    private final List<ReadBuilder> readBuilders;
     private final long monitorInterval;
     private final boolean emitSnapshotWatermark;
 
     private volatile boolean isRunning = true;
 
-    private transient StreamTableScan scan;
-    private transient SourceContext<Split> ctx;
+    //    private transient List<StreamTableScan> scans;
+    private transient Map<StreamTableScan, String> scansMap;
+    private transient SourceContext<Tuple2<Split, String>> ctx;
 
     private transient ListState<Long> checkpointState;
     private transient ListState<Tuple2<Long, Long>> nextSnapshotState;
     private transient TreeMap<Long, Long> nextSnapshotPerCheckpoint;
 
     public BatchMonitorFunction(
-            ReadBuilder readBuilder, long monitorInterval, boolean emitSnapshotWatermark) {
-        this.readBuilder = readBuilder;
+            List<ReadBuilder> readBuilders, long monitorInterval, boolean emitSnapshotWatermark) {
+        this.readBuilders = readBuilders;
         this.monitorInterval = monitorInterval;
         this.emitSnapshotWatermark = emitSnapshotWatermark;
     }
 
     @Override
     public void initializeState(FunctionInitializationContext context) throws Exception {
-        this.scan = readBuilder.newStreamScan();
-
+        scansMap = new HashMap<>();
+        for (ReadBuilder readBuilder : readBuilders) {
+            scansMap.put(readBuilder.newStreamScan(), readBuilder.tableName());
+        }
         this.checkpointState =
                 context.getOperatorStateStore()
                         .getListState(
@@ -107,7 +115,9 @@ public class BatchMonitorFunction extends RichSourceFunction<Split>
                     getClass().getSimpleName() + " retrieved invalid state.");
 
             if (retrievedStates.size() == 1) {
-                this.scan.restore(retrievedStates.get(0));
+                for (StreamTableScan scan : this.scansMap.keySet()) {
+                    scan.restore(retrievedStates.get(0));
+                }
             }
 
             for (Tuple2<Long, Long> tuple2 : nextSnapshotState.get()) {
@@ -121,7 +131,7 @@ public class BatchMonitorFunction extends RichSourceFunction<Split>
     @Override
     public void snapshotState(FunctionSnapshotContext ctx) throws Exception {
         this.checkpointState.clear();
-        Long nextSnapshot = this.scan.checkpoint();
+        Long nextSnapshot = this.scansMap.keySet().iterator().next().checkpoint();
         if (nextSnapshot != null) {
             this.checkpointState.add(nextSnapshot);
             this.nextSnapshotPerCheckpoint.put(ctx.getCheckpointId(), nextSnapshot);
@@ -137,7 +147,7 @@ public class BatchMonitorFunction extends RichSourceFunction<Split>
     }
 
     @Override
-    public void run(SourceContext<Split> ctx) throws Exception {
+    public void run(SourceContext<Tuple2<Split, String>> ctx) throws Exception {
         this.ctx = ctx;
         if (isRunning) {
             boolean isEmpty;
@@ -146,12 +156,21 @@ public class BatchMonitorFunction extends RichSourceFunction<Split>
                     return;
                 }
                 try {
-                    List<Split> splits = scan.plan().splits();
+                    // 传出去的split需要带有table name信息
+                    List<Tuple2<Split, String>> splits = new ArrayList<>();
+                    for (StreamTableScan scan : scansMap.keySet()) {
+                        splits.addAll(
+                                scan.plan().splits().stream()
+                                        .map(split -> new Tuple2<>(split, scansMap.get(scan)))
+                                        .collect(Collectors.toList()));
+                    }
                     isEmpty = splits.isEmpty();
+                    System.out.println("scansMap: " + scansMap.size());
+                    System.out.println("split: " + splits.size());
                     splits.forEach(ctx::collect);
 
                     if (emitSnapshotWatermark) {
-                        Long watermark = scan.watermark();
+                        Long watermark = scansMap.keySet().iterator().next().watermark();
                         if (watermark != null) {
                             ctx.emitWatermark(new Watermark(watermark));
                         }
@@ -177,7 +196,7 @@ public class BatchMonitorFunction extends RichSourceFunction<Split>
         NavigableMap<Long, Long> nextSnapshots =
                 nextSnapshotPerCheckpoint.headMap(checkpointId, true);
         OptionalLong max = nextSnapshots.values().stream().mapToLong(Long::longValue).max();
-        max.ifPresent(scan::notifyCheckpointComplete);
+        max.ifPresent(scansMap.keySet().iterator().next()::notifyCheckpointComplete);
         nextSnapshots.clear();
     }
 
@@ -193,38 +212,67 @@ public class BatchMonitorFunction extends RichSourceFunction<Split>
         }
     }
 
+    //    public static DataStream<RowData> buildSource(
+    //            StreamExecutionEnvironment env,
+    //            String name,
+    //            TypeInformation<RowData> typeInfo,
+    //            ReadBuilder readBuilder,
+    //            long monitorInterval,
+    //            boolean emitSnapshotWatermark) {
+    //        BatchMonitorFunction function =
+    //                new BatchMonitorFunction(
+    //                        Collections.singletonList(readBuilder),
+    //                        monitorInterval,
+    //                        emitSnapshotWatermark);
+    //        StreamSource<Split, ?> sourceOperator = new StreamSource<>(function);
+    //        boolean isParallel = false;
+    //        return new DataStreamSource<>(
+    //                        env,
+    //                        new JavaTypeInfo<>(Split.class),
+    //                        sourceOperator,
+    //                        isParallel,
+    //                        name + "-Monitor",
+    //                        Boundedness.BOUNDED)
+    //                .forceNonParallel()
+    //                .partitionCustom(
+    //                        (key, numPartitions) -> key % numPartitions,
+    //                        split -> ((DataSplit) split).bucket())
+    //                .transform(name + "-Reader", typeInfo, new ReadOperator(readBuilder));
+    //    }
+
     public static DataStream<RowData> buildSource(
             StreamExecutionEnvironment env,
             String name,
             TypeInformation<RowData> typeInfo,
-            ReadBuilder readBuilder,
+            List<ReadBuilder> readBuilders,
             long monitorInterval,
             boolean emitSnapshotWatermark) {
         BatchMonitorFunction function =
-                new BatchMonitorFunction(readBuilder, monitorInterval, emitSnapshotWatermark);
-        StreamSource<Split, ?> sourceOperator = new StreamSource<>(function);
+                new BatchMonitorFunction(readBuilders, monitorInterval, emitSnapshotWatermark);
+        StreamSource<Tuple2<Split, String>, ?> sourceOperator = new StreamSource<>(function);
         boolean isParallel = false;
-        return new DataStreamSource<>(
-                        env,
-                        new JavaTypeInfo<>(Split.class),
-                        sourceOperator,
-                        isParallel,
-                        name + "-Monitor",
-                        Boundedness.BOUNDED)
-                .forceNonParallel()
-                .partitionCustom(
-                        (key, numPartitions) -> key % numPartitions,
-                        split -> ((DataSplit) split).bucket())
-                .transform(name + "-Reader", typeInfo, new ReadOperator(readBuilder));
-        //        return env.addSource(
-        //                        new BatchMonitorFunction(
-        //                                readBuilder, monitorInterval, emitSnapshotWatermark),
-        //                        name + "-Monitor",
-        //                        new JavaTypeInfo<>(Split.class))
-        //                .forceNonParallel()
-        //                .partitionCustom(
-        //                        (key, numPartitions) -> key % numPartitions,
-        //                        split -> ((DataSplit) split).bucket())
-        //                .transform(name + "-Reader", typeInfo, new ReadOperator(readBuilder));
+        TupleTypeInfo<Tuple2<Split, String>> tupleTypeInfo =
+                new TupleTypeInfo<>(
+                        new JavaTypeInfo<>(Split.class), BasicTypeInfo.STRING_TYPE_INFO);
+        DataStream<RowData> ds =
+                new DataStreamSource<>(
+                                env,
+                                tupleTypeInfo,
+                                sourceOperator,
+                                isParallel,
+                                name + "-Monitor",
+                                Boundedness.BOUNDED)
+                        .forceNonParallel()
+                        .partitionCustom(
+                                (key, numPartitions) -> key % numPartitions,
+                                split -> ((DataSplit) split.f0).bucket())
+                        .transform(name + "-Reader", typeInfo, new ReadOperator2(readBuilders));
+        // new ReadOperator2(readBuilders)，对于datastream中的每个元素，都对所有的readBuilder进行了读取操作
+        try {
+            ds.executeAndCollect();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return ds;
     }
 }

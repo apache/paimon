@@ -1,6 +1,7 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
@@ -22,8 +23,6 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -47,9 +46,15 @@ public class BucketsTable2 implements DataTable, ReadonlyTable {
     private final FileStoreTable wrapped;
     private final boolean isContinuous;
 
-    public BucketsTable2(FileStoreTable wrapped, boolean isContinuous) {
+    private String databaseName;
+    private String tableName;
+
+    public BucketsTable2(
+            FileStoreTable wrapped, boolean isContinuous, String databaseName, String tableName) {
         this.wrapped = wrapped;
         this.isContinuous = isContinuous;
+        this.databaseName = databaseName;
+        this.tableName = tableName;
     }
 
     @Override
@@ -71,10 +76,11 @@ public class BucketsTable2 implements DataTable, ReadonlyTable {
     public RowType rowType() {
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "_SNAPSHOT_ID", new BigIntType(false)));
-        fields.add(new DataField(1, "_TABLE_NAME", new VarCharType(Integer.MAX_VALUE)));
-        fields.add(new DataField(2, "_PARTITION", newBytesType(false)));
-        fields.add(new DataField(3, "_BUCKET", new IntType(false)));
-        fields.add(new DataField(4, "_FILES", newBytesType(false)));
+        fields.add(new DataField(1, "_PARTITION", newBytesType(false)));
+        fields.add(new DataField(2, "_BUCKET", new IntType(false)));
+        fields.add(new DataField(3, "_FILES", newBytesType(false)));
+        fields.add(new DataField(4, "_DATABASE_NAME", new VarCharType(Integer.MAX_VALUE)));
+        fields.add(new DataField(5, "_TABLE_NAME", new VarCharType(Integer.MAX_VALUE)));
         return new RowType(fields);
     }
 
@@ -115,7 +121,8 @@ public class BucketsTable2 implements DataTable, ReadonlyTable {
 
     @Override
     public BucketsTable2 copy(Map<String, String> dynamicOptions) {
-        return new BucketsTable2(wrapped.copy(dynamicOptions), isContinuous);
+        return new BucketsTable2(
+                wrapped.copy(dynamicOptions), isContinuous, databaseName, tableName);
     }
 
     @Override
@@ -161,10 +168,11 @@ public class BucketsTable2 implements DataTable, ReadonlyTable {
             InternalRow row =
                     GenericRow.of(
                             dataSplit.snapshotId(),
-                            wrapped.name(),
                             serializeBinaryRow(dataSplit.partition()),
                             dataSplit.bucket(),
-                            dataFileMetaSerializer.serializeList(files));
+                            dataFileMetaSerializer.serializeList(files),
+                            BinaryString.fromString(databaseName),
+                            BinaryString.fromString(tableName));
 
             return new IteratorRecordReader<>(Collections.singletonList(row).iterator());
         }
