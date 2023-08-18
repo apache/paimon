@@ -49,7 +49,6 @@ public class MySqlCdcDataTypeModeITCase extends MySqlActionITCaseBase {
 
     // --------------------------------------- ALL_TO_STRING ---------------------------------------
 
-    // TODO: test BIT(n) after fix bit type
     @Test
     @Timeout(60)
     public void testReadAllTypes() throws Exception {
@@ -64,7 +63,7 @@ public class MySqlCdcDataTypeModeITCase extends MySqlActionITCaseBase {
                         .withDataTypeMapMode(ALL_TO_STRING);
         runActionWithDefaultEnv(action);
 
-        int allTypeNums = 76;
+        int allTypeNums = 77;
         DataType[] types =
                 IntStream.range(0, allTypeNums)
                         .mapToObj(i -> DataTypes.STRING())
@@ -79,6 +78,7 @@ public class MySqlCdcDataTypeModeITCase extends MySqlActionITCaseBase {
                             "_id",
                             "pt",
                             "_bit1",
+                            "_bit",
                             "_tinyint1",
                             "_boolean",
                             "_bool",
@@ -158,7 +158,7 @@ public class MySqlCdcDataTypeModeITCase extends MySqlActionITCaseBase {
                 Arrays.asList(
                         "+I["
                                 + "1, 1.1, "
-                                + "true, "
+                                + "true, 0000000000000000000000000000000000000000000000000000011111000111, "
                                 + "1, 1, 0, 1, 2, 3, "
                                 + "1000, 2000, 3000, "
                                 + "100000, 200000, 300000, "
@@ -198,7 +198,7 @@ public class MySqlCdcDataTypeModeITCase extends MySqlActionITCaseBase {
                                 + "]",
                         "+I["
                                 + "2, 2.2, "
-                                + "NULL, "
+                                + "NULL, NULL, "
                                 + "NULL, NULL, NULL, NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "

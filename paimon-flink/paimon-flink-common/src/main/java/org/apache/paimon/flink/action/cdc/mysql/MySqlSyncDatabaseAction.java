@@ -279,7 +279,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 schemaBuilder,
                                 includingPattern,
                                 excludingPattern,
-                                convertTinyint1ToBool);
+                                convertTinyint1ToBool,
+                                dataTypeMapMode);
 
         String database = this.database;
         SinkMode sinkMode = this.sinkMode;

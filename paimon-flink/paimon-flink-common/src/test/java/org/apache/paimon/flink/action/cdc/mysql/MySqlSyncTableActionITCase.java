@@ -505,11 +505,15 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_set",
                         });
         FileStoreTable table = getFileStoreTable();
+        // BIT(64) data: 0B11111000111 -> 0B00000111_11000111
+        String bits =
+                Arrays.toString(
+                        new byte[] {0, 0, 0, 0, 0, 0, (byte) 0B00000111, (byte) 0B11000111});
         List<String> expected =
                 Arrays.asList(
                         "+I["
                                 + "1, 1.1, "
-                                + "true, [-17, -65, -67, 7, 0, 0, 0, 0, 0, 0], "
+                                + String.format("true, %s, ", bits)
                                 + "true, true, false, 1, 2, 3, "
                                 + "1000, 2000, 3000, "
                                 + "100000, 200000, 300000, "

@@ -25,6 +25,7 @@ import java.io.Serializable;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /** A data change message from the CDC source. */
 @Experimental
@@ -35,10 +36,16 @@ public class CdcRecord implements Serializable {
     private RowKind kind;
 
     private final Map<String, String> fields;
+    private final Set<String> encodedFields;
 
     public CdcRecord(RowKind kind, Map<String, String> fields) {
+        this(kind, fields, Collections.emptySet());
+    }
+
+    public CdcRecord(RowKind kind, Map<String, String> fields, Set<String> encodedFields) {
         this.kind = kind;
         this.fields = fields;
+        this.encodedFields = encodedFields;
     }
 
     public CdcRecord setRowKind(RowKind kind) {
@@ -56,6 +63,10 @@ public class CdcRecord implements Serializable {
 
     public Map<String, String> fields() {
         return fields;
+    }
+
+    public boolean encoded(String fieldName) {
+        return encodedFields.contains(fieldName);
     }
 
     @Override

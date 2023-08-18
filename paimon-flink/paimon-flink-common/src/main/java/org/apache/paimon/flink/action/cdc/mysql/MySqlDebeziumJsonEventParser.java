@@ -25,6 +25,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DataTypeMapMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -35,6 +36,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -72,6 +74,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.flink.action.cdc.DataTypeMapMode.ALL_TO_STRING;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link EventParser} for MySQL Debezium JSON. */
@@ -90,6 +93,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final Set<String> includedTables = new HashSet<>();
     private final Set<String> excludedTables = new HashSet<>();
     private final boolean convertTinyint1ToBool;
+    private final DataTypeMapMode dataTypeMapMode;
 
     private JsonNode root;
     private JsonNode payload;
@@ -101,7 +105,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             ZoneId serverTimeZone,
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
-            boolean convertTinyint1ToBool) {
+            boolean convertTinyint1ToBool,
+            DataTypeMapMode dataTypeMapMode) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -110,7 +115,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 ddl -> Optional.empty(),
                 null,
                 null,
-                convertTinyint1ToBool);
+                convertTinyint1ToBool,
+                dataTypeMapMode);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -120,7 +126,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            boolean convertTinyint1ToBool) {
+            boolean convertTinyint1ToBool,
+            DataTypeMapMode dataTypeMapMode) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -129,7 +136,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 schemaBuilder,
                 includingPattern,
                 excludingPattern,
-                convertTinyint1ToBool);
+                convertTinyint1ToBool,
+                dataTypeMapMode);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -140,7 +148,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            boolean convertTinyint1ToBool) {
+            boolean convertTinyint1ToBool,
+            DataTypeMapMode dataTypeMapMode) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
@@ -149,6 +158,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
         this.convertTinyint1ToBool = convertTinyint1ToBool;
+        this.dataTypeMapMode = dataTypeMapMode;
     }
 
     @Override
@@ -278,27 +288,30 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             return Collections.emptyList();
         }
         List<CdcRecord> records = new ArrayList<>();
-
-        Map<String, String> before = extractRow(payload.get("before"));
-        if (before.size() > 0) {
-            before = caseSensitive ? before : keyCaseInsensitive(before);
-            records.add(new CdcRecord(RowKind.DELETE, before));
-        }
-
-        Map<String, String> after = extractRow(payload.get("after"));
-        if (after.size() > 0) {
-            after = caseSensitive ? after : keyCaseInsensitive(after);
-            records.add(new CdcRecord(RowKind.INSERT, after));
-        }
-
+        parseRecord(payload.get("before"), RowKind.DELETE).ifPresent(records::add);
+        parseRecord(payload.get("after"), RowKind.INSERT).ifPresent(records::add);
         return records;
+    }
+
+    private Optional<CdcRecord> parseRecord(JsonNode recordRow, RowKind kind) {
+        Map<String, String> fields = new HashMap<>();
+        Set<String> encodedFields = new HashSet<>();
+        extractRow(recordRow, fields, encodedFields);
+
+        if (fields.size() > 0) {
+            fields = caseSensitive ? fields : keyCaseInsensitive(fields);
+            return Optional.of(new CdcRecord(kind, fields, encodedFields));
+        } else {
+            return Optional.empty();
+        }
     }
 
     private String getDatabaseName() {
         return payload.get("source").get("db").asText();
     }
 
-    private Map<String, String> extractRow(JsonNode recordRow) {
+    private void extractRow(
+            JsonNode recordRow, Map<String, String> fields, Set<String> encodedFields) {
         JsonNode schema =
                 Preconditions.checkNotNull(
                         root.get("schema"),
@@ -332,10 +345,9 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         Map<String, Object> jsonMap =
                 objectMapper.convertValue(recordRow, new TypeReference<Map<String, Object>>() {});
         if (jsonMap == null) {
-            return new HashMap<>();
+            return;
         }
 
-        Map<String, String> resultMap = new HashMap<>();
         for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue();
@@ -348,10 +360,21 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String oldValue = objectValue.toString();
             String newValue = oldValue;
 
-            // pay attention to the temporal types
-            // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
-            if (("bytes".equals(mySqlType) && className == null)
-                    || Bits.LOGICAL_NAME.equals(className)) {
+            if (Bits.LOGICAL_NAME.equals(className)) {
+                // transform little-endian form to normal order
+                // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-data-types
+                byte[] littleEndian = Base64.getDecoder().decode(oldValue);
+                byte[] bigEndian = new byte[littleEndian.length];
+                for (int i = 0; i < littleEndian.length; i++) {
+                    bigEndian[i] = littleEndian[littleEndian.length - 1 - i];
+                }
+                if (dataTypeMapMode == ALL_TO_STRING) {
+                    newValue = StringUtils.bytesToBinaryString(bigEndian);
+                } else {
+                    newValue = Base64.getEncoder().encodeToString(bigEndian);
+                    encodedFields.add(fieldName);
+                }
+            } else if (("bytes".equals(mySqlType) && className == null)) {
                 // MySQL binary, varbinary, blob
                 newValue = new String(Base64.getDecoder().decode(oldValue));
             } else if ("bytes".equals(mySqlType) && Decimal.LOGICAL_NAME.equals(className)) {
@@ -368,7 +391,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     + "' to 'numeric'",
                             e);
                 }
-            } else if (Date.SCHEMA_NAME.equals(className)) {
+            }
+            // pay attention to the temporal types
+            // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
+            else if (Date.SCHEMA_NAME.equals(className)) {
                 // MySQL date
                 newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
             } else if (Timestamp.SCHEMA_NAME.equals(className)) {
@@ -432,17 +458,15 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 }
             }
 
-            resultMap.put(fieldName, newValue);
+            fields.put(fieldName, newValue);
         }
 
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(
+            fields.put(
                     computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
+                    computedColumn.eval(fields.get(computedColumn.fieldReference())));
         }
-
-        return resultMap;
     }
 
     private Map<String, String> keyCaseInsensitive(Map<String, String> origin) {

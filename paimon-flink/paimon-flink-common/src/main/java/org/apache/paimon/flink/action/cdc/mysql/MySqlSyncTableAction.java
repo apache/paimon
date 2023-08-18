@@ -210,11 +210,15 @@ public class MySqlSyncTableAction extends ActionBase {
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
+        DataTypeMapMode dataTypeMapMode = this.dataTypeMapMode;
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
-                                zoneId, caseSensitive, computedColumns, convertTinyint1ToBool);
-        DataTypeMapMode dataTypeMapMode = this.dataTypeMapMode;
+                                zoneId,
+                                caseSensitive,
+                                computedColumns,
+                                convertTinyint1ToBool,
+                                dataTypeMapMode);
 
         CdcSinkBuilder<String> sinkBuilder =
                 new CdcSinkBuilder<String>()
