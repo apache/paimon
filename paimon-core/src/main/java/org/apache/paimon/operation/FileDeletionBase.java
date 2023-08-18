@@ -38,6 +38,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -47,6 +48,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -64,13 +68,15 @@ public abstract class FileDeletionBase {
     protected final ManifestList manifestList;
     protected final IndexFileHandler indexFileHandler;
     protected final Map<BinaryRow, Set<Integer>> deletionBuckets;
+    protected final Executor ioExecutor;
 
     public FileDeletionBase(
             FileIO fileIO,
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
-            IndexFileHandler indexFileHandler) {
+            IndexFileHandler indexFileHandler,
+            Executor ioExecutor) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFile;
@@ -78,6 +84,7 @@ public abstract class FileDeletionBase {
         this.indexFileHandler = indexFileHandler;
 
         this.deletionBuckets = new HashMap<>();
+        this.ioExecutor = ioExecutor;
     }
 
     /**
@@ -107,10 +114,12 @@ public abstract class FileDeletionBase {
         // All directory paths are deduplicated and sorted by hierarchy level
         Map<Integer, Set<Path>> deduplicate = new HashMap<>();
         for (Map.Entry<BinaryRow, Set<Integer>> entry : deletionBuckets.entrySet()) {
+            List<Path> toDeleteEmptyDirectory = new ArrayList<>();
             // try to delete bucket directories
             for (Integer bucket : entry.getValue()) {
-                tryDeleteEmptyDirectory(pathFactory.bucketPath(entry.getKey(), bucket));
+                toDeleteEmptyDirectory.add(pathFactory.bucketPath(entry.getKey(), bucket));
             }
+            deleteFiles(toDeleteEmptyDirectory, this::tryDeleteEmptyDirectory);
 
             List<Path> hierarchicalPaths = pathFactory.getHierarchicalPartitionPath(entry.getKey());
             int hierarchies = hierarchicalPaths.size();
@@ -144,31 +153,34 @@ public abstract class FileDeletionBase {
     protected void cleanUnusedManifests(
             Snapshot snapshot, Set<String> skippingSet, boolean deleteChangelog) {
         // clean base and delta manifests
+        List<String> toDeleteManifests = new ArrayList<>();
         List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
         toExpireManifests.addAll(tryReadManifestList(snapshot.baseManifestList()));
         toExpireManifests.addAll(tryReadManifestList(snapshot.deltaManifestList()));
         for (ManifestFileMeta manifest : toExpireManifests) {
             String fileName = manifest.fileName();
             if (!skippingSet.contains(fileName)) {
-                manifestFile.delete(fileName);
+                toDeleteManifests.add(fileName);
                 // to avoid other snapshots trying to delete again
                 skippingSet.add(fileName);
             }
         }
+        deleteFiles(toDeleteManifests, manifestFile::delete);
 
+        toDeleteManifests.clear();
         if (!skippingSet.contains(snapshot.baseManifestList())) {
-            manifestList.delete(snapshot.baseManifestList());
+            toDeleteManifests.add(snapshot.baseManifestList());
         }
         if (!skippingSet.contains(snapshot.deltaManifestList())) {
-            manifestList.delete(snapshot.deltaManifestList());
+            toDeleteManifests.add(snapshot.deltaManifestList());
         }
+        deleteFiles(toDeleteManifests, manifestList::delete);
 
         // clean changelog manifests
         if (deleteChangelog && snapshot.changelogManifestList() != null) {
-            for (ManifestFileMeta manifest :
-                    tryReadManifestList(snapshot.changelogManifestList())) {
-                manifestFile.delete(manifest.fileName());
-            }
+            deleteFiles(
+                    tryReadManifestList(snapshot.changelogManifestList()),
+                    manifest -> manifestFile.delete(manifest.fileName()));
             manifestList.delete(snapshot.changelogManifestList());
         }
 
@@ -176,11 +188,11 @@ public abstract class FileDeletionBase {
         String indexManifest = snapshot.indexManifest();
         // check exists, it may have been deleted by other snapshots
         if (indexManifest != null && indexFileHandler.existsManifest(indexManifest)) {
-            for (IndexManifestEntry entry : indexFileHandler.readManifest(indexManifest)) {
-                if (!skippingSet.contains(entry.indexFile().fileName())) {
-                    indexFileHandler.deleteIndexFile(entry);
-                }
-            }
+            List<IndexManifestEntry> indexManifestEntries =
+                    indexFileHandler.readManifest(indexManifest);
+            indexManifestEntries.removeIf(
+                    entry -> skippingSet.contains(entry.indexFile().fileName()));
+            deleteFiles(indexManifestEntries, indexFileHandler::deleteIndexFile);
 
             if (!skippingSet.contains(indexManifest)) {
                 indexFileHandler.deleteManifest(indexManifest);
@@ -303,6 +315,24 @@ public abstract class FileDeletionBase {
         } catch (IOException e) {
             LOG.debug("Failed to delete directory '{}'. Check whether it is empty.", path);
             return false;
+        }
+    }
+
+    protected <T> void deleteFiles(Collection<T> files, Consumer<T> deletion) {
+        if (files.isEmpty()) {
+            return;
+        }
+
+        List<CompletableFuture<Void>> deletionFutures = new ArrayList<>(files.size());
+        for (T file : files) {
+            deletionFutures.add(
+                    CompletableFuture.runAsync(() -> deletion.accept(file), ioExecutor));
+        }
+
+        try {
+            CompletableFuture.allOf(deletionFutures.toArray(new CompletableFuture[0])).get();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 }

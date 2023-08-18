@@ -35,6 +35,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SegmentsCache;
 import org.apache.paimon.utils.SnapshotManager;
@@ -44,6 +45,8 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Base {@link FileStore} implementation.
@@ -59,6 +62,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final RowType partitionType;
 
     @Nullable private final SegmentsCache<String> writeManifestCache;
+
+    private ExecutorService lazyIoExecutor;
 
     public AbstractFileStore(
             FileIO fileIO,
@@ -176,7 +181,9 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.snapshotTimeRetain().toMillis(),
                 snapshotManager(),
                 newSnapshotDeletion(),
-                newTagManager());
+                newTagManager(),
+                ioExecutor(),
+                options.snapshotExpireLimit());
     }
 
     @Override
@@ -186,7 +193,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory(),
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
-                newIndexFileHandler());
+                newIndexFileHandler(),
+                ioExecutor());
     }
 
     @Override
@@ -201,7 +209,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory(),
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
-                newIndexFileHandler());
+                newIndexFileHandler(),
+                ioExecutor());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
@@ -229,5 +238,17 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     public TagAutoCreation newTagCreationManager() {
         return TagAutoCreation.create(
                 options, snapshotManager(), newTagManager(), newTagDeletion());
+    }
+
+    @VisibleForTesting
+    protected ExecutorService ioExecutor() {
+        if (lazyIoExecutor == null) {
+            lazyIoExecutor =
+                    Executors.newFixedThreadPool(
+                            options.snapshotExpireIoThreadPoolSize(),
+                            new ExecutorThreadFactory(
+                                    Thread.currentThread().getName() + "expire-io-thread"));
+        }
+        return lazyIoExecutor;
     }
 }

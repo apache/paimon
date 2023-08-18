@@ -37,6 +37,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 
 /** Delete snapshot files. */
@@ -53,8 +54,9 @@ public class SnapshotDeletion extends FileDeletionBase {
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
-            IndexFileHandler indexFileHandler) {
-        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler);
+            IndexFileHandler indexFileHandler,
+            Executor ioExecutor) {
+        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler, ioExecutor);
     }
 
     @Override
@@ -94,18 +96,20 @@ public class SnapshotDeletion extends FileDeletionBase {
             }
         }
 
+        List<Path> actualDataFileToDelete = new ArrayList<>();
         dataFileToDelete.forEach(
                 (path, pair) -> {
                     ManifestEntry entry = pair.getLeft();
                     // check whether we should skip the data file
                     if (!skipper.test(entry)) {
                         // delete data files
-                        fileIO.deleteQuietly(path);
-                        pair.getRight().forEach(fileIO::deleteQuietly);
+                        actualDataFileToDelete.add(path);
+                        actualDataFileToDelete.addAll(pair.getRight());
 
                         recordDeletionBuckets(entry);
                     }
                 });
+        deleteFiles(actualDataFileToDelete, fileIO::deleteQuietly);
     }
 
     /**
@@ -118,15 +122,17 @@ public class SnapshotDeletion extends FileDeletionBase {
     }
 
     public void deleteAddedDataFiles(Iterable<ManifestEntry> manifestEntries) {
+        List<Path> dataFileToDelete = new ArrayList<>();
         for (ManifestEntry entry : manifestEntries) {
             if (entry.kind() == FileKind.ADD) {
-                fileIO.deleteQuietly(
+                dataFileToDelete.add(
                         new Path(
                                 pathFactory.bucketPath(entry.partition(), entry.bucket()),
                                 entry.file().fileName()));
                 recordDeletionBuckets(entry);
             }
         }
+        deleteFiles(dataFileToDelete, fileIO::deleteQuietly);
     }
 
     public Predicate<ManifestEntry> dataFileSkipper(

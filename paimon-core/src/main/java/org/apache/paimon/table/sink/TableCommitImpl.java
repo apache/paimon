@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -25,7 +26,13 @@ import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.tag.TagAutoCreation;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.IOUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -37,8 +44,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
@@ -46,6 +56,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * snapshot commit and expiration.
  */
 public class TableCommitImpl implements InnerTableCommit {
+    private static final Logger LOG = LoggerFactory.getLogger(TableCommitImpl.class);
 
     private final FileStoreCommit commit;
     private final List<CommitCallback> commitCallbacks;
@@ -61,6 +72,8 @@ public class TableCommitImpl implements InnerTableCommit {
 
     private boolean batchCommitted = false;
 
+    private ExecutorService expireMainExecutor;
+
     public TableCommitImpl(
             FileStoreCommit commit,
             List<CommitCallback> commitCallbacks,
@@ -69,7 +82,8 @@ public class TableCommitImpl implements InnerTableCommit {
             @Nullable TagAutoCreation tagAutoCreation,
             Lock lock,
             @Nullable Duration consumerExpireTime,
-            ConsumerManager consumerManager) {
+            ConsumerManager consumerManager,
+            ExpireExecutionMode expireExecutionMode) {
         commit.withLock(lock);
         if (expire != null) {
             expire.withLock(lock);
@@ -87,6 +101,13 @@ public class TableCommitImpl implements InnerTableCommit {
 
         this.consumerExpireTime = consumerExpireTime;
         this.consumerManager = consumerManager;
+
+        this.expireMainExecutor =
+                expireExecutionMode == ExpireExecutionMode.SYNC
+                        ? MoreExecutors.newDirectExecutorService()
+                        : Executors.newSingleThreadExecutor(
+                                new ExecutorThreadFactory(
+                                        Thread.currentThread().getName() + "expire-main-thread"));
     }
 
     @Override
@@ -145,7 +166,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 commit.commit(committable, new HashMap<>());
             }
             if (!committables.isEmpty()) {
-                expire(committables.get(committables.size() - 1).identifier());
+                expire(committables.get(committables.size() - 1).identifier(), expireMainExecutor);
             }
         } else {
             ManifestCommittable committable;
@@ -162,7 +183,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 committable = new ManifestCommittable(Long.MAX_VALUE);
             }
             commit.overwrite(overwritePartition, committable, Collections.emptyMap());
-            expire(committable.identifier());
+            expire(committable.identifier(), expireMainExecutor);
         }
 
         commitCallbacks.forEach(c -> c.call(committables));
@@ -195,6 +216,17 @@ public class TableCommitImpl implements InnerTableCommit {
         return retryCommittables.size();
     }
 
+    private void expire(long partitionExpireIdentifier, ExecutorService executor) {
+        executor.execute(
+                () -> {
+                    try {
+                        expire(partitionExpireIdentifier);
+                    } catch (Throwable t) {
+                        LOG.warn("Executing expire encountered an error.", t);
+                    }
+                });
+    }
+
     private void expire(long partitionExpireIdentifier) {
         // expire consumer first to avoid preventing snapshot expiration
         if (consumerExpireTime != null) {
@@ -220,10 +252,21 @@ public class TableCommitImpl implements InnerTableCommit {
             IOUtils.closeQuietly(commitCallback);
         }
         IOUtils.closeQuietly(lock);
+
+        expireMainExecutor.shutdownNow();
+        if (expire != null) {
+            expire.close();
+        }
     }
 
     @Override
     public void abort(List<CommitMessage> commitMessages) {
         commit.abort(commitMessages);
+    }
+
+    @VisibleForTesting
+    public void resetExpireMainExecutor(ExecutorService executor) {
+        this.expireMainExecutor.shutdownNow();
+        this.expireMainExecutor = executor;
     }
 }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
@@ -28,10 +29,13 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nonnull;
+
 import java.util.List;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -56,6 +60,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final SnapshotDeletion snapshotDeletion;
 
     private final TagManager tagManager;
+    @Nonnull private final ExecutorService ioExecutor;
+    private final int expireLimit;
 
     private Lock lock;
 
@@ -65,13 +71,18 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             long millisRetained,
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
-            TagManager tagManager) {
+            TagManager tagManager,
+            @Nonnull ExecutorService ioExecutor,
+            int expireLimit) {
         Preconditions.checkArgument(
                 numRetainedMin >= 1,
                 "The minimum number of completed snapshots to retain should be >= 1.");
         Preconditions.checkArgument(
                 numRetainedMax >= numRetainedMin,
                 "The maximum number of snapshots to retain should be >= the minimum number.");
+        Preconditions.checkArgument(
+                expireLimit > 1,
+                String.format("The %s should be > 1.", CoreOptions.SNAPSHOT_EXPIRE_LIMIT.key()));
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
@@ -80,6 +91,8 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
+        this.ioExecutor = ioExecutor;
+        this.expireLimit = expireLimit;
     }
 
     @Override
@@ -152,6 +165,9 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 break;
             }
         }
+
+        endExclusiveId = Math.min(beginInclusiveId + expireLimit, endExclusiveId);
+
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");
@@ -231,5 +247,10 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     @VisibleForTesting
     SnapshotDeletion snapshotDeletion() {
         return snapshotDeletion;
+    }
+
+    @Override
+    public void close() throws Exception {
+        ioExecutor.shutdownNow();
     }
 }
