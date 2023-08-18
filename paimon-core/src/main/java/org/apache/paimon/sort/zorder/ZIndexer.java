@@ -19,6 +19,7 @@
 package org.apache.paimon.sort.zorder;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -53,6 +54,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 
+import static org.apache.paimon.types.TimestampType.DEFAULT_PRECISION;
 import static org.apache.paimon.utils.ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE;
 
 /** Z-indexer for responsibility to generate z-index. */
@@ -147,7 +149,7 @@ public class ZIndexer implements Serializable {
 
         @Override
         public ZorderBaseFunction visit(DecimalType decimalType) {
-            return new ZorderDecimalFunction();
+            return new ZorderDecimalFunction(decimalType.getPrecision(), decimalType.getScale());
         }
 
         @Override
@@ -192,12 +194,12 @@ public class ZIndexer implements Serializable {
 
         @Override
         public ZorderBaseFunction visit(TimestampType timestampType) {
-            return new ZorderTimestampFunction();
+            return new ZorderTimestampFunction(timestampType.getPrecision());
         }
 
         @Override
         public ZorderBaseFunction visit(LocalZonedTimestampType localZonedTimestampType) {
-            return new ZorderTimestampFunction();
+            return new ZorderTimestampFunction(localZonedTimestampType.getPrecision());
         }
 
         @Override
@@ -304,9 +306,15 @@ public class ZIndexer implements Serializable {
     /** Function used for Type Timestamp. */
     public static class ZorderTimestampFunction extends ZorderBaseFunction {
 
+        private final int precision;
+
+        public ZorderTimestampFunction(int precision) {
+            this.precision = precision;
+        }
+
         public byte[] apply(InternalRow val) {
-            Long time = val.getLong(position);
-            return ZOrderByteUtils.longToOrderedBytes(time, reuse).array();
+            Timestamp time = val.getTimestamp(position, precision);
+            return ZOrderByteUtils.longToOrderedBytes(time.getMillisecond(), reuse).array();
         }
     }
 
@@ -329,8 +337,16 @@ public class ZIndexer implements Serializable {
     /** Function used for Type Decimal. */
     public static class ZorderDecimalFunction extends ZorderBaseFunction {
 
+        private int precise;
+        private int scale;
+
+        public ZorderDecimalFunction(int precise, int scale) {
+            this.precise = precise;
+            this.scale = scale;
+        }
+
         public byte[] apply(InternalRow b) {
-            return ZOrderByteUtils.doubleToOrderedBytes(b.getDouble(position), reuse).array();
+            return ZOrderByteUtils.doubleToOrderedBytes(b.getDecimal(position, precise, scale).toUnscaledLong(), reuse).array();
         }
     }
 

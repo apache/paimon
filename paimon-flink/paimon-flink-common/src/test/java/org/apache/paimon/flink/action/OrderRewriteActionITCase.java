@@ -152,7 +152,7 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
 
     @Test
     public void testZorderActionWorks() throws Exception {
-        prepareData(300, 1);
+        prepareData(300, 30);
         PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
         Predicate predicate = predicateBuilder.between(1, 100, 200);
 
@@ -178,8 +178,6 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
                         .withFilter(predicate)
                         .plan()
                         .files();
-        System.out.println("files: " + files.size() + " filterAfter: " + filesFilter.size());
-
         Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
     }
 
