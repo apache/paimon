@@ -152,7 +152,7 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
 
     @Test
     public void testZorderActionWorks() throws Exception {
-        prepareData(300, 30);
+        prepareData(300, 1);
         PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
         Predicate predicate = predicateBuilder.between(1, 100, 200);
 

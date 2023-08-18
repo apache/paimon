@@ -40,6 +40,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.data.RowData;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 
@@ -73,25 +74,27 @@ public class ZorderSorterUtils {
         int fieldCount = valueRowType.getFieldCount();
         int parallelism = inputStream.getParallelism();
         int sampleSize = parallelism * 1000;
-        int rangeNum = parallelism * 100;
+        int rangeNum = parallelism * 10;
 
         // generate the z-index as the key of Pair.
         DataStream<Pair<byte[], RowData>> inputWithKey =
-                inputStream.map(
-                        new RichMapFunction<RowData, Pair<byte[], RowData>>() {
+                inputStream
+                        .map(
+                                new RichMapFunction<RowData, Pair<byte[], RowData>>() {
 
-                            @Override
-                            public void open(Configuration parameters) throws Exception {
-                                super.open(parameters);
-                                zIndexer.open();
-                            }
+                                    @Override
+                                    public void open(Configuration parameters) throws Exception {
+                                        super.open(parameters);
+                                        zIndexer.open();
+                                    }
 
-                            @Override
-                            public Pair<byte[], RowData> map(RowData value) {
-                                byte[] zorder = zIndexer.index(new FlinkRowWrapper(value));
-                                return Pair.of(zorder, value);
-                            }
-                        });
+                                    @Override
+                                    public Pair<byte[], RowData> map(RowData value) {
+                                        byte[] zorder = zIndexer.index(new FlinkRowWrapper(value));
+                                        return Pair.of(Arrays.copyOf(zorder, zorder.length), value);
+                                    }
+                                })
+                        .setParallelism(parallelism);
 
         // range shuffle by z-index key
         return RangeShuffleUtil.rangeShuffleByKey(
@@ -116,11 +119,13 @@ public class ZorderSorterUtils {
                                         GenericRow.of(a.getLeft()),
                                         new FlinkRowWrapper(a.getRight())),
                         TypeInformation.of(InternalRow.class))
+                .setParallelism(parallelism)
                 // sort the output locally by `SortOperator`
                 .transform(
                         "LOCAL SORT",
                         TypeInformation.of(InternalRow.class),
                         new SortOperator(KEY_TYPE, valueRowType))
+                .setParallelism(parallelism)
                 // remove the z-index column from every row
                 .map(
                         new RichMapFunction<InternalRow, InternalRow>() {
@@ -141,7 +146,9 @@ public class ZorderSorterUtils {
                                 return keyProjectedRow.replaceRow(value);
                             }
                         })
+                .setParallelism(parallelism)
                 // back to `RowData` to enable flink table environment convert it back to `Table`
-                .map(FlinkRowData::new, inputStream.getType());
+                .map(FlinkRowData::new, inputStream.getType())
+                .setParallelism(parallelism);
     }
 }

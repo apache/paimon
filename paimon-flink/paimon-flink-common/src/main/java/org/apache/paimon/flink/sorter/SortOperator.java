@@ -108,9 +108,11 @@ public class SortOperator extends TableStreamOperator<InternalRow>
 
     @Override
     public void endInput() throws Exception {
-        MutableObjectIterator<BinaryRow> iterator = buffer.sortedIterator();
-        while ((iterator.next(reuseBinaryRow)) != null) {
-            output.collect(new StreamRecord<>(reuseBinaryRow));
+        if (buffer.size() > 0) {
+            MutableObjectIterator<BinaryRow> iterator = buffer.sortedIterator();
+            while ((iterator.next(reuseBinaryRow)) != null) {
+                output.collect(new StreamRecord<>(reuseBinaryRow));
+            }
         }
     }
 

@@ -20,7 +20,6 @@ package org.apache.paimon.flink.shuffle;
 
 import org.apache.paimon.utils.Pair;
 
-import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.dag.Transformation;
@@ -129,6 +128,6 @@ public class RangeShuffleUtil {
                         "REMOVE KEY",
                         new RemoveRangeIndexOperator<>(),
                         input.getOutputType(),
-                        ExecutionConfig.PARALLELISM_DEFAULT));
+                        input.getParallelism()));
     }
 }
