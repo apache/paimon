@@ -382,6 +382,7 @@ public class HiveCatalog extends AbstractCatalog {
 
                 // update location
                 locationHelper.specifyTableLocation(table, toPath.toString());
+                client.alter_table(toTable.getDatabaseName(), toTable.getObjectName(), table);
             }
         } catch (TException e) {
             throw new RuntimeException("Failed to rename table " + fromTable.getFullName(), e);
