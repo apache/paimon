@@ -288,8 +288,8 @@ public class ZIndexer implements Serializable {
     public static class ZorderDateFunction extends ZorderBaseFunction {
 
         public byte[] apply(InternalRow val) {
-            Long date = val.getLong(position);
-            return ZOrderByteUtils.longToOrderedBytes(date, reuse).array();
+            int date = val.getInt(position);
+            return ZOrderByteUtils.intToOrderedBytes(date, reuse).array();
         }
     }
 
@@ -297,7 +297,7 @@ public class ZIndexer implements Serializable {
     public static class ZorderTimeFunction extends ZorderBaseFunction {
 
         public byte[] apply(InternalRow val) {
-            Long date = val.getLong(position);
+            long date = val.getLong(position);
             return ZOrderByteUtils.longToOrderedBytes(date, reuse).array();
         }
     }
