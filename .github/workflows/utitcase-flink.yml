@@ -43,13 +43,13 @@ jobs:
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'adopt'
-      - name: Build and Test
-        timeout-minutes: 60
+      - name: Build without tests
+        run: mvn -T 1C -B clean install -DskipTests
+        env:
+          MAVEN_OPTS: -Xmx4096m
+      - name: Run End to End Tests with random timezone
         run: |
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          mvn -T 1C -B clean install -DskipTests
           mvn -T 1C -B clean install -pl 'org.apache.paimon:paimon-flink-common' -Duser.timezone=$jvm_timezone
-        env:
-          MAVEN_OPTS: -Xmx4096m

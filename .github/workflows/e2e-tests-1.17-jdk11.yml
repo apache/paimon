@@ -44,14 +44,13 @@ jobs:
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'adopt'
-      - name: Build and Test Flink 1.17
-        timeout-minutes: 60
+      - name: Build without Tests
+        run: mvn -T 1C -B clean install -DskipTests -Pflink-1.17
+        env:
+          MAVEN_OPTS: -Xmx4096m
+      - name: Run Tests with Random Timezone
         run: |
-          # run tests with random timezone to find out timezone related bugs
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          mvn -T 1C -B clean install -DskipTests
-          mvn -T 1C -B test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
-        env:
-          MAVEN_OPTS: -Xmx4096m
+          mvn -T 1C -B test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone -Pflink-1.17
