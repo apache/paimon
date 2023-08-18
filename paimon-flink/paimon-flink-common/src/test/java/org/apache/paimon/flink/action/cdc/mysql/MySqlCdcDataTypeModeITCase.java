@@ -330,4 +330,38 @@ public class MySqlCdcDataTypeModeITCase extends MySqlActionITCaseBase {
                     Collections.singletonList("pk"));
         }
     }
+
+    @Test
+    @Timeout(60)
+    public void testDefaultValue() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "sync_table_test");
+        mySqlConfig.put("table-name", "test_default_value");
+
+        MySqlSyncTableAction action =
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                        .withDataTypeMapMode(ALL_TO_STRING);
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE sync_table_test");
+            statement.executeUpdate(
+                    "INSERT INTO test_default_value VALUES "
+                            + "(1, b'1', '2023-08-31 12:00', '2023-09-01 00:01'), (2, NULL, NULL, NULL)");
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, 00000001, 2023-08-31 12:00:00.000, 2023-09-01 00:01:00.000000]",
+                            "+I[2, b'1', 2023-08-31 12:00:00, 2023-09-01 03:01:00]" /* not normalized */),
+                    getFileStoreTable(tableName),
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.STRING().notNull(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING()
+                            },
+                            new String[] {"pk", "_bit", "_datetime", "_timestamp"}),
+                    Collections.singletonList("pk"));
+        }
+    }
 }

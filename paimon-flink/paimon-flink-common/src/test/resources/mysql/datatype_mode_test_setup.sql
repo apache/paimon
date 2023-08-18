@@ -248,3 +248,17 @@ CREATE TABLE a (
     pk INT,
     PRIMARY KEY (pk)
 );
+
+-- ################################################################################
+--  testDefaultValue
+-- ################################################################################
+
+USE sync_table_test;
+
+CREATE TABLE test_default_value (
+    pk INT,
+    _bit bit(8) DEFAULT b'1',
+    _datetime DATETIME DEFAULT '2023-08-31 12:00',
+    _timestamp TIMESTAMP DEFAULT '2023-09-01 00:01',
+    PRIMARY KEY (pk)
+);

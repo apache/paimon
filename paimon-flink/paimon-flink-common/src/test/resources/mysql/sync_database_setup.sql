@@ -476,3 +476,17 @@ CREATE TABLE t3 (
     k INT,
     v2 VARCHAR(10)
 );
+
+-- ################################################################################
+--  testDefaultValue
+-- ################################################################################
+
+CREATE DATABASE default_value_test_database;
+USE default_value_test_database;
+
+CREATE TABLE test_default_value (
+    pk INT,
+    dt VARCHAR(5) DEFAULT '01-01',
+    price DOUBLE DEFAULT 100.0,
+    PRIMARY KEY (pk)
+);

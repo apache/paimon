@@ -20,30 +20,31 @@ package org.apache.paimon.flink.action.cdc.mysql.schema;
 
 import org.apache.paimon.flink.action.cdc.DataTypeMapMode;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
-import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
+import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunctionBase;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.utils.Pair;
 
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchema {
 
-    private final LinkedHashMap<String, Pair<DataType, String>> fields;
+    private final List<MySqlColumn> columns;
     private final List<String> primaryKeys;
 
-    private MySqlSchema(
-            LinkedHashMap<String, Pair<DataType, String>> fields, List<String> primaryKeys) {
-        this.fields = fields;
+    private MySqlSchema(List<MySqlColumn> columns, List<String> primaryKeys) {
+        this.columns = columns;
         this.primaryKeys = primaryKeys;
     }
 
@@ -54,10 +55,11 @@ public class MySqlSchema {
             boolean convertTinyintToBool,
             DataTypeMapMode dataTypeMapMode)
             throws SQLException {
-        LinkedHashMap<String, Pair<DataType, String>> fields = new LinkedHashMap<>();
+        List<MySqlColumn> columns = new ArrayList<>();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
+                String defaultValue = rs.getString("COLUMN_DEF");
                 String fieldComment = rs.getString("REMARKS");
                 DataType paimonType;
 
@@ -85,7 +87,7 @@ public class MySqlSchema {
                         throw new UnsupportedOperationException(
                                 "Unsupported data type map mode: " + dataTypeMapMode);
                 }
-                fields.put(fieldName, Pair.of(paimonType, fieldComment));
+                columns.add(new MySqlColumn(fieldName, paimonType, defaultValue, fieldComment));
             }
         }
 
@@ -97,60 +99,89 @@ public class MySqlSchema {
             }
         }
 
-        return new MySqlSchema(fields, primaryKeys);
+        return new MySqlSchema(columns, primaryKeys);
     }
 
-    public LinkedHashMap<String, Pair<DataType, String>> fields() {
-        return fields;
+    public List<MySqlColumn> columns(boolean caseSensitive) {
+        if (caseSensitive) {
+            return columns;
+        } else {
+            List<MySqlColumn> lowerCaseColumns =
+                    columns.stream().map(MySqlColumn::toLowerCaseCopy).collect(Collectors.toList());
+
+            List<String> columnNames =
+                    lowerCaseColumns.stream().map(MySqlColumn::name).collect(Collectors.toList());
+
+            Set<String> duplicateColumns =
+                    columnNames.stream()
+                            .filter(columName -> Collections.frequency(columnNames, columName) > 1)
+                            .collect(Collectors.toSet());
+
+            checkState(
+                    duplicateColumns.isEmpty(),
+                    "There are duplicate fields [%s] after converted to lower case.",
+                    duplicateColumns);
+
+            return lowerCaseColumns;
+        }
     }
 
     public List<String> primaryKeys() {
         return primaryKeys;
     }
 
+    public List<String> primaryKeys(boolean caseSensitive) {
+        if (caseSensitive) {
+            return primaryKeys;
+        } else {
+            return primaryKeys.stream().map(String::toLowerCase).collect(Collectors.toList());
+        }
+    }
+
     public Map<String, DataType> typeMapping() {
-        Map<String, DataType> typeMapping = new HashMap<>();
-        fields.forEach((name, pair) -> typeMapping.put(name, pair.getLeft()));
-        return typeMapping;
+        return columns.stream().collect(Collectors.toMap(MySqlColumn::name, MySqlColumn::type));
     }
 
     public MySqlSchema merge(String currentTable, String otherTable, MySqlSchema other) {
-        for (Map.Entry<String, Pair<DataType, String>> entry : other.fields.entrySet()) {
-            String fieldName = entry.getKey();
-            DataType newType = entry.getValue().getLeft();
-            if (fields.containsKey(fieldName)) {
-                DataType oldType = fields.get(fieldName).getLeft();
-                switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newType)) {
+        LinkedHashMap<String, MySqlColumn> columnMapping = new LinkedHashMap<>();
+        columns.forEach(column -> columnMapping.put(column.name(), column));
+        for (MySqlColumn newColumn : other.columns) {
+            String columnName = newColumn.name();
+            DataType newType = newColumn.type();
+            if (columnMapping.containsKey(columnName)) {
+                MySqlColumn oldColumn = columnMapping.get(columnName);
+                DataType oldType = oldColumn.type();
+                switch (UpdatedDataFieldsProcessFunctionBase.canConvert(oldType, newType)) {
                     case CONVERT:
-                        fields.put(fieldName, Pair.of(newType, entry.getValue().getRight()));
+                        columnMapping.put(columnName, oldColumn.merge(newColumn));
                         break;
                     case EXCEPTION:
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Column %s have different types when merging schemas.\n"
-                                                + "Current table '%s' fields: %s\n"
-                                                + "To be merged table '%s' fields: %s",
-                                        fieldName,
+                                                + "Current table '%s' columns: %s\n"
+                                                + "To be merged table '%s' columns: %s",
+                                        columnName,
                                         currentTable,
-                                        fieldsToString(),
+                                        columnsToString(),
                                         otherTable,
-                                        other.fieldsToString()));
+                                        other.columnsToString()));
                 }
             } else {
-                fields.put(fieldName, Pair.of(newType, entry.getValue().getRight()));
+                columnMapping.put(columnName, newColumn.copy());
             }
         }
 
-        if (!primaryKeys.equals(other.primaryKeys)) {
-            primaryKeys.clear();
-        }
-        return this;
+        List<String> pks =
+                primaryKeys.equals(other.primaryKeys) ? primaryKeys : Collections.emptyList();
+
+        return new MySqlSchema(new ArrayList<>(columnMapping.values()), pks);
     }
 
-    private String fieldsToString() {
+    public String columnsToString() {
         return "["
-                + fields.entrySet().stream()
-                        .map(e -> String.format("%s %s", e.getKey(), e.getValue().getLeft()))
+                + columns.stream()
+                        .map(c -> String.format("%s %s", c.name(), c.type()))
                         .collect(Collectors.joining(","))
                 + "]";
     }

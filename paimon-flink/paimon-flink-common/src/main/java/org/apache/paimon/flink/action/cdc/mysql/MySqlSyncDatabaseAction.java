@@ -370,7 +370,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         identifier.getFullName(),
                         paimonSchema.fields(),
                         mySqlTableInfo.location(),
-                        mySqlTableInfo.schema().fields());
+                        mySqlTableInfo.schema().columnsToString());
     }
 
     @VisibleForTesting

@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.DataTypeMapMode;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlColumn;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchema;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
@@ -29,7 +31,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Pair;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -52,14 +53,15 @@ import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -124,15 +126,15 @@ public class MySqlActionUtils {
                         try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
                             while (tables.next()) {
                                 String tableName = tables.getString("TABLE_NAME");
-                                MySqlSchema mySqlSchema =
-                                        MySqlSchema.buildSchema(
-                                                metaData,
-                                                databaseName,
-                                                tableName,
-                                                mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL),
-                                                dataTypeMapMode);
                                 Identifier identifier = Identifier.create(databaseName, tableName);
                                 if (monitorTablePredication.test(tableName)) {
+                                    MySqlSchema mySqlSchema =
+                                            MySqlSchema.buildSchema(
+                                                    metaData,
+                                                    databaseName,
+                                                    tableName,
+                                                    mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL),
+                                                    dataTypeMapMode);
                                     mySqlSchemasInfo.addSchema(identifier, mySqlSchema);
                                 } else {
                                     excludedTables.add(identifier);
@@ -189,47 +191,41 @@ public class MySqlActionUtils {
         builder.options(paimonConfig);
         MySqlSchema mySqlSchema = mySqlTableInfo.schema();
 
-        // build columns and primary keys from mySqlSchema
-        LinkedHashMap<String, Pair<DataType, String>> mySqlFields;
-        List<String> mySqlPrimaryKeys;
-        if (caseSensitive) {
-            mySqlFields = mySqlSchema.fields();
-            mySqlPrimaryKeys = mySqlSchema.primaryKeys();
-        } else {
-            mySqlFields = new LinkedHashMap<>();
-            for (Map.Entry<String, Pair<DataType, String>> entry :
-                    mySqlSchema.fields().entrySet()) {
-                String fieldName = entry.getKey();
-                checkArgument(
-                        !mySqlFields.containsKey(fieldName.toLowerCase()),
+        // build columns and default value options
+        List<MySqlColumn> mySqlColumns = mySqlSchema.columns(caseSensitive);
+        Map<String, String> defaultValueOptions = new HashMap<>();
+        for (MySqlColumn column : mySqlColumns) {
+            builder.column(column.name(), column.type(), column.comment());
+            if (column.defaultValue() != null) {
+                defaultValueOptions.put(
                         String.format(
-                                "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, mySqlTableInfo.location()));
-                mySqlFields.put(fieldName.toLowerCase(), entry.getValue());
+                                "%s.%s.%s",
+                                CoreOptions.FIELDS_PREFIX,
+                                column.name(),
+                                CoreOptions.DEFAULT_VALUE_SUFFIX),
+                        column.defaultValue());
             }
-            mySqlPrimaryKeys =
-                    mySqlSchema.primaryKeys().stream()
-                            .map(String::toLowerCase)
-                            .collect(Collectors.toList());
         }
-
-        for (Map.Entry<String, Pair<DataType, String>> entry : mySqlFields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue().getLeft(), entry.getValue().getRight());
-        }
+        builder.options(defaultValueOptions);
 
         for (ComputedColumn computedColumn : computedColumns) {
             builder.column(computedColumn.columnName(), computedColumn.columnType());
         }
 
+        // primary keys
+        List<String> mySqlPrimaryKeys = mySqlSchema.primaryKeys(caseSensitive);
+        Set<String> knownColumns =
+                Stream.concat(
+                                mySqlColumns.stream().map(MySqlColumn::name),
+                                computedColumns.stream().map(ComputedColumn::columnName))
+                        .collect(Collectors.toSet());
         if (specifiedPrimaryKeys.size() > 0) {
             for (String key : specifiedPrimaryKeys) {
-                if (!mySqlFields.containsKey(key)
-                        && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
-                    throw new IllegalArgumentException(
-                            "Specified primary key "
-                                    + key
-                                    + " does not exist in MySQL tables or computed columns.");
-                }
+                checkArgument(
+                        knownColumns.contains(key),
+                        "Specified primary key '%s' does not exist in MySQL tables '%s' or computed columns.",
+                        key,
+                        mySqlTableInfo.location());
             }
             builder.primaryKey(specifiedPrimaryKeys);
         } else if (mySqlPrimaryKeys.size() > 0) {

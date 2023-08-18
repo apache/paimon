@@ -1302,6 +1302,103 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         Identifier.create("monitored_and_excluded_shard_2", "t3"));
     }
 
+    @Test
+    @Timeout(60)
+    public void testDefaultValue() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "default_value_test_database");
+
+        MySqlSyncDatabaseAction action =
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withSinkMode(COMBINED);
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE default_value_test_database");
+
+            // test existed table
+            statement.executeUpdate(
+                    "INSERT INTO test_default_value VALUES "
+                            + "(1, '01-31', 55.5), (2, NULL, 101.6), (3, '12-30', NULL), (4, NULL, NULL)");
+
+            FileStoreTable table = getFileStoreTable("test_default_value");
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(5), DataTypes.DOUBLE()
+                            },
+                            new String[] {"pk", "dt", "price"});
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, 01-31, 55.5]",
+                            "+I[2, 01-01, 101.6]",
+                            "+I[3, 12-30, 100.0]",
+                            "+I[4, 01-01, 100.0]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
+
+            // test newly created table
+            statement.executeUpdate(
+                    "CREATE TABLE test_default_value1 ("
+                            + "   pk INT, "
+                            + "   v1 BIT(8) DEFAULT b'1', "
+                            + "   v2 VARCHAR(10), "
+                            + "   PRIMARY KEY (pk)"
+                            + "   )");
+            statement.execute("INSERT INTO test_default_value1 VALUES (1, NULL , NULL)");
+            waitingTables("test_default_value1");
+
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(),
+                                DataTypes.BINARY(1),
+                                DataTypes.VARCHAR(10)
+                            },
+                            new String[] {"pk", "v1", "v2"});
+            table = getFileStoreTable("test_default_value1");
+            waitForResult(
+                    Collections.singletonList("+I[1, [1], NULL]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
+
+            // test schema evolution: only affects new value, because cannot get default value
+            // from debezium table changes
+            statement.executeUpdate(
+                    "ALTER TABLE test_default_value1 MODIFY COLUMN v2 VARCHAR(10) DEFAULT 'Paimon'");
+            statement.executeUpdate("INSERT INTO test_default_value1 VALUES (2, NULL, NULL)");
+
+            waitForResult(
+                    Arrays.asList("+I[1, [1], NULL]", "+I[2, [1], Paimon]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
+
+            statement.executeUpdate("ALTER TABLE test_default_value1 ADD COLUMN v3 INT DEFAULT 1");
+            statement.executeUpdate("INSERT INTO test_default_value1 VALUES (3, NULL, NULL, NULL)");
+
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(),
+                                DataTypes.BINARY(1),
+                                DataTypes.VARCHAR(10),
+                                DataTypes.INT()
+                            },
+                            new String[] {"pk", "v1", "v2", "v3"});
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, [1], NULL, NULL]",
+                            "+I[2, [1], Paimon, NULL]",
+                            "+I[3, [1], Paimon, 1]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
+        }
+    }
+
     private void assertTableExists(List<String> tableNames) {
         Catalog catalog = catalog();
         for (String tableName : tableNames) {
