@@ -69,29 +69,41 @@ public class FlinkSinkBuilder {
     }
 
     public DataStreamSink<?> build() {
+        DataStream<RowData> input = this.input;
+        if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
+            input =
+                    input.forward()
+                            .transform(
+                                    "local merge",
+                                    input.getType(),
+                                    new LocalMergeOperator(table.schema()))
+                            .setParallelism(input.getParallelism());
+        }
+
         BucketMode bucketMode = table.bucketMode();
         switch (bucketMode) {
             case FIXED:
-                return buildForFixedBucket();
+                return buildForFixedBucket(input);
             case DYNAMIC:
-                return buildDynamicBucketSink(false);
+                return buildDynamicBucketSink(input, false);
             case GLOBAL_DYNAMIC:
-                return buildDynamicBucketSink(true);
+                return buildDynamicBucketSink(input, true);
             case UNAWARE:
-                return buildUnawareBucketSink();
+                return buildUnawareBucketSink(input);
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
         }
     }
 
-    private DataStreamSink<?> buildDynamicBucketSink(boolean globalIndex) {
+    private DataStreamSink<?> buildDynamicBucketSink(
+            DataStream<RowData> input, boolean globalIndex) {
         checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
         return globalIndex
                 ? new GlobalDynamicBucketSink(table, overwritePartition).build(input, parallelism)
                 : new RowDynamicBucketSink(table, overwritePartition).build(input, parallelism);
     }
 
-    private DataStreamSink<?> buildForFixedBucket() {
+    private DataStreamSink<?> buildForFixedBucket(DataStream<RowData> input) {
         DataStream<RowData> partitioned =
                 partition(
                         input,
@@ -101,7 +113,7 @@ public class FlinkSinkBuilder {
         return sink.sinkFrom(partitioned);
     }
 
-    private DataStreamSink<?> buildUnawareBucketSink() {
+    private DataStreamSink<?> buildUnawareBucketSink(DataStream<RowData> input) {
         checkArgument(
                 table instanceof AppendOnlyFileStoreTable,
                 "Unaware bucket mode only works with append-only table for now.");
