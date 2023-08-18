@@ -368,8 +368,7 @@ public class HiveCatalog extends AbstractCatalog {
             Path fromPath = getDataTableLocation(fromTable);
             if (new SchemaManager(fileIO, fromPath).listAllIds().size() > 0) {
                 // Rename the file system's table directory. Maintain consistency between tables in
-                // the
-                // file system and tables in the Hive Metastore.
+                // the file system and tables in the Hive Metastore.
                 Path toPath = getDataTableLocation(toTable);
                 try {
                     fileIO.rename(fromPath, toPath);
