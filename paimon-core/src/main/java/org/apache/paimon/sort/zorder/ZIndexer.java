@@ -54,7 +54,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Function;
 
-import static org.apache.paimon.types.TimestampType.DEFAULT_PRECISION;
 import static org.apache.paimon.utils.ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE;
 
 /** Z-indexer for responsibility to generate z-index. */
@@ -346,7 +345,9 @@ public class ZIndexer implements Serializable {
         }
 
         public byte[] apply(InternalRow b) {
-            return ZOrderByteUtils.doubleToOrderedBytes(b.getDecimal(position, precise, scale).toUnscaledLong(), reuse).array();
+            return ZOrderByteUtils.doubleToOrderedBytes(
+                            b.getDecimal(position, precise, scale).toUnscaledLong(), reuse)
+                    .array();
         }
     }
 
