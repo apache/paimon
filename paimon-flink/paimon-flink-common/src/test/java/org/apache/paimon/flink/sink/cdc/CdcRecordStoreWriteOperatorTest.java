@@ -224,7 +224,7 @@ public class CdcRecordStoreWriteOperatorTest {
         expected = new CdcRecord(RowKind.INSERT, fields);
         runner.offer(expected);
         actual = runner.poll(1);
-        assertThat(actual).isNull();
+        assertThat(actual).isEqualTo(expected);
 
         schemaManager.commitChanges(SchemaChange.updateColumnType("v3", DataTypes.VARCHAR(10)));
         actual = runner.take();
@@ -239,7 +239,7 @@ public class CdcRecordStoreWriteOperatorTest {
         expected = new CdcRecord(RowKind.INSERT, fields);
         runner.offer(expected);
         actual = runner.poll(1);
-        assertThat(actual).isNull();
+        assertThat(actual).isEqualTo(expected);
 
         schemaManager.commitChanges(SchemaChange.updateColumnType("v4", DataTypes.VARBINARY(10)));
         actual = runner.take();
