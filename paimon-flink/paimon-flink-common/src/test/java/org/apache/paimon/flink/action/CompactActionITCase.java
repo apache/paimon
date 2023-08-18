@@ -25,7 +25,6 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
@@ -219,7 +218,7 @@ public class CompactActionITCase extends ActionITCaseBase {
 
         FileStoreTable table =
                 createFileStoreTable(
-                        ROW_TYPE, Arrays.asList("k"), Collections.emptyList(), options);
+                        ROW_TYPE, Collections.singletonList("k"), Collections.emptyList(), options);
         snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -241,7 +240,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         assertThat(snapshot.id()).isEqualTo(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
-        FileStoreScan storeScan = ((AbstractFileStoreTable) table).store().newScan();
+        FileStoreScan storeScan = table.store().newScan();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
@@ -274,7 +273,7 @@ public class CompactActionITCase extends ActionITCaseBase {
 
         FileStoreTable table =
                 createFileStoreTable(
-                        ROW_TYPE, Arrays.asList("k"), Collections.emptyList(), options);
+                        ROW_TYPE, Collections.singletonList("k"), Collections.emptyList(), options);
         snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -296,7 +295,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         assertThat(snapshot.id()).isEqualTo(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
-        FileStoreScan storeScan = ((AbstractFileStoreTable) table).store().newScan();
+        FileStoreScan storeScan = table.store().newScan();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
@@ -305,11 +304,6 @@ public class CompactActionITCase extends ActionITCaseBase {
 
         // first compaction, snapshot will be 3.
         checkFileAndRowSize(storeScan, 3L, 0L, 1, 6);
-
-        writeData(
-                rowData(1, 101, 15, BinaryString.fromString("20221208")),
-                rowData(1, 101, 16, BinaryString.fromString("20221208")),
-                rowData(1, 101, 15, BinaryString.fromString("20221209")));
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {
