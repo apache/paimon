@@ -178,6 +178,7 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
                         .withFilter(predicate)
                         .plan()
                         .files();
+        System.out.println("files: " + files.size() + " filterAfter: " + filesFilter.size());
 
         Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
     }

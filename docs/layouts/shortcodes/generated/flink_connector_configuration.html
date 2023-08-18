@@ -39,18 +39,6 @@ under the License.
             <td>The log system used to keep changes of the table.<br /><br />Possible values:<br /><ul><li>"none": No log system, the data is written only to file store, and the streaming read will be directly read from the file store.</li></ul><ul><li>"kafka": Kafka log system, the data is double written to file store and kafka, and the streaming read will be read from kafka. If streaming read from file, configures streaming-read-mode to file.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>lookup.async</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>Whether to enable async lookup join.</td>
-        </tr>
-        <tr>
-            <td><h5>lookup.async-thread-number</h5></td>
-            <td style="word-wrap: break-word;">16</td>
-            <td>Integer</td>
-            <td>The thread number for lookup async.</td>
-        </tr>
-        <tr>
             <td><h5>log.system.partitions</h5></td>
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
@@ -61,6 +49,18 @@ under the License.
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>
             <td>The number of replication of the log system. If log system is kafka, this is kafka replicationFactor.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.async</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to enable async lookup join.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.async-thread-number</h5></td>
+            <td style="word-wrap: break-word;">16</td>
+            <td>Integer</td>
+            <td>The thread number for lookup async.</td>
         </tr>
         <tr>
             <td><h5>scan.infer-parallelism</h5></td>
