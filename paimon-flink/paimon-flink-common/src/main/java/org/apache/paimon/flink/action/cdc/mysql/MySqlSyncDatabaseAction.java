@@ -48,6 +48,7 @@ import javax.annotation.Nullable;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -99,68 +100,81 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncDatabaseAction.class);
 
-    private final Configuration mySqlConfig;
     private final String database;
-    private final boolean ignoreIncompatible;
-    private final boolean mergeShards;
-    private final String tablePrefix;
-    private final String tableSuffix;
-    private final Pattern includingPattern;
-    @Nullable private final Pattern excludingPattern;
-    private final Map<String, String> tableConfig;
-    private final String includingTables;
-    private final DatabaseSyncMode mode;
+    private final Configuration mySqlConfig;
 
+    private Map<String, String> tableConfig = new HashMap<>();
+    private boolean ignoreIncompatible = false;
+    private boolean mergeShards = true;
+    private String tablePrefix = "";
+    private String tableSuffix = "";
+    private String includingTables = ".*";
+    @Nullable String excludingTables;
+    private DatabaseSyncMode mode = DIVIDED;
+
+    // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
     private final List<Identifier> excludedTables = new ArrayList<>();
 
     public MySqlSyncDatabaseAction(
-            Map<String, String> mySqlConfig,
-            String warehouse,
-            String database,
-            boolean ignoreIncompatible,
-            Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
-        this(
-                mySqlConfig,
-                warehouse,
-                database,
-                ignoreIncompatible,
-                true,
-                null,
-                null,
-                null,
-                null,
-                catalogConfig,
-                tableConfig,
-                DIVIDED);
+            String warehouse, String database, Map<String, String> mySqlConfig) {
+        this(warehouse, database, Collections.emptyMap(), mySqlConfig);
     }
 
     public MySqlSyncDatabaseAction(
-            Map<String, String> mySqlConfig,
             String warehouse,
             String database,
-            boolean ignoreIncompatible,
-            boolean mergeShards,
-            @Nullable String tablePrefix,
-            @Nullable String tableSuffix,
-            @Nullable String includingTables,
-            @Nullable String excludingTables,
             Map<String, String> catalogConfig,
-            Map<String, String> tableConfig,
-            DatabaseSyncMode mode) {
+            Map<String, String> mySqlConfig) {
         super(warehouse, catalogConfig);
-        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.database = database;
-        this.ignoreIncompatible = ignoreIncompatible;
-        this.mergeShards = mergeShards;
-        this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
-        this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
-        this.includingTables = includingTables == null ? ".*" : includingTables;
-        this.includingPattern = Pattern.compile(this.includingTables);
-        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
+        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
+    }
+
+    public MySqlSyncDatabaseAction withTableConfig(Map<String, String> tableConfig) {
         this.tableConfig = tableConfig;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction ignoreIncompatible(boolean ignoreIncompatible) {
+        this.ignoreIncompatible = ignoreIncompatible;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction mergeShards(boolean mergeShards) {
+        this.mergeShards = mergeShards;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction withTablePrefix(@Nullable String tablePrefix) {
+        if (tablePrefix != null) {
+            this.tablePrefix = tablePrefix;
+        }
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction withTableSuffix(@Nullable String tableSuffix) {
+        if (tableSuffix != null) {
+            this.tableSuffix = tableSuffix;
+        }
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction includingTables(@Nullable String includingTables) {
+        if (includingTables != null) {
+            this.includingTables = includingTables;
+        }
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction excludingTables(@Nullable String excludingTables) {
+        this.excludingTables = excludingTables;
+        return this;
+    }
+
+    public MySqlSyncDatabaseAction withMode(DatabaseSyncMode mode) {
         this.mode = mode;
+        return this;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
@@ -176,9 +190,15 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             validateCaseInsensitive();
         }
 
+        Pattern includingPattern = Pattern.compile(includingTables);
+        Pattern excludingPattern =
+                excludingTables == null ? null : Pattern.compile(excludingTables);
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig, this::shouldMonitorTable, excludedTables);
+                        mySqlConfig,
+                        tableName ->
+                                shouldMonitorTable(tableName, includingPattern, excludingPattern),
+                        excludedTables);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
@@ -238,8 +258,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
         MySqlTableSchemaBuilder schemaBuilder =
                 new MySqlTableSchemaBuilder(tableConfig, caseSensitive, convertTinyint1ToBool);
-        Pattern includingPattern = this.includingPattern;
-        Pattern excludingPattern = this.excludingPattern;
+
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
@@ -302,7 +321,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         }
     }
 
-    private boolean shouldMonitorTable(String mySqlTableName) {
+    private boolean shouldMonitorTable(
+            String mySqlTableName, Pattern includingPattern, @Nullable Pattern excludingPattern) {
         boolean shouldMonitor = includingPattern.matcher(mySqlTableName).matches();
         if (excludingPattern != null) {
             shouldMonitor = shouldMonitor && !excludingPattern.matcher(mySqlTableName).matches();

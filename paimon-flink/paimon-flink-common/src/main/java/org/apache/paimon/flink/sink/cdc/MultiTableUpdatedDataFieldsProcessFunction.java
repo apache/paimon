@@ -84,9 +84,4 @@ public class MultiTableUpdatedDataFieldsProcessFunction
             }
         }
     }
-
-    private List<SchemaChange> extractSchemaChanges(
-            SchemaManager schemaManager, List<DataField> updatedDataFields) {
-        return getSchemaChanges(updatedDataFields, schemaManager);
-    }
 }

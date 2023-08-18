@@ -24,11 +24,7 @@ import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
-import java.util.Map;
 import java.util.Optional;
-
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
 
 /** Factory to create {@link MySqlSyncDatabaseAction}. */
 public class MySqlSyncDatabaseActionFactory implements ActionFactory {
@@ -42,54 +38,28 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "warehouse");
-        checkRequiredArgument(params, "database");
         checkRequiredArgument(params, "mysql-conf");
 
-        String warehouse = params.get("warehouse");
-        String database = params.get("database");
-        boolean ignoreIncompatible = Boolean.parseBoolean(params.get("ignore-incompatible"));
-        boolean mergeShards =
-                !params.has("merge-shards") || Boolean.parseBoolean(params.get("merge-shards"));
-        String tablePrefix = params.get("table-prefix");
-        String tableSuffix = params.get("table-suffix");
-        String includingTables = params.get("including-tables");
-        String excludingTables = params.get("excluding-tables");
-        String mode = params.get("mode");
-        DatabaseSyncMode syncMode;
-        if (mode == null) {
-            syncMode = DIVIDED;
-        } else {
-            switch (mode.toLowerCase()) {
-                case "divided":
-                    syncMode = DIVIDED;
-                    break;
-                case "combined":
-                    syncMode = COMBINED;
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unsupported mode '" + mode + "' for database synchronization mode.");
-            }
-        }
-
-        Map<String, String> mySqlConfig = optionalConfigMap(params, "mysql-conf");
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        Map<String, String> tableConfig = optionalConfigMap(params, "table-conf");
-        return Optional.of(
+        MySqlSyncDatabaseAction mySqlSyncDatabaseAction =
                 new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        ignoreIncompatible,
-                        mergeShards,
-                        tablePrefix,
-                        tableSuffix,
-                        includingTables,
-                        excludingTables,
-                        catalogConfig,
-                        tableConfig,
-                        syncMode));
+                        getRequiredValue(params, "warehouse"),
+                        getRequiredValue(params, "database"),
+                        optionalConfigMap(params, "catalog-conf"),
+                        optionalConfigMap(params, "mysql-conf"));
+
+        mySqlSyncDatabaseAction
+                .withTableConfig(optionalConfigMap(params, "table-conf"))
+                .ignoreIncompatible(Boolean.parseBoolean(params.get("ignore-incompatible")))
+                .mergeShards(
+                        !params.has("merge-shards")
+                                || Boolean.parseBoolean(params.get("merge-shards")))
+                .withTablePrefix(params.get("table-suffix"))
+                .withTableSuffix(params.get("table-suffix"))
+                .includingTables(params.get("including-tables"))
+                .excludingTables(params.get("excluding-tables"))
+                .withMode(DatabaseSyncMode.fromString(params.get("mode")));
+
+        return Optional.of(mySqlSyncDatabaseAction);
     }
 
     @Override

@@ -28,7 +28,9 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.AfterAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -155,6 +157,29 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
         config.put("bucket", String.valueOf(random.nextInt(3) + 1));
         config.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         return config;
+    }
+
+    protected JobClient runActionWithDefaultEnv(MySqlSyncTableAction action) throws Exception {
+        StreamExecutionEnvironment env = getBasicEnv();
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+        return client;
+    }
+
+    protected void runActionWithDefaultEnv(MySqlSyncDatabaseAction action) throws Exception {
+        StreamExecutionEnvironment env = getBasicEnv();
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+    }
+
+    protected StreamExecutionEnvironment getBasicEnv() {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+        return env;
     }
 
     protected void waitJobRunning(JobClient client) throws Exception {

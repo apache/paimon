@@ -39,7 +39,9 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -84,53 +86,59 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class MySqlSyncTableAction extends ActionBase {
 
-    private final Configuration mySqlConfig;
     private final String database;
     private final String table;
-    private final List<String> partitionKeys;
-    private final List<String> primaryKeys;
-    private final List<String> computedColumnArgs;
-    private final Map<String, String> tableConfig;
+    private final Configuration mySqlConfig;
+
+    private final List<String> partitionKeys = new ArrayList<>();
+    private final List<String> primaryKeys = new ArrayList<>();
+
+    private Map<String, String> tableConfig = new HashMap<>();
+    private List<String> computedColumnArgs = new ArrayList<>();
 
     public MySqlSyncTableAction(
-            Map<String, String> mySqlConfig,
-            String warehouse,
-            String database,
-            String table,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
-        this(
-                mySqlConfig,
-                warehouse,
-                database,
-                table,
-                partitionKeys,
-                primaryKeys,
-                Collections.emptyList(),
-                catalogConfig,
-                tableConfig);
+            String warehouse, String database, String table, Map<String, String> mySqlConfig) {
+        this(warehouse, database, table, Collections.emptyMap(), mySqlConfig);
     }
 
     public MySqlSyncTableAction(
-            Map<String, String> mySqlConfig,
             String warehouse,
             String database,
             String table,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            List<String> computedColumnArgs,
             Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
+            Map<String, String> mySqlConfig) {
         super(warehouse, catalogConfig);
-        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
         this.database = database;
         this.table = table;
-        this.partitionKeys = partitionKeys;
-        this.primaryKeys = primaryKeys;
-        this.computedColumnArgs = computedColumnArgs;
+        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
+    }
+
+    public MySqlSyncTableAction withPartitionKeys(String... partitionKeys) {
+        return withPartitionKeys(Arrays.asList(partitionKeys));
+    }
+
+    public MySqlSyncTableAction withPartitionKeys(List<String> partitionKeys) {
+        this.partitionKeys.addAll(partitionKeys);
+        return this;
+    }
+
+    public MySqlSyncTableAction withPrimaryKeys(String... primaryKeys) {
+        return withPrimaryKeys(Arrays.asList(primaryKeys));
+    }
+
+    public MySqlSyncTableAction withPrimaryKeys(List<String> primaryKeys) {
+        this.primaryKeys.addAll(primaryKeys);
+        return this;
+    }
+
+    public MySqlSyncTableAction withTableConfig(Map<String, String> tableConfig) {
         this.tableConfig = tableConfig;
+        return this;
+    }
+
+    public MySqlSyncTableAction withComputedColumnArgs(List<String> computedColumnArgs) {
+        this.computedColumnArgs = computedColumnArgs;
+        return this;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
