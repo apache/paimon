@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.cdc.SinkMode;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -57,8 +57,8 @@ import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.SinkMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.SinkMode.DIVIDED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -199,84 +199,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         "+I[6, six, 60, 600, string_6]",
                         "+I[8, eight, 80, 800, string_8]",
                         "+I[10, ten, 100, 1000, long_long_string_10]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
-    }
-
-    @Test
-    @Timeout(60)
-    public void testSchemaEvolutionWithTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_tinyint_schema");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
-                        .withTableConfig(getBasicTableConfig());
-        runActionWithDefaultEnv(action);
-
-        try (Statement statement = getStatement()) {
-            testSchemaEvolutionImplWithTinyInt1Convert(statement);
-        }
-    }
-
-    private void testSchemaEvolutionImplWithTinyInt1Convert(Statement statement) throws Exception {
-        FileStoreTable table1 = getFileStoreTable("schema_evolution_4");
-        FileStoreTable table2 = getFileStoreTable("schema_evolution_5");
-
-        statement.executeUpdate("USE " + "paimon_sync_database_tinyint_schema");
-
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (1, 'one')");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (2, 'two', 21)");
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (3, 'three')");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (4, 'four', 24)");
-
-        RowType rowType1 =
-                RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
-                        new String[] {"_id", "v1"});
-
-        List<String> primaryKeys1 = Collections.singletonList("_id");
-        List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
-
-        waitForResult(expected, table1, rowType1, primaryKeys1);
-
-        RowType rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2"});
-        List<String> primaryKeys2 = Collections.singletonList("_id");
-        expected = Arrays.asList("+I[2, two, 21]", "+I[4, four, 24]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
-
-        statement.executeUpdate("ALTER TABLE schema_evolution_4 ADD COLUMN v2 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (5, 'five', 42)");
-        statement.executeUpdate("ALTER TABLE schema_evolution_5 ADD COLUMN v3 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (6, 'six', 42, 43)");
-
-        rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2"});
-
-        expected = Arrays.asList("+I[1, one, NULL]", "+I[3, three, NULL]", "+I[5, five, 42]");
-        waitForResult(expected, table1, rowType1, primaryKeys1);
-
-        rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10),
-                            DataTypes.TINYINT(),
-                            DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2", "v3"});
-        expected =
-                Arrays.asList(
-                        "+I[2, two, 21, NULL]", "+I[4, four, 24, NULL]", "+I[6, six, 42, 43]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
     }
 
@@ -654,7 +576,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .includingTables("t.+")
                         .excludingTables(".*a$")
-                        .withMode(COMBINED);
+                        .withSinkMode(COMBINED);
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -938,7 +860,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 new MySqlSyncDatabaseAction(warehouse, database, catalogConfig, mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
                         .includingTables("t.+")
-                        .withMode(COMBINED);
+                        .withSinkMode(COMBINED);
         StreamExecutionEnvironment env = getBasicEnv();
         action.build(env);
 
@@ -950,42 +872,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             return env.executeAsync(streamGraph);
         }
         return env.executeAsync();
-    }
-
-    @Test
-    @Timeout(60)
-    public void testTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_tinyint");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
-                        .withTableConfig(getBasicTableConfig());
-        runActionWithDefaultEnv(action);
-
-        try (Statement statement = getStatement()) {
-            testTinyInt1Convert(statement);
-        }
-    }
-
-    private void testTinyInt1Convert(Statement statement) throws Exception {
-        FileStoreTable table = getFileStoreTable("t4");
-
-        statement.executeUpdate("USE paimon_sync_database_tinyint");
-
-        statement.executeUpdate("INSERT INTO t4 VALUES (1, '2021-09-15 15:00:10', 21)");
-        statement.executeUpdate("INSERT INTO t4 VALUES (2, '2023-03-23 16:00:20', 42)");
-
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.TIMESTAMP(0), DataTypes.TINYINT()
-                        },
-                        new String[] {"pk", "_datetime", "_tinyint1"});
-        List<String> expected =
-                Arrays.asList("+I[1, 2021-09-15T15:00:10, 21]", "+I[2, 2023-03-23T16:00:20, 42]");
-        waitForResult(expected, table, rowType, Collections.singletonList("pk"));
     }
 
     @Test
@@ -1013,7 +899,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .withTableConfig(tableConfig)
-                        .withMode(COMBINED);
+                        .withSinkMode(COMBINED);
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -1055,11 +941,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         ? "database_shard_.*"
                         : "database_shard_1|database_shard_2");
 
-        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        SinkMode sinkMode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
-                        .withMode(mode);
+                        .withSinkMode(sinkMode);
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -1131,7 +1017,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     Collections.singletonList("k"));
 
             // test newly created table
-            if (mode == COMBINED) {
+            if (sinkMode == COMBINED) {
                 statement.executeUpdate(
                         "CREATE TABLE database_shard_1.t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
                 statement.executeUpdate("INSERT INTO database_shard_1.t4 VALUES (1, 'db1_1')");
@@ -1162,12 +1048,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "without_merging_shard_.*");
 
-        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        SinkMode sinkMode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
                         .mergeShards(false)
-                        .withMode(mode);
+                        .withSinkMode(sinkMode);
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -1230,7 +1116,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     Collections.singletonList("k"));
 
             // test newly created table
-            if (mode == COMBINED) {
+            if (sinkMode == COMBINED) {
                 statement.executeUpdate(
                         "CREATE TABLE without_merging_shard_1.t3 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
                 statement.executeUpdate(
@@ -1284,7 +1170,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .ignoreIncompatible(true)
-                        .withMode(COMBINED);
+                        .withSinkMode(COMBINED);
         action.build(StreamExecutionEnvironment.getExecutionEnvironment());
 
         assertThat(action.monitoredTables())

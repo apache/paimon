@@ -20,7 +20,8 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.cdc.DataTypeOptions;
+import org.apache.paimon.flink.action.cdc.SinkMode;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
@@ -40,15 +41,14 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
     public Optional<Action> create(MultipleParameterTool params) {
         checkRequiredArgument(params, "mysql-conf");
 
-        MySqlSyncDatabaseAction mySqlSyncDatabaseAction =
+        MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
                         getRequiredValue(params, "warehouse"),
                         getRequiredValue(params, "database"),
                         optionalConfigMap(params, "catalog-conf"),
                         optionalConfigMap(params, "mysql-conf"));
 
-        mySqlSyncDatabaseAction
-                .withTableConfig(optionalConfigMap(params, "table-conf"))
+        action.withTableConfig(optionalConfigMap(params, "table-conf"))
                 .ignoreIncompatible(Boolean.parseBoolean(params.get("ignore-incompatible")))
                 .mergeShards(
                         !params.has("merge-shards")
@@ -57,9 +57,14 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
-                .withMode(DatabaseSyncMode.fromString(params.get("mode")));
+                .withSinkMode(SinkMode.fromString(params.get("sink-mode")));
 
-        return Optional.of(mySqlSyncDatabaseAction);
+        if (params.has("data-type-options")) {
+            String[] options = params.get("data-type-options").split(",");
+            action.withDataTypeOptions(DataTypeOptions.parse(options));
+        }
+
+        return Optional.of(action);
     }
 
     @Override
@@ -81,7 +86,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--table-suffix <paimon-table-suffix>] "
                         + "[--including-tables <mysql-table-name|name-regular-expr>] "
                         + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
-                        + "[--mode <sync-mode>] "
+                        + "[--sink-mode <sink-mode>] "
+                        + "[--data-type-map-mode <map-mode>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -116,13 +122,16 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 "--excluding-tables has higher priority than --including-tables if you specified both.");
         System.out.println();
 
-        System.out.println(
-                "--mode is used to specify synchronization mode. You can specify two modes:");
+        System.out.println("--sink-mode is used to specify sink mode. You can specify two modes:");
         System.out.println(
                 "  1. 'divided' (the default mode if you haven't specified one): "
                         + "start a sink for each table, the synchronization of the new table requires restarting the job;");
         System.out.println(
                 "  2. 'combined': start a single combined sink for all tables, the new table will be automatically synchronized.");
+        System.out.println();
+
+        System.out.println(
+                "--data-type-options is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.cdc.DataTypeOptions;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
@@ -39,13 +40,15 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
-    private final boolean convertTinyint1ToBool;
+    private final DataTypeOptions dataTypeOptions;
 
     public MySqlTableSchemaBuilder(
-            Map<String, String> tableConfig, boolean caseSensitive, boolean convertTinyint1ToBool) {
+            Map<String, String> tableConfig,
+            boolean caseSensitive,
+            DataTypeOptions dataTypeOptions) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
-        this.convertTinyint1ToBool = convertTinyint1ToBool;
+        this.dataTypeOptions = dataTypeOptions;
     }
 
     @Override
@@ -56,17 +59,21 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
         LinkedHashMap<String, DataType> fields = new LinkedHashMap<>();
 
         for (JsonNode element : columns) {
-            Integer precision = element.has("length") ? element.get("length").asInt() : null;
-            Integer scale = element.has("scale") ? element.get("scale").asInt() : null;
-            fields.put(
-                    element.get("name").asText(),
-                    // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
+            JsonNode length = element.get("length");
+            JsonNode scale = element.get("scale");
+            DataType dataType =
                     MySqlTypeUtils.toDataType(
-                                    element.get("typeExpression").asText(),
-                                    precision,
-                                    scale,
-                                    convertTinyint1ToBool)
-                            .copy(element.get("optional").asBoolean()));
+                            element.get("typeExpression").asText(),
+                            length == null ? null : length.asInt(),
+                            scale == null ? null : scale.asInt(),
+                            dataTypeOptions);
+
+            if (!dataTypeOptions.ignoreNotNull()) {
+                dataType.copy(element.get("optional").asBoolean());
+            }
+
+            // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
+            fields.put(element.get("name").asText(), dataType);
         }
 
         ArrayNode arrayNode = (ArrayNode) jsonTable.get("primaryKeyColumnNames");

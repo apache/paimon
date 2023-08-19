@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.cdc.SinkMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -32,8 +32,8 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.SinkMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.SinkMode.DIVIDED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test if the table list in {@link MySqlSyncDatabaseAction} is correct. */
@@ -55,12 +55,12 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                         ? ".*shard_.*"
                         : "shard_1|shard_2|shard_3|x_shard_1");
 
-        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        SinkMode sinkMode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
                         .mergeShards(false)
-                        .withMode(mode)
+                        .withSinkMode(sinkMode)
                         .includingTables("t.+|s.+")
                         .excludingTables("ta|sa");
 
@@ -80,7 +80,7 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                         "x_shard_1_t1");
 
         // test newly created tables
-        if (mode == COMBINED) {
+        if (sinkMode == COMBINED) {
             try (Statement statement = getStatement()) {
                 // ensure the job steps into incremental phase
                 statement.executeUpdate("USE shard_1");

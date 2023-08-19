@@ -24,6 +24,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DataTypeOptions;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
@@ -50,7 +51,6 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -95,6 +95,7 @@ public class MySqlSyncTableAction extends ActionBase {
 
     private Map<String, String> tableConfig = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
+    private DataTypeOptions dataTypeOptions = DataTypeOptions.defaultOptions();
 
     public MySqlSyncTableAction(
             String warehouse, String database, String table, Map<String, String> mySqlConfig) {
@@ -141,6 +142,11 @@ public class MySqlSyncTableAction extends ActionBase {
         return this;
     }
 
+    public MySqlSyncTableAction withDataTypeOptions(DataTypeOptions dataTypeOptions) {
+        this.dataTypeOptions = dataTypeOptions;
+        return this;
+    }
+
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
                 mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
@@ -155,7 +161,7 @@ public class MySqlSyncTableAction extends ActionBase {
 
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig, monitorTablePredication(), new ArrayList<>());
+                        mySqlConfig, monitorTablePredication(), new ArrayList<>(), dataTypeOptions);
         validateMySqlTableInfos(mySqlSchemasInfo);
 
         catalog.createDatabase(database, true);
@@ -201,11 +207,11 @@ public class MySqlSyncTableAction extends ActionBase {
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
+        DataTypeOptions dataTypeOptions = this.dataTypeOptions;
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
-                                zoneId, caseSensitive, computedColumns, convertTinyint1ToBool);
+                                zoneId, caseSensitive, computedColumns, dataTypeOptions);
 
         CdcSinkBuilder<String> sinkBuilder =
                 new CdcSinkBuilder<String>()
@@ -215,7 +221,8 @@ public class MySqlSyncTableAction extends ActionBase {
                         .withParserFactory(parserFactory)
                         .withTable(table)
                         .withIdentifier(identifier)
-                        .withCatalogLoader(catalogLoader());
+                        .withCatalogLoader(catalogLoader())
+                        .withDataTypeOptions(dataTypeOptions);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.DataTypeOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataField;
@@ -40,12 +41,14 @@ public class UpdatedDataFieldsProcessFunction
         extends UpdatedDataFieldsProcessFunctionBase<List<DataField>, Void> {
 
     private final SchemaManager schemaManager;
-
     private final Identifier identifier;
 
     public UpdatedDataFieldsProcessFunction(
-            SchemaManager schemaManager, Identifier identifier, Catalog.Loader catalogLoader) {
-        super(catalogLoader);
+            SchemaManager schemaManager,
+            Identifier identifier,
+            Catalog.Loader catalogLoader,
+            DataTypeOptions.DataTypeMapMode dataTypeMapMode) {
+        super(catalogLoader, dataTypeMapMode);
         this.schemaManager = schemaManager;
         this.identifier = identifier;
     }

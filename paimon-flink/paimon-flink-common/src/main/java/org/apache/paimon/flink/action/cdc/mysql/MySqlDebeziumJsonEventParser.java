@@ -25,6 +25,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.DataTypeOptions;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -89,7 +90,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     @Nullable private final Pattern excludingPattern;
     private final Set<String> includedTables = new HashSet<>();
     private final Set<String> excludedTables = new HashSet<>();
-    private final boolean convertTinyint1ToBool;
+    private final DataTypeOptions dataTypeOptions;
 
     private JsonNode root;
     private JsonNode payload;
@@ -101,7 +102,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             ZoneId serverTimeZone,
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
-            boolean convertTinyint1ToBool) {
+            DataTypeOptions dataTypeOptions) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -110,7 +111,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 ddl -> Optional.empty(),
                 null,
                 null,
-                convertTinyint1ToBool);
+                dataTypeOptions);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -120,7 +121,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            boolean convertTinyint1ToBool) {
+            DataTypeOptions dataTypeOptions) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -129,7 +130,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 schemaBuilder,
                 includingPattern,
                 excludingPattern,
-                convertTinyint1ToBool);
+                dataTypeOptions);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -140,7 +141,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            boolean convertTinyint1ToBool) {
+            DataTypeOptions dataTypeOptions) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
@@ -148,7 +149,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         this.schemaBuilder = schemaBuilder;
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
-        this.convertTinyint1ToBool = convertTinyint1ToBool;
+        this.dataTypeOptions = dataTypeOptions;
     }
 
     @Override
@@ -212,11 +213,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                             column.get("typeName").asText(),
                             length == null ? null : length.asInt(),
                             scale == null ? null : scale.asInt(),
-                            convertTinyint1ToBool);
-            if (column.get("optional").asBoolean()) {
-                type = type.nullable();
-            } else {
-                type = type.notNull();
+                            dataTypeOptions);
+
+            if (!dataTypeOptions.ignoreNotNull()) {
+                type = type.copy(column.get("optional").asBoolean());
             }
 
             String fieldName = column.get("name").asText();
