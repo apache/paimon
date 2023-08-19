@@ -25,12 +25,7 @@ import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /** Factory to create {@link MySqlSyncTableAction}. */
 public class MySqlSyncTableActionFactory implements ActionFactory {
@@ -45,43 +40,31 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        List<String> partitionKeys = Collections.emptyList();
-        if (params.has("partition-keys")) {
-            partitionKeys =
-                    Arrays.stream(params.get("partition-keys").split(","))
-                            .collect(Collectors.toList());
-        }
-
-        List<String> primaryKeys = Collections.emptyList();
-        if (params.has("primary-keys")) {
-            primaryKeys =
-                    Arrays.stream(params.get("primary-keys").split(","))
-                            .collect(Collectors.toList());
-        }
-
-        List<String> computedColumnArgs = Collections.emptyList();
-        if (params.has("computed-column")) {
-            computedColumnArgs = new ArrayList<>(params.getMultiParameter("computed-column"));
-        }
-
         checkRequiredArgument(params, "mysql-conf");
 
-        Map<String, String> mySqlConfig = optionalConfigMap(params, "mysql-conf");
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        Map<String, String> tableConfig = optionalConfigMap(params, "table-conf");
-
-        return Optional.of(
+        MySqlSyncTableAction action =
                 new MySqlSyncTableAction(
-                        mySqlConfig,
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        partitionKeys,
-                        primaryKeys,
-                        computedColumnArgs,
-                        catalogConfig,
-                        tableConfig));
+                                tablePath.f0,
+                                tablePath.f1,
+                                tablePath.f2,
+                                optionalConfigMap(params, "catalog-conf"),
+                                optionalConfigMap(params, "mysql-conf"))
+                        .withTableConfig(optionalConfigMap(params, "table-conf"));
+
+        if (params.has("partition-keys")) {
+            action.withPartitionKeys(params.get("partition-keys").split(","));
+        }
+
+        if (params.has("primary-keys")) {
+            action.withPrimaryKeys(params.get("primary-keys").split(","));
+        }
+
+        if (params.has("computed-column")) {
+            action.withComputedColumnArgs(
+                    new ArrayList<>(params.getMultiParameter("computed-column")));
+        }
+
+        return Optional.of(action);
     }
 
     @Override
