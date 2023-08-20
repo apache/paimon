@@ -833,15 +833,17 @@ public class CoreOptions implements Serializable {
             key("orc.column.encoding.direct")
                     .intType()
                     .noDefaultValue()
-                    .withDescription("Comma-separated list of fields for which dictionary encoding is to be skipped in orc.");
+                    .withDescription(
+                            "Comma-separated list of fields for which dictionary encoding is to be skipped in orc.");
 
     public static final ConfigOption<Integer> ORC_DICTIONARY_KEY_THRESHOLD =
             key("orc.dictionary.key.threshold")
                     .intType()
                     .noDefaultValue()
-                    .withDescription("If the number of distinct keys in a dictionary is greater than this" +
-                            "fraction of the total number of non-null rows, turn off " +
-                            "dictionary encoding in orc.  Use 1 to always use dictionary encoding.");
+                    .withDescription(
+                            "If the number of distinct keys in a dictionary is greater than this "
+                                    + "fraction of the total number of non-null rows, turn off "
+                                    + "dictionary encoding in orc.  Use 1 to always use dictionary encoding.");
 
     public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
             key("sink.watermark-time-zone")
