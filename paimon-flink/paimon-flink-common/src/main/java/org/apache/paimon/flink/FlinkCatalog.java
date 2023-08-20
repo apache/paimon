@@ -91,6 +91,7 @@ import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
@@ -114,6 +115,8 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private final Duration logStoreAutoRegisterTimeout;
 
+    private final boolean disableCreateTableInDefaultDatabase;
+
     public FlinkCatalog(
             Catalog catalog,
             String name,
@@ -125,6 +128,7 @@ public class FlinkCatalog extends AbstractCatalog {
         this.classLoader = classLoader;
         this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);
         this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
+        this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
         try {
             this.catalog.createDatabase(defaultDatabase, true);
         } catch (Catalog.DatabaseAlreadyExistException ignore) {
@@ -251,6 +255,13 @@ public class FlinkCatalog extends AbstractCatalog {
             throw new UnsupportedOperationException(
                     "Only support CatalogTable, but is: " + table.getClass());
         }
+
+        if (getDefaultDatabase().equals(tablePath.getDatabaseName())
+                && disableCreateTableInDefaultDatabase) {
+            throw new UnsupportedOperationException(
+                    "Creating table in default database is disabled, please specify a database name.");
+        }
+
         CatalogTable catalogTable = (CatalogTable) table;
         Map<String, String> options = table.getOptions();
         String connector = options.get(CONNECTOR.key());
