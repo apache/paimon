@@ -25,7 +25,7 @@ under the License.
 -->
 
 
-# Qucik Start
+# Quick Start
 This document describes how to use Docker and Docker Compose 
 to quickly build a big data environment such as Paimon and 
 the big data engine Flink/Spark. 
@@ -47,7 +47,7 @@ docker compose
 
 Look at the version mapping between paimon and Flink 
 in the [Engines/Flink](https://paimon.apache.org/docs/master/engines/flink/) section of the document and select 
-the version you want
+the version you want.
 
 ### Docker compose
 
@@ -55,8 +55,10 @@ docker compose is a convenient way to manage docker containers and quickly build
 you need. The following docker compose file is composed of three services, jobmanager, taskmanager and sql-client
 , using the flink:1.17.1-scala_2.12 image.
 
-Copy the following into a ```flink_docker_compose.yml``` file
+Copy the following into a ```flink_docker_compose.yml``` file.
 
+> Notice:
+> 
 > The /tmp path in the container is mapped to the local./tmp path so that multiple containers can share a file system path. The reason is because the 'warehouse'='file:/tmp/paimon' option is configured when the catalog is created. If you use another path as the warehouse address, modify the volumes option in the docker compose file simultaneously.
 
 ```shell
@@ -127,13 +129,13 @@ networks:
 
 Reading [Engines/Flink](https://paimon.apache.org/docs/master/engines/flink/) chapters, Download the appropriate versions of the paimon-flink-*.jar and flink-shaded-hadoop-2-uber-*.jar files to the specified path
 
-For example, ./incubator-paimon/docker/custom_jars
+For example, ./incubator-paimon/docker/custom_jars.
 
 After creating a new custom_jars folder under the path./incubator-paimon/docker/, place the required jar files into it.
 
 The file I downloaded here is flink-shaded-hadoop-2-uber-2.8.3-10.0.jar and paimon-flink-1.17-0.5-20230815.001819-123.jar
 
-With the jar files ready, you next need to place the ```flink_docker_compose.yml``` docker compose file in the./incubator-paimon/docker/ path
+With the jar files ready, you next need to place the ```flink_docker_compose.yml``` docker compose file in the ```./incubator-paimon/docker/``` path.
 
 We can then quickly start the cluster through docker compose.
 
@@ -153,7 +155,7 @@ PS .\incubator-paimon\docker> docker-compose -f flink_docker_compose.yml up -d j
  - Container docker-jobmanager-1   Started                                                                                                                                                                  1.1s
  - Container docker-taskmanager-1  Started                                                                                                                                                                  1.5s
 ```
-You can now access the Flink Web UI at http://localhost:8081/
+You can now access the Flink Web UI at ```http://localhost:8081/``` .
 
 ### 2.3 Use interactive mode to start an SQL-client for executing SQL
 ```shell
