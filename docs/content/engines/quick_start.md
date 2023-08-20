@@ -37,9 +37,9 @@ The following steps have been tested on a Windows 11 laptop
 with docker desktop and docker compose installed.
 
 ## Prerequisites
-windows
+windows/Linux/MacOS
 
-docker desktop for windows
+docker desktop for windows/Applicable to the docker of the corresponding system
 
 docker compose
 
