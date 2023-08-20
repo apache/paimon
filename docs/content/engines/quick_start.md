@@ -127,13 +127,13 @@ networks:
 
 ### Step 1: Prepare the dependent jar files
 
-Reading [Engines/Flink](https://paimon.apache.org/docs/master/engines/flink/) chapters, Download the appropriate versions of the paimon-flink-*.jar and flink-shaded-hadoop-2-uber-*.jar files to the specified path
+Reading [Engines/Flink](https://paimon.apache.org/docs/master/engines/flink/) chapters, Download the appropriate versions of the ```paimon-flink-{{< version >}}.jar``` and ```flink-shaded-hadoop-2-uber-{{< version >}}.jar``` files to the specified path
 
-For example, ./incubator-paimon/docker/custom_jars.
+For example, ```./incubator-paimon/docker/custom_jars```.
 
-After creating a new custom_jars folder under the path./incubator-paimon/docker/, place the required jar files into it.
+After creating a new custom_jars folder under the path```./incubator-paimon/docker/```, place the required jar files into it.
 
-The file I downloaded here is flink-shaded-hadoop-2-uber-2.8.3-10.0.jar and paimon-flink-1.17-0.5-20230815.001819-123.jar
+The file I downloaded here is ```flink-shaded-hadoop-2-uber-2.8.3-10.0.jar``` and ```paimon-flink-1.17-0.5-20230815.001819-123.jar```
 
 With the jar files ready, you next need to place the ```flink_docker_compose.yml``` docker compose file in the ```./incubator-paimon/docker/``` path.
 
