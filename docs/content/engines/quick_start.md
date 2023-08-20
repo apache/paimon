@@ -147,7 +147,7 @@ Open a CMD window and run the commands shown below.
 cd ./incubator-paimon/docker/
 ```
 
-### 2.2 Start the Flink cluster
+#### 2.2 Start the Flink cluster
 ```shell
 PS .\incubator-paimon\docker> docker-compose -f flink_docker_compose.yml up -d jobmanager taskmanager
 [+] Running 3/3
@@ -157,7 +157,7 @@ PS .\incubator-paimon\docker> docker-compose -f flink_docker_compose.yml up -d j
 ```
 You can now access the Flink Web UI at ```http://localhost:8081/``` .
 
-### 2.3 Use interactive mode to start an SQL-client for executing SQL
+#### 2.3 Use interactive mode to start an SQL-client for executing SQL
 ```shell
                                                                                                                                    
 PS .\incubator-paimon\docker> docker-compose -f flink_docker_compose.yml run sql-client
