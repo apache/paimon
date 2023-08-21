@@ -26,6 +26,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
@@ -254,7 +255,8 @@ public class FlinkCatalog extends AbstractCatalog {
         Map<String, String> options = table.getOptions();
         String connector = options.get(CONNECTOR.key());
         options.remove(CONNECTOR.key());
-        if (!FlinkCatalogFactory.IDENTIFIER.equals(connector)) {
+        if (!StringUtils.isNullOrWhitespaceOnly(connector)
+                && !FlinkCatalogFactory.IDENTIFIER.equals(connector)) {
             throw new CatalogException(
                     "Paimon Catalog only supports paimon tables,"
                             + " but you specify  'connector'= '"
