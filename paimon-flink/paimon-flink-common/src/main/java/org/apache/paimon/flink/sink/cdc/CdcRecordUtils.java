@@ -27,6 +27,7 @@ import org.apache.paimon.utils.TypeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,10 +55,7 @@ public class CdcRecordUtils {
         GenericRow genericRow = new GenericRow(dataFields.size());
         for (int i = 0; i < dataFields.size(); i++) {
             DataField dataField = dataFields.get(i);
-            genericRow.setField(
-                    i,
-                    TypeUtils.castFromString(
-                            record.fields().get(dataField.name()), dataField.type()));
+            genericRow.setField(i, fieldToInternal(record, dataField.name(), dataField.type()));
         }
         return genericRow;
     }
@@ -97,10 +95,8 @@ public class CdcRecordUtils {
             }
 
             DataType type = dataFields.get(idx).type();
-            // TODO TypeUtils.castFromString cannot deal with complex types like arrays and
-            //  maps. Change type of CdcRecord#field if needed.
             try {
-                genericRow.setField(idx, TypeUtils.castFromString(value, type));
+                genericRow.setField(idx, fieldToInternal(record, key, type));
             } catch (Exception e) {
                 LOG.info(
                         "Failed to convert value "
@@ -113,6 +109,17 @@ public class CdcRecordUtils {
             }
         }
         return Optional.of(genericRow);
+    }
+
+    private static Object fieldToInternal(CdcRecord record, String fieldName, DataType type) {
+        String value = record.fields().get(fieldName);
+        if (record.encoded(fieldName)) {
+            return Base64.getDecoder().decode(value);
+        } else {
+            // TODO TypeUtils.castFromString cannot deal with complex types like arrays and
+            //  maps. Change type of CdcRecord#field if needed.
+            return TypeUtils.castFromString(value, type);
+        }
     }
 
     public static CdcRecord fromGenericRow(GenericRow row, List<String> fieldNames) {
