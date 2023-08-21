@@ -18,8 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-/** schema acquisition mode. */
-public enum ModeEnum {
+/** Enum representing the modes of schema acquisition. */
+public enum SchemaAcquisitionMode {
+
+    /** Represents a mode where the schema is specified explicitly. */
     SPECIFIED,
+
+    /** Represents a mode where the schema is determined dynamically based on the data. */
     DYNAMIC
 }
