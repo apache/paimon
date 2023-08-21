@@ -307,6 +307,8 @@ under the License.
                     <archive>
                         <manifestEntries>
                             <SCM-Revision>${git.commit.id}</SCM-Revision>
+                            <SCM-Branch>${git.branch}</SCM-Branch>
+                            <Packaging-Time>${maven.build.timestamp}</Packaging-Time>
                         </manifestEntries>
                         <manifest>
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
