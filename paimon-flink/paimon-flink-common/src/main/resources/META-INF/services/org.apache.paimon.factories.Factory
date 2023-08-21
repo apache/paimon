@@ -17,6 +17,7 @@ org.apache.paimon.flink.kafka.KafkaLogStoreFactory
 
 ### action factories
 org.apache.paimon.flink.action.CompactActionFactory
+org.apache.paimon.flink.action.CompactDatabaseActionFactory
 org.apache.paimon.flink.action.DropPartitionActionFactory
 org.apache.paimon.flink.action.DeleteActionFactory
 org.apache.paimon.flink.action.MergeIntoActionFactory
