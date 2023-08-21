@@ -18,6 +18,7 @@
 
 package org.apache.paimon.schema;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -63,10 +64,11 @@ public class Schema {
             List<String> primaryKeys,
             Map<String, String> options,
             String comment) {
-        this.fields = normalizeFields(fields, primaryKeys, partitionKeys);
-        this.partitionKeys = partitionKeys;
-        this.primaryKeys = primaryKeys;
         this.options = new HashMap<>(options);
+        this.partitionKeys = normalizePartitionKeys(partitionKeys);
+        this.primaryKeys = normalizePrimaryKeys(primaryKeys);
+        this.fields = normalizeFields(fields, this.primaryKeys, this.partitionKeys);
+
         this.comment = comment;
     }
 
@@ -150,6 +152,32 @@ public class Schema {
             }
         }
         return newFields;
+    }
+
+    private List<String> normalizePrimaryKeys(List<String> primaryKeys) {
+        if (options.containsKey(CoreOptions.PRIMARY_KEY.key())) {
+            if (!primaryKeys.isEmpty()) {
+                throw new RuntimeException(
+                        "Cannot define primary key on DDL and table options at the same time.");
+            }
+            String pk = options.get(CoreOptions.PRIMARY_KEY.key());
+            primaryKeys = Arrays.asList(pk.split(","));
+            options.remove(CoreOptions.PRIMARY_KEY.key());
+        }
+        return primaryKeys;
+    }
+
+    private List<String> normalizePartitionKeys(List<String> partitionKeys) {
+        if (options.containsKey(CoreOptions.PARTITION.key())) {
+            if (!partitionKeys.isEmpty()) {
+                throw new RuntimeException(
+                        "Cannot define partition on DDL and table options at the same time.");
+            }
+            String partitions = options.get(CoreOptions.PARTITION.key());
+            partitionKeys = Arrays.asList(partitions.split(","));
+            options.remove(CoreOptions.PARTITION.key());
+        }
+        return partitionKeys;
     }
 
     private static Set<String> duplicate(List<String> names) {
