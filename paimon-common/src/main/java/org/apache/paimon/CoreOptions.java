@@ -652,15 +652,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Consumer id for recording the offset of consumption in the storage.");
 
-    @Deprecated
-    @ExcludeFromDocumentation("For compatibility with older versions")
-    public static final ConfigOption<Boolean> APPEND_ONLY_ASSERT_DISORDER =
-            key("append-only.assert-disorder")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Should assert disorder files, this just for compatibility with older versions.");
-
     public static final ConfigOption<Integer> FULL_COMPACTION_DELTA_COMMITS =
             key("full-compaction.delta-commits")
                     .intType()
