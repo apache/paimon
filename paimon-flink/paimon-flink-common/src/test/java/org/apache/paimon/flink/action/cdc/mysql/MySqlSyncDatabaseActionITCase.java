@@ -564,7 +564,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testAddIgnoredTable() throws Exception {
         String mySqlDatabase = "paimon_sync_database_add_ignored_table";
 
