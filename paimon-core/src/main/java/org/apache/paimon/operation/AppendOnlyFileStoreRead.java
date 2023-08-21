@@ -39,6 +39,9 @@ import org.apache.paimon.utils.BulkFormatMapping;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Projection;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
@@ -52,10 +55,11 @@ import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 /** {@link FileStoreRead} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
 
+    private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyFileStoreRead.class);
+
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
     private final long schemaId;
-    private final RowType rowType;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
@@ -74,7 +78,6 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
-        this.rowType = rowType;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.bulkFormatMappings = new HashMap<>();
@@ -98,7 +101,10 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
         List<ConcatRecordReader.ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
-        for (DataFileMeta file : split.files()) {
+        if (split.beforeFiles().size() > 0) {
+            LOG.info("Ignore split before files: " + split.beforeFiles());
+        }
+        for (DataFileMeta file : split.dataFiles()) {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             BulkFormatMapping bulkFormatMapping =
                     bulkFormatMappings.computeIfAbsent(

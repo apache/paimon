@@ -66,6 +66,8 @@ public class PaimonTimestampObjectInspector extends AbstractPrimitiveJavaObjectI
         }
         if (value instanceof java.sql.Timestamp) {
             return Timestamp.fromSQLTimestamp((java.sql.Timestamp) value);
+        } else if (value instanceof TimestampWritable) {
+            return Timestamp.fromSQLTimestamp(((TimestampWritable) value).getTimestamp());
         } else {
             return Timestamp.fromLocalDateTime((LocalDateTime) value);
         }

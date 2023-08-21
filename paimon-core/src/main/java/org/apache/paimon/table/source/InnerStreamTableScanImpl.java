@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
+import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
@@ -39,8 +40,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-
 /** {@link StreamTableScan} implementation for streaming planning. */
 public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         implements InnerStreamTableScan {
@@ -50,6 +49,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     private final CoreOptions options;
     private final SnapshotManager snapshotManager;
     private final boolean supportStreamingReadOverwrite;
+    private final DefaultValueAssigner defaultValueAssigner;
 
     private StartingScanner startingScanner;
     private FollowUpScanner followUpScanner;
@@ -62,16 +62,18 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
             CoreOptions options,
             SnapshotReader snapshotReader,
             SnapshotManager snapshotManager,
-            boolean supportStreamingReadOverwrite) {
+            boolean supportStreamingReadOverwrite,
+            DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
         this.options = options;
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
+        this.defaultValueAssigner = defaultValueAssigner;
     }
 
     @Override
     public InnerStreamTableScanImpl withFilter(Predicate predicate) {
-        snapshotReader.withFilter(predicate);
+        snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
         return this;
     }
 
@@ -103,6 +105,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
             nextSnapshotId = currentSnapshotId + 1;
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
+            return DataFilePlan.fromResult(result);
         } else if (result instanceof StartingScanner.NextSnapshot) {
             nextSnapshotId = ((StartingScanner.NextSnapshot) result).nextSnapshotId();
             isFullPhaseEnd =
@@ -110,7 +113,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                             && boundedChecker.shouldEndInput(
                                     snapshotManager.snapshot(nextSnapshotId - 1));
         }
-        return DataFilePlan.fromResult(result);
+        return SnapshotNotExistPlan.INSTANCE;
     }
 
     private Plan nextPlan() {
@@ -132,7 +135,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 LOG.debug(
                         "Next snapshot id {} does not exist, wait for the snapshot generation.",
                         nextSnapshotId);
-                return new DataFilePlan(Collections.emptyList());
+                return SnapshotNotExistPlan.INSTANCE;
             }
 
             Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
@@ -234,7 +237,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
 
         String consumerId = options.consumerId();
         if (consumerId != null) {
-            snapshotReader.consumerManager().recordConsumer(consumerId, new Consumer(nextSnapshot));
+            snapshotReader.consumerManager().resetConsumer(consumerId, new Consumer(nextSnapshot));
         }
     }
 }

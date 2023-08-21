@@ -74,7 +74,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                         pageSize,
                         maxNumFileHandles,
                         channelManager,
-                        (BinaryRowSerializer) serializer.duplicate(),
+                        serializer.duplicate(),
                         comparator,
                         compressionCodecFactory,
                         compressionBlockSize);

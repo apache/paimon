@@ -38,7 +38,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
     private static final int MAX_LEVEL = 3;
 
     private static final RecordEqualiser EQUALISER =
-            (RecordEqualiser) (row1, row2) -> row1.getInt(0) == row2.getInt(0);
+            (row1, row2) -> row1.getInt(0) == row2.getInt(0);
 
     protected FullChangelogMergeFunctionWrapper wrapper;
 

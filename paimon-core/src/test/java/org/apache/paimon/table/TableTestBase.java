@@ -23,15 +23,22 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -44,6 +51,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.UUID;
 import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -51,11 +60,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test base for table. */
 public abstract class TableTestBase {
 
-    @TempDir java.nio.file.Path tempPath;
+    protected static final Random RANDOM = new Random();
+    protected static final String DEFAULT_TABLE_NAME = "MyTable";
+
+    protected final String commitUser = UUID.randomUUID().toString();
 
     protected Path warehouse;
     protected Catalog catalog;
     protected String database;
+    @TempDir java.nio.file.Path tempPath;
 
     @BeforeEach
     public void beforeEach() throws Catalog.DatabaseAlreadyExistException {
@@ -75,6 +88,10 @@ public abstract class TableTestBase {
 
     protected Identifier identifier(String tableName) {
         return new Identifier(database, tableName);
+    }
+
+    protected Identifier identifier() {
+        return identifier(DEFAULT_TABLE_NAME);
     }
 
     protected void write(Table table, InternalRow... rows) throws Exception {
@@ -111,5 +128,67 @@ public abstract class TableTestBase {
         List<InternalRow> rows = new ArrayList<>();
         reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
         return rows;
+    }
+
+    public void createTableDefault() throws Exception {
+        catalog.createTable(identifier(), schemaDefault(), true);
+    }
+
+    protected void commitDefault(List<CommitMessage> messages) throws Exception {
+        getTableDefault().newBatchWriteBuilder().newCommit().commit(messages);
+    }
+
+    protected List<CommitMessage> writeDataDefault(int size, int times) throws Exception {
+        List<CommitMessage> messages = new ArrayList<>();
+        for (int i = 0; i < times; i++) {
+            messages.addAll(writeOnce(getTableDefault(), i, size));
+        }
+
+        return messages;
+    }
+
+    public Table getTableDefault() throws Exception {
+        return catalog.getTable(identifier());
+    }
+
+    private List<CommitMessage> writeOnce(Table table, int time, int size) throws Exception {
+        StreamWriteBuilder builder = table.newStreamWriteBuilder();
+        builder.withCommitUser(commitUser);
+        try (StreamTableWrite streamTableWrite = builder.newWrite()) {
+            for (int j = 0; j < size; j++) {
+                streamTableWrite.write(dataDefault(time, j));
+            }
+            return streamTableWrite.prepareCommit(false, Long.MAX_VALUE);
+        }
+    }
+
+    // schema with all the basic types.
+    protected Schema schemaDefault() {
+        Schema.Builder schemaBuilder = Schema.newBuilder();
+        schemaBuilder.column("f0", DataTypes.INT());
+        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.column("f2", DataTypes.BYTES());
+        return schemaBuilder.build();
+    }
+
+    protected InternalRow dataDefault(int time, int size) {
+        return GenericRow.of(RANDOM.nextInt(), randomString(), randomBytes());
+    }
+
+    protected BinaryString randomString() {
+        int length = RANDOM.nextInt(50);
+        byte[] buffer = new byte[length];
+
+        for (int i = 0; i < length; i += 1) {
+            buffer[i] = (byte) ('a' + RANDOM.nextInt(26));
+        }
+
+        return BinaryString.fromBytes(buffer);
+    }
+
+    protected byte[] randomBytes() {
+        byte[] binary = new byte[RANDOM.nextInt(10)];
+        RANDOM.nextBytes(binary);
+        return binary;
     }
 }

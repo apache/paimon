@@ -18,13 +18,17 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchema;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.Pair;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -35,7 +39,6 @@ import com.ververica.cdc.connectors.mysql.table.JdbcUrlUtils;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -44,19 +47,23 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
-import java.util.ArrayList;
-import java.util.Arrays;
+import java.sql.ResultSet;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-class MySqlActionUtils {
+/** Utils for MySQL Action. * */
+public class MySqlActionUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
     public static final ConfigOption<Boolean> SCAN_NEWLY_ADDED_TABLE_ENABLED =
@@ -66,14 +73,74 @@ class MySqlActionUtils {
                     .withDescription(
                             "Whether capture the scan the newly added tables or not, by default is true.");
 
+    public static final ConfigOption<Boolean> MYSQL_CONVERTER_TINYINT1_BOOL =
+            ConfigOptions.key("mysql.converter.tinyint1-to-bool")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Mysql tinyint type will be converted to boolean type by default, if you want to convert to tinyint type, "
+                                    + "you can set this option to false.");
+
     static Connection getConnection(Configuration mySqlConfig) throws Exception {
-        return DriverManager.getConnection(
+        String url =
                 String.format(
-                        "jdbc:mysql://%s:%d/",
+                        "jdbc:mysql://%s:%d",
                         mySqlConfig.get(MySqlSourceOptions.HOSTNAME),
-                        mySqlConfig.get(MySqlSourceOptions.PORT)),
+                        mySqlConfig.get(MySqlSourceOptions.PORT));
+
+        // we need to add the `tinyInt1isBit` parameter to the connection url to make sure the
+        // tinyint(1) in MySQL is converted to bits or not. Refer to
+        // https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-connp-props-result-sets.html#cj-conn-prop_tinyInt1isBit
+        if (mySqlConfig.contains(MYSQL_CONVERTER_TINYINT1_BOOL)) {
+            url =
+                    String.format(
+                            "%s?tinyInt1isBit=%s",
+                            url, mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
+        }
+
+        return DriverManager.getConnection(
+                url,
                 mySqlConfig.get(MySqlSourceOptions.USERNAME),
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
+    }
+
+    static MySqlSchemasInfo getMySqlTableInfos(
+            Configuration mySqlConfig,
+            Predicate<String> monitorTablePredication,
+            List<Identifier> excludedTables)
+            throws Exception {
+        Pattern databasePattern =
+                Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
+        MySqlSchemasInfo mySqlSchemasInfo = new MySqlSchemasInfo();
+        try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
+            DatabaseMetaData metaData = conn.getMetaData();
+            try (ResultSet schemas = metaData.getCatalogs()) {
+                while (schemas.next()) {
+                    String databaseName = schemas.getString("TABLE_CAT");
+                    Matcher databaseMatcher = databasePattern.matcher(databaseName);
+                    if (databaseMatcher.matches()) {
+                        try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
+                            while (tables.next()) {
+                                String tableName = tables.getString("TABLE_NAME");
+                                MySqlSchema mySqlSchema =
+                                        MySqlSchema.buildSchema(
+                                                metaData,
+                                                databaseName,
+                                                tableName,
+                                                mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
+                                Identifier identifier = Identifier.create(databaseName, tableName);
+                                if (monitorTablePredication.test(tableName)) {
+                                    mySqlSchemasInfo.addSchema(identifier, mySqlSchema);
+                                } else {
+                                    excludedTables.add(identifier);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return mySqlSchemasInfo;
     }
 
     static void assertSchemaCompatible(TableSchema paimonSchema, Schema mySqlSchema) {
@@ -109,7 +176,7 @@ class MySqlActionUtils {
     }
 
     static Schema buildPaimonSchema(
-            MySqlSchema mySqlSchema,
+            MySqlTableInfo mySqlTableInfo,
             List<String> specifiedPartitionKeys,
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
@@ -117,23 +184,24 @@ class MySqlActionUtils {
             boolean caseSensitive) {
         Schema.Builder builder = Schema.newBuilder();
         builder.options(paimonConfig);
+        MySqlSchema mySqlSchema = mySqlTableInfo.schema();
 
         // build columns and primary keys from mySqlSchema
-        LinkedHashMap<String, Tuple2<DataType, String>> mySqlFields;
+        LinkedHashMap<String, Pair<DataType, String>> mySqlFields;
         List<String> mySqlPrimaryKeys;
         if (caseSensitive) {
             mySqlFields = mySqlSchema.fields();
             mySqlPrimaryKeys = mySqlSchema.primaryKeys();
         } else {
             mySqlFields = new LinkedHashMap<>();
-            for (Map.Entry<String, Tuple2<DataType, String>> entry :
+            for (Map.Entry<String, Pair<DataType, String>> entry :
                     mySqlSchema.fields().entrySet()) {
                 String fieldName = entry.getKey();
                 checkArgument(
                         !mySqlFields.containsKey(fieldName.toLowerCase()),
                         String.format(
-                                "Duplicate key '%s' in table '%s.%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, mySqlSchema.databaseName(), mySqlSchema.tableName()));
+                                "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
+                                fieldName, mySqlTableInfo.location()));
                 mySqlFields.put(fieldName.toLowerCase(), entry.getValue());
             }
             mySqlPrimaryKeys =
@@ -142,8 +210,8 @@ class MySqlActionUtils {
                             .collect(Collectors.toList());
         }
 
-        for (Map.Entry<String, Tuple2<DataType, String>> entry : mySqlFields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue().f0, entry.getValue().f1);
+        for (Map.Entry<String, Pair<DataType, String>> entry : mySqlFields.entrySet()) {
+            builder.column(entry.getKey(), entry.getValue().getLeft(), entry.getValue().getRight());
         }
 
         for (ComputedColumn computedColumn : computedColumns) {
@@ -177,19 +245,17 @@ class MySqlActionUtils {
         return builder.build();
     }
 
-    static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig) {
+    static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {
         validateMySqlConfig(mySqlConfig);
         MySqlSourceBuilder<String> sourceBuilder = MySqlSource.builder();
 
-        String databaseName = mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME);
-        String tableName = mySqlConfig.get(MySqlSourceOptions.TABLE_NAME);
         sourceBuilder
                 .hostname(mySqlConfig.get(MySqlSourceOptions.HOSTNAME))
                 .port(mySqlConfig.get(MySqlSourceOptions.PORT))
                 .username(mySqlConfig.get(MySqlSourceOptions.USERNAME))
                 .password(mySqlConfig.get(MySqlSourceOptions.PASSWORD))
-                .databaseList(databaseName)
-                .tableList(databaseName + "." + tableName);
+                .databaseList(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME))
+                .tableList(tableList);
 
         mySqlConfig.getOptional(MySqlSourceOptions.SERVER_ID).ifPresent(sourceBuilder::serverId);
         mySqlConfig
@@ -295,58 +361,5 @@ class MySqlActionUtils {
                 String.format(
                         "mysql-conf [%s] must be specified.",
                         MySqlSourceOptions.DATABASE_NAME.key()));
-
-        checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.TABLE_NAME) != null,
-                String.format(
-                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.TABLE_NAME.key()));
-    }
-
-    static List<ComputedColumn> buildComputedColumns(
-            List<String> computedColumnArgs, Map<String, DataType> typeMapping) {
-        List<ComputedColumn> computedColumns = new ArrayList<>();
-        for (String columnArg : computedColumnArgs) {
-            String[] kv = columnArg.split("=");
-            if (kv.length != 2) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "Invalid computed column argument: %s. Please use format 'column-name=expr-name(args, ...)'.",
-                                columnArg));
-            }
-            String columnName = kv[0].trim();
-            String expression = kv[1].trim();
-            // parse expression
-            int left = expression.indexOf('(');
-            int right = expression.indexOf(')');
-            Preconditions.checkArgument(
-                    left > 0 && right > left,
-                    String.format(
-                            "Invalid expression: %s. Please use format 'expr-name(args, ...)'.",
-                            expression));
-
-            String exprName = expression.substring(0, left);
-            String[] args = expression.substring(left + 1, right).split(",");
-            checkArgument(args.length >= 1, "Computed column needs at least one argument.");
-
-            String fieldReference = args[0].trim();
-            String[] literals =
-                    Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
-            checkArgument(
-                    typeMapping.containsKey(fieldReference),
-                    String.format(
-                            "Referenced field '%s' is not in given MySQL fields: %s.",
-                            fieldReference, typeMapping.keySet()));
-
-            computedColumns.add(
-                    new ComputedColumn(
-                            columnName,
-                            Expression.create(
-                                    exprName,
-                                    fieldReference,
-                                    typeMapping.get(fieldReference),
-                                    literals)));
-        }
-
-        return computedColumns;
     }
 }

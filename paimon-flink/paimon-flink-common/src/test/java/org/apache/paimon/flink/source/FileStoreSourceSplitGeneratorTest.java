@@ -83,7 +83,6 @@ public class FileStoreSourceSplitGeneratorTest {
                 SnapshotReaderImpl.generateSplits(
                         1L,
                         false,
-                        false,
                         new SplitGenerator() {
                             @Override
                             public List<List<DataFileMeta>> splitForBatch(
@@ -134,7 +133,7 @@ public class FileStoreSourceSplitGeneratorTest {
         assertThat(((DataSplit) split.split()).bucket()).isEqualTo(bucket);
         assertThat(
                         ((DataSplit) split.split())
-                                .files().stream()
+                                .dataFiles().stream()
                                         .map(DataFileMeta::fileName)
                                         .collect(Collectors.toList()))
                 .isEqualTo(files);

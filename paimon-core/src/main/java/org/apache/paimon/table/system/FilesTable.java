@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -39,6 +40,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -96,7 +98,9 @@ public class FilesTable implements ReadonlyTable {
                                     11, "min_value_stats", SerializationUtils.newStringType(false)),
                             new DataField(
                                     12, "max_value_stats", SerializationUtils.newStringType(false)),
-                            new DataField(13, "creation_time", DataTypes.TIMESTAMP_MILLIS())));
+                            new DataField(13, "min_sequence_number", new BigIntType(true)),
+                            new DataField(14, "max_sequence_number", new BigIntType(true)),
+                            new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS())));
 
     private final FileStoreTable storeTable;
 
@@ -169,7 +173,7 @@ public class FilesTable implements ReadonlyTable {
             TableScan.Plan plan = plan();
             return plan.splits().stream()
                     .map(s -> (DataSplit) s)
-                    .mapToLong(s -> s.files().size())
+                    .mapToLong(s -> s.dataFiles().size())
                     .sum();
         }
 
@@ -214,6 +218,11 @@ public class FilesTable implements ReadonlyTable {
         @Override
         public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
+            return this;
+        }
+
+        @Override
+        public TableRead withIOManager(IOManager ioManager) {
             return this;
         }
 
@@ -263,7 +272,7 @@ public class FilesTable implements ReadonlyTable {
             for (Split dataSplit : plan.splits()) {
                 iteratorList.add(
                         Iterators.transform(
-                                ((DataSplit) dataSplit).files().iterator(),
+                                ((DataSplit) dataSplit).dataFiles().iterator(),
                                 file ->
                                         toRow(
                                                 (DataSplit) dataSplit,
@@ -320,7 +329,7 @@ public class FilesTable implements ReadonlyTable {
                                                                 .apply(dataFileMeta.schemaId())
                                                                 .convert(dataFileMeta.minKey()))),
                         () ->
-                                dataFileMeta.minKey().getFieldCount() <= 0
+                                dataFileMeta.maxKey().getFieldCount() <= 0
                                         ? null
                                         : BinaryString.fromString(
                                                 Arrays.toString(
@@ -330,6 +339,8 @@ public class FilesTable implements ReadonlyTable {
                         () -> BinaryString.fromString(statsGetter.nullValueCounts().toString()),
                         () -> BinaryString.fromString(statsGetter.lowerValueBounds().toString()),
                         () -> BinaryString.fromString(statsGetter.upperValueBounds().toString()),
+                        dataFileMeta::minSequenceNumber,
+                        dataFileMeta::maxSequenceNumber,
                         dataFileMeta::creationTime
                     };
 

@@ -37,12 +37,13 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.HashMap;
 import java.util.LinkedList;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** test file format suffix. */
 public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
@@ -56,8 +57,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
     public void testFileSuffix(@TempDir java.nio.file.Path tempDir) throws Exception {
         String format = "avro";
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
-        Path path = writerFactory.pathFactory().newPath();
-        Assertions.assertTrue(path.getPath().endsWith(format));
+        Path path = writerFactory.pathFactory(0).newPath();
+        assertThat(path.getPath().endsWith(format)).isTrue();
 
         DataFilePathFactory dataFilePathFactory =
                 new DataFilePathFactory(new Path(tempDir.toString()), "dt=1", 1, format);
@@ -71,8 +72,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         10,
                         SCHEMA,
                         0,
-                        new AppendOnlyCompactManager(
-                                null, toCompact, 4, 10, 10, null, false), // not used
+                        new AppendOnlyCompactManager(null, toCompact, 4, 10, 10, null), // not used
                         false,
                         dataFilePathFactory,
                         null,
@@ -85,6 +85,6 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
         appendOnlyWriter.close();
 
         DataFileMeta meta = increment.newFilesIncrement().newFiles().get(0);
-        Assertions.assertTrue(meta.fileName().endsWith(format));
+        assertThat(meta.fileName().endsWith(format)).isTrue();
     }
 }

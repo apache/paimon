@@ -53,7 +53,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                     return splits.stream()
-                            .flatMap(s -> s.files().stream())
+                            .flatMap(s -> s.dataFiles().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
@@ -87,7 +87,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                             table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                     return splits.stream()
-                            .flatMap(s -> s.files().stream())
+                            .flatMap(s -> s.dataFiles().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
@@ -120,7 +120,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 6L);
                     return splits.stream()
-                            .flatMap(s -> s.files().stream())
+                            .flatMap(s -> s.dataFiles().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {

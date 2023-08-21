@@ -22,6 +22,8 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -30,6 +32,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
@@ -40,6 +44,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
@@ -53,8 +58,14 @@ public abstract class FormatReadWriteTest {
 
     @TempDir java.nio.file.Path tempPath;
 
+    private final String formatType;
+
     private FileIO fileIO;
     private Path file;
+
+    protected FormatReadWriteTest(String formatType) {
+        this.formatType = formatType;
+    }
 
     @BeforeEach
     public void beforeEach() {
@@ -94,28 +105,41 @@ public abstract class FormatReadWriteTest {
                         GenericRow.of(1, 1L), GenericRow.of(2, 2L), GenericRow.of(3, null));
     }
 
+    /**
+     * Currently, Parquet format doesn't support nested row in array, so this test handles Parquet
+     * specially.
+     */
     @Test
     public void testFullTypes() throws IOException {
-        RowType rowType =
+        RowType rowType = rowTypeForFullTypesTest();
+        InternalRow expected = expectedRowForFullTypesTest();
+        FileFormat format = fileFormat();
+
+        PositionOutputStream out = fileIO.newOutputStream(file, false);
+        FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
+        writer.addElement(expected);
+        writer.flush();
+        writer.finish();
+        out.close();
+
+        RecordReader<InternalRow> reader =
+                format.createReaderFactory(rowType).createReader(fileIO, file);
+        List<InternalRow> result = new ArrayList<>();
+        reader.forEachRemaining(result::add);
+        assertThat(result.size()).isEqualTo(1);
+
+        validateFullTypesResult(result.get(0), expected);
+    }
+
+    private RowType rowTypeForFullTypesTest() {
+        RowType.Builder builder =
                 RowType.builder()
                         .field("id", DataTypes.INT().notNull())
                         .field("name", DataTypes.STRING()) /* optional by default */
                         .field("salary", DataTypes.DOUBLE().notNull())
                         .field(
                                 "locations",
-                                DataTypes.MAP(
-                                        DataTypes.STRING().notNull(),
-                                        DataTypes.ROW(
-                                                DataTypes.FIELD(
-                                                        0,
-                                                        "posX",
-                                                        DataTypes.DOUBLE().notNull(),
-                                                        "X field"),
-                                                DataTypes.FIELD(
-                                                        1,
-                                                        "posY",
-                                                        DataTypes.DOUBLE().notNull(),
-                                                        "Y field"))))
+                                DataTypes.MAP(DataTypes.STRING().notNull(), getMapValueType()))
                         .field("strArray", DataTypes.ARRAY(DataTypes.STRING()).nullable())
                         .field("intArray", DataTypes.ARRAY(DataTypes.INT()).nullable())
                         .field("boolean", DataTypes.BOOLEAN().nullable())
@@ -128,27 +152,45 @@ public abstract class FormatReadWriteTest {
                         .field("date", DataTypes.DATE())
                         .field("decimal", DataTypes.DECIMAL(2, 2))
                         .field("decimal2", DataTypes.DECIMAL(38, 2))
-                        .field("decimal3", DataTypes.DECIMAL(10, 1))
-                        .build();
+                        .field("decimal3", DataTypes.DECIMAL(10, 1));
+
+        if (formatType.equals("avro") || formatType.equals("orc")) {
+            builder.field(
+                    "rowArray",
+                    DataTypes.ARRAY(
+                            DataTypes.ROW(
+                                    DataTypes.FIELD(
+                                            0,
+                                            "int0",
+                                            DataTypes.INT().notNull(),
+                                            "nested row int field 0"),
+                                    DataTypes.FIELD(
+                                            1,
+                                            "double1",
+                                            DataTypes.DOUBLE().notNull(),
+                                            "nested row double field 1"))));
+        }
+        RowType rowType = builder.build();
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             rowType = (RowType) rowType.notNull();
         }
 
-        FileFormat format = fileFormat();
+        return rowType;
+    }
 
-        PositionOutputStream out = fileIO.newOutputStream(file, false);
-        FormatWriter writer = format.createWriterFactory(rowType).create(out, null);
-        GenericRow expected =
-                GenericRow.of(
+    private GenericRow expectedRowForFullTypesTest() {
+        Object[] mapValueData = getMapValueData();
+        List<Object> values =
+                Arrays.asList(
                         1,
                         fromString("name"),
                         5.26D,
                         new GenericMap(
                                 new HashMap<Object, Object>() {
                                     {
-                                        this.put(fromString("key1"), GenericRow.of(5.2D, 6.2D));
-                                        this.put(fromString("key2"), GenericRow.of(6.2D, 2.2D));
+                                        this.put(fromString("key1"), mapValueData[0]);
+                                        this.put(fromString("key2"), mapValueData[1]);
                                     }
                                 }),
                         new GenericArray(new Object[] {fromString("123"), fromString("456")}),
@@ -161,19 +203,123 @@ public abstract class FormatReadWriteTest {
                         Timestamp.fromMicros(123123123),
                         Timestamp.fromEpochMillis(123123123),
                         2456,
-                        Decimal.fromBigDecimal(new BigDecimal(0.22), 2, 2),
-                        Decimal.fromBigDecimal(new BigDecimal(12312455.22), 38, 2),
-                        Decimal.fromBigDecimal(new BigDecimal(12455.1), 10, 1));
-        writer.addElement(expected);
-        writer.flush();
-        writer.finish();
-        out.close();
+                        Decimal.fromBigDecimal(new BigDecimal("0.22"), 2, 2),
+                        Decimal.fromBigDecimal(new BigDecimal("12312455.22"), 38, 2),
+                        Decimal.fromBigDecimal(new BigDecimal("12455.1"), 10, 1));
 
-        RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType).createReader(fileIO, file);
-        List<InternalRow> result = new ArrayList<>();
-        reader.forEachRemaining(result::add);
+        if (formatType.equals("avro") || formatType.equals("orc")) {
+            values = new ArrayList<>(values);
+            values.add(
+                    new GenericArray(
+                            new Object[] {GenericRow.of(1, 0.1D), GenericRow.of(2, 0.2D)}));
+        }
+        return GenericRow.of(values.toArray());
+    }
 
-        assertThat(result).containsExactly(expected);
+    private DataType getMapValueType() {
+        if (formatType.equals("avro") || formatType.equals("orc")) {
+            return DataTypes.ROW(
+                    DataTypes.FIELD(0, "posX", DataTypes.DOUBLE().notNull(), "X field"),
+                    DataTypes.FIELD(1, "posY", DataTypes.DOUBLE().notNull(), "Y field"));
+        } else {
+            return DataTypes.DOUBLE();
+        }
+    }
+
+    private Object[] getMapValueData() {
+        if (formatType.equals("avro") || formatType.equals("orc")) {
+            // allow nested row in array
+            return new Object[] {GenericRow.of(5.2D, 6.2D), GenericRow.of(6.2D, 2.2D)};
+        } else {
+            return new Object[] {5.2D, 6.2D};
+        }
+    }
+
+    private void validateFullTypesResult(InternalRow actual, InternalRow expected) {
+        if (formatType.equals("avro")) {
+            assertThat(actual).isEqualTo(expected);
+        } else {
+            RowType rowType = rowTypeForFullTypesTest();
+            InternalRow.FieldGetter[] fieldGetters = rowType.fieldGetters();
+            for (int i = 0; i < fieldGetters.length; i++) {
+                String name = rowType.getFieldNames().get(i);
+                Object actualField = fieldGetters[i].getFieldOrNull(actual);
+                Object expectedField = fieldGetters[i].getFieldOrNull(expected);
+                switch (name) {
+                    case "locations":
+                        validateInternalMap((InternalMap) actualField, (InternalMap) expectedField);
+                        break;
+                    case "strArray":
+                        validateInternalArray(
+                                (InternalArray) actualField,
+                                (InternalArray) expectedField,
+                                DataTypes.STRING());
+                        break;
+                    case "intArray":
+                        validateInternalArray(
+                                (InternalArray) actualField,
+                                (InternalArray) expectedField,
+                                DataTypes.INT());
+                        break;
+                    case "rowArray":
+                        validateInternalArray(
+                                (InternalArray) actualField,
+                                (InternalArray) expectedField,
+                                ((ArrayType)
+                                                rowType.getFields().stream()
+                                                        .filter(f -> f.name().equals("rowArray"))
+                                                        .findAny()
+                                                        .get()
+                                                        .type())
+                                        .getElementType());
+                        break;
+                    default:
+                        assertThat(actualField).isEqualTo(expectedField);
+                        break;
+                }
+            }
+        }
+    }
+
+    private void validateInternalMap(InternalMap actualMap, InternalMap expectedMap) {
+        validateInternalArray(actualMap.keyArray(), expectedMap.keyArray(), DataTypes.STRING());
+        validateInternalArray(actualMap.valueArray(), expectedMap.valueArray(), getMapValueType());
+    }
+
+    private void validateInternalArray(
+            InternalArray actualArray, InternalArray expectedArray, DataType elementType) {
+        assertThat(actualArray.size()).isEqualTo(expectedArray.size());
+        switch (elementType.getTypeRoot()) {
+            case VARCHAR:
+                for (int i = 0; i < actualArray.size(); i++) {
+                    assertThat(actualArray.getString(i)).isEqualTo(expectedArray.getString(i));
+                }
+                break;
+            case DOUBLE:
+                assertThat(actualArray.toDoubleArray()).isEqualTo(expectedArray.toDoubleArray());
+                break;
+            case INTEGER:
+                assertThat(actualArray.toIntArray()).isEqualTo(expectedArray.toIntArray());
+                break;
+            case ROW:
+                InternalArray.ElementGetter getter = InternalArray.createElementGetter(elementType);
+                RowType rowType = (RowType) elementType;
+                for (int i = 0; i < expectedArray.size(); i++) {
+                    InternalRow actual = (InternalRow) getter.getElementOrNull(actualArray, i);
+                    InternalRow expected = (InternalRow) getter.getElementOrNull(expectedArray, i);
+                    assertThat(actual.getFieldCount()).isEqualTo(expected.getFieldCount());
+                    for (int j = 0; j < actual.getFieldCount(); j++) {
+                        InternalRow.FieldGetter fieldGetter =
+                                InternalRow.createFieldGetter(rowType.getTypeAt(j), j);
+                        assertThat(fieldGetter.getFieldOrNull(expected))
+                                .isEqualTo(fieldGetter.getFieldOrNull(actual));
+                    }
+                }
+                break;
+            default:
+                throw new UnsupportedOperationException(
+                        "Haven't implemented array comparing for type "
+                                + elementType.getTypeRoot());
+        }
     }
 }

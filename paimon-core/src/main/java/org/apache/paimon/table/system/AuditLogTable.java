@@ -24,6 +24,7 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.ScanKind;
@@ -41,6 +42,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
@@ -233,6 +235,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
+            snapshotReader.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
         public Plan read() {
             return snapshotReader.read();
         }
@@ -240,6 +248,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public Plan readOverwrittenChanges() {
             return snapshotReader.readOverwrittenChanges();
+        }
+
+        @Override
+        public Plan readIncrementalDiff(Snapshot before) {
+            return snapshotReader.readIncrementalDiff(before);
         }
 
         @Override
@@ -374,6 +387,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             }
             this.readProjection = Ints.toArray(readProjection);
             dataRead.withProjection(dataProjection.toArray(new int[0][]));
+            return this;
+        }
+
+        @Override
+        public TableRead withIOManager(IOManager ioManager) {
+            this.dataRead.withIOManager(ioManager);
             return this;
         }
 

@@ -1,0 +1,22 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+{"data":[{"pt":"2","_id":"7","v1":"seven","v2":"70000000000"}],"database":"paimon_sync_table","es":1683168079000,"id":41,"isDdl":false,"mysqlType":{"pt":"INT","_id":"INT","v1":"VARCHAR(10)","v2":"BIGINT"},"old":null,"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":-5},"table":"schema_evolution_1","ts":1683168079071,"type":"INSERT"}
+{"data":[{"pt":"1","_id":"5","v1":"five","v2":"50"}],"database":"paimon_sync_table","es":1683168079000,"id":42,"isDdl":false,"mysqlType":{"pt":"INT","_id":"INT","v1":"VARCHAR(10)","v2":"BIGINT"},"old":null,"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":-5},"table":"schema_evolution_1","ts":1683168079391,"type":"DELETE"}
+{"data":[{"pt":"2","_id":"3","v1":"three","v2":"30000000000"}],"database":"paimon_sync_table","es":1683168079000,"id":43,"isDdl":false,"mysqlType":{"pt":"INT","_id":"INT","v1":"VARCHAR(10)","v2":"BIGINT"},"old":[{"v2":"30"}],"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":-5},"table":"schema_evolution_1","ts":1683168079507,"type":"UPDATE"}
+{"data":[{"pt":"2","_id":"8","v1":"eight","v2":"80000000000"}],"database":"paimon_sync_table","es":1683168080000,"id":45,"isDdl":false,"mysqlType":{"pt":"INT","_id":"INT","v1":"VARCHAR(10)","v2":"BIGINT"},"old":null,"pkNames":["_id"],"sql":"","sqlType":{"pt":4,"_id":4,"v1":12,"v2":-5},"table":"schema_evolution_2","ts":1683168079943,"type":"INSERT"}

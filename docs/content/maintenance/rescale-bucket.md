@@ -34,13 +34,13 @@ scan the data with the old bucket number and hash the record according to the cu
 ## Rescale Overwrite
 ```sql
 -- rescale number of total buckets
-ALTER TABLE table_identifier SET ('bucket' = '...')
+ALTER TABLE table_identifier SET ('bucket' = '...');
 
 -- reorganize data layout of table/partition
 INSERT OVERWRITE table_identifier [PARTITION (part_spec)]
 SELECT ... 
 FROM table_identifier
-[WHERE part_spec]
+[WHERE part_spec];
 ``` 
 
 Please note that

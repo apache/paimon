@@ -61,6 +61,8 @@ import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LOG_SCAN_REMOVE_NORMALIZE;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_ASYNC_THREAD_NUMBER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
@@ -138,6 +140,10 @@ public class DataTableSource extends FlinkTableSource {
             return ChangelogMode.all();
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
+
+            if (new CoreOptions(options).mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+                return ChangelogMode.insertOnly();
+            }
 
             if (options.get(LOG_SCAN_REMOVE_NORMALIZE)) {
                 return ChangelogMode.all();
@@ -272,8 +278,13 @@ public class DataTableSource extends FlinkTableSource {
                         ? IntStream.range(0, table.rowType().getFieldCount()).toArray()
                         : Projection.of(projectFields).toTopLevelIndexes();
         int[] joinKey = Projection.of(context.getKeys()).toTopLevelIndexes();
+        Options options = new Options(table.options());
+        boolean enableAsync = options.get(LOOKUP_ASYNC);
+        int asyncThreadNumber = options.get(LOOKUP_ASYNC_THREAD_NUMBER);
         return LookupRuntimeProviderFactory.create(
-                new FileStoreLookupFunction(table, projection, joinKey, predicate));
+                new FileStoreLookupFunction(table, projection, joinKey, predicate),
+                enableAsync,
+                asyncThreadNumber);
     }
 
     @Override

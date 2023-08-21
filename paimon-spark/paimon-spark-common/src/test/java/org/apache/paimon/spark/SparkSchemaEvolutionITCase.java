@@ -34,9 +34,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * ITCase for schema eqvolution in spark.
+ * ITCase for schema evolution in spark.
  *
- * <p>NOTICE: For these tests, we remove
+ * <p>NOTICE: since we make all fields nullable when convert paimon schema to spark schema, we
+ * remove "NOT NULL" identifier for some fields even though these fields are supposed to be
+ * non-nullable.
  */
 public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 

@@ -97,12 +97,14 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
 
         // 2. With level 0, with the latest high level, return changelog
         if (highLevel != null) {
+            // For first row, we should just return old value. And produce no changelog.
             setChangelog(highLevel, result);
             return reusedResult.setResult(result);
         }
 
         // 3. Lookup to find the latest high level record
         highLevel = lookup.apply(result.key());
+
         if (highLevel != null) {
             mergeFunction2.reset();
             mergeFunction2.add(highLevel);

@@ -36,14 +36,41 @@ By [defining primary keys]({{< ref "how-to/creating-tables#tables-with-primary-k
 
 A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}).
 
-Primary Key Table supports two bucket mode:
-1. Fixed Bucket mode: configure a bucket greater than 0, rescaling buckets can only be done through offline processes, 
-   see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}). A too large number of buckets leads to too many
-   small files, and a too small number of buckets leads to poor write performance.
-2. Dynamic Bucket mode: configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic expansion of
-   the number of buckets. (This is an experimental feature)
-   - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
-   - Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
+### Fixed Bucket
+
+Configure a bucket greater than 0, rescaling buckets can only be done through offline processes,
+see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}). A too large number of buckets leads to too many
+small files, and a too small number of buckets leads to poor write performance.
+
+### Dynamic Bucket
+
+Configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic expansion of the number of buckets.
+
+- Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
+- Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
+
+{{< hint info >}}
+Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition.
+{{< /hint >}}
+
+**Normal Dynamic Bucket Mode**:
+
+When your updates do not cross partitions (no partitions, or primary keys contain all partition fields), Dynamic
+Bucket mode uses HASH index to maintain mapping from key to bucket, it requires more memory than fixed bucket mode,
+100 million entries in a partition takes up 1 GB more memory, partitions that are no longer active do not take up memory.
+
+**Cross Partitions Update Dynamic Bucket Mode**:
+
+{{< hint info >}}
+This is an experimental feature.
+{{< /hint >}}
+
+When you need cross partition updates (primary keys not contain all partition fields), Dynamic Bucket mode directly
+maintains the mapping of keys to partition and bucket, uses local disks, and initializes indexes by reading all 
+existing keys in the table when starting stream write job. Different merge engines have different behaviors:
+1. Deduplicate: Delete data from the old partition and insert new data into the new partition.
+2. PartialUpdate & Aggregation: Insert new data into the old partition.
+3. FirstRow: Ignore new data if there is old value.
 
 ## Merge Engines
 
@@ -78,7 +105,9 @@ For streaming queries, `partial-update` merge engine must be used together with 
 {{< /hint >}}
 
 {{< hint info >}}
-Partial cannot receive `DELETE` messages because the behavior cannot be defined. You can configure `partial-update.ignore-delete` to ignore `DELETE` messages.
+By default, Partial update can not accept delete records, you can choose one of the following solutions:
+- Configure 'partial-update.ignore-delete' to ignore delete records.
+- Configure 'sequence-group's to retract partial columns.
 {{< /hint >}}
 
 #### Sequence Group
@@ -120,6 +149,45 @@ SELECT * FROM T; -- output 1, 2, 2, 2, 1, 1, 1
 INSERT INTO T VALUES (1, 3, 3, 1, 3, 3, 3);
 
 SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
+```
+
+#### Default Value
+If the order of the data cannot be guaranteed and field is written only by overwriting null values,
+fields that have not been overwritten will be displayed as null when reading table.
+
+```sql
+CREATE TABLE T (
+                  k INT,
+                  a INT,
+                  b INT,
+                  c INT,
+                  PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+     'merge-engine'='partial-update'
+     );
+INSERT INTO T VALUES (1, 1,null,null);
+INSERT INTO T VALUES (1, null,null,1);
+
+SELECT * FROM T; -- output 1, 1, null, 1
+```
+If it is expected that fields which have not been overwritten have a default value instead of null when reading table,
+'fields.name.default-value' is required.
+```sql
+CREATE TABLE T (
+    k INT,
+    a INT,
+    b INT,
+    c INT,
+    PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+    'merge-engine'='partial-update',
+    'fields.b.default-value'='0'
+);
+
+INSERT INTO T VALUES (1, 1,null,null);
+INSERT INTO T VALUES (1, null,null,1);
+
+SELECT * FROM T; -- output 1, 1, 0, 1
 ```
 
 ### Aggregation
@@ -171,6 +239,19 @@ If you allow some functions to ignore retraction messages, you can configure:
 For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
 {{< /hint >}}
 
+### First Row
+
+{{< hint info >}}
+This is an experimental feature.
+{{< /hint >}}
+
+By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the
+`deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog. 
+
+1. `first-row` merge engine must be used together with `lookup` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
+2. You can not specify `sequence.field`.
+3. Not accept `DELETE` and `UPDATE_BEFORE` message.
+
 ## Changelog Producers
 
 Streaming queries will continuously produce the latest changes. These changes can come from the underlying table files or from an [external log system]({{< ref "concepts/external-log-systems" >}}) like Kafka. Compared to the external log system, changes from table files have lower cost but higher latency (depending on how often snapshots are created).
@@ -204,10 +285,6 @@ By specifying `'changelog-producer' = 'input'`, Paimon writers rely on their inp
 {{< img src="/img/changelog-producer-input.png">}}
 
 ### Lookup
-
-{{< hint info >}}
-This is an experimental feature.
-{{< /hint >}}
 
 If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you may consider using the `'lookup'` changelog producer.
 
@@ -276,19 +353,8 @@ changelog for the same record.
 By default, the primary key table determines the merge order according to the input order (the last input record will be the last to merge). However, in distributed computing,
 there will be some cases that lead to data disorder. At this time, you can use a time field as `sequence.field`, for example:
 
-{{< hint info >}}
-When the record is updated or deleted, the `sequence.field` must become larger and cannot remain unchanged. 
-For -U and +U, their sequence-fields must be different.
-
-If the provided `sequence.field` doesn't meet the precision, like a rough second or millisecond, you can set
-`sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision of sequence number will
-be made up to microsecond by system. 
-{{< /hint >}}
-
 {{< tabs "sequence.field" >}}
-
 {{< tab "Flink" >}}
-
 ```sql
 CREATE TABLE MyTable (
     pk BIGINT PRIMARY KEY NOT ENFORCED,
@@ -299,9 +365,24 @@ CREATE TABLE MyTable (
     'sequence.field' = 'dt'
 );
 ```
-
 {{< /tab >}}
-
 {{< /tabs >}}
 
 The record with the largest `sequence.field` value will be the last to merge, regardless of the input order.
+
+**Sequence Auto Padding**:
+
+When the record is updated or deleted, the `sequence.field` must become larger and cannot remain unchanged.
+For -U and +U, their sequence-fields must be different. If you cannot meet this requirement, Paimon provides
+option to automatically pad the sequence field for you.
+
+1. `'sequence.auto-padding' = 'row-kind-flag'`: If you are using same value for -U and +U, just like "`op_ts`"
+(the time that the change was made in the database) in Mysql Binlog. It is recommended to use the automatic
+padding for row kind flag, which will automatically distinguish between -U (-D) and +U (+I).
+
+2. Insufficient precision: If the provided `sequence.field` doesn't meet the precision, like a rough second or
+millisecond, you can set `sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision
+of sequence number will be made up to microsecond by system.
+
+3. Composite pattern: for example, "second-to-micro,row-kind-flag", first, add the micro to the second, and then
+pad the row kind flag.

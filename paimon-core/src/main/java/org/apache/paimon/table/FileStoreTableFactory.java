@@ -63,16 +63,29 @@ public class FileStoreTableFactory {
                                                 "Schema file not found in location "
                                                         + tablePath
                                                         + ". Please create table first."));
-        return create(fileIO, tablePath, tableSchema, options, Lock.emptyFactory());
+        return create(
+                fileIO,
+                tablePath,
+                tableSchema,
+                options,
+                new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {
-        return create(fileIO, tablePath, tableSchema, new Options(), Lock.emptyFactory());
+        return create(
+                fileIO,
+                tablePath,
+                tableSchema,
+                new Options(),
+                new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 
     public static FileStoreTable create(
-            FileIO fileIO, Path tablePath, TableSchema tableSchema, Lock.Factory lockFactory) {
-        return create(fileIO, tablePath, tableSchema, new Options(), lockFactory);
+            FileIO fileIO,
+            Path tablePath,
+            TableSchema tableSchema,
+            CatalogEnvironment catalogEnvironment) {
+        return create(fileIO, tablePath, tableSchema, new Options(), catalogEnvironment);
     }
 
     public static FileStoreTable create(
@@ -80,7 +93,7 @@ public class FileStoreTableFactory {
             Path tablePath,
             TableSchema tableSchema,
             Options dynamicOptions,
-            Lock.Factory lockFactory) {
+            CatalogEnvironment catalogEnvironment) {
         FileStoreTable table;
         Options coreOptions = Options.fromMap(tableSchema.options());
         WriteMode writeMode = coreOptions.get(CoreOptions.WRITE_MODE);
@@ -92,16 +105,18 @@ public class FileStoreTableFactory {
             coreOptions.set(CoreOptions.WRITE_MODE, writeMode);
         }
         if (writeMode == WriteMode.APPEND_ONLY) {
-            table = new AppendOnlyFileStoreTable(fileIO, tablePath, tableSchema, lockFactory);
+            table =
+                    new AppendOnlyFileStoreTable(
+                            fileIO, tablePath, tableSchema, catalogEnvironment);
         } else {
             if (tableSchema.primaryKeys().isEmpty()) {
                 table =
                         new ChangelogValueCountFileStoreTable(
-                                fileIO, tablePath, tableSchema, lockFactory);
+                                fileIO, tablePath, tableSchema, catalogEnvironment);
             } else {
                 table =
                         new ChangelogWithKeyFileStoreTable(
-                                fileIO, tablePath, tableSchema, lockFactory);
+                                fileIO, tablePath, tableSchema, catalogEnvironment);
             }
         }
         return table.copy(dynamicOptions.toMap());

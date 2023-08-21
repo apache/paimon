@@ -80,8 +80,18 @@ ALTER TABLE my_table RENAME TO my_table_new;
 
 {{< tab "Spark3" >}}
 
+The simplest sql to call is:
 ```sql
 ALTER TABLE my_table RENAME TO my_table_new;
+```
+
+Note that: we can rename paimon table in spark this way:
+```sql
+ALTER TABLE [catalog.[database.]]test1 RENAME to [database.]test2;
+```
+But we can't put catalog name before the renamed-to table, it will throw an error if we write sql like this:
+```sql
+ALTER TABLE catalog.database.test1 RENAME to catalog.database.test2;
 ```
 
 {{< /tab >}}
@@ -219,7 +229,8 @@ ALTER TABLE my_table RENAME COLUMN c0 TO c1;
 
 ## Dropping Columns
 
-The following SQL drops two columns `c1` and `c2` from table `my_table`.
+The following SQL drops two columns `c1` and `c2` from table `my_table`. In hive catalog, you need to ensure disable `hive.metastore.disallow.incompatible.col.type.changes` in your hive server,
+otherwise this operation may fail, throws an exception like `The following columns have types incompatible with the existing columns in their respective positions`.
 
 {{< tabs "drop-columns-example" >}}
 
@@ -305,7 +316,7 @@ The following SQL changes comment of column `buy_count` to `buy count`.
 {{< tab "Flink" >}}
 
 ```sql
-ALTER TABLE my_table MODIFY buy_count BIGINT COMMENT 'buy count'
+ALTER TABLE my_table MODIFY buy_count BIGINT COMMENT 'buy count';
 ```
 
 {{< /tab >}}
@@ -394,7 +405,7 @@ ALTER TABLE my_table MODIFY col_a DOUBLE;
 {{< tab "Spark3" >}}
 
 ```sql
-ALTER TABLE my_table ALTER COLUMN col_a TYPE 'DOUBLE';
+ALTER TABLE my_table ALTER COLUMN col_a TYPE DOUBLE;
 ```
 
 {{< /tab >}}
@@ -441,7 +452,7 @@ The following SQL drops the watermark of table `my_table`.
 {{< tab "Flink" >}}
 
 ```sql
-ALTER TABLE my_table DROP WATERMARK
+ALTER TABLE my_table DROP WATERMARK;
 ```
 
 {{< /tab >}}

@@ -62,6 +62,23 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
 
     protected abstract MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel);
 
+    protected boolean rewriteLookupChangelog(int outputLevel, List<List<SortedRun>> sections) {
+        if (outputLevel == 0) {
+            return false;
+        }
+
+        for (List<SortedRun> runs : sections) {
+            for (SortedRun run : runs) {
+                for (DataFileMeta file : run.files()) {
+                    if (file.level() == 0) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     @Override
     public CompactResult rewrite(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {

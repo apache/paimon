@@ -52,7 +52,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                     List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 3L);
                     return splits.stream()
-                            .flatMap(s -> s.files().stream())
+                            .flatMap(s -> s.dataFiles().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
@@ -74,7 +74,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
 
                     List<DataFileMeta> fileMetaList =
                             splits.stream()
-                                    .flatMap(s -> s.files().stream())
+                                    .flatMap(s -> s.dataFiles().stream())
                                     .collect(Collectors.toList());
                     assertThat(
                                     fileMetaList.stream()
@@ -126,7 +126,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                             table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return splits.stream()
-                            .flatMap(s -> s.files().stream())
+                            .flatMap(s -> s.dataFiles().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
@@ -157,7 +157,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
 
                     List<DataFileMeta> fileMetaList =
                             splits.stream()
-                                    .flatMap(s -> s.files().stream())
+                                    .flatMap(s -> s.dataFiles().stream())
                                     .collect(Collectors.toList());
                     assertThat(
                                     fileMetaList.stream()
@@ -185,7 +185,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                             table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return splits.stream()
-                            .flatMap(s -> s.files().stream())
+                            .flatMap(s -> s.dataFiles().stream())
                             .collect(Collectors.toList());
                 },
                 (files, schemas) -> {
@@ -207,7 +207,7 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
 
                     List<DataFileMeta> fileMetaList =
                             splits.stream()
-                                    .flatMap(s -> s.files().stream())
+                                    .flatMap(s -> s.dataFiles().stream())
                                     .collect(Collectors.toList());
                     assertThat(
                                     fileMetaList.stream()

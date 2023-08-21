@@ -21,6 +21,7 @@ package org.apache.paimon.schema;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -131,14 +133,9 @@ public class Schema {
                 "Table column %s should include all primary key constraint %s",
                 fieldNames,
                 primaryKeys);
-        Set<String> pkSet = new HashSet<>(primaryKeys);
-        Preconditions.checkState(
-                pkSet.containsAll(partitionKeys),
-                "Primary key constraint %s should include all partition fields %s",
-                primaryKeys,
-                partitionKeys);
 
         // primary key should not nullable
+        Set<String> pkSet = new HashSet<>(primaryKeys);
         List<DataField> newFields = new ArrayList<>();
         for (DataField field : fields) {
             if (pkSet.contains(field.name()) && field.type().isNullable()) {
@@ -216,10 +213,10 @@ public class Schema {
 
         @Nullable private String comment;
 
-        private int highestFieldId = -1;
+        private final AtomicInteger highestFieldId = new AtomicInteger(-1);
 
         public int getHighestFieldId() {
-            return highestFieldId;
+            return highestFieldId.get();
         }
 
         /**
@@ -242,7 +239,10 @@ public class Schema {
         public Builder column(String columnName, DataType dataType, @Nullable String description) {
             Preconditions.checkNotNull(columnName, "Column name must not be null.");
             Preconditions.checkNotNull(dataType, "Data type must not be null.");
-            columns.add(new DataField(++highestFieldId, columnName, dataType, description));
+
+            int id = highestFieldId.incrementAndGet();
+            DataType reassignDataType = ReassignFieldId.reassign(dataType, highestFieldId);
+            columns.add(new DataField(id, columnName, reassignDataType, description));
             return this;
         }
 

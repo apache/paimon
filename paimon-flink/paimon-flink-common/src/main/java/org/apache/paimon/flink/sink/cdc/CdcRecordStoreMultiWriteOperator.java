@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
@@ -25,10 +26,14 @@ import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StateUtils;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.StoreSinkWriteState;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.ExecutorThreadFactory;
 
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
@@ -40,6 +45,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
@@ -54,19 +61,21 @@ public class CdcRecordStoreMultiWriteOperator
 
     private static final long serialVersionUID = 1L;
 
-    private final StoreSinkWrite.Provider storeSinkWriteProvider;
+    private final StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider;
     private final String initialCommitUser;
     private final Catalog.Loader catalogLoader;
 
-    protected Catalog catalog;
-    protected Map<Identifier, FileStoreTable> tables;
-    protected StoreSinkWriteState state;
-    protected Map<Identifier, StoreSinkWrite> writes;
-    protected String commitUser;
+    private MemoryPoolFactory memoryPoolFactory;
+    private Catalog catalog;
+    private Map<Identifier, FileStoreTable> tables;
+    private StoreSinkWriteState state;
+    private Map<Identifier, StoreSinkWrite> writes;
+    private String commitUser;
+    private ExecutorService compactExecutor;
 
     public CdcRecordStoreMultiWriteOperator(
             Catalog.Loader catalogLoader,
-            StoreSinkWrite.Provider storeSinkWriteProvider,
+            StoreSinkWrite.WithWriteBufferProvider storeSinkWriteProvider,
             String initialCommitUser,
             Options options) {
         super(options);
@@ -92,6 +101,10 @@ public class CdcRecordStoreMultiWriteOperator
         state = new StoreSinkWriteState(context, (tableName, partition, bucket) -> true);
         tables = new HashMap<>();
         writes = new HashMap<>();
+        compactExecutor =
+                Executors.newSingleThreadScheduledExecutor(
+                        new ExecutorThreadFactory(
+                                Thread.currentThread().getName() + "-CdcMultiWrite-Compaction"));
     }
 
     @Override
@@ -104,8 +117,19 @@ public class CdcRecordStoreMultiWriteOperator
 
         FileStoreTable table = getTable(tableId);
 
-        // TODO memoryPool should not be null
-        // TODO set executor service to write
+        // all table write should share one write buffer so that writers can preempt memory
+        // from those of other tables
+        if (memoryPoolFactory == null) {
+            memoryPoolFactory =
+                    new MemoryPoolFactory(
+                            memoryPool != null
+                                    ? memoryPool
+                                    // currently, the options of all tables are the same in CDC
+                                    : new HeapMemorySegmentPool(
+                                            table.coreOptions().writeBufferSize(),
+                                            table.coreOptions().pageSize()));
+        }
+
         StoreSinkWrite write =
                 writes.computeIfAbsent(
                         tableId,
@@ -115,7 +139,9 @@ public class CdcRecordStoreMultiWriteOperator
                                         commitUser,
                                         state,
                                         getContainingTask().getEnvironment().getIOManager(),
-                                        memoryPool));
+                                        memoryPoolFactory));
+
+        ((StoreSinkWriteImpl) write).withCompactExecutor(compactExecutor);
 
         Optional<GenericRow> optionalConverted =
                 toGenericRow(record.record(), table.schema().fields());
@@ -184,22 +210,40 @@ public class CdcRecordStoreMultiWriteOperator
         for (StoreSinkWrite write : writes.values()) {
             write.close();
         }
+        if (compactExecutor != null) {
+            compactExecutor.shutdownNow();
+        }
     }
 
     @Override
-    protected List<MultiTableCommittable> prepareCommit(boolean doCompaction, long checkpointId)
+    protected List<MultiTableCommittable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         List<MultiTableCommittable> committables = new LinkedList<>();
         for (Map.Entry<Identifier, StoreSinkWrite> entry : writes.entrySet()) {
             Identifier key = entry.getKey();
             StoreSinkWrite write = entry.getValue();
             committables.addAll(
-                    write.prepareCommit(doCompaction, checkpointId).stream()
+                    write.prepareCommit(waitCompaction, checkpointId).stream()
                             .map(
                                     committable ->
                                             MultiTableCommittable.fromCommittable(key, committable))
                             .collect(Collectors.toList()));
         }
         return committables;
+    }
+
+    @VisibleForTesting
+    public Map<Identifier, FileStoreTable> tables() {
+        return tables;
+    }
+
+    @VisibleForTesting
+    public Map<Identifier, StoreSinkWrite> writes() {
+        return writes;
+    }
+
+    @VisibleForTesting
+    public String commitUser() {
+        return commitUser;
     }
 }

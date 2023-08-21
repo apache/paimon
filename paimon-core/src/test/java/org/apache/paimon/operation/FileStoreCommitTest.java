@@ -69,7 +69,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /** Tests for {@link FileStoreCommitImpl}. */
 public class FileStoreCommitTest {
@@ -549,14 +548,12 @@ public class FileStoreCommitTest {
 
         // commit the first snapshot again, should throw exception due to conflicts
         for (int i = 0; i < 3; i++) {
-            RuntimeException e =
-                    assertThrows(
-                            RuntimeException.class,
+            assertThatThrownBy(
                             () ->
                                     store.newCommit()
-                                            .commit(committables.get(0), Collections.emptyMap()),
-                            "Expecting RuntimeException, but nothing is thrown.");
-            assertThat(e).hasMessageContaining("Give up committing.");
+                                            .commit(committables.get(0), Collections.emptyMap()))
+                    .isInstanceOf(RuntimeException.class)
+                    .hasMessageContaining("Give up committing.");
         }
     }
 

@@ -28,10 +28,16 @@ under the License.
 
 Paimon's write performance is closely related to checkpoint, so if you need greater write throughput:
 
-1. Increase the checkpoint interval, or just use batch mode.
+1. Flink Configuration (`'flink-conf.yaml'` or `SET` in SQL): Increase the checkpoint interval
+   (`'execution.checkpointing.interval'`), increase max concurrent checkpoints to 3
+   (`'execution.checkpointing.max-concurrent-checkpoints'`), or just use batch mode.
 2. Increase `write-buffer-size`.
 3. Enable `write-buffer-spillable`.
 4. Rescale bucket number if you are using Fixed-Bucket mode.
+
+Option `'changelog-producer' = 'lookup' or 'full-compaction'`, and option `'full-compaction.delta-commits'` have a
+large impact on write performance, if it is a snapshot / full synchronization phase you can unset these options and
+then enable them again in the incremental phase.
 
 ## Parallelism
 
@@ -60,11 +66,25 @@ It is recommended that the parallelism of sink should be less than or equal to t
 
 ## Compaction
 
+### Asynchronous Compaction
+
+Compaction is inherently asynchronous, but if you want it to be completely asynchronous and not blocking writing,
+expect a mode to have maximum write throughput, the compaction can be done slowly and not in a hurry.
+You can use the following strategies for your table:
+
+```shell
+num-sorted-run.stop-trigger = 2147483647
+sort-spill-threshold = 10
+```
+
+This configuration will generate more files during peak write periods and gradually merge into optimal read
+performance during low write periods.
+
 ### Number of Sorted Runs to Pause Writing
 
-When number of sorted runs is small, Paimon writers will perform compaction asynchronously in separated threads, so
-records can be continuously written into the table. However to avoid unbounded growth of sorted runs, writers will
-have to pause writing when the number of sorted runs hits the threshold. The following table property determines
+When the number of sorted runs is small, Paimon writers will perform compaction asynchronously in separated threads, so
+records can be continuously written into the table. However, to avoid unbounded growth of sorted runs, writers will
+pause writing when the number of sorted runs hits the threshold. The following table property determines
 the threshold.
 
 <table class="table table-bordered">
@@ -90,21 +110,29 @@ the threshold.
 
 Write stalls will become less frequent when `num-sorted-run.stop-trigger` becomes larger, thus improving writing
 performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the
-table. If you are concerned about the OOM of memory, please configure the following option `sort-spill-threshold`.
+table. If you are concerned about the OOM problem, please configure the following option.
 Its value depends on your memory size.
 
-### Prioritize write throughput
-
-If you expect a mode to have maximum write throughput, the compaction can be done slowly and not in a hurry.
-You can use the following strategies for your table:
-
-```shell
-num-sorted-run.stop-trigger = 2147483647
-sort-spill-threshold = 10
-```
-
-This configuration will generate more files during peak write periods and gradually merge into optimal read
-performance during low write periods.
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Option</th>
+      <th class="text-left" style="width: 5%">Required</th>
+      <th class="text-left" style="width: 5%">Default</th>
+      <th class="text-left" style="width: 10%">Type</th>
+      <th class="text-left" style="width: 60%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+      <td><h5>sort-spill-threshold</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">(none)</td>
+      <td>Integer</td>
+      <td>If the maximum number of sort readers exceeds this value, a spill will be attempted. This prevents too many readers from consuming too much memory and causing OOM.</td>
+    </tr>
+    </tbody>
+</table>
 
 ### Number of Sorted Runs to Trigger Compaction
 
@@ -135,6 +163,18 @@ One can easily see that too many sorted runs will result in poor query performan
 
 Compaction will become less frequent when `num-sorted-run.compaction-trigger` becomes larger, thus improving writing performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the table. This is a trade-off between writing and query performance.
 
+## Local Merging
+
+If your job suffers from primary key data skew
+(for example, you want to count the number of views for each pages in a website,
+and some particular pages are very popular among the users),
+you can set `'local-merge-buffer-size'` so that input records will be buffered and merged
+before they're shuffled by bucket and written into sink.
+This is particularly useful when the same primary key is updated frequently between snapshots.
+
+The buffer will be flushed when it is full. We recommend starting with `64 mb`
+when you are faced with data skew but don't know where to start adjusting buffer size.
+
 ## File Format
 
 If you want to achieve ultimate compaction performance, you can consider using row storage file format AVRO.
@@ -155,6 +195,29 @@ metadata.stats-mode = none
 The collection of statistical information for row storage is a bit expensive, so I suggest turning off statistical
 information as well.
 
+If you don't want to modify all files to Avro format, at least you can consider modifying the files in the previous
+layers to Avro format. You can use `'file.format.per.level' = '0:avro,1:avro'` to specify the files in the first two
+layers to be in Avro format.
+
+## File Compression
+
+By default, Paimon uses high-performance compression algorithms such as LZ4 and SNAPPY, but their compression rates
+are not so good. If you want to reduce the write/read performance, you can modify the compression algorithm:
+
+1. `'file.compression'`: Default file compression format. If you need a higher compression rate, I recommend using `'ZSTD'`.
+2. `'file.compression.per.level'`: Define different compression policies for different level. For example `'0:lz4,1:zstd'`.
+
+## Stability
+
+If there are too few buckets or resources, full-compaction may cause the checkpoint timeout, Flink's default
+checkpoint timeout is 10 minutes.
+
+If you expect stability even in this case, you can turn up the checkpoint timeout, for example:
+
+```shell
+execution.checkpointing.timeout = 60 min
+```
+
 ## Write Initialize
 
 In the initialization of write, the writer of the bucket needs to read all historical files. If there is a bottleneck
@@ -167,10 +230,13 @@ There are three main places in Paimon writer that takes up memory:
 
 * Writer's memory buffer, shared and preempted by all writers of a single task. This memory value can be adjusted by the `write-buffer-size` table property.
 * Memory consumed when merging several sorted runs for compaction. Can be adjusted by the `num-sorted-run.compaction-trigger` option to change the number of sorted runs to be merged.
-* If the row is very large, reading too many lines of data at once can consume a lot of memory when making a compaction. Reducing the `read.batch-size` option can alleviate the impact of this case.
-* The memory consumed by writing columnar (ORC, Parquet, etc.) file, which is not adjustable.
+* If the row is very large, reading too many lines of data at once will consume a lot of memory when making a compaction. Reducing the `read.batch-size` option can alleviate the impact of this case.
+* The memory consumed by writing columnar (ORC, Parquet, etc.) file. Decreasing the `orc.write.batch-size` option can reduce the consumption of memory for ORC format.
+* If files are automatically compaction in the write task, dictionaries for certain large columns can significantly consume memory during compaction.
+  * To disable dictionary encoding for all fields in Parquet format, set `'parquet.enable.dictionary'= 'false'`.
+  * To disable dictionary encoding for all fields in ORC format, set `orc.dictionary.key.threshold='0'`. Additionally,set `orc.column.encoding.direct='field1,field2'` to disable dictionary encoding for specific columns.
 
-If your Flink job does not rely on state, please avoid using managed memory, which you can control with the following Flink parameters:
+If your Flink job does not rely on state, please avoid using managed memory, which you can control with the following Flink parameter:
 ```shell
 taskmanager.memory.managed.size=1m
 ```

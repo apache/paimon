@@ -17,6 +17,7 @@
  */
 package org.apache.paimon.codegen
 
+import org.apache.paimon.annotation.VisibleForTesting
 import org.apache.paimon.codegen.GenerateUtils.{newName, newNames}
 import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.types.DataType
@@ -29,8 +30,6 @@ import scala.collection.mutable
  * different code sections in the final generated class.
  */
 class CodeGeneratorContext {
-
-  val classLoader: ClassLoader = Thread.currentThread().getContextClassLoader
 
   // holding a list of objects that could be used passed into generated class
   val references: mutable.ArrayBuffer[AnyRef] = new mutable.ArrayBuffer[AnyRef]()
@@ -148,15 +147,13 @@ class CodeGeneratorContext {
     fieldTerm
   }
 
-  private def addReusableObjectInternal(
-      obj: AnyRef,
-      fieldTerm: String,
-      fieldTypeTerm: String): Unit = {
+  @VisibleForTesting
+  def addReusableObjectInternal(obj: AnyRef, fieldTerm: String, fieldTypeTerm: String): Unit = {
     val idx = references.length
     // make a deep copy of the object
     val byteArray = InstantiationUtil.serializeObject(obj)
     val objCopy: AnyRef =
-      InstantiationUtil.deserializeObject(byteArray, classLoader)
+      InstantiationUtil.deserializeObject(byteArray, obj.getClass.getClassLoader)
     references += objCopy
 
     reusableMemberStatements.add(s"private transient $fieldTypeTerm $fieldTerm;")

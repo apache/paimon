@@ -29,7 +29,6 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.ql.lockmgr.DbTxnManager;
-import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -38,8 +37,8 @@ import java.util.Arrays;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_IN_TEST;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_SUPPORT_CONCURRENCY;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_TXN_MANAGER;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for using Paimon {@link HiveCatalog} together with Paimon Hive 3.1 connector. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -78,12 +77,12 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive").await();
-        Assert.assertEquals(
-                Arrays.asList(
-                        Row.of("default"),
-                        Row.of("test_db"),
-                        Row.of(TestHiveMetaStoreClient.MOCK_DATABASE)),
-                collect("SHOW DATABASES"));
+        assertThat(collect("SHOW DATABASES"))
+                .isEqualTo(
+                        Arrays.asList(
+                                Row.of("default"),
+                                Row.of("test_db"),
+                                Row.of(TestHiveMetaStoreClient.MOCK_DATABASE)));
     }
 
     @Test
@@ -109,12 +108,13 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                 .isInstanceOf(TableException.class)
                 .hasMessage(
                         "Could not execute CreateTable in path `my_hive_custom_client`.`default`.`hive_table`");
-        assertTrue(
-                new SchemaManager(
-                                LocalFileIO.create(),
-                                new org.apache.paimon.fs.Path(path, "default.db/hive_table"))
-                        .listAllIds()
-                        .isEmpty());
+        assertThat(
+                        new SchemaManager(
+                                        LocalFileIO.create(),
+                                        new org.apache.paimon.fs.Path(
+                                                path, "default.db/hive_table"))
+                                .listAllIds())
+                .isEmpty();
     }
 
     @Test
@@ -142,14 +142,14 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 + "ALTER TABLE my_alter_hive.default.alter_failed_table\n"
                                 + "  SET 'aa' = 'bb'");
 
-        assertTrue(
-                new SchemaManager(
-                                LocalFileIO.create(),
-                                new org.apache.paimon.fs.Path(
-                                        path, "default.db/alter_failed_table"))
-                        .latest()
-                        .get()
-                        .options()
-                        .isEmpty());
+        assertThat(
+                        new SchemaManager(
+                                        LocalFileIO.create(),
+                                        new org.apache.paimon.fs.Path(
+                                                path, "default.db/alter_failed_table"))
+                                .latest()
+                                .get()
+                                .options())
+                .isEmpty();
     }
 }

@@ -18,13 +18,13 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
 
-import org.apache.paimon.shade.guava30.com.google.common.cache.Cache;
-import org.apache.paimon.shade.guava30.com.google.common.cache.CacheBuilder;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
@@ -36,7 +36,7 @@ import java.io.IOException;
 import java.util.Arrays;
 
 /** Rocksdb state for key value. */
-public abstract class RocksDBState<CacheV> {
+public abstract class RocksDBState<K, V, CacheV> {
 
     protected final RocksDB db;
 
@@ -44,9 +44,9 @@ public abstract class RocksDBState<CacheV> {
 
     protected final ColumnFamilyHandle columnFamily;
 
-    protected final Serializer<InternalRow> keySerializer;
+    protected final Serializer<K> keySerializer;
 
-    protected final Serializer<InternalRow> valueSerializer;
+    protected final Serializer<V> valueSerializer;
 
     protected final DataOutputSerializer keyOutView;
 
@@ -59,8 +59,8 @@ public abstract class RocksDBState<CacheV> {
     public RocksDBState(
             RocksDB db,
             ColumnFamilyHandle columnFamily,
-            Serializer<InternalRow> keySerializer,
-            Serializer<InternalRow> valueSerializer,
+            Serializer<K> keySerializer,
+            Serializer<V> valueSerializer,
             long lruCacheSize) {
         this.db = db;
         this.columnFamily = columnFamily;
@@ -70,10 +70,14 @@ public abstract class RocksDBState<CacheV> {
         this.valueInputView = new DataInputDeserializer();
         this.valueOutputView = new DataOutputSerializer(32);
         this.writeOptions = new WriteOptions().setDisableWAL(true);
-        this.cache = CacheBuilder.newBuilder().maximumSize(lruCacheSize).build();
+        this.cache =
+                Caffeine.newBuilder()
+                        .maximumSize(lruCacheSize)
+                        .executor(MoreExecutors.directExecutor())
+                        .build();
     }
 
-    protected byte[] serializeKey(InternalRow key) throws IOException {
+    protected byte[] serializeKey(K key) throws IOException {
         keyOutView.clear();
         keySerializer.serialize(key, keyOutView);
         return keyOutView.getCopyOfBuffer();

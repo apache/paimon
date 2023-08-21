@@ -32,6 +32,11 @@ Just like all other tables, Paimon tables can be queried with `SELECT` statement
 
 Paimon's batch read returns all the data in a snapshot of the table. By default, batch reads return the latest snapshot.
 
+```sql
+-- Flink SQL
+SET 'execution.runtime-mode' = 'batch';
+```
+
 ### Batch Time Travel
 
 Paimon batch reads with time travel can specify a snapshot or a tag and read the corresponding data.
@@ -111,31 +116,108 @@ SELECT * FROM t;
 
 {{< /tab >}}
 
+{{< tab "Hive" >}}
+
+Hive requires adding the following configuration parameters to the hive-site.xml file:
+```xml
+<!--This parameter is used to configure the whitelist of permissible configuration items allowed for use in SQL standard authorization mode.-->
+<property>
+  <name>hive.security.authorization.sqlstd.confwhitelist</name>
+  <value>mapred.*|hive.*|mapreduce.*|spark.*</value>
+</property>
+
+<!--This parameter is an additional configuration for hive.security.authorization.sqlstd.confwhitelist. It allows you to add other permissible configuration items to the existing whitelist.-->
+<property>
+ <name>hive.security.authorization.sqlstd.confwhitelist.append</name>
+  <value>mapred.*|hive.*|mapreduce.*|spark.*</value>
+</property>
+```
+
+```sql
+SET paimon.scan.timestamp-millis=1679486589444;
+SELECT * FROM t;
+SET paimon.scan.timestamp-millis=null;
+    
+-- read tag 'my-tag'
+set paimon.scan.tag-name=my-tag;
+SELECT * FROM t;
+set paimon.scan.tag-name=null;
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ### Batch Incremental
 
 Read incremental changes between start snapshot (exclusive) and end snapshot.
 
-For example, '5,10' means changes between snapshot 5 and snapshot 10.
+For example:
+- '5,10' means changes between snapshot 5 and snapshot 10.
+- 'TAG1,TAG3' means changes between TAG1 and TAG3.
 
 {{< tabs "incremental-example" >}}
 
 {{< tab "Flink" >}}
 ```sql
+-- incremental between snapshot ids
 SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
+
+-- incremental between snapshot time mills
+SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp' = '1692169000000,1692169900000') */;
 ```
 {{< /tab >}}
 
-{{< tab "Spark" >}}
+{{< tab "Spark3" >}}
 
-```java
+Requires Spark 3.2+.
+
+Paimon supports that use Spark SQL to do the incremental query that implemented by Spark Table Valued Function.
+To enable this needs these configs below:
+
+```text
+--conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
+--conf spark.sql.extensions=org.apache.paimon.spark.PaimonSparkSessionExtension
+```
+
+you can use `paimon_incremental_query` in query to extract the incremental data:
+
+```sql
+-- read the incremental data between snapshot id 12 and snapshot id 20.
+SELECT * FROM paimon_incremental_query('tableName', 12, 20);
+```
+
+{{< /tab >}}
+
+{{< tab "Spark-DF" >}}
+
+```scala
+// incremental between snapshot ids
 spark.read()
   .format("paimon")
   .option("incremental-between", "12,20")
   .load("path/to/table")
+
+// incremental between snapshot time mills
+spark.read()
+  .format("paimon")
+  .option("incremental-between-timestamp", "1692169000000,1692169900000")
+  .load("path/to/table")
 ```
 
+{{< /tab >}}
+
+{{< tab "Hive" >}}
+```sql
+-- incremental between snapshot ids
+SET paimon.incremental-between='12,20';
+SELECT * FROM t;
+SET paimon.incremental-between=null;
+
+-- incremental between snapshot time mills
+SET paimon.incremental-between-timestamp='1692169000000,1692169900000';
+SELECT * FROM t;
+SET paimon.incremental-between-timestamp=null;
+```
 {{< /tab >}}
 
 {{< /tabs >}}
@@ -159,13 +241,18 @@ and continue to read the latest changes.
 Paimon by default ensures that your startup is properly processed with the full amount
 included.
 
+```sql
+-- Flink SQL
+SET 'execution.runtime-mode' = 'streaming';
+```
+
 You can also do streaming read without the snapshot data, you can use `latest` scan mode:
 
 {{< tabs "latest streaming read" >}}
 {{< tab "Flink" >}}
 ```sql
 -- Continuously reads latest changes without producing a snapshot at the beginning.
-SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest') */
+SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest') */;
 ```
 {{< /tab >}}
 {{< /tabs >}}
@@ -175,7 +262,7 @@ SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest') */
 If you only want to process data for today and beyond, you can do so with partitioned filters:
 
 ```sql
-SELECT * FROM t WHERE dt > '2023-06-26'
+SELECT * FROM t WHERE dt > '2023-06-26';
 ```
 
 If it's not a partitioned table, or you can't filter by partition, you can use Time travel's stream read.
@@ -220,6 +307,39 @@ NOTE: The consumer will prevent expiration of the snapshot. You can specify 'con
 lifetime of consumers.
 {{< /hint >}}
 
+You can reset a consumer with a given consumer ID and next snapshot ID.
+
+{{< hint info >}}
+First, you need to stop the streaming task using this consumer ID, and then execute the reset consumer action job.
+{{< /hint >}}
+
+{{< tabs "reset-consumer" >}}
+
+{{< tab "Flink" >}}
+
+Run the following command:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    reset-consumer \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table <table-name> \
+    --consumer-id <consumer-id> \
+    --next-snapshot <next-snapshot-id> \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+### Read Overwrite
+
+Streaming reading will ignore the commits generated by `INSERT OVERWRITE` by default. If you want to read the
+commits of `OVERWRITE`, you can configure `streaming-read-overwrite`.
+
 ## Query Optimization
 
 {{< label Batch >}}{{< label Streaming >}}
@@ -250,7 +370,7 @@ CREATE TABLE orders (
     order_id BIGINT,
     .....,
     PRIMARY KEY (catalog_id, order_id) NOT ENFORCED -- composite primary key
-)
+);
 ```
 
 The query obtains a good acceleration by specifying a range filter for

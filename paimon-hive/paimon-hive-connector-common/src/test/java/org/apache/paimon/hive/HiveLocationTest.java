@@ -43,7 +43,6 @@ import com.klarna.hiverunner.annotations.HiveSQL;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -62,7 +61,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for specify location. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -146,28 +145,28 @@ public class HiveLocationTest {
         List<Path> paths = new ArrayList<>();
         for (String db : dbs) {
             catalog.createDatabase(db, true);
-            Assert.assertNotNull(hmsClient.getDatabase(db));
+            assertThat(hmsClient.getDatabase(db)).isNotNull();
 
             Path actual = catalog.databasePath(db);
             Path expected = new Path(this.objectStorepath + "/" + db + ".db");
-            Assert.assertTrue(fileIO.exists(expected));
-            Assert.assertEquals(expected, actual);
+            assertThat(fileIO.exists(expected)).isTrue();
+            assertThat(actual).isEqualTo(expected);
 
             paths.add(expected);
         }
 
         HashSet<String> dbsExpected = Sets.newHashSet("db1", "db2", "db3", "db4", "db5", "default");
-        Assert.assertEquals(Sets.newHashSet(catalog.listDatabases()), dbsExpected);
+        assertThat(Sets.newHashSet(catalog.listDatabases())).isEqualTo(dbsExpected);
 
         for (String db : dbs) {
             catalog.dropDatabase(db, false, true);
         }
 
         for (Path p : paths) {
-            Assert.assertFalse(fileIO.exists(p));
+            assertThat(fileIO.exists(p)).isFalse();
         }
 
-        Assert.assertEquals(Sets.newHashSet(catalog.listDatabases()), Sets.newHashSet("default"));
+        assertThat(Sets.newHashSet(catalog.listDatabases())).isEqualTo(Sets.newHashSet("default"));
     }
 
     @Test
@@ -198,8 +197,8 @@ public class HiveLocationTest {
         String location =
                 hmsClientTablea.getParameters().get(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY);
         String expected = this.objectStorepath + "/" + db + ".db" + "/" + table;
-        Assert.assertTrue(fileIO.exists(new Path(expected)));
-        Assert.assertEquals(expected, location);
+        assertThat(fileIO.exists(new Path(expected))).isTrue();
+        assertThat(location).isEqualTo(expected);
     }
 
     @Test
@@ -217,13 +216,12 @@ public class HiveLocationTest {
 
         RowType rowType = RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"aaa"});
         // create table with location field
-        IllegalArgumentException exception =
-                assertThrows(
-                        IllegalArgumentException.class,
+        assertThatThrownBy(
                         () ->
                                 createTableWithStorageLocation(
-                                        path, rowType, "test_extern_table", conf, true));
-        assertThat(exception).hasMessageContaining("No FileSystem for scheme: s3");
+                                        path, rowType, "test_extern_table", conf, true))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("No FileSystem for scheme: s3");
 
         // create table with location in table properties
         Set<String> tableForTest = Sets.newHashSet("test_extern_table1", "hive_inner_table1");
@@ -234,7 +232,7 @@ public class HiveLocationTest {
         }
 
         Set<String> tableInHive = Sets.newHashSet(hiveShell.executeQuery("show tables"));
-        Assert.assertEquals(tableForTest, tableInHive);
+        assertThat(tableInHive).isEqualTo(tableForTest);
     }
 
     @Test
@@ -266,7 +264,7 @@ public class HiveLocationTest {
         }
         String associationSql = "select a,b from table1 union all select a,b from table2";
         List<String> result = hiveShell.executeQuery(associationSql);
-        Assert.assertEquals(result, Arrays.asList("3\tPaimon", "3\tPaimon"));
+        assertThat(Arrays.asList("3\tPaimon", "3\tPaimon")).isEqualTo(result);
     }
 
     private String getCreateTableSqlStr(
@@ -306,10 +304,10 @@ public class HiveLocationTest {
         FileIO fIO = getFileIO(catalogContext, new Path(location));
         SchemaManager schemaManager = new SchemaManager(fIO, new Path(location));
         Optional<TableSchema> tableSchema = schemaManager.latest();
-        Assert.assertTrue("table should be created at object store", tableSchema.isPresent());
+        assertThat(tableSchema).isPresent();
 
         List<String> result = hiveShell.executeQuery(selectStr);
-        Assert.assertEquals(result, Lists.newArrayList("1"));
+        assertThat(result).isEqualTo(Lists.newArrayList("1"));
     }
 
     private void createTableWithPropertiesLocation(

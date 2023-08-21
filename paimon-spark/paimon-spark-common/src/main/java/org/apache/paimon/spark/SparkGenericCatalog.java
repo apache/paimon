@@ -22,6 +22,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.utils.Preconditions;
 
@@ -44,6 +45,8 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.internal.SQLConf;
+import org.apache.spark.sql.internal.StaticSQLConf;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
@@ -51,8 +54,10 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
+import static org.apache.paimon.options.CatalogOptions.URI;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -129,7 +134,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         try {
             return paimonCatalog.loadTable(ident);
         } catch (NoSuchTableException e) {
-            return getSessionCatalog().loadTable(ident);
+            return throwsOldIfExceptionHappens(() -> getSessionCatalog().loadTable(ident), e);
         }
     }
 
@@ -138,7 +143,8 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         try {
             return paimonCatalog.loadTable(ident, version);
         } catch (NoSuchTableException e) {
-            return getSessionCatalog().loadTable(ident, version);
+            return throwsOldIfExceptionHappens(
+                    () -> getSessionCatalog().loadTable(ident, version), e);
         }
     }
 
@@ -147,7 +153,8 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         try {
             return paimonCatalog.loadTable(ident, timestamp);
         } catch (NoSuchTableException e) {
-            return getSessionCatalog().loadTable(ident, timestamp);
+            return throwsOldIfExceptionHappens(
+                    () -> getSessionCatalog().loadTable(ident, timestamp), e);
         }
     }
 
@@ -229,13 +236,28 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         this.catalogName = name;
         this.paimonCatalog = new SparkCatalog();
 
+        this.paimonCatalog.initialize(
+                name, autoFillConfigurations(options, SparkSession.active().sessionState().conf()));
+    }
+
+    private CaseInsensitiveStringMap autoFillConfigurations(
+            CaseInsensitiveStringMap options, SQLConf conf) {
+        Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
         if (!options.containsKey(WAREHOUSE.key())) {
-            Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
-            String warehouse = SparkSession.active().sessionState().conf().warehousePath();
+            String warehouse = conf.warehousePath();
             newOptions.put(WAREHOUSE.key(), warehouse);
-            options = new CaseInsensitiveStringMap(newOptions);
         }
-        this.paimonCatalog.initialize(name, options);
+        String metastore = conf.getConf(StaticSQLConf.CATALOG_IMPLEMENTATION());
+        if (HiveCatalogOptions.IDENTIFIER.equals(metastore)) {
+            newOptions.put(METASTORE.key(), metastore);
+            String uri;
+            if ((uri = conf.getConfString("spark.sql.catalog.spark_catalog.uri", null)) != null
+                    && !options.containsKey(URI.key())) {
+                newOptions.put(URI.key(), uri);
+            }
+        }
+
+        return new CaseInsensitiveStringMap(newOptions);
     }
 
     @Override
@@ -282,5 +304,14 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
 
     private static boolean isSystemNamespace(String[] namespace) {
         return namespace.length == 1 && namespace[0].equalsIgnoreCase("system");
+    }
+
+    private Table throwsOldIfExceptionHappens(Callable<Table> call, NoSuchTableException e)
+            throws NoSuchTableException {
+        try {
+            return call.call();
+        } catch (Exception exception) {
+            throw e;
+        }
     }
 }

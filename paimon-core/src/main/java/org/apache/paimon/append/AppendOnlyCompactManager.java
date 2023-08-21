@@ -26,6 +26,9 @@ import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.Preconditions;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -39,6 +42,8 @@ import java.util.concurrent.ExecutorService;
 
 /** Compact manager for {@link AppendOnlyFileStore}. */
 public class AppendOnlyCompactManager extends CompactFutureManager {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyCompactManager.class);
 
     private static final int FULL_COMPACT_MIN_FILE = 3;
 
@@ -57,10 +62,9 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             int minFileNum,
             int maxFileNum,
             long targetFileSize,
-            CompactRewriter rewriter,
-            boolean assertDisorder) {
+            CompactRewriter rewriter) {
         this.executor = executor;
-        this.toCompact = new TreeSet<>(fileComparator(assertDisorder));
+        this.toCompact = new TreeSet<>(fileComparator());
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
@@ -280,19 +284,17 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
      * may be put after the new files, and this order will be disrupted. We need to ensure this
      * order, so we force the order by sequence.
      */
-    public static Comparator<DataFileMeta> fileComparator(boolean assertDisorder) {
+    public static Comparator<DataFileMeta> fileComparator() {
         return (o1, o2) -> {
             if (o1 == o2) {
                 return 0;
             }
 
-            if (assertDisorder && isOverlap(o1, o2)) {
-                throw new RuntimeException(
+            if (isOverlap(o1, o2)) {
+                LOG.warn(
                         String.format(
-                                "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s).\n "
-                                        + "If you are recovering from an older version of paimon (<= 0.3), "
-                                        + "you can configure 'append-only.assert-disorder'='false' to avoid exceptions. \n "
-                                        + "If it was not restored from an older version, there is a bug!",
+                                "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s),"
+                                        + " check if you have multiple write jobs.",
                                 o1.minSequenceNumber(),
                                 o1.maxSequenceNumber(),
                                 o2.minSequenceNumber(),

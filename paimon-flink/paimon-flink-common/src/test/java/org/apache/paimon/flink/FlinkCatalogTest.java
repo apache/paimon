@@ -21,6 +21,11 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.log.LogSinkProvider;
+import org.apache.paimon.flink.log.LogSourceProvider;
+import org.apache.paimon.flink.log.LogStoreRegister;
+import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
@@ -43,6 +48,10 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
+import org.apache.flink.table.connector.sink.DynamicTableSink;
+import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.factories.DynamicTableFactory;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -61,15 +70,14 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Test for {@link FlinkCatalog}. */
 public class FlinkCatalogTest {
+    private static final String TESTING_LOG_STORE = "testing";
 
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
     private final ObjectPath path3 = new ObjectPath("db1", "t2");
@@ -84,6 +92,7 @@ public class FlinkCatalogTest {
         String path = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
         Options conf = new Options();
         conf.setString("warehouse", path);
+        conf.set(LOG_SYSTEM_AUTO_REGISTER, true);
         catalog =
                 FlinkCatalogFactory.createCatalog(
                         "test-catalog",
@@ -96,7 +105,16 @@ public class FlinkCatalogTest {
                 Arrays.asList(
                         Column.physical("first", DataTypes.STRING()),
                         Column.physical("second", DataTypes.INT()),
-                        Column.physical("third", DataTypes.STRING())),
+                        Column.physical("third", DataTypes.STRING()),
+                        Column.physical(
+                                "four",
+                                DataTypes.ROW(
+                                        DataTypes.FIELD("f1", DataTypes.STRING()),
+                                        DataTypes.FIELD("f2", DataTypes.INT()),
+                                        DataTypes.FIELD(
+                                                "f3",
+                                                DataTypes.MAP(
+                                                        DataTypes.STRING(), DataTypes.INT()))))),
                 Collections.emptyList(),
                 null);
     }
@@ -160,7 +178,7 @@ public class FlinkCatalogTest {
         checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
         CatalogTable newTable = this.createAnotherTable(options);
         catalog.alterTable(this.path1, newTable, false);
-        assertNotEquals(table, catalog.getTable(this.path1));
+        assertThat(catalog.getTable(this.path1)).isNotEqualTo(table);
         checkEquals(path1, newTable, (CatalogTable) catalog.getTable(this.path1));
         catalog.dropTable(this.path1, false);
 
@@ -173,7 +191,7 @@ public class FlinkCatalogTest {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
         catalog.createTable(this.path3, this.createTable(options), false);
-        assertEquals(2L, catalog.listTables("db1").size());
+        assertThat(catalog.listTables("db1").size()).isEqualTo(2L);
 
         // Not support views
     }
@@ -231,10 +249,10 @@ public class FlinkCatalogTest {
         catalog.createTable(this.path1, table, false);
         CatalogBaseTable tableCreated = catalog.getTable(this.path1);
         checkEquals(path1, table, (CatalogTable) tableCreated);
-        assertEquals("test comment", tableCreated.getDescription().get());
+        assertThat(tableCreated.getDescription().get()).isEqualTo("test comment");
         List<String> tables = catalog.listTables("db1");
-        assertEquals(1L, tables.size());
-        assertEquals(this.path1.getObjectName(), tables.get(0));
+        assertThat(tables.size()).isEqualTo(1L);
+        assertThat(tables.get(0)).isEqualTo(this.path1.getObjectName());
         catalog.dropTable(this.path1, false);
     }
 
@@ -258,8 +276,8 @@ public class FlinkCatalogTest {
         catalog.createTable(this.path1, table, false);
         checkEquals(path1, table, (CatalogTable) catalog.getTable(this.path1));
         List<String> tables = catalog.listTables("db1");
-        assertEquals(1L, tables.size());
-        assertEquals(this.path1.getObjectName(), tables.get(0));
+        assertThat(tables.size()).isEqualTo(1L);
+        assertThat(tables.get(0)).isEqualTo(this.path1.getObjectName());
     }
 
     @ParameterizedTest
@@ -279,26 +297,30 @@ public class FlinkCatalogTest {
     @MethodSource("batchOptionProvider")
     public void testTableExists(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
-        assertFalse(catalog.tableExists(this.path1));
+        assertThat(catalog.tableExists(this.path1)).isFalse();
         catalog.createTable(this.path1, this.createTable(options), false);
-        assertTrue(catalog.tableExists(this.path1));
+        assertThat(catalog.tableExists(this.path1)).isTrue();
 
         // system tables
-        assertTrue(
-                catalog.tableExists(
-                        new ObjectPath(
-                                path1.getDatabaseName(), path1.getObjectName() + "$snapshots")));
-        assertFalse(
-                catalog.tableExists(
-                        new ObjectPath(
-                                path1.getDatabaseName(), path1.getObjectName() + "$unknown")));
+        assertThat(
+                        catalog.tableExists(
+                                new ObjectPath(
+                                        path1.getDatabaseName(),
+                                        path1.getObjectName() + "$snapshots")))
+                .isTrue();
+        assertThat(
+                        catalog.tableExists(
+                                new ObjectPath(
+                                        path1.getDatabaseName(),
+                                        path1.getObjectName() + "$unknown")))
+                .isFalse();
     }
 
     @ParameterizedTest
     @MethodSource("batchOptionProvider")
     public void testAlterTable_TableNotExist_ignored(Map<String, String> options) throws Exception {
         catalog.alterTable(this.nonExistObjectPath, this.createTable(options), true);
-        assertFalse(catalog.tableExists(this.nonExistObjectPath));
+        assertThat(catalog.tableExists(this.nonExistObjectPath)).isFalse();
     }
 
     @Test
@@ -322,9 +344,9 @@ public class FlinkCatalogTest {
     public void testDropTable_nonPartitionedTable(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
-        assertTrue(catalog.tableExists(this.path1));
+        assertThat(catalog.tableExists(this.path1)).isTrue();
         catalog.dropTable(this.path1, false);
-        assertFalse(catalog.tableExists(this.path1));
+        assertThat(catalog.tableExists(this.path1)).isFalse();
     }
 
     @Test
@@ -339,7 +361,7 @@ public class FlinkCatalogTest {
     public void testDbExists(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
-        assertTrue(catalog.databaseExists("db1"));
+        assertThat(catalog.databaseExists("db1")).isTrue();
     }
 
     @Test
@@ -442,7 +464,7 @@ public class FlinkCatalogTest {
                         .field("comp", DataTypes.INT(), "test + 1")
                         .primaryKey("pk")
                         .build();
-        CatalogTable catalogTable = new CatalogTableImpl(schema, Collections.emptyMap(), "");
+        CatalogTable catalogTable = new CatalogTableImpl(schema, new HashMap<>(), "");
 
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(path1, catalogTable, false);
@@ -457,6 +479,34 @@ public class FlinkCatalogTest {
         Map<String, String> expected = got.getOptions();
         expected.remove("path");
         assertThat(catalogTable.getOptions()).isEqualTo(expected);
+    }
+
+    @Test
+    public void testCreateTableWithLogSystemRegister() throws Exception {
+        catalog.createDatabase(path1.getDatabaseName(), null, false);
+
+        TableSchema schema =
+                TableSchema.builder()
+                        .field("pk", DataTypes.INT().notNull())
+                        .field("test", DataTypes.INT())
+                        .field("comp", DataTypes.INT(), "test + 1")
+                        .primaryKey("pk")
+                        .build();
+        Map<String, String> options = new HashMap<>();
+        CatalogTable catalogTable1 = new CatalogTableImpl(schema, options, "");
+        catalog.createTable(path1, catalogTable1, false);
+        CatalogBaseTable storedTable1 = catalog.getTable(path1);
+        assertThat(storedTable1.getOptions().containsKey("testing.log.store.topic")).isFalse();
+
+        options.put(LOG_SYSTEM.key(), TESTING_LOG_STORE);
+        CatalogTable catalogTable2 = new CatalogTableImpl(schema, options, "");
+        catalog.createTable(path3, catalogTable2, false);
+
+        CatalogBaseTable storedTable2 = catalog.getTable(path3);
+        assertThat(storedTable2.getOptions().get("testing.log.store.topic"))
+                .isEqualTo(String.format("%s-topic", path3.getObjectName()));
+        assertThatThrownBy(() -> catalog.dropTable(path3, true))
+                .hasMessage("Check unregister log store topic here.");
     }
 
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {
@@ -507,5 +557,53 @@ public class FlinkCatalogTest {
             allOptions.add(options);
         }
         return allOptions.stream();
+    }
+
+    /** Testing log store register factory to create {@link TestingLogStoreRegister}. */
+    public static class TestingLogSoreRegisterFactory implements LogStoreTableFactory {
+
+        @Override
+        public String identifier() {
+            return TESTING_LOG_STORE;
+        }
+
+        @Override
+        public LogSourceProvider createSourceProvider(
+                DynamicTableFactory.Context context,
+                DynamicTableSource.Context sourceContext,
+                @Nullable int[][] projectFields) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public LogSinkProvider createSinkProvider(
+                DynamicTableFactory.Context context, DynamicTableSink.Context sinkContext) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public LogStoreRegister createRegister(RegisterContext context) {
+            return new TestingLogStoreRegister(context.getIdentifier());
+        }
+    }
+
+    /** Testing log store register. */
+    private static class TestingLogStoreRegister implements LogStoreRegister {
+        private final Identifier table;
+
+        private TestingLogStoreRegister(Identifier table) {
+            this.table = table;
+        }
+
+        @Override
+        public Map<String, String> registerTopic() {
+            return Collections.singletonMap(
+                    "testing.log.store.topic", String.format("%s-topic", table.getObjectName()));
+        }
+
+        @Override
+        public void unRegisterTopic() {
+            throw new UnsupportedOperationException("Check unregister log store topic here.");
+        }
     }
 }

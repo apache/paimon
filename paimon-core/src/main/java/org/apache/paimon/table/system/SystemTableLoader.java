@@ -25,11 +25,15 @@ import org.apache.paimon.table.Table;
 
 import javax.annotation.Nullable;
 
+import java.util.Map;
+
+import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
 import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
 import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
+import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
@@ -44,11 +48,13 @@ public class SystemTableLoader {
             case MANIFESTS:
                 return new ManifestsTable(fileIO, location, dataTable);
             case SNAPSHOTS:
-                return new SnapshotsTable(fileIO, location);
+                return new SnapshotsTable(fileIO, location, dataTable);
             case OPTIONS:
                 return new OptionsTable(fileIO, location);
             case SCHEMAS:
                 return new SchemasTable(fileIO, location);
+            case PARTITIONS:
+                return new PartitionsTable(dataTable);
             case AUDIT_LOG:
                 return new AuditLogTable(dataTable);
             case FILES:
@@ -57,6 +63,17 @@ public class SystemTableLoader {
                 return new TagsTable(fileIO, location);
             case CONSUMERS:
                 return new ConsumersTable(fileIO, location);
+            default:
+                return null;
+        }
+    }
+
+    @Nullable
+    public static Table loadGlobal(
+            String tableName, FileIO fileIO, Map<String, Map<String, Path>> allTablePaths) {
+        switch (tableName.toLowerCase()) {
+            case ALL_TABLE_OPTIONS:
+                return new AllTableOptionsTable(fileIO, allTablePaths);
             default:
                 return null;
         }

@@ -19,37 +19,55 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.lineage.LineageMeta;
+import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
 
+import javax.annotation.Nullable;
+
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+
+import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
 
     public static final String DB_SUFFIX = ".db";
-
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    protected static final List<String> GLOBAL_TABLES =
+            Arrays.asList(AllTableOptionsTable.ALL_TABLE_OPTIONS);
 
     protected final FileIO fileIO;
-
     protected final Map<String, String> tableDefaultOptions;
+
+    @Nullable protected final LineageMeta lineageMeta;
 
     protected AbstractCatalog(FileIO fileIO) {
         this.fileIO = fileIO;
+        this.lineageMeta = null;
         this.tableDefaultOptions = new HashMap<>();
     }
 
     protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
         this.fileIO = fileIO;
+        this.lineageMeta =
+                findAndCreateLineageMeta(
+                        Options.fromMap(options), AbstractCatalog.class.getClassLoader());
         this.tableDefaultOptions = new HashMap<>();
 
         options.keySet().stream()
@@ -61,9 +79,27 @@ public abstract class AbstractCatalog implements Catalog {
                                         options.get(key)));
     }
 
+    @Nullable
+    private LineageMeta findAndCreateLineageMeta(Options options, ClassLoader classLoader) {
+        return options.getOptional(LINEAGE_META)
+                .map(
+                        meta ->
+                                FactoryUtil.discoverFactory(
+                                                classLoader, LineageMetaFactory.class, meta)
+                                        .create(() -> options))
+                .orElse(null);
+    }
+
     @Override
     public Table getTable(Identifier identifier) throws TableNotExistException {
-        if (isSystemTable(identifier)) {
+        if (isSystemDatabase(identifier.getDatabaseName())) {
+            String tableName = identifier.getObjectName();
+            Table table = SystemTableLoader.loadGlobal(tableName, fileIO, allTablePaths());
+            if (table == null) {
+                throw new TableNotExistException(identifier);
+            }
+            return table;
+        } else if (isSpecifiedSystemTable(identifier)) {
             String[] splits = tableAndSystemName(identifier);
             String tableName = splits[0];
             String type = splits[1];
@@ -85,12 +121,33 @@ public abstract class AbstractCatalog implements Catalog {
                 fileIO,
                 getDataTableLocation(identifier),
                 tableSchema,
-                Lock.factory(lockFactory().orElse(null), identifier));
+                new CatalogEnvironment(
+                        Lock.factory(lockFactory().orElse(null), identifier),
+                        metastoreClientFactory(identifier).orElse(null),
+                        lineageMeta));
     }
 
     @VisibleForTesting
     public Path databasePath(String database) {
         return databasePath(warehouse(), database);
+    }
+
+    Map<String, Map<String, Path>> allTablePaths() {
+        try {
+            Map<String, Map<String, Path>> allPaths = new HashMap<>();
+            for (String database : listDatabases()) {
+                Map<String, Path> tableMap =
+                        allPaths.computeIfAbsent(database, d -> new HashMap<>());
+                for (String table : listTables(database)) {
+                    tableMap.put(
+                            table,
+                            dataTableLocation(warehouse(), Identifier.create(database, table)));
+                }
+            }
+            return allPaths;
+        } catch (DatabaseNotExistException e) {
+            throw new RuntimeException("Database is deleted while listing", e);
+        }
     }
 
     protected abstract String warehouse();
@@ -103,12 +160,12 @@ public abstract class AbstractCatalog implements Catalog {
         return dataTableLocation(warehouse(), identifier);
     }
 
-    private boolean isSystemTable(Identifier identifier) {
+    private static boolean isSpecifiedSystemTable(Identifier identifier) {
         return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER);
     }
 
     protected void checkNotSystemTable(Identifier identifier, String method) {
-        if (isSystemTable(identifier)) {
+        if (isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot '%s' for system table '%s', please use data table.",
@@ -116,7 +173,7 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    protected void copyTableDefaultOptions(Map<String, String> options) {
+    public void copyTableDefaultOptions(Map<String, String> options) {
         tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
@@ -131,7 +188,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     public static Path dataTableLocation(String warehouse, Identifier identifier) {
-        if (identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER)) {
+        if (isSpecifiedSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Table name[%s] cannot contain '%s' separator",
@@ -143,5 +200,9 @@ public abstract class AbstractCatalog implements Catalog {
 
     public static Path databasePath(String warehouse, String database) {
         return new Path(warehouse, database + DB_SUFFIX);
+    }
+
+    protected boolean isSystemDatabase(String database) {
+        return SYSTEM_DATABASE_NAME.equals(database);
     }
 }

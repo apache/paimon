@@ -44,8 +44,20 @@ Options for Hive catalog.
 
 {{< generated/hive_catalog_configuration >}}
 
+### FlinkCatalogOptions
+
+Flink catalog options for paimon.
+
+{{< generated/flink_catalog_configuration >}}
+
 ### FlinkConnectorOptions
 
 Flink connector options for paimon.
 
 {{< generated/flink_connector_configuration >}}
+
+### SparkConnectorOptions
+
+Spark connector options for paimon.
+
+{{< generated/spark_connector_configuration >}}

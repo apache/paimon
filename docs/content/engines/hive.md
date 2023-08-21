@@ -101,6 +101,7 @@ CREATE CATALOG my_hive WITH (
   'type' = 'paimon',
   'metastore' = 'hive',
   'uri' = 'thrift://<hive-metastore-host-name>:<port>',
+  -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
   'warehouse' = 'hdfs:///path/to/table/store/warehouse'
 );
 
@@ -172,6 +173,19 @@ OK
 2	Store
 3	Paimon
 */
+
+-- time travel
+
+SET paimon.scan.snapshot-id=1;
+SELECT a, b FROM test_table ORDER BY a;
+/*
+OK
+1	Table
+2	Store
+3	Paimon
+*/
+SET paimon.scan.snapshot-id=null;
+
 ```
 
 ## Hive SQL: create new Paimon Tables
@@ -188,7 +202,7 @@ CREATE TABLE hive_test_table(
     a INT COMMENT 'The a field',
     b STRING COMMENT 'The b field'
 )
-STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'
+STORED BY 'org.apache.paimon.hive.PaimonStorageHandler';
 ```
 
 ## Hive SQL: access Paimon Tables by External Table

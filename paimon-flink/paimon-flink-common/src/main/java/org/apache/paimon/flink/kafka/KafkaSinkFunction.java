@@ -71,7 +71,7 @@ public class KafkaSinkFunction extends FlinkKafkaProducer<SinkRecord> implements
         Callback baseCallback = requireNonNull(callback);
         callback =
                 (metadata, exception) -> {
-                    if (writeCallback != null) {
+                    if (writeCallback != null && metadata != null && metadata.hasOffset()) {
                         writeCallback.onCompletion(metadata.partition(), metadata.offset());
                     }
                     baseCallback.onCompletion(metadata, exception);

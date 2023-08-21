@@ -29,8 +29,10 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
 
@@ -67,8 +69,15 @@ public interface FileStore<T> extends Serializable {
 
     SnapshotDeletion newSnapshotDeletion();
 
+    TagManager newTagManager();
+
     TagDeletion newTagDeletion();
 
     @Nullable
     PartitionExpire newPartitionExpire(String commitUser);
+
+    @Nullable
+    TagAutoCreation newTagCreationManager();
+
+    boolean mergeSchema(RowType rowType, boolean allowExplicitCast);
 }

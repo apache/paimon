@@ -24,6 +24,7 @@ import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.utils.IOUtils;
 
 import javax.annotation.Nullable;
@@ -50,6 +51,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private final List<CommitCallback> commitCallbacks;
     @Nullable private final FileStoreExpire expire;
     @Nullable private final PartitionExpire partitionExpire;
+    @Nullable private final TagAutoCreation tagAutoCreation;
     private final Lock lock;
 
     @Nullable private final Duration consumerExpireTime;
@@ -64,6 +66,7 @@ public class TableCommitImpl implements InnerTableCommit {
             List<CommitCallback> commitCallbacks,
             @Nullable FileStoreExpire expire,
             @Nullable PartitionExpire partitionExpire,
+            @Nullable TagAutoCreation tagAutoCreation,
             Lock lock,
             @Nullable Duration consumerExpireTime,
             ConsumerManager consumerManager) {
@@ -79,6 +82,7 @@ public class TableCommitImpl implements InnerTableCommit {
         this.commitCallbacks = commitCallbacks;
         this.expire = expire;
         this.partitionExpire = partitionExpire;
+        this.tagAutoCreation = tagAutoCreation;
         this.lock = lock;
 
         this.consumerExpireTime = consumerExpireTime;
@@ -203,6 +207,10 @@ public class TableCommitImpl implements InnerTableCommit {
 
         if (partitionExpire != null) {
             partitionExpire.expire(partitionExpireIdentifier);
+        }
+
+        if (tagAutoCreation != null) {
+            tagAutoCreation.run();
         }
     }
 

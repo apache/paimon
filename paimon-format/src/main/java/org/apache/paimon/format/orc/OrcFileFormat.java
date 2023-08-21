@@ -73,6 +73,7 @@ public class OrcFileFormat extends FileFormat {
         this.readerConf = new org.apache.hadoop.conf.Configuration();
         this.orcProperties.forEach((k, v) -> readerConf.set(k.toString(), v.toString()));
         this.writerConf = new org.apache.hadoop.conf.Configuration();
+        this.orcProperties.forEach((k, v) -> writerConf.set(k.toString(), v.toString()));
         this.formatContext = formatContext;
     }
 

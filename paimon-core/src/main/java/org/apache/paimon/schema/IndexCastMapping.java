@@ -24,6 +24,7 @@ import javax.annotation.Nullable;
 
 /** Class includes index mapping and cast mapping. */
 public interface IndexCastMapping {
+
     @Nullable
     int[] getIndexMapping();
 

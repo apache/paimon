@@ -73,13 +73,15 @@ public class ConfigOptionsDocGenerator {
     static final OptionsClassLocation[] LOCATIONS =
             new OptionsClassLocation[] {
                 new OptionsClassLocation("paimon-common", "org.apache.paimon.options"),
-                new OptionsClassLocation("paimon-core", "org.apache.paimon"),
+                new OptionsClassLocation("paimon-common", "org.apache.paimon"),
                 new OptionsClassLocation(
                         "paimon-flink/paimon-flink-common", "org.apache.paimon.flink"),
                 new OptionsClassLocation(
                         "paimon-flink/paimon-flink-common", "org.apache.paimon.flink.kafka"),
                 new OptionsClassLocation(
-                        "paimon-hive/paimon-hive-catalog", "org.apache.paimon.hive")
+                        "paimon-hive/paimon-hive-catalog", "org.apache.paimon.hive"),
+                new OptionsClassLocation(
+                        "paimon-spark/paimon-spark-common", "org.apache.paimon.spark")
             };
     static final String DEFAULT_PATH_PREFIX = "src/main/java";
 

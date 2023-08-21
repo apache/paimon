@@ -30,6 +30,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataType;
@@ -48,13 +49,14 @@ import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.table.data.RowData;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test class for {@link FlinkSink}. */
 public class FlinkSinkTest {
@@ -70,11 +72,11 @@ public class FlinkSinkTest {
 
         // set this when batch executing
         streamExecutionEnvironment.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        Assertions.assertTrue(testSpillable(streamExecutionEnvironment, fileStoreTable));
+        assertThat(testSpillable(streamExecutionEnvironment, fileStoreTable)).isTrue();
 
         // set this to streaming, we should get a false then
         streamExecutionEnvironment.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        Assertions.assertFalse(testSpillable(streamExecutionEnvironment, fileStoreTable));
+        assertThat(testSpillable(streamExecutionEnvironment, fileStoreTable)).isFalse();
     }
 
     private boolean testSpillable(
@@ -127,6 +129,10 @@ public class FlinkSinkTest {
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
-                FileIOFinder.find(tablePath), tablePath, tableSchema, conf, Lock.emptyFactory());
+                FileIOFinder.find(tablePath),
+                tablePath,
+                tableSchema,
+                conf,
+                new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 }

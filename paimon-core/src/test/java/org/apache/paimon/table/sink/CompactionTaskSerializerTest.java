@@ -20,13 +20,13 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CompactionTaskSerializer}. */
 public class CompactionTaskSerializerTest {
@@ -39,6 +39,6 @@ public class CompactionTaskSerializerTest {
 
         byte[] bytes = serializer.serialize(task);
         AppendOnlyCompactionTask task1 = serializer.deserialize(serializer.getVersion(), bytes);
-        Assertions.assertEquals(task1, task);
+        assertThat(task).isEqualTo(task1);
     }
 }

@@ -32,6 +32,8 @@ import org.apache.paimon.data.columnar.heap.HeapTimestampVector;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.LocalZonedTimestampType;
+import org.apache.paimon.types.TimestampType;
 
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReader;
@@ -41,6 +43,8 @@ import org.apache.parquet.schema.Type;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.paimon.types.DataTypeRoot.TIMESTAMP_WITHOUT_TIME_ZONE;
 
 /** Array {@link ColumnReader}. TODO Currently ARRAY type only support non nested case. */
 public class ArrayColumnReader extends BaseVectorizedColumnReader {
@@ -169,7 +173,21 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
                 }
             case TIMESTAMP_WITHOUT_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return dataColumn.readTimestamp();
+                int precision;
+                if (type.getTypeRoot() == TIMESTAMP_WITHOUT_TIME_ZONE) {
+                    precision = ((TimestampType) type).getPrecision();
+                } else {
+                    precision = ((LocalZonedTimestampType) type).getPrecision();
+                }
+
+                if (precision <= 3) {
+                    return dataColumn.readMillsTimestamp();
+                } else if (precision <= 6) {
+                    return dataColumn.readMicrosTimestamp();
+                } else {
+                    throw new RuntimeException(
+                            "Unsupported precision of time type in the list: " + precision);
+                }
             default:
                 throw new RuntimeException("Unsupported type in the list: " + type);
         }
@@ -406,17 +424,18 @@ public class ArrayColumnReader extends BaseVectorizedColumnReader {
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 if (descriptor.getPrimitiveType().getPrimitiveTypeName()
                         == PrimitiveType.PrimitiveTypeName.INT64) {
-                    HeapLongVector heapLongVector = new HeapLongVector(total);
-                    heapLongVector.reset();
-                    lcv.setChild(new ParquetTimestampVector(heapLongVector));
+                    HeapTimestampVector heapTimestampVector = new HeapTimestampVector(total);
+                    heapTimestampVector.reset();
+                    lcv.setChild(new ParquetTimestampVector(heapTimestampVector));
                     for (int i = 0; i < valueList.size(); i++) {
                         if (valueList.get(i) == null) {
-                            ((HeapLongVector) ((ParquetTimestampVector) lcv.getChild()).getVector())
+                            ((HeapTimestampVector)
+                                            ((ParquetTimestampVector) lcv.getChild()).getVector())
                                     .setNullAt(i);
                         } else {
-                            ((HeapLongVector) ((ParquetTimestampVector) lcv.getChild()).getVector())
-                                            .vector[i] =
-                                    ((List<Long>) valueList).get(i);
+                            ((HeapTimestampVector)
+                                            ((ParquetTimestampVector) lcv.getChild()).getVector())
+                                    .fill(((List<Timestamp>) valueList).get(i));
                         }
                     }
                     break;

@@ -18,13 +18,11 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.types.logical.LogicalType;
 
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Conversion between {@link LogicalType} and {@link DataType}. */
@@ -50,11 +48,5 @@ public class LogicalTypeConversion {
     public static DataType toDataType(
             LogicalType logicalType, AtomicInteger currentHighestFieldId) {
         return logicalType.accept(new LogicalTypeToDataType(currentHighestFieldId));
-    }
-
-    public static org.apache.flink.table.types.logical.RowType toRowType(
-            List<DataField> dataFields) {
-        return (org.apache.flink.table.types.logical.RowType)
-                DataTypeToLogicalType.INSTANCE.visit(new RowType(false, dataFields));
     }
 }

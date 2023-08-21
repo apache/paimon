@@ -57,7 +57,7 @@ public class BinaryMergeIterator<Entry> implements MutableObjectIterator<Entry> 
     @Override
     public Entry next() throws IOException {
         if (currHead != null) {
-            if (!currHead.nextHead()) {
+            if (currHead.noMoreHead()) {
                 this.heap.poll();
             } else {
                 this.heap.adjustTop();
@@ -80,7 +80,7 @@ public class BinaryMergeIterator<Entry> implements MutableObjectIterator<Entry> 
         private HeadStream(MutableObjectIterator<Entry> iterator, Entry head) throws IOException {
             this.iterator = iterator;
             this.head = head;
-            if (!nextHead()) {
+            if (noMoreHead()) {
                 throw new IllegalStateException();
             }
         }
@@ -89,8 +89,8 @@ public class BinaryMergeIterator<Entry> implements MutableObjectIterator<Entry> 
             return this.head;
         }
 
-        private boolean nextHead() throws IOException {
-            return (this.head = this.iterator.next(head)) != null;
+        private boolean noMoreHead() throws IOException {
+            return (this.head = this.iterator.next(head)) == null;
         }
     }
 }

@@ -34,23 +34,15 @@ If you have other requirements, please contact us.
 ## What’s Next?
 
 ### Core
-- Lookup Changelog-Producer to produce changelog in real-time
-- Enhance Flink Lookup Join from True Lookup
-- Provide stable Java Programing API
-- Savepoint support
-- More Metrics, such as the busyness of compaction thread
-- Multi table consistency for real-time materialized views
 
-### Ingestion
-- Schema Evolution Synchronization from Flink CDC
-- Entire Database Synchronization from Flink CDC
-- Integration with Apache Seatunnel
+- Foreign Key Join Partial-Update
+- Append-only table supports batch / streaming z-order sort
+- Supports cross partition update
 
 ### Compute Engines
-- Flink DELETE/UPDATE support
-- More management via Flink/Spark `CALL` procedures. 
-- Hive Writer
-- Spark Writer supports `INSERT OVERWRITE`
-- Spark Time Traveling
-- Presto Reader
-- Doris Reader
+
+- More management via Flink/Spark `CALL` procedures
+- Flink Sink supports at-least-once / unaligned checkpoint
+- Flink Whole database compaction Job
+- Public Spark Schema Evolution Pipeline
+- Spark supports Dynamic Partition overwrite

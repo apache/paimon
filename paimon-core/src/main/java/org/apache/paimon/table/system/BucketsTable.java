@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
@@ -35,6 +36,7 @@ import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -155,6 +157,11 @@ public class BucketsTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public TableRead withIOManager(IOManager ioManager) {
+            return this;
+        }
+
+        @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             if (!(split instanceof DataSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
@@ -167,7 +174,7 @@ public class BucketsTable implements DataTable, ReadonlyTable {
                 // Serialized files are only useful in streaming jobs.
                 // Batch compact jobs only run once, so they only need to know what buckets should
                 // be compacted and don't need to concern incremental new files.
-                files = dataSplit.files();
+                files = dataSplit.dataFiles();
             }
             InternalRow row =
                     GenericRow.of(

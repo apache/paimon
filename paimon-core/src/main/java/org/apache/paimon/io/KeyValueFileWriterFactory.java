@@ -28,13 +28,17 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
 
 /** A factory to create {@link FileWriter}s for writing {@link KeyValue} files. */
 public class KeyValueFileWriterFactory {
@@ -43,12 +47,8 @@ public class KeyValueFileWriterFactory {
     private final long schemaId;
     private final RowType keyType;
     private final RowType valueType;
-    private final FormatWriterFactory writerFactory;
-    @Nullable private final TableStatsExtractor tableStatsExtractor;
-    private final DataFilePathFactory pathFactory;
+    private final WriteFormatContext formatContext;
     private final long suggestedFileSize;
-    private final Map<Integer, String> levelCompressions;
-    private final String fileCompression;
     private final CoreOptions options;
 
     private KeyValueFileWriterFactory(
@@ -56,23 +56,15 @@ public class KeyValueFileWriterFactory {
             long schemaId,
             RowType keyType,
             RowType valueType,
-            FormatWriterFactory writerFactory,
-            @Nullable TableStatsExtractor tableStatsExtractor,
-            DataFilePathFactory pathFactory,
+            WriteFormatContext formatContext,
             long suggestedFileSize,
-            Map<Integer, String> levelCompressions,
-            String fileCompression,
             CoreOptions options) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.keyType = keyType;
         this.valueType = valueType;
-        this.writerFactory = writerFactory;
-        this.tableStatsExtractor = tableStatsExtractor;
-        this.pathFactory = pathFactory;
+        this.formatContext = formatContext;
         this.suggestedFileSize = suggestedFileSize;
-        this.levelCompressions = levelCompressions;
-        this.fileCompression = fileCompression;
         this.options = options;
     }
 
@@ -85,50 +77,42 @@ public class KeyValueFileWriterFactory {
     }
 
     @VisibleForTesting
-    public DataFilePathFactory pathFactory() {
-        return pathFactory;
+    public DataFilePathFactory pathFactory(int level) {
+        return formatContext.pathFactory(level);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(int level) {
         return new RollingFileWriter<>(
-                () -> createDataFileWriter(pathFactory.newPath(), level, getCompression(level)),
+                () -> createDataFileWriter(formatContext.pathFactory(level).newPath(), level),
                 suggestedFileSize);
-    }
-
-    private String getCompression(int level) {
-        if (null == levelCompressions) {
-            return fileCompression;
-        } else {
-            return levelCompressions.getOrDefault(level, fileCompression);
-        }
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
         return new RollingFileWriter<>(
                 () ->
                         createDataFileWriter(
-                                pathFactory.newChangelogPath(), level, getCompression(level)),
+                                formatContext.pathFactory(level).newChangelogPath(), level),
                 suggestedFileSize);
     }
 
-    private KeyValueDataFileWriter createDataFileWriter(Path path, int level, String compression) {
+    private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         return new KeyValueDataFileWriter(
                 fileIO,
-                writerFactory,
+                formatContext.writerFactory(level),
                 path,
                 kvSerializer::toRow,
                 keyType,
                 valueType,
-                tableStatsExtractor,
+                formatContext.extractor(level),
                 schemaId,
                 level,
-                compression,
+                formatContext.compression(level),
                 options);
     }
 
-    public void deleteFile(String filename) {
-        fileIO.deleteQuietly(pathFactory.toPath(filename));
+    public void deleteFile(String filename, int level) {
+        fileIO.deleteQuietly(formatContext.pathFactory(level).toPath(filename));
     }
 
     public static Builder builder(
@@ -137,10 +121,16 @@ public class KeyValueFileWriterFactory {
             RowType keyType,
             RowType valueType,
             FileFormat fileFormat,
-            FileStorePathFactory pathFactory,
+            Map<String, FileStorePathFactory> format2PathFactory,
             long suggestedFileSize) {
         return new Builder(
-                fileIO, schemaId, keyType, valueType, fileFormat, pathFactory, suggestedFileSize);
+                fileIO,
+                schemaId,
+                keyType,
+                valueType,
+                fileFormat,
+                format2PathFactory,
+                suggestedFileSize);
     }
 
     /** Builder of {@link KeyValueFileWriterFactory}. */
@@ -151,7 +141,7 @@ public class KeyValueFileWriterFactory {
         private final RowType keyType;
         private final RowType valueType;
         private final FileFormat fileFormat;
-        private final FileStorePathFactory pathFactory;
+        private final Map<String, FileStorePathFactory> format2PathFactory;
         private final long suggestedFileSize;
 
         private Builder(
@@ -160,41 +150,92 @@ public class KeyValueFileWriterFactory {
                 RowType keyType,
                 RowType valueType,
                 FileFormat fileFormat,
-                FileStorePathFactory pathFactory,
+                Map<String, FileStorePathFactory> format2PathFactory,
                 long suggestedFileSize) {
             this.fileIO = fileIO;
             this.schemaId = schemaId;
             this.keyType = keyType;
             this.valueType = valueType;
             this.fileFormat = fileFormat;
-            this.pathFactory = pathFactory;
+            this.format2PathFactory = format2PathFactory;
             this.suggestedFileSize = suggestedFileSize;
         }
 
         public KeyValueFileWriterFactory build(
+                BinaryRow partition, int bucket, CoreOptions options) {
+            RowType fileRowType = KeyValue.schema(keyType, valueType);
+            WriteFormatContext context =
+                    new WriteFormatContext(
+                            partition,
+                            bucket,
+                            fileRowType,
+                            fileFormat,
+                            format2PathFactory,
+                            options);
+            return new KeyValueFileWriterFactory(
+                    fileIO, schemaId, keyType, valueType, context, suggestedFileSize, options);
+        }
+    }
+
+    private static class WriteFormatContext {
+
+        private final Function<Integer, String> level2Format;
+        private final Function<Integer, String> level2Compress;
+
+        private final Map<String, Optional<TableStatsExtractor>> format2Extractor;
+        private final Map<String, DataFilePathFactory> format2PathFactory;
+        private final Map<String, FormatWriterFactory> format2WriterFactory;
+
+        private WriteFormatContext(
                 BinaryRow partition,
                 int bucket,
-                Map<Integer, String> levelCompressions,
-                String fileCompression,
+                RowType rowType,
+                FileFormat defaultFormat,
+                Map<String, FileStorePathFactory> parentFactories,
                 CoreOptions options) {
-            RowType recordType = KeyValue.schema(keyType, valueType);
-            return new KeyValueFileWriterFactory(
-                    fileIO,
-                    schemaId,
-                    keyType,
-                    valueType,
-                    fileFormat.createWriterFactory(recordType),
-                    fileFormat
-                            .createStatsExtractor(
-                                    recordType,
-                                    StatsCollectorFactories.createStatsFactories(
-                                            options, recordType.getFieldNames()))
-                            .orElse(null),
-                    pathFactory.createDataFilePathFactory(partition, bucket),
-                    suggestedFileSize,
-                    levelCompressions,
-                    fileCompression,
-                    options);
+            Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
+            this.level2Format =
+                    level ->
+                            fileFormatPerLevel.getOrDefault(
+                                    level, defaultFormat.getFormatIdentifier());
+
+            String defaultCompress = options.fileCompression();
+            Map<Integer, String> fileCompressionPerLevel = options.fileCompressionPerLevel();
+            this.level2Compress =
+                    level -> fileCompressionPerLevel.getOrDefault(level, defaultCompress);
+
+            this.format2Extractor = new HashMap<>();
+            this.format2PathFactory = new HashMap<>();
+            this.format2WriterFactory = new HashMap<>();
+            FieldStatsCollector.Factory[] statsCollectorFactories =
+                    StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
+            for (String format : parentFactories.keySet()) {
+                format2PathFactory.put(
+                        format,
+                        parentFactories.get(format).createDataFilePathFactory(partition, bucket));
+
+                FileFormat fileFormat = FileFormat.getFileFormat(options.toConfiguration(), format);
+                format2Extractor.put(
+                        format, fileFormat.createStatsExtractor(rowType, statsCollectorFactories));
+                format2WriterFactory.put(format, fileFormat.createWriterFactory(rowType));
+            }
+        }
+
+        @Nullable
+        private TableStatsExtractor extractor(int level) {
+            return format2Extractor.get(level2Format.apply(level)).orElse(null);
+        }
+
+        private DataFilePathFactory pathFactory(int level) {
+            return format2PathFactory.get(level2Format.apply(level));
+        }
+
+        private FormatWriterFactory writerFactory(int level) {
+            return format2WriterFactory.get(level2Format.apply(level));
+        }
+
+        private String compression(int level) {
+            return level2Compress.apply(level);
         }
     }
 }

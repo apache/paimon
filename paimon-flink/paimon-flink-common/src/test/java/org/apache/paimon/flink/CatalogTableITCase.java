@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -36,6 +38,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for catalog tables. */
@@ -84,6 +87,45 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         List<Row> result = sql("SELECT * FROM T$options");
         assertThat(result).containsExactly(Row.of("snapshot.time-retained", "5 h"));
+    }
+
+    @Test
+    public void testAllTableOptions() {
+        sql("CREATE TABLE T (a INT, b INT) with ('a.aa.aaa'='val1', 'b.bb.bbb'='val2')");
+        sql("ALTER TABLE T SET ('c.cc.ccc' = 'val3')");
+
+        List<Row> result = sql("SELECT * FROM sys.all_table_options");
+        assertThat(result)
+                .containsExactly(
+                        Row.of("default", "T", "a.aa.aaa", "val1"),
+                        Row.of("default", "T", "b.bb.bbb", "val2"),
+                        Row.of("default", "T", "c.cc.ccc", "val3"));
+    }
+
+    @Test
+    public void testDropSystemDatabase() {
+        assertThatCode(() -> sql("DROP DATABASE sys"))
+                .hasRootCauseMessage("Can't do operation on system database.");
+    }
+
+    @Test
+    public void testCreateSystemDatabase() {
+        assertThatCode(() -> sql("CREATE DATABASE sys"))
+                .hasRootCauseMessage("Can't do operation on system database.");
+    }
+
+    @Test
+    public void testChangeTableInSystemDatabase() {
+        sql("USE sys");
+        assertThatCode(() -> sql("ALTER TABLE all_table_options SET ('bucket-num' = '5')"))
+                .hasRootCauseMessage("Can't alter system table.");
+    }
+
+    @Test
+    public void testSystemDatabase() {
+        sql("USE " + Catalog.SYSTEM_DATABASE_NAME);
+        assertThat(sql("SHOW TABLES"))
+                .containsExactly(Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS));
     }
 
     @Test
@@ -138,10 +180,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "  `partition_keys` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `primary_keys` VARCHAR(2147483647) NOT NULL,\n"
                                 + "  `options` VARCHAR(2147483647) NOT NULL,\n"
-                                + "  `comment` VARCHAR(2147483647)\n"
+                                + "  `comment` VARCHAR(2147483647),\n"
+                                + "  `update_time` TIMESTAMP(3) NOT NULL\n"
                                 + ") ]]");
 
-        List<Row> result = sql("SELECT * FROM T$schemas order by schema_id");
+        List<Row> result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM T$schemas order by schema_id");
 
         assertThat(result.toString())
                 .isEqualTo(
@@ -180,7 +226,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     public void testCreateTableLike() throws Exception {
         sql("CREATE TABLE T (a INT)");
         sql("CREATE TABLE T1 LIKE T");
-        List<Row> result = sql("SELECT * FROM T1$schemas s");
+        List<Row> result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM T1$schemas s");
         assertThat(result.toString())
                 .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
     }
@@ -190,7 +239,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("CREATE TABLE t (a INT)");
         sql("INSERT INTO t VALUES(1),(2)");
         sql("CREATE TABLE t1 AS SELECT * FROM t");
-        List<Row> result = sql("SELECT * FROM t1$schemas s");
+        List<Row> result =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM t1$schemas s");
         assertThat(result.toString())
                 .isEqualTo("[+I[0, [{\"id\":0,\"name\":\"a\",\"type\":\"INT\"}], [], [], {}, ]]");
         List<Row> data = sql("SELECT * FROM t1");
@@ -207,7 +259,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         + ") PARTITIONED BY (dt, hh)");
         sql("INSERT INTO t_p SELECT 1,2,'a','2023-02-19','12'");
         sql("CREATE TABLE t1_p WITH ('partition' = 'dt' ) AS SELECT * FROM t_p");
-        List<Row> resultPartition = sql("SELECT * FROM t1_p$schemas s");
+        List<Row> resultPartition =
+                sql(
+                        "SELECT schema_id, fields, partition_keys, "
+                                + "primary_keys, options, `comment` FROM t1_p$schemas s");
         assertThat(resultPartition.toString())
                 .isEqualTo(
                         "[+I[0, [{\"id\":0,\"name\":\"user_id\",\"type\":\"BIGINT\"},{\"id\":1,\"name\":\"item_id\",\"type\":\"BIGINT\"},"
@@ -341,6 +396,41 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
                         "Can not set the write-mode to append-only and changelog-producer at the same time.");
+    }
+
+    @Test
+    public void testChangelogProducerOnAppendOnlyTable() {
+        assertThatThrownBy(
+                        () -> sql("CREATE TABLE T (a INT) WITH ('changelog-producer' = 'input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
+
+        sql("CREATE TABLE T (a INT)");
+        assertThatThrownBy(() -> sql("ALTER TABLE T SET ('changelog-producer'='input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
+    }
+
+    @Test
+    public void testFileFormatPerLevel() {
+        sql(
+                "CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) "
+                        + "WITH ('num-sorted-run.compaction-trigger'='2',"
+                        + "'file.format.per.level' = '0:avro,3:parquet',"
+                        + " 'num-levels' = '4')");
+        sql("INSERT INTO T1 SELECT 1,'AAA'");
+        sql("INSERT INTO T1 SELECT 2,'BBB'");
+        sql("INSERT INTO T1 SELECT 3,'CCC'");
+        List<Row> rows = sql("SELECT * FROM T1");
+        assertThat(rows)
+                .containsExactlyInAnyOrder(Row.of(1, "AAA"), Row.of(2, "BBB"), Row.of(3, "CCC"));
+
+        rows = sql("SELECT level,file_format FROM T1$files");
+        assertThat(rows).containsExactlyInAnyOrder(Row.of(3, "parquet"), Row.of(0, "avro"));
     }
 
     @Test
@@ -528,5 +618,50 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         List<Row> result = sql("SELECT * FROM T$consumers");
         assertThat(result).containsExactly(Row.of("my1", 3L));
+    }
+
+    @Test
+    public void testPartitionsTable() throws Exception {
+        sql(
+                "CREATE TABLE T_VALUE_COUNT (a INT, p INT, b BIGINT, c STRING) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='change-log')"); // change log with value count table
+        assertFilesTable("T_VALUE_COUNT");
+
+        sql(
+                "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='change-log')"); // change log with key table
+        assertFilesTable("T_WITH_KEY");
+
+        sql(
+                "CREATE TABLE T_APPEND_ONLY (a INT, p INT, b BIGINT, c STRING) "
+                        + "PARTITIONED BY (p) "
+                        + "WITH ('write-mode'='append-only')"); // append only table
+        assertPartitionsTable("T_APPEND_ONLY");
+    }
+
+    private void assertPartitionsTable(String tableName) throws Exception {
+        assertThat(sql(String.format("SELECT * FROM %s$partitions", tableName))).isEmpty();
+        // TODO should use sql for schema evolution after flink supports it.
+        SchemaManager schemaManager =
+                new SchemaManager(
+                        LocalFileIO.create(),
+                        new Path(path, String.format("default.db/%s", tableName)));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S2'), (1, 2, 2, 'S1')", tableName));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
+        List<Row> rows1 = sql(String.format("SELECT * FROM %s$partitions", tableName));
+        for (Row row : rows1) {
+            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]");
+            assertThat((long) row.getField(2)).isGreaterThan(0L); // check file size
+        }
+
+        sql(String.format("INSERT INTO %s VALUES (3, 4, 4, 'S3'), (1, 3, 2, 'S4')", tableName));
+        sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
+
+        List<Row> rows2 = sql(String.format("SELECT * FROM %s$partitions", tableName));
+        for (Row row : rows2) {
+            assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]", "[3]", "[4]");
+        }
     }
 }

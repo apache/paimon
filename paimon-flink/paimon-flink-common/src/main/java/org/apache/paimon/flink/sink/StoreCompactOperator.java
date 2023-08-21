@@ -125,9 +125,9 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     }
 
     @Override
-    protected List<Committable> prepareCommit(boolean doCompaction, long checkpointId)
+    protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
-        return write.prepareCommit(doCompaction, checkpointId);
+        return write.prepareCommit(waitCompaction, checkpointId);
     }
 
     @Override

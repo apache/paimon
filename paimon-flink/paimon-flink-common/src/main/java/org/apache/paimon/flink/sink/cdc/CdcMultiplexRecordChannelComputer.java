@@ -23,12 +23,18 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
 /** {@link ChannelComputer} for {@link CdcRecord}. */
 public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMultiplexRecord> {
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(CdcMultiplexRecordChannelComputer.class);
 
     private static final long serialVersionUID = 1L;
     private final Catalog.Loader catalogLoader;
@@ -51,9 +57,12 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
 
     @Override
     public int channel(CdcMultiplexRecord multiplexRecord) {
+        ChannelComputer<CdcRecord> channelComputer = computeChannelComputer(multiplexRecord);
+        int recordChannel =
+                channelComputer != null ? channelComputer.channel(multiplexRecord.record()) : 0;
         return Math.floorMod(
                 Objects.hash(multiplexRecord.databaseName(), multiplexRecord.tableName())
-                        + computeChannelComputer(multiplexRecord).channel(multiplexRecord.record()),
+                        + recordChannel,
                 numChannels);
     }
 
@@ -65,7 +74,8 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                     try {
                         table = (FileStoreTable) catalog.getTable(id);
                     } catch (Catalog.TableNotExistException e) {
-                        throw new RuntimeException("Failed to get table " + id.getFullName());
+                        LOG.error("Failed to get table " + id.getFullName());
+                        return null;
                     }
                     CdcRecordChannelComputer channelComputer =
                             new CdcRecordChannelComputer(table.schema());

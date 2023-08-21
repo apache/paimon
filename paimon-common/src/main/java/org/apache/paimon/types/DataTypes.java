@@ -21,6 +21,7 @@ package org.apache.paimon.types;
 import org.apache.paimon.annotation.Public;
 
 import java.util.Arrays;
+import java.util.OptionalInt;
 
 /**
  * Utils for creating {@link DataType}s.
@@ -144,5 +145,73 @@ public class DataTypes {
 
     public static MultisetType MULTISET(DataType elementType) {
         return new MultisetType(elementType);
+    }
+
+    public static OptionalInt getPrecision(DataType dataType) {
+        return dataType.accept(PRECISION_EXTRACTOR);
+    }
+
+    public static OptionalInt getLength(DataType dataType) {
+        return dataType.accept(LENGTH_EXTRACTOR);
+    }
+
+    private static final PrecisionExtractor PRECISION_EXTRACTOR = new PrecisionExtractor();
+
+    private static final LengthExtractor LENGTH_EXTRACTOR = new LengthExtractor();
+
+    private static class PrecisionExtractor extends DataTypeDefaultVisitor<OptionalInt> {
+
+        @Override
+        public OptionalInt visit(DecimalType decimalType) {
+            return OptionalInt.of(decimalType.getPrecision());
+        }
+
+        @Override
+        public OptionalInt visit(TimeType timeType) {
+            return OptionalInt.of(timeType.getPrecision());
+        }
+
+        @Override
+        public OptionalInt visit(TimestampType timestampType) {
+            return OptionalInt.of(timestampType.getPrecision());
+        }
+
+        @Override
+        public OptionalInt visit(LocalZonedTimestampType localZonedTimestampType) {
+            return OptionalInt.of(localZonedTimestampType.getPrecision());
+        }
+
+        @Override
+        protected OptionalInt defaultMethod(DataType dataType) {
+            return OptionalInt.empty();
+        }
+    }
+
+    private static class LengthExtractor extends DataTypeDefaultVisitor<OptionalInt> {
+
+        @Override
+        public OptionalInt visit(CharType charType) {
+            return OptionalInt.of(charType.getLength());
+        }
+
+        @Override
+        public OptionalInt visit(VarCharType varCharType) {
+            return OptionalInt.of(varCharType.getLength());
+        }
+
+        @Override
+        public OptionalInt visit(BinaryType binaryType) {
+            return OptionalInt.of(binaryType.getLength());
+        }
+
+        @Override
+        public OptionalInt visit(VarBinaryType varBinaryType) {
+            return OptionalInt.of(varBinaryType.getLength());
+        }
+
+        @Override
+        protected OptionalInt defaultMethod(DataType dataType) {
+            return OptionalInt.empty();
+        }
     }
 }

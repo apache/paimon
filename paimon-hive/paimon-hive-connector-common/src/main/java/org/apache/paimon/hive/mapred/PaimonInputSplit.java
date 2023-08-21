@@ -65,7 +65,7 @@ public class PaimonInputSplit extends FileSplit {
 
     @Override
     public long getLength() {
-        return split.files().stream().mapToLong(DataFileMeta::fileSize).sum();
+        return split.dataFiles().stream().mapToLong(DataFileMeta::fileSize).sum();
     }
 
     @Override

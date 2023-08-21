@@ -19,15 +19,9 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -38,7 +32,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -46,10 +39,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.Collectors;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaCanalSyncTableActionITCase}. */
 public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
@@ -57,10 +48,21 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testSchemaEvolution() throws Exception {
+        runSingleTableSchemaEvolution("schemaevolution");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSchemaEvolutionWithMissingDdl() throws Exception {
+        runSingleTableSchemaEvolution("schemaevolutionmissingddl");
+    }
+
+    private void runSingleTableSchemaEvolution(String sourceDir) throws Exception {
         final String topic = "schema_evolution";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/schemaevolution/canal-data-1.txt");
+        List<String> lines =
+                readLines(String.format("kafka.canal/table/%s/canal-data-1.txt", sourceDir));
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -87,7 +89,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -95,11 +97,11 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         waitJobRunning(client);
 
-        testSchemaEvolutionImpl(topic);
+        testSchemaEvolutionImpl(topic, sourceDir);
     }
 
-    private void testSchemaEvolutionImpl(String topic) throws Exception {
-        FileStoreTable table = getFileStoreTable();
+    private void testSchemaEvolutionImpl(String topic, String sourceDir) throws Exception {
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -115,7 +117,8 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         try {
             writeRecordsToKafka(
-                    topic, readLines("kafka.canal/table/schemaevolution/canal-data-2.txt"));
+                    topic,
+                    readLines(String.format("kafka.canal/table/%s/canal-data-2.txt", sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -140,7 +143,8 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         try {
             writeRecordsToKafka(
-                    topic, readLines("kafka.canal/table/schemaevolution/canal-data-3.txt"));
+                    topic,
+                    readLines(String.format("kafka.canal/table/%s/canal-data-3.txt", sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -166,7 +170,8 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         try {
             writeRecordsToKafka(
-                    topic, readLines("kafka.canal/table/schemaevolution/canal-data-4.txt"));
+                    topic,
+                    readLines(String.format("kafka.canal/table/%s/canal-data-4.txt", sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -196,7 +201,8 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         try {
             writeRecordsToKafka(
-                    topic, readLines("kafka.canal/table/schemaevolution/canal-data-5.txt"));
+                    topic,
+                    readLines(String.format("kafka.canal/table/%s/canal-data-5.txt", sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -256,7 +262,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.singletonList("_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         Collections.emptyMap());
         action.build(env);
@@ -268,7 +274,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
     }
 
     private void testSchemaEvolutionMultipleImpl(String topic) throws Exception {
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -326,7 +332,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         createTestTopic(topic, 1, 1);
 
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/alltype/canal-data-1.txt");
+        List<String> lines = readLines("kafka.canal/table/alltype/canal-data.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
@@ -357,11 +363,11 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         waitJobRunning(client);
 
-        testAllTypesImpl(topic);
+        testAllTypesImpl();
         client.cancel().get();
     }
 
-    private void testAllTypesImpl(String topic) throws Exception {
+    private void testAllTypesImpl() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -518,7 +524,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                             "_geometrycollection",
                             "_set",
                         });
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
         List<String> expected =
                 Arrays.asList(
                         "+I["
@@ -597,34 +603,6 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                                 + "]");
 
         waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
-
-        // test all types during schema evolution
-        try {
-            try {
-                writeRecordsToKafka(topic, readLines("kafka.canal/table/alltype/canal-data-2.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
-            }
-            List<DataField> newFields = new ArrayList<>(rowType.getFields());
-            newFields.add(new DataField(rowType.getFieldCount(), "v", DataTypes.INT()));
-            RowType newRowType = new RowType(newFields);
-            List<String> newExpected =
-                    expected.stream()
-                            .map(s -> s.substring(0, s.length() - 1) + ", NULL]")
-                            .collect(Collectors.toList());
-            waitForResult(newExpected, table, newRowType, Arrays.asList("pt", "_id"));
-        } finally {
-            try {
-                writeRecordsToKafka(topic, readLines("kafka.canal/table/alltype/canal-data-3.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write canal data to Kafka.", e);
-            }
-            waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
-            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
-            schemaManager.commitChanges(SchemaChange.dropColumn("v"));
-            List<DataField> fields = table.schema().fields();
-            int size = fields.size();
-        }
     }
 
     @Test
@@ -660,15 +638,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
-        UnsupportedOperationException e =
-                assertThrows(
-                        UnsupportedOperationException.class,
-                        () -> action.build(env),
-                        "Expecting UnsupportedOperationException");
-        assertThat(e).hasMessage("This format: ogg-json is not support.");
+
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage("This format: ogg-json is not support.");
     }
 
     @Test
@@ -704,11 +680,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
-        Exception e = assertThrows(Exception.class, () -> action.build(env), "Expecting Exception");
-        assertThat(e).hasMessage("Could not get metadata from server,topic :no_non_ddl_data");
+
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(Exception.class)
+                .hasMessage("Could not get metadata from server,topic:no_non_ddl_data");
     }
 
     @Test
@@ -728,7 +706,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
 
         // create an incompatible table
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Catalog catalog = catalog();
         catalog.createDatabase(database, true);
         Identifier identifier = Identifier.create(database, tableName);
         Schema schema =
@@ -756,15 +734,12 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
-        IllegalArgumentException e =
-                assertThrows(
-                        IllegalArgumentException.class,
-                        () -> action.build(env),
-                        "Expecting IllegalArgumentException");
-        assertThat(e)
+
+        assertThatThrownBy(() -> action.build(env))
+                .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
                         "Paimon schema and Kafka schema are not compatible.\n"
                                 + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
@@ -806,7 +781,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -814,7 +789,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         waitJobRunning(client);
 
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -864,7 +839,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -877,7 +852,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -929,7 +904,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -942,7 +917,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -992,7 +967,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -1005,7 +980,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -1057,7 +1032,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         tableName,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "_id"),
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
                         Collections.emptyMap(),
                         tableConfig);
         action.build(env);
@@ -1070,7 +1045,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        FileStoreTable table = getFileStoreTable();
+        FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
                 RowType.of(
@@ -1086,11 +1061,5 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 Arrays.asList(
                         "+I[1, 1, one]", "+I[1, 2, two]", "+I[1, 3, three]", "+I[1, 4, four]");
         waitForResult(expected, table, rowType, primaryKeys);
-    }
-
-    private FileStoreTable getFileStoreTable() throws Exception {
-        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
-        Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog.getTable(identifier);
     }
 }

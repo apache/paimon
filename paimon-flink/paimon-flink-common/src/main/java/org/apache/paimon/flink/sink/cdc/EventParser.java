@@ -42,10 +42,6 @@ public interface EventParser<T> {
         throw new UnsupportedOperationException("Table name is not supported in this parser.");
     }
 
-    default String parseDatabaseName() {
-        throw new UnsupportedOperationException("Database name is not supported in this parser.");
-    }
-
     /**
      * Parse new schema if this event contains schema change.
      *
@@ -63,10 +59,9 @@ public interface EventParser<T> {
     /**
      * Parse newly added table schema from event.
      *
-     * @param databaseName database of the new table
      * @return empty if there is no newly added table
      */
-    default Optional<Schema> parseNewTable(String databaseName) {
+    default Optional<Schema> parseNewTable() {
         return Optional.empty();
     }
 

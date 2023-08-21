@@ -22,6 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
@@ -30,6 +32,7 @@ import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -38,7 +41,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.StringUtils;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -48,7 +50,6 @@ import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -56,6 +57,8 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
+import java.io.IOException;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -68,6 +71,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.hive.FileStoreTestUtils.DATABASE_NAME;
 import static org.apache.paimon.hive.FileStoreTestUtils.TABLE_NAME;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonInputFormat}. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -80,7 +84,10 @@ public class PaimonStorageHandlerITCase {
 
     private static String engine;
 
-    private String commitUser;
+    private String warehouse;
+    private String tablePath;
+    private Identifier identifier;
+    private String externalTable;
     private long commitIdentifier;
 
     @BeforeClass
@@ -92,7 +99,7 @@ public class PaimonStorageHandlerITCase {
     }
 
     @Before
-    public void before() {
+    public void before() throws IOException {
         if ("mr".equals(engine)) {
             hiveShell.execute("SET hive.execution.engine=mr");
         } else if ("tez".equals(engine)) {
@@ -111,7 +118,10 @@ public class PaimonStorageHandlerITCase {
         hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
         hiveShell.execute("USE test_db");
 
-        commitUser = UUID.randomUUID().toString();
+        warehouse = folder.newFolder().toURI().toString();
+        tablePath = String.format("%s/default.db/%s", warehouse, TABLE_NAME);
+        identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
+        externalTable = "test_table_" + UUID.randomUUID().toString().substring(0, 4);
         commitIdentifier = 0;
     }
 
@@ -132,65 +142,77 @@ public class PaimonStorageHandlerITCase {
                                 RowKind.DELETE, 2, 30L, BinaryString.fromString("World"), 300L),
                         GenericRow.of(2, 40L, null, 400L),
                         GenericRow.of(3, 50L, BinaryString.fromString("Store"), 200L));
-        String tableName =
-                createChangelogExternalTable(
-                        RowType.of(
-                                new DataType[] {
-                                    DataTypes.INT(),
-                                    DataTypes.BIGINT(),
-                                    DataTypes.STRING(),
-                                    DataTypes.BIGINT()
-                                },
-                                new String[] {"a", "b", "c", "d"}),
+
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.STRING(),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"a", "b", "c", "d"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
                         Collections.emptyList(),
                         Arrays.asList("a", "b"),
-                        data);
+                        identifier);
 
-        List<String> actual = hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY b");
+        createExternalTable();
+        writeData(table, data);
+
+        List<String> actual =
+                hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY b");
         List<String> expected =
                 Arrays.asList(
                         "1\t10\tHi Again\t1000",
                         "1\t20\tHello\t200",
                         "2\t40\tNULL\t400",
                         "3\t50\tStore\t200");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
-        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY b");
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + externalTable + " ORDER BY b");
         expected = Arrays.asList("Hi Again\t10", "Hello\t20", "NULL\t40", "Store\t50");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
-        actual = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE d > 200 ORDER BY b");
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT * FROM " + externalTable + " WHERE d > 200 ORDER BY b");
         expected = Arrays.asList("1\t10\tHi Again\t1000", "2\t40\tNULL\t400");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT a, sum(d) FROM " + tableName + " GROUP BY a ORDER BY a");
+                        "SELECT a, sum(d) FROM " + externalTable + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("1\t1200", "2\t400", "3\t200");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT d, sum(b) FROM " + tableName + " GROUP BY d ORDER BY d");
+                        "SELECT d, sum(b) FROM " + externalTable + " GROUP BY d ORDER BY d");
         expected = Arrays.asList("200\t70", "400\t40", "1000\t10");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
                         "SELECT T1.a, T1.b, T1.d + T2.d FROM "
-                                + tableName
+                                + externalTable
                                 + " T1 INNER JOIN "
-                                + tableName
+                                + externalTable
                                 + " T2 ON T1.a = T2.a AND T1.b = T2.b ORDER BY T1.a, T1.b");
         expected = Arrays.asList("1\t10\t2000", "1\t20\t400", "2\t40\t800", "3\t50\t400");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
                         "SELECT T1.a, T1.b, T2.b, T1.d + T2.d FROM "
-                                + tableName
+                                + externalTable
                                 + " T1 INNER JOIN "
-                                + tableName
+                                + externalTable
                                 + " T2 ON T1.a = T2.a ORDER BY T1.a, T1.b, T2.b");
         expected =
                 Arrays.asList(
@@ -200,7 +222,37 @@ public class PaimonStorageHandlerITCase {
                         "1\t20\t20\t400",
                         "2\t40\t40\t800",
                         "3\t50\t50\t400");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
+
+        long snapshotId = ((FileStoreTable) table).snapshotManager().latestSnapshot().id();
+
+        // write new data
+        data =
+                Collections.singletonList(
+                        GenericRow.of(1, 10L, BinaryString.fromString("Hi Time Travel"), 10000L));
+        writeData(table, data);
+
+        // validate new data
+        actual = hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY b");
+        expected =
+                Arrays.asList(
+                        "1\t10\tHi Time Travel\t10000",
+                        "1\t20\tHello\t200",
+                        "2\t40\tNULL\t400",
+                        "3\t50\tStore\t200");
+        assertThat(actual).isEqualTo(expected);
+
+        // test time travel
+        hiveShell.execute("SET paimon.scan.snapshot-id=" + snapshotId);
+        actual = hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY b");
+        expected =
+                Arrays.asList(
+                        "1\t10\tHi Again\t1000",
+                        "1\t20\tHello\t200",
+                        "2\t40\tNULL\t400",
+                        "3\t50\tStore\t200");
+        assertThat(actual).isEqualTo(expected);
+        hiveShell.execute("SET paimon.scan.snapshot-id=null");
     }
 
     @Test
@@ -215,80 +267,92 @@ public class PaimonStorageHandlerITCase {
                                 RowKind.DELETE, 1, 20, 300L, BinaryString.fromString("World")),
                         GenericRow.of(2, 20, 100L, null),
                         GenericRow.of(1, 30, 200L, BinaryString.fromString("Store")));
-        String tableName =
-                createChangelogExternalTable(
-                        RowType.of(
-                                new DataType[] {
-                                    DataTypes.INT(),
-                                    DataTypes.INT(),
-                                    DataTypes.BIGINT(),
-                                    DataTypes.STRING()
-                                },
-                                new String[] {"pt", "a", "b", "c"}),
+
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
                         Collections.singletonList("pt"),
                         Arrays.asList("pt", "a"),
-                        data);
+                        identifier);
+
+        createExternalTable();
+        writeData(table, data);
 
         List<String> actual =
-                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY pt, a");
+                hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY pt, a");
         List<String> expected =
                 Arrays.asList(
                         "1\t10\t100\tHi Again",
                         "1\t30\t200\tStore",
                         "2\t10\t200\tHello",
                         "2\t20\t100\tNULL");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
-        actual = hiveShell.executeQuery("SELECT c, a FROM " + tableName + " ORDER BY c, a");
+        actual = hiveShell.executeQuery("SELECT c, a FROM " + externalTable + " ORDER BY c, a");
         expected = Arrays.asList("NULL\t20", "Hello\t10", "Hi Again\t10", "Store\t30");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT * FROM " + tableName + " WHERE b > 100 ORDER BY pt, a");
+                        "SELECT * FROM " + externalTable + " WHERE b > 100 ORDER BY pt, a");
         expected = Arrays.asList("1\t30\t200\tStore", "2\t10\t200\tHello");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT pt, sum(b), max(c) FROM " + tableName + " GROUP BY pt ORDER BY pt");
+                        "SELECT pt, sum(b), max(c) FROM "
+                                + externalTable
+                                + " GROUP BY pt ORDER BY pt");
         expected = Arrays.asList("1\t300\tStore", "2\t300\tHello");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT a, sum(b), max(c) FROM " + tableName + " GROUP BY a ORDER BY a");
+                        "SELECT a, sum(b), max(c) FROM "
+                                + externalTable
+                                + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("10\t300\tHi Again", "20\t100\tNULL", "30\t200\tStore");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT b, sum(a), max(c) FROM " + tableName + " GROUP BY b ORDER BY b");
+                        "SELECT b, sum(a), max(c) FROM "
+                                + externalTable
+                                + " GROUP BY b ORDER BY b");
         expected = Arrays.asList("100\t30\tHi Again", "200\t40\tStore");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
                         "SELECT a, b FROM (SELECT T1.a AS a, T1.b + T2.b AS b FROM "
-                                + tableName
+                                + externalTable
                                 + " T1 JOIN "
-                                + tableName
+                                + externalTable
                                 + " T2 ON T1.a = T2.a) T3 ORDER BY a, b");
         expected = Arrays.asList("10\t200", "10\t300", "10\t300", "10\t400", "20\t200", "30\t400");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
                         "SELECT b, a FROM (SELECT T1.b AS b, T1.a + T2.a AS a FROM "
-                                + tableName
+                                + externalTable
                                 + " T1 JOIN "
-                                + tableName
+                                + externalTable
                                 + " T2 ON T1.b = T2.b) T3 ORDER BY b, a");
         expected =
                 Arrays.asList(
                         "100\t20", "100\t30", "100\t30", "100\t40", "200\t20", "200\t40", "200\t40",
                         "200\t60");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
     }
 
     @Test
@@ -303,22 +367,32 @@ public class PaimonStorageHandlerITCase {
                                 RowKind.DELETE, 2, 30L, BinaryString.fromString("World"), 300L),
                         GenericRow.of(2, 40L, null, 400L),
                         GenericRow.of(3, 50L, BinaryString.fromString("Store"), 200L));
-        String tableName =
-                createChangelogExternalTable(
-                        RowType.of(
-                                new DataType[] {
-                                    DataTypes.INT(),
-                                    DataTypes.BIGINT(),
-                                    DataTypes.STRING(),
-                                    DataTypes.BIGINT()
-                                },
-                                new String[] {"a", "b", "c", "d"}),
+
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.STRING(),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"a", "b", "c", "d"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        data);
+                        identifier);
+
+        createExternalTable();
+        writeData(table, data);
 
         List<String> actual =
-                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY b, d");
+                hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY b, d");
         List<String> expected =
                 Arrays.asList(
                         "1\t10\tHi\t100",
@@ -326,35 +400,36 @@ public class PaimonStorageHandlerITCase {
                         "1\t20\tHello\t200",
                         "2\t40\tNULL\t400",
                         "3\t50\tStore\t200");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
-        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY c");
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + externalTable + " ORDER BY c");
         expected = Arrays.asList("NULL\t40", "Hello\t20", "Hi\t10", "Hi Again\t10", "Store\t50");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
-                hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE d <> 200 ORDER BY d");
+                hiveShell.executeQuery(
+                        "SELECT * FROM " + externalTable + " WHERE d <> 200 ORDER BY d");
         expected = Arrays.asList("1\t10\tHi\t100", "2\t40\tNULL\t400", "1\t10\tHi Again\t1000");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT a, sum(d) FROM " + tableName + " GROUP BY a ORDER BY a");
+                        "SELECT a, sum(d) FROM " + externalTable + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("1\t1300", "2\t400", "3\t200");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT d, sum(b) FROM " + tableName + " GROUP BY d ORDER BY d");
+                        "SELECT d, sum(b) FROM " + externalTable + " GROUP BY d ORDER BY d");
         expected = Arrays.asList("100\t10", "200\t70", "400\t40", "1000\t10");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
                         "SELECT T1.b, T1.d, T2.d FROM "
-                                + tableName
+                                + externalTable
                                 + " T1 JOIN "
-                                + tableName
+                                + externalTable
                                 + " T2 ON T1.b = T2.b ORDER BY T1.b, T1.d, T2.d");
         expected =
                 Arrays.asList(
@@ -365,7 +440,7 @@ public class PaimonStorageHandlerITCase {
                         "20\t200\t200",
                         "40\t400\t400",
                         "50\t200\t200");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
     }
 
     @Test
@@ -380,22 +455,29 @@ public class PaimonStorageHandlerITCase {
                                 RowKind.DELETE, 1, 20, 300L, BinaryString.fromString("World")),
                         GenericRow.of(2, 20, 400L, null),
                         GenericRow.of(1, 30, 500L, BinaryString.fromString("Store")));
-        String tableName =
-                createChangelogExternalTable(
-                        RowType.of(
-                                new DataType[] {
-                                    DataTypes.INT(),
-                                    DataTypes.INT(),
-                                    DataTypes.BIGINT(),
-                                    DataTypes.STRING()
-                                },
-                                new String[] {"pt", "a", "b", "c"}),
+
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
                         Collections.singletonList("pt"),
                         Collections.emptyList(),
-                        data);
+                        identifier);
+
+        createExternalTable();
+        writeData(table, data);
 
         List<String> actual =
-                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY pt, a, c");
+                hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY pt, a, c");
         List<String> expected =
                 Arrays.asList(
                         "1\t10\t100\tHi",
@@ -403,37 +485,41 @@ public class PaimonStorageHandlerITCase {
                         "1\t30\t500\tStore",
                         "2\t10\t200\tHello",
                         "2\t20\t400\tNULL");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
-        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY c");
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + externalTable + " ORDER BY c");
         expected =
                 Arrays.asList("NULL\t400", "Hello\t200", "Hi\t100", "Hi Again\t100", "Store\t500");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT * FROM " + tableName + " WHERE b < 400 ORDER BY b, c");
+                        "SELECT * FROM " + externalTable + " WHERE b < 400 ORDER BY b, c");
         expected = Arrays.asList("1\t10\t100\tHi", "1\t10\t100\tHi Again", "2\t10\t200\tHello");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT pt, max(a), min(c) FROM " + tableName + " GROUP BY pt ORDER BY pt");
+                        "SELECT pt, max(a), min(c) FROM "
+                                + externalTable
+                                + " GROUP BY pt ORDER BY pt");
         expected = Arrays.asList("1\t30\tHi", "2\t20\tHello");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT a, sum(b), min(c) FROM " + tableName + " GROUP BY a ORDER BY a");
+                        "SELECT a, sum(b), min(c) FROM "
+                                + externalTable
+                                + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("10\t400\tHello", "20\t400\tNULL", "30\t500\tStore");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
                         "SELECT T1.b, T1.c, T2.c FROM "
-                                + tableName
+                                + externalTable
                                 + " T1 JOIN "
-                                + tableName
+                                + externalTable
                                 + " T2 ON T1.b = T2.b ORDER BY T1.b, T1.c, T2.c");
         expected =
                 Arrays.asList(
@@ -444,7 +530,7 @@ public class PaimonStorageHandlerITCase {
                         "200\tHello\tHello",
                         "400\tNULL\tNULL",
                         "500\tStore\tStore");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
     }
 
     @Test
@@ -457,21 +543,31 @@ public class PaimonStorageHandlerITCase {
                         GenericRow.of(1, 10L, BinaryString.fromString("Hi Again"), 1000L),
                         GenericRow.of(2, 40L, null, 400L),
                         GenericRow.of(3, 50L, BinaryString.fromString("Store"), 200L));
-        String tableName =
-                createAppendOnlyExternalTable(
-                        RowType.of(
-                                new DataType[] {
-                                    DataTypes.INT(),
-                                    DataTypes.BIGINT(),
-                                    DataTypes.STRING(),
-                                    DataTypes.BIGINT()
-                                },
-                                new String[] {"a", "b", "c", "d"}),
+
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.STRING(),
+                            DataTypes.BIGINT()
+                        },
+                        new String[] {"a", "b", "c", "d"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
                         Collections.emptyList(),
-                        data);
+                        Collections.emptyList(),
+                        identifier);
+
+        createExternalTable();
+        writeData(table, data);
 
         List<String> actual =
-                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY a, b, c");
+                hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY a, b, c");
         List<String> expected =
                 Arrays.asList(
                         "1\t10\tHi\t100",
@@ -480,9 +576,9 @@ public class PaimonStorageHandlerITCase {
                         "2\t30\tWorld\t300",
                         "2\t40\tNULL\t400",
                         "3\t50\tStore\t200");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
-        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY c");
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + externalTable + " ORDER BY c");
         expected =
                 Arrays.asList(
                         "NULL\t40",
@@ -491,29 +587,29 @@ public class PaimonStorageHandlerITCase {
                         "Hi Again\t10",
                         "Store\t50",
                         "World\t30");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT * FROM " + tableName + " WHERE d < 300 ORDER BY b, d");
+                        "SELECT * FROM " + externalTable + " WHERE d < 300 ORDER BY b, d");
         expected = Arrays.asList("1\t10\tHi\t100", "1\t20\tHello\t200", "3\t50\tStore\t200");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT a, sum(d) FROM " + tableName + " GROUP BY a ORDER BY a");
+                        "SELECT a, sum(d) FROM " + externalTable + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("1\t1300", "2\t700", "3\t200");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
                         "SELECT T1.a, T1.b, T2.b FROM "
-                                + tableName
+                                + externalTable
                                 + " T1 JOIN "
-                                + tableName
+                                + externalTable
                                 + " T2 ON T1.a = T2.a WHERE T1.a > 1 ORDER BY T1.a, T1.b, T2.b");
         expected = Arrays.asList("2\t30\t30", "2\t30\t40", "2\t40\t30", "2\t40\t40", "3\t50\t50");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
     }
 
     @Test
@@ -526,21 +622,28 @@ public class PaimonStorageHandlerITCase {
                         GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi Again")),
                         GenericRow.of(2, 20, 400L, null),
                         GenericRow.of(1, 30, 500L, BinaryString.fromString("Store")));
-        String tableName =
-                createAppendOnlyExternalTable(
-                        RowType.of(
-                                new DataType[] {
-                                    DataTypes.INT(),
-                                    DataTypes.INT(),
-                                    DataTypes.BIGINT(),
-                                    DataTypes.STRING()
-                                },
-                                new String[] {"pt", "a", "b", "c"}),
+
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
                         Collections.singletonList("pt"),
-                        data);
+                        Collections.emptyList(),
+                        identifier);
+
+        createExternalTable();
+        writeData(table, data);
 
         List<String> actual =
-                hiveShell.executeQuery("SELECT * FROM " + tableName + " ORDER BY pt, a, c");
+                hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY pt, a, c");
         List<String> expected =
                 Arrays.asList(
                         "1\t10\t100\tHi",
@@ -549,9 +652,9 @@ public class PaimonStorageHandlerITCase {
                         "1\t30\t500\tStore",
                         "2\t10\t200\tHello",
                         "2\t20\t400\tNULL");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
-        actual = hiveShell.executeQuery("SELECT c, b FROM " + tableName + " ORDER BY c");
+        actual = hiveShell.executeQuery("SELECT c, b FROM " + externalTable + " ORDER BY c");
         expected =
                 Arrays.asList(
                         "NULL\t400",
@@ -560,37 +663,41 @@ public class PaimonStorageHandlerITCase {
                         "Hi Again\t100",
                         "Store\t500",
                         "World\t300");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT * FROM " + tableName + " WHERE b < 400 ORDER BY b, c");
+                        "SELECT * FROM " + externalTable + " WHERE b < 400 ORDER BY b, c");
         expected =
                 Arrays.asList(
                         "1\t10\t100\tHi",
                         "1\t10\t100\tHi Again",
                         "2\t10\t200\tHello",
                         "1\t20\t300\tWorld");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT pt, max(a), min(c) FROM " + tableName + " GROUP BY pt ORDER BY pt");
+                        "SELECT pt, max(a), min(c) FROM "
+                                + externalTable
+                                + " GROUP BY pt ORDER BY pt");
         expected = Arrays.asList("1\t30\tHi", "2\t20\tHello");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
-                        "SELECT a, sum(b), min(c) FROM " + tableName + " GROUP BY a ORDER BY a");
+                        "SELECT a, sum(b), min(c) FROM "
+                                + externalTable
+                                + " GROUP BY a ORDER BY a");
         expected = Arrays.asList("10\t400\tHello", "20\t700\tWorld", "30\t500\tStore");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
 
         actual =
                 hiveShell.executeQuery(
                         "SELECT T1.a, T1.b, T2.b FROM "
-                                + tableName
+                                + externalTable
                                 + " T1 JOIN "
-                                + tableName
+                                + externalTable
                                 + " T2 ON T1.a = T2.a WHERE T1.a > 10 ORDER BY T1.a, T1.b, T2.b");
         expected =
                 Arrays.asList(
@@ -599,69 +706,10 @@ public class PaimonStorageHandlerITCase {
                         "20\t400\t300",
                         "20\t400\t400",
                         "30\t500\t500");
-        Assert.assertEquals(expected, actual);
+        assertThat(actual).isEqualTo(expected);
     }
 
-    private String createChangelogExternalTable(
-            RowType rowType,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            List<InternalRow> data)
-            throws Exception {
-
-        return createChangelogExternalTable(rowType, partitionKeys, primaryKeys, data, "");
-    }
-
-    private String createChangelogExternalTable(
-            RowType rowType,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            List<InternalRow> data,
-            String tableName)
-            throws Exception {
-        String path = folder.newFolder().toURI().toString();
-        String tableNameNotNull =
-                StringUtils.isNullOrWhitespaceOnly(tableName) ? TABLE_NAME : tableName;
-        String tablePath = String.format("%s/default.db/%s", path, tableNameNotNull);
-        Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, path);
-        conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
-        Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
-        Table table =
-                FileStoreTestUtils.createFileStoreTable(
-                        conf, rowType, partitionKeys, primaryKeys, identifier);
-
-        return writeData(table, tablePath, data);
-    }
-
-    private String createAppendOnlyExternalTable(
-            RowType rowType, List<String> partitionKeys, List<InternalRow> data) throws Exception {
-        return createAppendOnlyExternalTable(rowType, partitionKeys, data, "");
-    }
-
-    private String createAppendOnlyExternalTable(
-            RowType rowType, List<String> partitionKeys, List<InternalRow> data, String tableName)
-            throws Exception {
-        String path = folder.newFolder().toURI().toString();
-        String tableNameNotNull =
-                StringUtils.isNullOrWhitespaceOnly(tableName) ? TABLE_NAME : tableName;
-        String tablePath = String.format("%s/default.db/%s", path, tableNameNotNull);
-        Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, path);
-        conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
-        Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
-        Table table =
-                FileStoreTestUtils.createFileStoreTable(
-                        conf, rowType, partitionKeys, Collections.emptyList(), identifier);
-
-        return writeData(table, tablePath, data);
-    }
-
-    private String writeData(Table table, String path, List<InternalRow> data) throws Exception {
+    private void writeData(Table table, List<InternalRow> data) throws Exception {
         StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
         StreamTableWrite write = streamWriteBuilder.newWrite();
         StreamTableCommit commit = streamWriteBuilder.newCommit();
@@ -675,24 +723,11 @@ public class PaimonStorageHandlerITCase {
         commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
         commitIdentifier++;
         write.close();
-
-        String tableName = "test_table_" + (UUID.randomUUID().toString().substring(0, 4));
-        hiveShell.execute(
-                String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE EXTERNAL TABLE " + tableName + " ",
-                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
-                                "LOCATION '" + path + "'")));
-        return tableName;
     }
 
     @Test
     public void testReadAllSupportedTypes() throws Exception {
-        String root = folder.newFolder().toString();
-        String tablePath = String.format("%s/default.db/hive_test_table", root);
-        Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, root);
+        Options conf = getBasicConf();
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -723,15 +758,10 @@ public class PaimonStorageHandlerITCase {
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
 
-        hiveShell.execute(
-                String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table",
-                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
-                                "LOCATION '" + tablePath + "'")));
+        createExternalTable();
         List<Object[]> actual =
-                hiveShell.executeStatement("SELECT * FROM test_table WHERE f_int > 0");
+                hiveShell.executeStatement(
+                        "SELECT * FROM `" + externalTable + "`  WHERE f_int > 0");
 
         Map<Integer, GenericRow> expected = new HashMap<>();
         for (GenericRow rowData : input) {
@@ -742,12 +772,12 @@ public class PaimonStorageHandlerITCase {
         }
         for (Object[] actualRow : actual) {
             int key = (int) actualRow[3];
-            Assert.assertTrue(expected.containsKey(key));
+            assertThat(expected.containsKey(key)).isTrue();
             GenericRow expectedRow = expected.get(key);
-            Assert.assertEquals(expectedRow.getFieldCount(), actualRow.length);
+            assertThat(actualRow.length).isEqualTo(expectedRow.getFieldCount());
             for (int i = 0; i < actualRow.length; i++) {
                 if (expectedRow.isNullAt(i)) {
-                    Assert.assertNull(actualRow[i]);
+                    assertThat(actualRow[i]).isNull();
                     continue;
                 }
                 ObjectInspector oi =
@@ -760,23 +790,23 @@ public class PaimonStorageHandlerITCase {
                         Object expectedObject =
                                 primitiveOi.getPrimitiveJavaObject(expectedRow.getField(i));
                         if (expectedObject instanceof byte[]) {
-                            Assert.assertArrayEquals(
-                                    (byte[]) expectedObject, (byte[]) actualRow[i]);
+                            assertThat((byte[]) actualRow[i])
+                                    .containsExactly((byte[]) expectedObject);
                         } else if (expectedObject instanceof HiveDecimal) {
-                            // HiveDecimal will remove trailing zeros
+                            // HiveDecimal will remove trailing zeros,
                             // so we have to compare it from the original DecimalData
-                            Assert.assertEquals(expectedRow.getField(i).toString(), actualRow[i]);
+                            assertThat(actualRow[i]).isEqualTo(expectedRow.getField(i).toString());
                         } else {
-                            Assert.assertEquals(
-                                    String.valueOf(expectedObject), String.valueOf(actualRow[i]));
+                            assertThat(String.valueOf(actualRow[i]))
+                                    .isEqualTo(String.valueOf(expectedObject));
                         }
                         break;
                     case LIST:
                         ListObjectInspector listOi = (ListObjectInspector) oi;
-                        Assert.assertEquals(
-                                String.valueOf(listOi.getList(expectedRow.getField(i)))
-                                        .replace(" ", ""),
-                                actualRow[i]);
+                        assertThat(actualRow[i])
+                                .isEqualTo(
+                                        String.valueOf(listOi.getList(expectedRow.getField(i)))
+                                                .replace(" ", ""));
                         break;
                     case MAP:
                         MapObjectInspector mapOi = (MapObjectInspector) oi;
@@ -792,7 +822,7 @@ public class PaimonStorageHandlerITCase {
                             }
                             String[] split = kv.split(":");
                             String k = split[0].substring(1, split[0].length() - 1);
-                            Assert.assertEquals(expectedMap.get(k), split[1]);
+                            assertThat(split[1]).isEqualTo(expectedMap.get(k));
                             expectedMap.remove(k);
                         }
                         break;
@@ -802,15 +832,13 @@ public class PaimonStorageHandlerITCase {
             }
             expected.remove(key);
         }
-        Assert.assertTrue(expected.isEmpty());
+        assertThat(expected).isEmpty();
     }
 
     @Test
     public void testPredicatePushDown() throws Exception {
-        String path = folder.newFolder().toURI().toString();
-        String tablePath = String.format("%s/default.db/hive_test_table", path);
-        Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, path);
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.BUCKET, 1);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -845,64 +873,50 @@ public class PaimonStorageHandlerITCase {
                                 "CREATE EXTERNAL TABLE test_table",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + tablePath + "'")));
-        Assert.assertEquals(
-                Arrays.asList("1", "5"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a = 1 OR a = 5"));
-        Assert.assertEquals(
-                Arrays.asList("2", "3", "6"),
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE a <> 1 AND a <> 4 AND a <> 5"));
-        Assert.assertEquals(
-                Arrays.asList("2", "3", "6"),
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE NOT (a = 1 OR a = 5) AND NOT a = 4"));
-        Assert.assertEquals(
-                Arrays.asList("1", "2", "3"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a < 4"));
-        Assert.assertEquals(
-                Arrays.asList("1", "2", "3"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a <= 3"));
-        Assert.assertEquals(
-                Arrays.asList("4", "5", "6"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a > 3"));
-        Assert.assertEquals(
-                Arrays.asList("4", "5", "6"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a >= 4"));
-        Assert.assertEquals(
-                Arrays.asList("1", "3"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, 1, 3, 7)"));
-        Assert.assertEquals(
-                Collections.singletonList("3"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, NULL, 3, 7)"));
-        Assert.assertEquals(
-                Arrays.asList("4", "6"),
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE a NOT IN (0, 1, 3, 2, 5, 7)"));
-        Assert.assertEquals(
-                Collections.emptyList(),
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE a NOT IN (0, 1, NULL, 2, 5, 7)"));
-        Assert.assertEquals(
-                Arrays.asList("2", "3"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a BETWEEN 2 AND 3"));
-        Assert.assertEquals(
-                Arrays.asList("1", "5", "6"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a NOT BETWEEN 2 AND 4"));
-        Assert.assertEquals(
-                Arrays.asList("NULL", "NULL"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NULL"));
-        Assert.assertEquals(
-                Arrays.asList("1", "2", "3", "4", "5", "6"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NOT NULL"));
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a = 1 OR a = 5"))
+                .containsExactly("1", "5");
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM test_table WHERE a <> 1 AND a <> 4 AND a <> 5"))
+                .containsExactly("2", "3", "6");
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM test_table WHERE NOT (a = 1 OR a = 5) AND NOT a = 4"))
+                .containsExactly("2", "3", "6");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a < 4"))
+                .containsExactly("1", "2", "3");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a <= 3"))
+                .containsExactly("1", "2", "3");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a > 3"))
+                .containsExactly("4", "5", "6");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a >= 4"))
+                .containsExactly("4", "5", "6");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, 1, 3, 7)"))
+                .containsExactly("1", "3");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a IN (0, NULL, 3, 7)"))
+                .containsExactly("3");
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM test_table WHERE a NOT IN (0, 1, 3, 2, 5, 7)"))
+                .containsExactly("4", "6");
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM test_table WHERE a NOT IN (0, 1, NULL, 2, 5, 7)"))
+                .isEmpty();
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a BETWEEN 2 AND 3"))
+                .containsExactly("2", "3");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a NOT BETWEEN 2 AND 4"))
+                .containsExactly("1", "5", "6");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NULL"))
+                .containsExactly("NULL", "NULL");
+        assertThat(hiveShell.executeQuery("SELECT * FROM test_table WHERE a IS NOT NULL"))
+                .containsExactly("1", "2", "3", "4", "5", "6");
     }
 
     @Test
     public void testDateAndTimestamp() throws Exception {
-        String path = folder.newFolder().toURI().toString();
-        String tablePath = String.format("%s/default.db/hive_test_table", path);
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, path);
+        Options conf = getBasicConf();
         conf.set(
                 CoreOptions.FILE_FORMAT,
                 random.nextBoolean()
@@ -939,26 +953,182 @@ public class PaimonStorageHandlerITCase {
         commit.commit(2, write.prepareCommit(true, 2));
         write.close();
 
+        createExternalTable();
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-11'"))
+                .containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM `"
+                                        + externalTable
+                                        + "` WHERE ts = '2022-05-17 17:29:20.1'"))
+                .containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-12'"))
+                .containsExactly("1971-01-12\tNULL");
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM `"
+                                        + externalTable
+                                        + "` WHERE ts = '2022-06-18 08:30:00.1'"))
+                .containsExactly("NULL\t2022-06-18 08:30:00.1");
+    }
+
+    @Test
+    public void testTime() throws Exception {
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        getBasicConf(),
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.INT().notNull(), DataTypes.TIME(), DataTypes.TIME(2)
+                                },
+                                new String[] {"pk", "time0", "time2"}),
+                        Collections.emptyList(),
+                        Collections.singletonList("pk"));
+
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+
+        write.write(GenericRow.of(1, 0, 0)); // 00:00
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(GenericRow.of(2, 86_399_999, 86_399_999)); // 23:59:59.999999
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(GenericRow.of(3, 45_001_000, 45_001_000)); // 12:30:01
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.write(GenericRow.of(4, null, null));
+        commit.commit(4, write.prepareCommit(true, 3));
+
+        write.close();
+
+        createExternalTable();
+
+        // the TIME column will be converted to STRING column
+        assertThat(hiveShell.executeQuery("SHOW CREATE TABLE " + externalTable))
+                .contains(
+                        "  `time0` string COMMENT 'from deserializer', ",
+                        "  `time2` string COMMENT 'from deserializer')");
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM " + externalTable))
+                .containsExactlyInAnyOrder(
+                        "1\t00:00\t00:00",
+                        "2\t23:59:59.999\t23:59:59.999",
+                        "3\t12:30:01\t12:30:01",
+                        "4\tNULL\tNULL");
+
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT * FROM " + externalTable + " WHERE time0 = '12:30:01'"))
+                .containsExactlyInAnyOrder("3\t12:30:01\t12:30:01");
+    }
+
+    @Test
+    public void testMapKey() throws Exception {
+        Options conf = getBasicConf();
+        conf.set(
+                CoreOptions.FILE_FORMAT,
+                ThreadLocalRandom.current().nextBoolean()
+                        ? CoreOptions.FileFormatType.ORC
+                        : CoreOptions.FileFormatType.PARQUET);
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.MAP(DataTypes.DATE(), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.TIMESTAMP(3), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.TIMESTAMP(5), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.DECIMAL(2, 1), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()),
+                                    DataTypes.MAP(DataTypes.VARCHAR(10), DataTypes.STRING())
+                                },
+                                new String[] {
+                                    "date_key",
+                                    "timestamp3_key",
+                                    "timestamp5_key",
+                                    "decimal_key",
+                                    "string_key",
+                                    "varchar_key"
+                                }),
+                        Collections.emptyList(),
+                        Collections.emptyList());
+
+        StreamWriteBuilder streamWriteBuilder = table.newStreamWriteBuilder();
+        StreamTableWrite write = streamWriteBuilder.newWrite();
+        StreamTableCommit commit = streamWriteBuilder.newCommit();
+
+        Map<Integer, BinaryString> dateMap =
+                Collections.singletonMap(375, BinaryString.fromString("Date 1971-01-11"));
+        Map<Timestamp, BinaryString> timestamp3Map =
+                Collections.singletonMap(
+                        Timestamp.fromLocalDateTime(
+                                LocalDateTime.of(2023, 7, 18, 12, 29, 59, 123_000_000)),
+                        BinaryString.fromString("Test timestamp(3)"));
+        Map<Timestamp, BinaryString> timestamp5Map =
+                Collections.singletonMap(
+                        Timestamp.fromLocalDateTime(
+                                LocalDateTime.of(2023, 7, 18, 12, 29, 59, 123_450_000)),
+                        BinaryString.fromString("Test timestamp(5)"));
+        Map<Decimal, BinaryString> decimalMap =
+                Collections.singletonMap(
+                        Decimal.fromBigDecimal(new BigDecimal("1.2"), 2, 1),
+                        BinaryString.fromString("一点二"));
+        Map<BinaryString, BinaryString> stringMap =
+                Collections.singletonMap(
+                        BinaryString.fromString("Engine"), BinaryString.fromString("Hive"));
+        Map<BinaryString, BinaryString> varcharMap =
+                Collections.singletonMap(
+                        BinaryString.fromString("Name"), BinaryString.fromString("Paimon"));
+
+        write.write(
+                GenericRow.of(
+                        new GenericMap(dateMap),
+                        new GenericMap(timestamp3Map),
+                        new GenericMap(timestamp5Map),
+                        new GenericMap(decimalMap),
+                        new GenericMap(stringMap),
+                        new GenericMap(varcharMap)));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+
+        createExternalTable();
+
+        assertThat(
+                        hiveShell.executeQuery(
+                                "SELECT "
+                                        + "date_key[CAST('1971-01-11' AS DATE)],"
+                                        + "timestamp3_key[CAST('2023-7-18 12:29:59.123' AS TIMESTAMP)],"
+                                        + "timestamp5_key[CAST('2023-7-18 12:29:59.12345' AS TIMESTAMP)],"
+                                        + "decimal_key[1.2],"
+                                        + "string_key['Engine'],"
+                                        + "varchar_key['Name']"
+                                        + " FROM `"
+                                        + externalTable
+                                        + "`"))
+                .containsExactly(
+                        "Date 1971-01-11\tTest timestamp(3)\tTest timestamp(5)\t一点二\tHive\tPaimon");
+    }
+
+    private Options getBasicConf() {
+        Options conf = new Options();
+        conf.set(CatalogOptions.WAREHOUSE, warehouse);
+        conf.set(CoreOptions.BUCKET, 2);
+        return conf;
+    }
+
+    private void createExternalTable() {
         hiveShell.execute(
                 String.join(
                         "\n",
                         Arrays.asList(
-                                "CREATE EXTERNAL TABLE test_table",
+                                "CREATE EXTERNAL TABLE " + externalTable + " ",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + tablePath + "'")));
-        Assert.assertEquals(
-                Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.1"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE dt = '1971-01-11'"));
-        Assert.assertEquals(
-                Collections.singletonList("1971-01-11\t2022-05-17 17:29:20.1"),
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE ts = '2022-05-17 17:29:20.1'"));
-        Assert.assertEquals(
-                Collections.singletonList("1971-01-12\tNULL"),
-                hiveShell.executeQuery("SELECT * FROM test_table WHERE dt = '1971-01-12'"));
-        Assert.assertEquals(
-                Collections.singletonList("NULL\t2022-06-18 08:30:00.1"),
-                hiveShell.executeQuery(
-                        "SELECT * FROM test_table WHERE ts = '2022-06-18 08:30:00.1'"));
     }
 }

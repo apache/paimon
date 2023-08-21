@@ -31,9 +31,12 @@ import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.PredicateBuilder.convertJavaObject;
@@ -48,14 +51,19 @@ public class SearchArgumentToPredicateConverter {
     private final List<PredicateLeaf> leaves;
     private final List<String> columnNames;
     private final List<DataType> columnTypes;
+    @Nullable private final Set<String> readColumnNames;
     private final PredicateBuilder builder;
 
     public SearchArgumentToPredicateConverter(
-            SearchArgument sarg, List<String> columnNames, List<DataType> columnTypes) {
+            SearchArgument sarg,
+            List<String> columnNames,
+            List<DataType> columnTypes,
+            @Nullable Set<String> readColumnNames) {
         this.root = sarg.getExpression();
         this.leaves = sarg.getLeaves();
         this.columnNames = columnNames;
         this.columnTypes = columnTypes;
+        this.readColumnNames = readColumnNames;
         this.builder =
                 new PredicateBuilder(
                         RowType.of(
@@ -116,6 +124,16 @@ public class SearchArgumentToPredicateConverter {
 
     private Predicate convertLeaf(PredicateLeaf leaf) {
         String columnName = leaf.getColumnName();
+        if (readColumnNames != null && !readColumnNames.contains(columnName)) {
+            throw new UnsupportedOperationException(
+                    "Column "
+                            + columnName
+                            + " is not needed when reading. "
+                            + "It is very likely that the Hive table you're reading is a partitioned table and "
+                            + columnName
+                            + " is a partition column.");
+        }
+
         int idx = columnNames.indexOf(columnName);
         Preconditions.checkArgument(idx >= 0, "Column " + columnName + " not found.");
         DataType columnType = columnTypes.get(idx);

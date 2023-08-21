@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.catalog.Identifier;
+
 import java.io.Serializable;
 
 /** Used to convert a MySQL source table name to corresponding Paimon table name. */
@@ -26,15 +28,18 @@ public class TableNameConverter implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private final boolean caseSensitive;
+    private final boolean mergeShards;
     private final String prefix;
     private final String suffix;
 
     public TableNameConverter(boolean caseSensitive) {
-        this(caseSensitive, "", "");
+        this(caseSensitive, true, "", "");
     }
 
-    public TableNameConverter(boolean caseSensitive, String prefix, String suffix) {
+    public TableNameConverter(
+            boolean caseSensitive, boolean mergeShards, String prefix, String suffix) {
         this.caseSensitive = caseSensitive;
+        this.mergeShards = mergeShards;
         this.prefix = prefix;
         this.suffix = suffix;
     }
@@ -42,5 +47,15 @@ public class TableNameConverter implements Serializable {
     public String convert(String originName) {
         String tableName = caseSensitive ? originName : originName.toLowerCase();
         return prefix + tableName + suffix;
+    }
+
+    public String convert(Identifier originIdentifier) {
+        String rawName =
+                mergeShards
+                        ? originIdentifier.getObjectName()
+                        : originIdentifier.getDatabaseName()
+                                + "_"
+                                + originIdentifier.getObjectName();
+        return convert(rawName);
     }
 }

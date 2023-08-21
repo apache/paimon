@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.orc.writer;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.fs.PositionOutputStream;
@@ -45,17 +46,18 @@ public class OrcBulkWriter implements FormatWriter {
     public OrcBulkWriter(
             Vectorizer<InternalRow> vectorizer,
             Writer writer,
-            PositionOutputStream underlyingStream) {
+            PositionOutputStream underlyingStream,
+            int batchSize) {
         this.vectorizer = checkNotNull(vectorizer);
         this.writer = checkNotNull(writer);
-        this.rowBatch = vectorizer.getSchema().createRowBatch();
 
+        this.rowBatch = vectorizer.getSchema().createRowBatch(batchSize);
         // Configure the vectorizer with the writer so that users can add
         // metadata on the fly through the Vectorizer#vectorize(...) method.
         this.vectorizer.setWriter(this.writer);
         this.underlyingStream = underlyingStream;
         // TODO: Turn to access these hidden field directly after upgrade to ORC 1.7.4
-        this.treeWriter = getHiddenFiledInORC("treeWriter");
+        this.treeWriter = getHiddenFieldInORC("treeWriter");
     }
 
     @Override
@@ -95,7 +97,7 @@ public class OrcBulkWriter implements FormatWriter {
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T getHiddenFiledInORC(String fieldName) {
+    private <T> T getHiddenFieldInORC(String fieldName) {
         try {
             Field treeWriterField = writer.getClass().getDeclaredField(fieldName);
             AccessController.doPrivileged(
@@ -109,5 +111,10 @@ public class OrcBulkWriter implements FormatWriter {
             throw new RuntimeException(
                     "Cannot get " + fieldName + " from " + writer.getClass().getName(), e);
         }
+    }
+
+    @VisibleForTesting
+    VectorizedRowBatch getRowBatch() {
+        return rowBatch;
     }
 }

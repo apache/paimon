@@ -30,6 +30,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataType;
@@ -109,7 +110,10 @@ public class TableCommitTest {
 
         FileStoreTable table =
                 FileStoreTableFactory.create(
-                        new FailingFileIO(), new Path(path), tableSchema, Lock.emptyFactory());
+                        new FailingFileIO(),
+                        new Path(path),
+                        tableSchema,
+                        new CatalogEnvironment(Lock.emptyFactory(), null, null));
 
         String commitUser = UUID.randomUUID().toString();
         StreamTableWrite write = table.newWrite(commitUser);

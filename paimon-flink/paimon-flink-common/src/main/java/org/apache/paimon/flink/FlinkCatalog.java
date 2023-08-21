@@ -20,15 +20,13 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.table.api.Schema.UnresolvedColumn;
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.api.WatermarkSpec;
@@ -73,6 +71,7 @@ import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -91,23 +90,43 @@ import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
+import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
+import static org.apache.paimon.flink.log.LogStoreRegister.registerLogSystem;
+import static org.apache.paimon.flink.log.LogStoreRegister.unRegisterLogSystem;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundKey;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeWatermarkSpec;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNonPhysicalColumns;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeWatermarkSpec;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Catalog for paimon. */
 public class FlinkCatalog extends AbstractCatalog {
+    private final ClassLoader classLoader;
 
     private final Catalog catalog;
+    private final boolean logStoreAutoRegister;
 
-    public FlinkCatalog(Catalog catalog, String name, String defaultDatabase) {
+    private final Duration logStoreAutoRegisterTimeout;
+
+    private final Options options;
+
+    public FlinkCatalog(
+            Catalog catalog,
+            String name,
+            String defaultDatabase,
+            ClassLoader classLoader,
+            Options options) {
         super(name, defaultDatabase);
         this.catalog = catalog;
+        this.classLoader = classLoader;
+        this.options = options;
+        this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);
+        this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
         try {
             this.catalog.createDatabase(defaultDatabase, true);
         } catch (Catalog.DatabaseAlreadyExistException ignore) {
@@ -212,8 +231,16 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void dropTable(ObjectPath tablePath, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
+        Identifier identifier = toIdentifier(tablePath);
+        Table table = null;
         try {
+            if (logStoreAutoRegister && catalog.tableExists(identifier)) {
+                table = catalog.getTable(identifier);
+            }
             catalog.dropTable(toIdentifier(tablePath), ignoreIfNotExists);
+            if (logStoreAutoRegister && table != null) {
+                unRegisterLogSystem(identifier, table.options(), classLoader);
+            }
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
         }
@@ -237,21 +264,38 @@ public class FlinkCatalog extends AbstractCatalog {
                             + " You can create TEMPORARY table instead if you want to create the table of other connector.");
         }
 
+        Identifier identifier = toIdentifier(tablePath);
+        if (logStoreAutoRegister) {
+            // Although catalog.createTable will copy the default options, but we need this info
+            // here before create table, such as table-default.kafka.bootstrap.servers defined in
+            // catalog options. Temporarily, we copy the default options here.
+            if (catalog instanceof org.apache.paimon.catalog.AbstractCatalog) {
+                ((org.apache.paimon.catalog.AbstractCatalog) catalog)
+                        .copyTableDefaultOptions(options);
+            }
+            options.put(REGISTER_TIMEOUT.key(), logStoreAutoRegisterTimeout.toString());
+            registerLogSystem(catalog, identifier, options, classLoader);
+        }
         // remove table path
         String specific = options.remove(PATH.key());
-        if (specific != null) {
+        if (specific != null || logStoreAutoRegister) {
             catalogTable = catalogTable.copy(options);
         }
 
+        boolean unRegisterLogSystem = false;
         try {
             catalog.createTable(
-                    toIdentifier(tablePath),
-                    FlinkCatalog.fromCatalogTable(catalogTable),
-                    ignoreIfExists);
+                    identifier, FlinkCatalog.fromCatalogTable(catalogTable), ignoreIfExists);
         } catch (Catalog.TableAlreadyExistException e) {
+            unRegisterLogSystem = true;
             throw new TableAlreadyExistException(getName(), tablePath);
         } catch (Catalog.DatabaseNotExistException e) {
+            unRegisterLogSystem = true;
             throw new DatabaseNotExistException(getName(), e.database());
+        } finally {
+            if (logStoreAutoRegister && unRegisterLogSystem) {
+                unRegisterLogSystem(identifier, options, classLoader);
+            }
         }
     }
 
@@ -470,6 +514,9 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     private static void validateAlterTable(CatalogTable ct1, CatalogTable ct2) {
+        if (ct1 instanceof SystemCatalogTable) {
+            throw new UnsupportedOperationException("Can't alter system table.");
+        }
         org.apache.flink.table.api.TableSchema ts1 = ct1.getSchema();
         org.apache.flink.table.api.TableSchema ts2 = ct2.getSchema();
         boolean pkEquality = false;
@@ -557,40 +604,40 @@ public class FlinkCatalog extends AbstractCatalog {
     public static Schema fromCatalogTable(CatalogTable catalogTable) {
         TableSchema schema = catalogTable.getSchema();
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
-        List<String> primaryKeys = new ArrayList<>();
-        if (schema.getPrimaryKey().isPresent()) {
-            primaryKeys = schema.getPrimaryKey().get().getColumns();
-        }
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
-
         // Serialize virtual columns and watermark to the options
         // This is what Flink SQL needs, the storage itself does not need them
         options.putAll(columnOptions(schema));
 
-        return new Schema(
-                addColumnComments(toDataType(rowType).getFields(), getColumnComments(catalogTable)),
-                catalogTable.getPartitionKeys(),
-                primaryKeys,
-                options,
-                catalogTable.getComment());
+        Schema.Builder schemaBuilder =
+                Schema.newBuilder()
+                        .comment(catalogTable.getComment())
+                        .options(options)
+                        .primaryKey(
+                                schema.getPrimaryKey()
+                                        .map(pk -> pk.getColumns())
+                                        .orElse(Collections.emptyList()))
+                        .partitionKeys(catalogTable.getPartitionKeys());
+        Map<String, String> columnComments = getColumnComments(catalogTable);
+        rowType.getFields()
+                .forEach(
+                        field ->
+                                schemaBuilder.column(
+                                        field.getName(),
+                                        toDataType(field.getType()),
+                                        columnComments.get(field.getName())));
+
+        return schemaBuilder.build();
     }
 
     private static Map<String, String> getColumnComments(CatalogTable catalogTable) {
         return catalogTable.getUnresolvedSchema().getColumns().stream()
                 .filter(c -> c.getComment().isPresent())
-                .collect(Collectors.toMap(UnresolvedColumn::getName, c -> c.getComment().get()));
-    }
-
-    private static List<DataField> addColumnComments(
-            List<DataField> fields, Map<String, String> columnComments) {
-        return fields.stream()
-                .map(
-                        field -> {
-                            String comment = columnComments.get(field.name());
-                            return comment == null ? field : field.newDescription(comment);
-                        })
-                .collect(Collectors.toList());
+                .collect(
+                        Collectors.toMap(
+                                org.apache.flink.table.api.Schema.UnresolvedColumn::getName,
+                                c -> c.getComment().get()));
     }
 
     /** Only reserve necessary options. */
@@ -613,7 +660,7 @@ public class FlinkCatalog extends AbstractCatalog {
         // watermark
         List<WatermarkSpec> watermarkSpecs = schema.getWatermarkSpecs();
         if (!watermarkSpecs.isEmpty()) {
-            Preconditions.checkArgument(watermarkSpecs.size() == 1);
+            checkArgument(watermarkSpecs.size() == 1);
             columnOptions.putAll(serializeWatermarkSpec(watermarkSpecs.get(0)));
         }
 

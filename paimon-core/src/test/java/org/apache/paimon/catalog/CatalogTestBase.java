@@ -208,7 +208,24 @@ public abstract class CatalogTestBase {
         catalog.createDatabase("test_db", false);
         // Create table creates a new table when it does not exist
         Identifier identifier = Identifier.create("test_db", "new_table");
-        catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk1", DataTypes.INT())
+                        .column("pk2", DataTypes.STRING())
+                        .column("pk3", DataTypes.STRING())
+                        .column(
+                                "col1",
+                                DataTypes.ROW(
+                                        DataTypes.STRING(),
+                                        DataTypes.BIGINT(),
+                                        DataTypes.TIMESTAMP(),
+                                        DataTypes.ARRAY(DataTypes.STRING())))
+                        .column("col2", DataTypes.MAP(DataTypes.STRING(), DataTypes.BIGINT()))
+                        .column("col3", DataTypes.ARRAY(DataTypes.ROW(DataTypes.STRING())))
+                        .partitionKeys("pk1", "pk2")
+                        .primaryKey("pk1", "pk2", "pk3")
+                        .build();
+        catalog.createTable(identifier, schema, false);
         boolean exists = catalog.tableExists(identifier);
         assertThat(exists).isTrue();
 
@@ -588,7 +605,7 @@ public abstract class CatalogTestBase {
                 new Schema(
                         Lists.newArrayList(
                                 new DataField(0, "dt", DataTypes.STRING()),
-                                new DataField(1, "col1", DataTypes.BIGINT())),
+                                new DataField(1, "col1", DataTypes.BIGINT(), "col1 field")),
                         Lists.newArrayList("dt"),
                         Collections.emptyList(),
                         Maps.newHashMap(),
@@ -602,6 +619,7 @@ public abstract class CatalogTestBase {
 
         assertThat(table.rowType().getFieldIndex("col1")).isEqualTo(1);
         assertThat(table.rowType().getTypeAt(1)).isEqualTo(DataTypes.DOUBLE());
+        assertThat(table.rowType().getFields().get(1).description()).isEqualTo("col1 field");
 
         // Alter table update a column type throws Exception when column data type does not support
         // cast

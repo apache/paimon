@@ -35,12 +35,14 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
+import org.apache.paimon.mergetree.ContainsLevels;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
+import org.apache.paimon.mergetree.compact.FirstRowMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.LookupCompaction;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
@@ -62,6 +64,7 @@ import javax.annotation.Nullable;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
@@ -93,6 +96,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             Supplier<RecordEqualiser> valueEqualiserSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
+            Map<String, FileStorePathFactory> format2PathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
@@ -119,7 +123,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         keyType,
                         valueType,
                         options.fileFormat(),
-                        pathFactory,
+                        format2PathFactory,
                         options.targetFileSize());
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.valueEqualiserSupplier = valueEqualiserSupplier;
@@ -143,12 +147,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         }
 
         KeyValueFileWriterFactory writerFactory =
-                writerFactoryBuilder.build(
-                        partition,
-                        bucket,
-                        options.fileCompressionPerLevel(),
-                        options.fileCompression(),
-                        options);
+                writerFactoryBuilder.build(partition, bucket, options);
         Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
         Levels levels = new Levels(keyComparator, restoreFiles, options.numLevels());
         UniversalCompaction universalCompaction =
@@ -197,7 +196,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     levels,
                     compactStrategy,
                     keyComparator,
-                    options.targetFileSize(),
+                    options.compactionFileSize(),
                     options.numSortedRunStopTrigger(),
                     rewriter);
         }
@@ -207,12 +206,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             BinaryRow partition, int bucket, Comparator<InternalRow> keyComparator, Levels levels) {
         KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
         KeyValueFileWriterFactory writerFactory =
-                writerFactoryBuilder.build(
-                        partition,
-                        bucket,
-                        options.fileCompressionPerLevel(),
-                        options.fileCompression(),
-                        options);
+                writerFactoryBuilder.build(partition, bucket, options);
         MergeSorter mergeSorter = new MergeSorter(options, keyType, valueType, ioManager);
         switch (options.changelogProducer()) {
             case FULL_COMPACTION:
@@ -226,6 +220,23 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         valueEqualiserSupplier.get(),
                         options.changelogRowDeduplicate());
             case LOOKUP:
+                if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+                    KeyValueFileReaderFactory keyOnlyReader =
+                            readerFactoryBuilder
+                                    .copyWithoutProjection()
+                                    .withValueProjection(new int[0][])
+                                    .build(partition, bucket);
+                    ContainsLevels containsLevels = createContainsLevels(levels, keyOnlyReader);
+                    return new FirstRowMergeTreeCompactRewriter(
+                            containsLevels,
+                            readerFactory,
+                            writerFactory,
+                            keyComparator,
+                            mfFactory,
+                            mergeSorter,
+                            valueEqualiserSupplier.get(),
+                            options.changelogRowDeduplicate());
+                }
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
                 return new LookupMergeTreeCompactRewriter(
                         lookupLevels,
@@ -253,6 +264,27 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 keyComparatorSupplier.get(),
                 keyType,
                 valueType,
+                file ->
+                        readerFactory.createRecordReader(
+                                file.schemaId(), file.fileName(), file.level()),
+                () -> ioManager.createChannel().getPathFile(),
+                new HashLookupStoreFactory(
+                        cacheManager,
+                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
+                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+    }
+
+    private ContainsLevels createContainsLevels(
+            Levels levels, KeyValueFileReaderFactory readerFactory) {
+        if (ioManager == null) {
+            throw new RuntimeException(
+                    "Can not use lookup, there is no temp disk directory to use.");
+        }
+        return new ContainsLevels(
+                levels,
+                keyComparatorSupplier.get(),
+                keyType,
                 file ->
                         readerFactory.createRecordReader(
                                 file.schemaId(), file.fileName(), file.level()),

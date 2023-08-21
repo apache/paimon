@@ -66,6 +66,8 @@ public class PaimonDateObjectInspector extends AbstractPrimitiveJavaObjectInspec
         }
         if (value instanceof Date) {
             return DateTimeUtils.toInternal((Date) value);
+        } else if (value instanceof DateWritable) {
+            return (((DateWritable) value).getDays());
         } else {
             return DateTimeUtils.toInternal((LocalDate) value);
         }

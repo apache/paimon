@@ -56,7 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactorSinkBuilder} and {@link CompactorSink}. */
 public class CompactorSinkITCase extends AbstractTestBase {
@@ -97,8 +97,8 @@ public class CompactorSinkITCase extends AbstractTestBase {
         commit.commit(1, write.prepareCommit(true, 1));
 
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        assertEquals(2, snapshot.id());
-        assertEquals(Snapshot.CommitKind.APPEND, snapshot.commitKind());
+        assertThat(snapshot.id()).isEqualTo(2);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
         write.close();
         commit.close();
@@ -117,19 +117,19 @@ public class CompactorSinkITCase extends AbstractTestBase {
         env.execute();
 
         snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-        assertEquals(3, snapshot.id());
-        assertEquals(Snapshot.CommitKind.COMPACT, snapshot.commitKind());
+        assertThat(snapshot.id()).isEqualTo(3);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
 
         TableScan.Plan plan = table.newReadBuilder().newScan().plan();
-        assertEquals(3, plan.splits().size());
+        assertThat(plan.splits().size()).isEqualTo(3);
         for (Split split : plan.splits()) {
             DataSplit dataSplit = (DataSplit) split;
             if (dataSplit.partition().getInt(1) == 15) {
                 // compacted
-                assertEquals(1, dataSplit.files().size());
+                assertThat(dataSplit.dataFiles().size()).isEqualTo(1);
             } else {
                 // not compacted
-                assertEquals(2, dataSplit.files().size());
+                assertThat(dataSplit.dataFiles().size()).isEqualTo(2);
             }
         }
     }

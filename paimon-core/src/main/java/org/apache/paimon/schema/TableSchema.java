@@ -58,6 +58,8 @@ public class TableSchema implements Serializable {
 
     private final String comment;
 
+    private final long timeMillis;
+
     public TableSchema(
             long id,
             List<DataField> fields,
@@ -66,6 +68,26 @@ public class TableSchema implements Serializable {
             List<String> primaryKeys,
             Map<String, String> options,
             String comment) {
+        this(
+                id,
+                fields,
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                options,
+                comment,
+                System.currentTimeMillis());
+    }
+
+    public TableSchema(
+            long id,
+            List<DataField> fields,
+            int highestFieldId,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            Map<String, String> options,
+            String comment,
+            long timeMillis) {
         this.id = id;
         this.fields = fields;
         this.highestFieldId = highestFieldId;
@@ -73,6 +95,7 @@ public class TableSchema implements Serializable {
         this.primaryKeys = primaryKeys;
         this.options = Collections.unmodifiableMap(options);
         this.comment = comment;
+        this.timeMillis = timeMillis;
 
         // try to trim to validate primary keys
         trimmedPrimaryKeys();
@@ -107,11 +130,6 @@ public class TableSchema implements Serializable {
 
     public List<String> trimmedPrimaryKeys() {
         if (primaryKeys.size() > 0) {
-            Preconditions.checkState(
-                    primaryKeys.containsAll(partitionKeys),
-                    String.format(
-                            "Primary key constraint %s should include all partition fields %s",
-                            primaryKeys, partitionKeys));
             List<String> adjusted =
                     primaryKeys.stream()
                             .filter(pk -> !partitionKeys.contains(pk))
@@ -143,6 +161,14 @@ public class TableSchema implements Serializable {
             bucketKeys = fieldNames();
         }
         return bucketKeys;
+    }
+
+    public boolean crossPartitionUpdate() {
+        if (primaryKeys.isEmpty() || partitionKeys.isEmpty()) {
+            return false;
+        }
+
+        return !primaryKeys.containsAll(partitionKeys);
     }
 
     /** Original bucket keys, maybe empty. */
@@ -183,6 +209,10 @@ public class TableSchema implements Serializable {
         return comment;
     }
 
+    public long timeMillis() {
+        return timeMillis;
+    }
+
     public RowType logicalRowType() {
         return new RowType(fields);
     }
@@ -197,6 +227,10 @@ public class TableSchema implements Serializable {
 
     public RowType logicalTrimmedPrimaryKeysType() {
         return projectedLogicalRowType(trimmedPrimaryKeys());
+    }
+
+    public RowType logicalPrimaryKeysType() {
+        return projectedLogicalRowType(primaryKeys());
     }
 
     public List<DataField> trimmedPrimaryKeysFields() {
@@ -215,13 +249,20 @@ public class TableSchema implements Serializable {
                 .collect(Collectors.toList());
     }
 
-    private RowType projectedLogicalRowType(List<String> projectedFieldNames) {
+    public RowType projectedLogicalRowType(List<String> projectedFieldNames) {
         return new RowType(projectedDataFields(projectedFieldNames));
     }
 
     public TableSchema copy(Map<String, String> newOptions) {
         return new TableSchema(
-                id, fields, highestFieldId, partitionKeys, primaryKeys, newOptions, comment);
+                id,
+                fields,
+                highestFieldId,
+                partitionKeys,
+                primaryKeys,
+                newOptions,
+                comment,
+                timeMillis);
     }
 
     @Override

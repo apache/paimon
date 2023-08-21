@@ -22,24 +22,25 @@ import org.apache.paimon.fs.Path;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Base tests for spark read. */
 public class SparkGenericCatalogTest {
 
-    protected static SparkSession spark = null;
+    protected SparkSession spark = null;
 
-    protected static Path warehousePath = null;
+    protected Path warehousePath = null;
 
-    @BeforeAll
-    public static void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
+    @BeforeEach
+    public void startMetastoreAndSpark(@TempDir java.nio.file.Path tempDir) {
         warehousePath = new Path("file:" + tempDir.toString());
         spark =
                 SparkSession.builder()
@@ -49,8 +50,8 @@ public class SparkGenericCatalogTest {
         spark.conf().set("spark.sql.catalog.spark_catalog", SparkGenericCatalog.class.getName());
     }
 
-    @AfterAll
-    public static void stopMetastoreAndSpark() {
+    @AfterEach
+    public void stopMetastoreAndSpark() {
         if (spark != null) {
             spark.stop();
             spark = null;
@@ -75,9 +76,34 @@ public class SparkGenericCatalogTest {
     }
 
     @Test
+    public void testSparkSessionReload() {
+        spark.sql("CREATE DATABASE my_db");
+        spark.close();
+
+        spark =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        .master("local[2]")
+                        .getOrCreate();
+        spark.conf().set("spark.sql.catalog.spark_catalog", SparkGenericCatalog.class.getName());
+        assertThatCode(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE my_db.DB_PT (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
+                                                + " ('file.format'='avro')"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testCsvTable() {
         spark.sql("CREATE TABLE CT (a INT, b INT, c STRING) USING csv");
         testReadWrite("CT");
+    }
+
+    @Test
+    public void testStructTable() {
+        spark.sql(
+                "CREATE TABLE ST (a INT, b STRUCT<b1: STRING, b2: STRING, b3: STRING>) USING paimon");
     }
 
     private void testReadWrite(String table) {

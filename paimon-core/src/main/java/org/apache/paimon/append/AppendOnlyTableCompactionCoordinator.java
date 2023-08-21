@@ -62,6 +62,7 @@ public class AppendOnlyTableCompactionCoordinator {
 
     private final InnerTableScan scan;
     private final long targetFileSize;
+    private final long compactionFileSize;
     private final int minFileNum;
     private final int maxFileNum;
     private final boolean streamingMode;
@@ -93,6 +94,7 @@ public class AppendOnlyTableCompactionCoordinator {
         this.streamingMode = isStreaming;
         CoreOptions coreOptions = table.coreOptions();
         this.targetFileSize = coreOptions.targetFileSize();
+        this.compactionFileSize = coreOptions.compactionFileSize();
         this.minFileNum = coreOptions.compactionMinFileNum();
         this.maxFileNum = coreOptions.compactionMaxFileNum();
     }
@@ -116,7 +118,7 @@ public class AppendOnlyTableCompactionCoordinator {
             splits.forEach(
                     split -> {
                         DataSplit dataSplit = (DataSplit) split;
-                        notifyNewFiles(dataSplit.partition(), dataSplit.files());
+                        notifyNewFiles(dataSplit.partition(), dataSplit.dataFiles());
                     });
             // batch mode, we don't do continuous scanning
             if (!streamingMode) {
@@ -132,7 +134,7 @@ public class AppendOnlyTableCompactionCoordinator {
                 .computeIfAbsent(partition, PartitionCompactCoordinator::new)
                 .addFiles(
                         files.stream()
-                                .filter(file -> file.fileSize() < targetFileSize)
+                                .filter(file -> file.fileSize() < compactionFileSize)
                                 .collect(Collectors.toList()));
     }
 

@@ -22,8 +22,11 @@ import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -75,5 +78,39 @@ public class LookupChangelogWithAggITCase extends CatalogITCaseBase {
         }
 
         iterator.close();
+    }
+
+    @Test
+    public void testLookupChangelogProducerWithValueSwitch() throws Exception {
+        sql(
+                "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ("
+                        + "'bucket'='3', "
+                        + "'changelog-producer'='lookup', "
+                        + "'merge-engine'='aggregation', "
+                        + "'fields.v.aggregate-function'='sum')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM T");
+
+        sql("INSERT INTO T VALUES (1, 1), (2, 2), (1, 3), (1, 4), (1, 5)");
+        assertThat(iterator.collect(2)).containsExactlyInAnyOrder(Row.of(1, 13), Row.of(2, 2));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testLookupChangelogProducerWithProjection() {
+        sql(
+                "CREATE TABLE T (k INT PRIMARY KEY NOT ENFORCED, v1 INT, v2 INT) WITH ("
+                        + "'bucket'='3', "
+                        + "'changelog-producer'='lookup', "
+                        + "'merge-engine'='aggregation', "
+                        + "'fields.v1.aggregate-function'='sum', "
+                        + "'fields.v2.aggregate-function'='sum')");
+
+        int times = 3 + ThreadLocalRandom.current().nextInt(3);
+        for (int i = 0; i < times; i++) {
+            sql("INSERT INTO T VALUES (1, 1, 1), (2, 2, 2)");
+        }
+        assertThat(sql("SELECT v2 FROM T"))
+                .containsExactlyInAnyOrder(Row.of(times), Row.of(times * 2));
     }
 }

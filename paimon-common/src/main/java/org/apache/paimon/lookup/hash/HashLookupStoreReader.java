@@ -158,7 +158,7 @@ public class HashLookupStoreReader
         if (keyLength >= slots.length || keyCounts[keyLength] == 0) {
             return null;
         }
-        int hash = MurmurHashUtils.hashBytesPositive(key);
+        long hash = MurmurHashUtils.hashBytesPositive(key);
         int numSlots = slots[keyLength];
         int slotSize = slotSizes[keyLength];
         int indexOffset = indexOffsets[keyLength];

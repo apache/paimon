@@ -27,7 +27,7 @@ import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
@@ -70,6 +70,7 @@ public abstract class AbstractFileStoreWrite<T>
     protected final Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers;
 
     private ExecutorService lazyCompactExecutor;
+    private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
 
@@ -93,13 +94,18 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public FileStoreWrite<T> withMemoryPool(MemorySegmentPool memoryPool) {
+    public FileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         return this;
     }
 
     @Override
     public void withIgnorePreviousFiles(boolean ignorePreviousFiles) {
         this.ignorePreviousFiles = ignorePreviousFiles;
+    }
+
+    public void withCompactExecutor(ExecutorService compactExecutor) {
+        this.lazyCompactExecutor = compactExecutor;
+        this.closeCompactExecutorWhenLeaving = false;
     }
 
     @Override
@@ -231,7 +237,7 @@ public abstract class AbstractFileStoreWrite<T>
             }
         }
         writers.clear();
-        if (lazyCompactExecutor != null) {
+        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
             lazyCompactExecutor.shutdownNow();
         }
     }
@@ -353,6 +359,11 @@ public abstract class AbstractFileStoreWrite<T>
                             new ExecutorThreadFactory(
                                     Thread.currentThread().getName() + "-compaction"));
         }
+        return lazyCompactExecutor;
+    }
+
+    @VisibleForTesting
+    public ExecutorService getCompactExecutor() {
         return lazyCompactExecutor;
     }
 

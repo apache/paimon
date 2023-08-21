@@ -18,7 +18,13 @@
 
 package org.apache.paimon.memory;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+
 import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * A factory which creates {@link MemorySegmentPool} from {@link MemoryOwner}. The returned memory
@@ -28,16 +34,32 @@ public class MemoryPoolFactory {
 
     private final MemorySegmentPool innerPool;
     private final int totalPages;
-    private final Iterable<MemoryOwner> owners;
 
-    public MemoryPoolFactory(MemorySegmentPool innerPool, Iterable<MemoryOwner> owners) {
+    private Iterable<MemoryOwner> owners;
+
+    public MemoryPoolFactory(MemorySegmentPool innerPool) {
         this.innerPool = innerPool;
         this.totalPages = innerPool.freePages();
-        this.owners = owners;
+    }
+
+    public MemoryPoolFactory addOwners(Iterable<MemoryOwner> newOwners) {
+        if (this.owners == null) {
+            this.owners = newOwners;
+        } else {
+            Iterable<MemoryOwner> currentOwners = this.owners;
+            this.owners = () -> Iterators.concat(currentOwners.iterator(), newOwners.iterator());
+        }
+        return this;
     }
 
     public void notifyNewOwner(MemoryOwner owner) {
+        checkNotNull(owners);
         owner.setMemoryPool(createSubPool(owner));
+    }
+
+    @VisibleForTesting
+    public Iterable<MemoryOwner> memoryOwners() {
+        return owners;
     }
 
     MemorySegmentPool createSubPool(MemoryOwner owner) {

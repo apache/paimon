@@ -33,6 +33,60 @@ data files, and the historical data of expired snapshots cannot be queried anymo
 To solve this problem, you can create a tag based on a snapshot. The tag will maintain the manifests and data files of the
 snapshot. A typical usage is creating tags daily, then you can maintain the historical data of each day for batch reading.
 
+## Automatic Creation
+
+Paimon supports automatic creation of tags in writing job.
+
+**Step 1: Choose Creation Mode**
+
+You can set `'tag.automatic-creation'` to `process-time` or `watermark`:
+- `process-time`: Create TAG based on the time of the machine.
+- `watermark`: Create TAG based on the watermark of the Sink input.
+
+{{< hint info >}}
+If you choose Watermark, you may need to specify the time zone of watermark, if watermark is not in the
+UTC time zone, please configure `'sink.watermark-time-zone'`.
+{{< /hint >}}
+
+**Step 2: Choose Creation Period**
+
+What frequency is used to generate tags. You can choose `'daily'`, `'hourly'` and `'two-hours'` for `'tag.creation-period'`.
+
+If you need to wait for late data, you can configure a delay time: `'tag.creation-delay'`.
+
+**Step 3: Automatic deletion of tags**
+
+You can configure `'tag.num-retained-max'` to delete tags automatically.
+
+Example, configure table to create a tag at 0:10 every day, with a maximum retention time of 3 months:
+
+```sql
+-- Flink SQL
+CREATE TABLE T (
+    k INT PRIMARY KEY NOT ENFORCED,
+    f0 INT,
+    ...
+) WITH (
+    'tag.automatic-creation' = 'process-time',
+    'tag.creation-period' = 'daily',
+    'tag.creation-delay' = '10 m',
+    'tag.num-retained-max' = '90'
+);
+
+INSERT INTO T SELECT ...;
+
+-- Spark SQL
+
+-- Read latest snapshot
+SELECT * FROM T;
+
+-- Read Tag snapshot
+SELECT * FROM T VERSION AS OF '2023-07-26';
+
+-- Read Incremental between Tags
+SELECT * FROM paimon_incremental_query('T', '2023-07-25', '2023-07-26');
+```
+
 ## Create Tags
 
 You can create a tag with given name (cannot be number) and snapshot ID.

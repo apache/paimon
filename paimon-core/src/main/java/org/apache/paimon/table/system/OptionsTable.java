@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
@@ -32,6 +33,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
@@ -166,6 +168,11 @@ public class OptionsTable implements ReadonlyTable {
         @Override
         public InnerTableRead withProjection(int[][] projection) {
             this.projection = projection;
+            return this;
+        }
+
+        @Override
+        public TableRead withIOManager(IOManager ioManager) {
             return this;
         }
 

@@ -34,12 +34,14 @@ import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.IncrementalStartingScanner;
+import org.apache.paimon.table.source.snapshot.IncrementalTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.IncrementalTimeStampStartingScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 
 import java.util.List;
@@ -62,6 +64,11 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
     @VisibleForTesting
     public AbstractInnerTableScan withBucket(int bucket) {
         snapshotReader.withBucket(bucket);
+        return this;
+    }
+
+    public AbstractInnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+        snapshotReader.withBucketFilter(bucketFilter);
         return this;
     }
 
@@ -137,9 +144,14 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
                 Pair<String, String> incrementalBetween = options.incrementalBetween();
                 if (options.toMap().get(CoreOptions.INCREMENTAL_BETWEEN.key()) != null) {
-                    return new IncrementalStartingScanner(
-                            Long.parseLong(incrementalBetween.getLeft()),
-                            Long.parseLong(incrementalBetween.getRight()));
+                    try {
+                        return new IncrementalStartingScanner(
+                                Long.parseLong(incrementalBetween.getLeft()),
+                                Long.parseLong(incrementalBetween.getRight()));
+                    } catch (NumberFormatException e) {
+                        return new IncrementalTagStartingScanner(
+                                incrementalBetween.getLeft(), incrementalBetween.getRight());
+                    }
                 } else {
                     return new IncrementalTimeStampStartingScanner(
                             Long.parseLong(incrementalBetween.getLeft()),

@@ -25,14 +25,21 @@ import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 
+import org.assertj.core.util.Lists;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.types.RowKind.DELETE;
@@ -45,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class LookupChangelogMergeFunctionWrapperTest {
 
     private static final RecordEqualiser EQUALISER =
-            (RecordEqualiser) (row1, row2) -> row1.getInt(0) == row2.getInt(0);
+            (row1, row2) -> row1.getInt(0) == row2.getInt(0);
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
@@ -53,7 +60,10 @@ public class LookupChangelogMergeFunctionWrapperTest {
         Map<InternalRow, KeyValue> highLevel = new HashMap<>();
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(DeduplicateMergeFunction.factory()),
+                        LookupMergeFunction.wrap(
+                                DeduplicateMergeFunction.factory(),
+                                RowType.of(DataTypes.INT()),
+                                RowType.of(DataTypes.INT())),
                         highLevel::get,
                         EQUALISER,
                         changelogRowDeduplicate);
@@ -196,7 +206,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    public void testSum(boolean changlogRowDeduplicate) {
+    public void testSum(boolean changelogRowDeduplicate) {
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(
@@ -207,10 +217,12 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                                 },
                                                 new FieldAggregator[] {
                                                     new FieldSumAgg(DataTypes.INT())
-                                                })),
+                                                }),
+                                RowType.of(DataTypes.INT()),
+                                RowType.of(DataTypes.INT())),
                         key -> null,
                         EQUALISER,
-                        changlogRowDeduplicate);
+                        changelogRowDeduplicate);
 
         // Without level-0
         function.reset();
@@ -264,7 +276,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
         result = function.getResult();
         assertThat(result).isNotNull();
         changelogs = result.changelogs();
-        if (changlogRowDeduplicate) {
+        if (changelogRowDeduplicate) {
             assertThat(changelogs).isEmpty();
         } else {
             assertThat(changelogs).hasSize(2);
@@ -276,5 +288,80 @@ public class LookupChangelogMergeFunctionWrapperTest {
         kv = result.result();
         assertThat(kv).isNotNull();
         assertThat(kv.value().getInt(0)).isEqualTo(2);
+    }
+
+    @Test
+    public void testFirstRow() {
+        Set<InternalRow> highLevel = new HashSet<>();
+        FirstRowMergeTreeCompactRewriter.FistRowMergeFunctionWrapper function =
+                new FirstRowMergeTreeCompactRewriter.FistRowMergeFunctionWrapper(
+                        projection ->
+                                new FirstRowMergeFunction(
+                                        new RowType(
+                                                Lists.list(new DataField(0, "f0", new IntType()))),
+                                        new RowType(
+                                                Lists.list(new DataField(1, "f1", new IntType())))),
+                        highLevel::contains);
+
+        // Without level-0
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(2));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(1));
+        ChangelogResult result = function.getResult();
+        assertThat(result).isNotNull();
+        assertThat(result.changelogs()).isEmpty();
+        KeyValue kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(1);
+
+        // With level-0 record, with level-x (x > 0) record
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        List<KeyValue> changelogs = result.changelogs();
+        assertThat(changelogs).isEmpty();
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(1);
+
+        // With level-0 record, with multiple level-x (x > 0) record
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 1, INSERT, row(1)).setLevel(3));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(1)).setLevel(2));
+        function.add(new KeyValue().replace(row(1), 3, INSERT, row(2)).setLevel(1));
+        function.add(new KeyValue().replace(row(1), 4, INSERT, row(2)).setLevel(0));
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).isEmpty();
+        assertThat(kv.value().getInt(0)).isEqualTo(1);
+
+        // Without high level value
+        function.reset();
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(0)).setLevel(0));
+
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(1);
+        assertThat(changelogs.get(0).valueKind()).isEqualTo(INSERT);
+        assertThat(changelogs.get(0).value().getInt(0)).isEqualTo(0);
+        kv = result.result();
+        assertThat(kv).isNotNull();
+        assertThat(kv.value().getInt(0)).isEqualTo(0);
+
+        // with high level value
+        function.reset();
+        highLevel.add(row(1));
+        function.add(new KeyValue().replace(row(1), 2, INSERT, row(0)).setLevel(0));
+
+        result = function.getResult();
+        assertThat(result).isNotNull();
+        changelogs = result.changelogs();
+        assertThat(changelogs).hasSize(0);
+        kv = result.result();
+        assertThat(kv).isNull();
     }
 }

@@ -263,7 +263,7 @@ public final class GenericArray implements InternalArray, Serializable {
             return (boolean[]) array;
         }
         checkNoNull();
-        return ArrayUtils.toPrimitive((Boolean[]) array);
+        return ArrayUtils.toPrimitiveBoolean((Object[]) array);
     }
 
     @Override
@@ -272,7 +272,7 @@ public final class GenericArray implements InternalArray, Serializable {
             return (byte[]) array;
         }
         checkNoNull();
-        return ArrayUtils.toPrimitive((Byte[]) array);
+        return ArrayUtils.toPrimitiveByte((Object[]) array);
     }
 
     @Override
@@ -281,7 +281,7 @@ public final class GenericArray implements InternalArray, Serializable {
             return (short[]) array;
         }
         checkNoNull();
-        return ArrayUtils.toPrimitive((Short[]) array);
+        return ArrayUtils.toPrimitiveShort((Object[]) array);
     }
 
     @Override
@@ -290,7 +290,7 @@ public final class GenericArray implements InternalArray, Serializable {
             return (int[]) array;
         }
         checkNoNull();
-        return ArrayUtils.toPrimitive((Integer[]) array);
+        return ArrayUtils.toPrimitiveInteger((Object[]) array);
     }
 
     @Override
@@ -299,7 +299,7 @@ public final class GenericArray implements InternalArray, Serializable {
             return (long[]) array;
         }
         checkNoNull();
-        return ArrayUtils.toPrimitive((Long[]) array);
+        return ArrayUtils.toPrimitiveLong((Object[]) array);
     }
 
     @Override
@@ -308,7 +308,7 @@ public final class GenericArray implements InternalArray, Serializable {
             return (float[]) array;
         }
         checkNoNull();
-        return ArrayUtils.toPrimitive((Float[]) array);
+        return ArrayUtils.toPrimitiveFloat((Object[]) array);
     }
 
     @Override
@@ -317,6 +317,6 @@ public final class GenericArray implements InternalArray, Serializable {
             return (double[]) array;
         }
         checkNoNull();
-        return ArrayUtils.toPrimitive((Double[]) array);
+        return ArrayUtils.toPrimitiveDouble((Object[]) array);
     }
 }

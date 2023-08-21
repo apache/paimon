@@ -68,8 +68,8 @@ public class PreAssignSplitAssigner implements SplitAssigner {
     }
 
     @Override
-    public void addSplit(int subtask, FileStoreSourceSplit split) {
-        pendingSplitAssignment.computeIfAbsent(subtask, k -> new LinkedList<>()).add(split);
+    public void addSplit(int suggestedTask, FileStoreSourceSplit split) {
+        pendingSplitAssignment.computeIfAbsent(suggestedTask, k -> new LinkedList<>()).add(split);
     }
 
     @Override

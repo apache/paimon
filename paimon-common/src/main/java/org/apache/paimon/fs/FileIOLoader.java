@@ -20,6 +20,9 @@ package org.apache.paimon.fs;
 
 import org.apache.paimon.annotation.Public;
 
+import java.util.Collections;
+import java.util.List;
+
 /**
  * Loader to load {@link FileIO}.
  *
@@ -29,6 +32,15 @@ import org.apache.paimon.annotation.Public;
 public interface FileIOLoader {
 
     String getScheme();
+
+    /**
+     * Returns a set of option keys (case-insensitive, key can be written in multiple ways) that an
+     * implementation of this FileIO requires. Only when these options are included will this FileIO
+     * be selected, otherwise it will fall back to HadoopFileIO or compute engine's own FileIO.
+     */
+    default List<String[]> requiredOptions() {
+        return Collections.emptyList();
+    }
 
     FileIO load(Path path);
 }

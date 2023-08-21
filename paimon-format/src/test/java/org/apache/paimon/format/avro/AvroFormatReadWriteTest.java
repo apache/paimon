@@ -25,6 +25,10 @@ import org.apache.paimon.options.Options;
 /** An avro {@link FormatReadWriteTest}. */
 public class AvroFormatReadWriteTest extends FormatReadWriteTest {
 
+    protected AvroFormatReadWriteTest() {
+        super("avro");
+    }
+
     @Override
     protected FileFormat fileFormat() {
         return new AvroFileFormat(new Options());

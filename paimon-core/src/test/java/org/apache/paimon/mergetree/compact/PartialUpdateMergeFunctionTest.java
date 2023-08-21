@@ -26,7 +26,6 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
 
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -79,6 +78,16 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, 1, 2, 2, 2, 1, 1, 1);
         add(func, 1, 3, 3, 1, 3, 3, 3);
         validate(func, 1, 2, 2, 2, 3, 3, 3);
+
+        // delete
+        add(func, RowKind.DELETE, 1, 1, 1, 3, 1, 1, null);
+        validate(func, 1, null, null, 3, 3, 3, 3);
+        add(func, RowKind.DELETE, 1, 1, 1, 3, 1, 1, 4);
+        validate(func, 1, null, null, 3, null, null, 4);
+        add(func, 1, 4, 4, 4, 5, 5, 5);
+        validate(func, 1, 4, 4, 4, 5, 5, 5);
+        add(func, RowKind.DELETE, 1, 1, 1, 6, 1, 1, 6);
+        validate(func, 1, null, null, 6, null, null, 6);
     }
 
     @Test
@@ -158,7 +167,7 @@ public class PartialUpdateMergeFunctionTest {
 
         MergeFunction<KeyValue> func = factory.create(adjustedProjection.pushdownProjection);
         func.reset();
-        // if sequence filed is null, the related fields should not be updated
+        // if sequence field is null, the related fields should not be updated
         add(func, 1, 1, 1, 1, 1);
         add(func, 1, null, 1, 2, 2);
         validate(func, 1, 1, 1, 2, 2);
@@ -284,9 +293,12 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     private void add(MergeFunction<KeyValue> function, Integer... f) {
+        add(function, RowKind.INSERT, f);
+    }
+
+    private void add(MergeFunction<KeyValue> function, RowKind rowKind, Integer... f) {
         function.add(
-                new KeyValue()
-                        .replace(GenericRow.of(1), sequence++, RowKind.INSERT, GenericRow.of(f)));
+                new KeyValue().replace(GenericRow.of(1), sequence++, rowKind, GenericRow.of(f)));
     }
 
     private void validate(MergeFunction<KeyValue> function, Integer... f) {
@@ -296,17 +308,18 @@ public class PartialUpdateMergeFunctionTest {
     private void validate(
             MergeFunctionFactory.AdjustedProjection projection, int[] pushdown, int[] outer) {
         if (projection.pushdownProjection == null) {
-            Assertions.assertNull(pushdown);
+            assertThat(pushdown).isNull();
         } else {
-            Assertions.assertArrayEquals(
-                    Projection.of(projection.pushdownProjection).toTopLevelIndexes(), pushdown);
+            assertThat(pushdown)
+                    .containsExactly(
+                            Projection.of(projection.pushdownProjection).toTopLevelIndexes());
         }
 
         if (projection.outerProjection == null) {
-            Assertions.assertNull(outer);
+            assertThat(outer).isNull();
         } else {
-            Assertions.assertArrayEquals(
-                    Projection.of(projection.outerProjection).toTopLevelIndexes(), outer);
+            assertThat(outer)
+                    .containsExactly(Projection.of(projection.outerProjection).toTopLevelIndexes());
         }
     }
 }

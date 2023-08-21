@@ -36,11 +36,14 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.fs.FileIOUtils.checkAccess;
 
@@ -254,6 +257,37 @@ public interface FileIO extends Serializable {
         FileIOLoader fallbackIO = config.fallbackIO();
 
         List<IOException> ioExceptionList = new ArrayList<>();
+
+        if (loader != null) {
+            Set<String> options =
+                    config.options().keySet().stream()
+                            .map(String::toLowerCase)
+                            .collect(Collectors.toSet());
+            Set<String> missOptions = new HashSet<>();
+            for (String[] keys : loader.requiredOptions()) {
+                boolean found = false;
+                for (String key : keys) {
+                    if (options.contains(key.toLowerCase())) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    missOptions.add(keys[0]);
+                }
+            }
+            if (missOptions.size() > 0) {
+                IOException exception =
+                        new IOException(
+                                String.format(
+                                        "One or more required options are missing.\n\n"
+                                                + "Missing required options are:\n\n"
+                                                + "%s",
+                                        String.join("\n", missOptions)));
+                ioExceptionList.add(exception);
+                loader = null;
+            }
+        }
 
         if (loader == null) {
             try {

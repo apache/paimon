@@ -83,7 +83,7 @@ public class SparkWriteITCase {
     public void testSortSpill() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
-                        + " ('primary-key'='a', 'bucket'='4', 'file.format'='avro', 'sort-spill-threshold'='1')");
+                        + " ('primary-key'='a', 'bucket'='4', 'file.format'='avro', 'sort-spill-threshold'='2')");
         innerSimpleWrite();
     }
 

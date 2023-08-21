@@ -157,6 +157,18 @@ public class KeyValueFileReaderFactory {
             applyProjection();
         }
 
+        public Builder copyWithoutProjection() {
+            return new Builder(
+                    fileIO,
+                    schemaManager,
+                    schemaId,
+                    keyType,
+                    valueType,
+                    formatDiscover,
+                    pathFactory,
+                    extractor);
+        }
+
         public Builder withKeyProjection(int[][] projection) {
             keyProjection = projection;
             applyProjection();
@@ -167,6 +179,10 @@ public class KeyValueFileReaderFactory {
             valueProjection = projection;
             applyProjection();
             return this;
+        }
+
+        public RowType projectedValueType() {
+            return projectedValueType;
         }
 
         public KeyValueFileReaderFactory build(BinaryRow partition, int bucket) {

@@ -19,10 +19,18 @@
 package org.apache.paimon.hive;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
+import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 
+import javax.annotation.Nullable;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.Map;
 import java.util.Properties;
 
@@ -33,45 +41,113 @@ import static org.apache.hadoop.hive.metastore.Warehouse.getDnsPath;
  * where the Paimon table is stored.
  */
 public class LocationKeyExtractor {
+
     // special at the tbproperties with the name paimon_location.
     public static final String TBPROPERTIES_LOCATION_KEY = "paimon_location";
 
-    public static String getLocation(Properties properties) {
-        String storageLocation =
-                properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
-        String propertiesLocation = properties.getProperty(TBPROPERTIES_LOCATION_KEY);
-        return propertiesLocation != null ? propertiesLocation : storageLocation;
+    public static final String INTERNAL_LOCATION = "paimon.internal.location";
+
+    /** Get the real path of Paimon table. */
+    public static String getPaimonLocation(@Nullable Configuration conf, Properties properties) {
+        // read from table properties
+        // if users set HiveCatalogOptions#LOCATION_IN_PROPERTIES
+        String location = properties.getProperty(TBPROPERTIES_LOCATION_KEY);
+        if (location != null) {
+            return location;
+        }
+
+        // read what metastore tells us
+        location = properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
+        if (location != null) {
+            if (conf != null) {
+                try {
+                    return getDnsPath(new Path(location), conf).toString();
+                } catch (MetaException e) {
+                    throw new RuntimeException(e);
+                }
+            } else {
+                return location;
+            }
+        }
+
+        // for some Hive compatible systems
+        if (conf != null) {
+            return conf.get("table.original.path");
+        }
+
+        return null;
     }
 
-    public static String getLocation(Table table) {
-        String sdLocation = table.getSd().getLocation();
-
+    /** Get the real path of Paimon table. */
+    public static String getPaimonLocation(Configuration conf, Table table) throws MetaException {
+        // read from table properties
+        // if users set HiveCatalogOptions#LOCATION_IN_PROPERTIES
         Map<String, String> params = table.getParameters();
-
-        String propertiesLocation = null;
         if (params != null) {
-            propertiesLocation = params.get(TBPROPERTIES_LOCATION_KEY);
+            String location = params.get(TBPROPERTIES_LOCATION_KEY);
+            if (location != null) {
+                return location;
+            }
         }
 
-        return propertiesLocation != null ? propertiesLocation : sdLocation;
+        // read what metastore tells us
+        String location = table.getSd().getLocation();
+        if (location != null) {
+            location = getDnsPath(new Path(location), conf).toString();
+            table.getSd().setLocation(location);
+        }
+        return location;
     }
 
-    public static String getLocation(Table table, Configuration conf) throws MetaException {
-        String sdLocation = table.getSd().getLocation();
-        if (sdLocation != null) {
-            org.apache.hadoop.fs.Path path;
-            path = getDnsPath(new org.apache.hadoop.fs.Path(sdLocation), conf);
-            sdLocation = path.toUri().toString();
-            table.getSd().setLocation(sdLocation);
+    /** Get the real path of Paimon table. */
+    public static String getPaimonLocation(JobConf conf) {
+        // read what PaimonStorageHandler tells us
+        String location = conf.get(INTERNAL_LOCATION);
+        if (location != null) {
+            return location;
         }
 
-        Map<String, String> params = table.getParameters();
-
-        String propertiesLocation = null;
-        if (params != null) {
-            propertiesLocation = params.get(TBPROPERTIES_LOCATION_KEY);
+        // read from table properties
+        // if users set HiveCatalogOptions#LOCATION_IN_PROPERTIES
+        location = conf.get(TBPROPERTIES_LOCATION_KEY);
+        if (location != null) {
+            return location;
         }
 
-        return propertiesLocation != null ? propertiesLocation : sdLocation;
+        // for some Hive compatible systems
+        location = conf.get("table.original.path");
+        if (location != null) {
+            return location;
+        }
+
+        // read the input dir of this Hive job
+        //
+        // it is possible that input dir is the directory of a partition,
+        // so we should find the root of table by checking if,
+        // in each parent directory, the schema directory exists
+        location = conf.get(FileInputFormat.INPUT_DIR);
+        if (location != null) {
+            Path path = new Path(location);
+            try {
+                FileSystem fs = path.getFileSystem(conf);
+                while (path != null) {
+                    if (fs.exists(new Path(path, "schema"))) {
+                        break;
+                    }
+                    path = path.getParent();
+                }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+            if (path != null) {
+                try {
+                    return getDnsPath(path, conf).toString();
+                } catch (MetaException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+
+        return null;
     }
 }

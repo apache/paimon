@@ -28,6 +28,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
@@ -42,13 +43,18 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** Implementation of {@link SnapshotReader}. */
@@ -61,6 +67,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final ConsumerManager consumerManager;
     private final SplitGenerator splitGenerator;
     private final BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer;
+    private final DefaultValueAssigner defaultValueAssigner;
 
     private ScanKind scanKind = ScanKind.ALL;
     private RecordComparator lazyPartitionComparator;
@@ -71,7 +78,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
             CoreOptions options,
             SnapshotManager snapshotManager,
             SplitGenerator splitGenerator,
-            BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer) {
+            BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer,
+            DefaultValueAssigner defaultValueAssigner) {
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.options = options;
@@ -80,6 +88,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.splitGenerator = splitGenerator;
         this.nonPartitionFilterConsumer = nonPartitionFilterConsumer;
+        this.defaultValueAssigner = defaultValueAssigner;
     }
 
     @Override
@@ -119,7 +128,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
         List<Predicate> partitionFilters = new ArrayList<>();
         List<Predicate> nonPartitionFilters = new ArrayList<>();
-        for (Predicate p : PredicateBuilder.splitAnd(predicate)) {
+        for (Predicate p :
+                PredicateBuilder.splitAnd(defaultValueAssigner.handlePredicate(predicate))) {
             Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
             if (mapped.isPresent()) {
                 partitionFilters.add(mapped.get());
@@ -157,6 +167,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return this;
     }
 
+    @Override
+    public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
+        scan.withBucketFilter(bucketFilter);
+        return this;
+    }
+
     /** Get splits from {@link FileKind#ADD} files. */
     @Override
     public Plan read() {
@@ -164,7 +180,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         Long snapshotId = plan.snapshotId();
 
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> files =
-                FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD));
+                groupByPartFiles(plan.files(FileKind.ADD));
         if (options.scanPlanSortPartition()) {
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> newFiles = new LinkedHashMap<>();
             files.entrySet().stream()
@@ -176,7 +192,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 generateSplits(
                         snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
                         scanKind != ScanKind.ALL,
-                        false,
                         splitGenerator,
                         files);
         return new Plan() {
@@ -216,10 +231,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 .collect(Collectors.toList());
     }
 
-    /**
-     * Get splits from an overwrite snapshot files. The {@link FileKind#DELETE} part will be marked
-     * with reverseRowKind = true (see {@link DataSplit}).
-     */
+    /** Get splits from an overwritten snapshot files. */
     @Override
     public Plan readOverwrittenChanges() {
         withKind(ScanKind.DELTA);
@@ -232,23 +244,57 @@ public class SnapshotReaderImpl implements SnapshotReader {
                     "Cannot read overwrite splits from a non-overwrite snapshot.");
         }
 
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
+                groupByPartFiles(plan.files(FileKind.DELETE));
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
+                groupByPartFiles(plan.files(FileKind.ADD));
+
+        return toChangesPlan(true, plan, beforeFiles, dataFiles);
+    }
+
+    private Plan toChangesPlan(
+            boolean isStreaming,
+            FileStoreScan.Plan plan,
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles,
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles) {
         List<DataSplit> splits = new ArrayList<>();
+        Map<BinaryRow, Set<Integer>> buckets = new HashMap<>();
+        beforeFiles.forEach(
+                (part, bucketMap) ->
+                        buckets.computeIfAbsent(part, k -> new HashSet<>())
+                                .addAll(bucketMap.keySet()));
+        dataFiles.forEach(
+                (part, bucketMap) ->
+                        buckets.computeIfAbsent(part, k -> new HashSet<>())
+                                .addAll(bucketMap.keySet()));
 
-        splits.addAll(
-                generateSplits(
-                        snapshotId,
-                        true,
-                        true,
-                        splitGenerator,
-                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.DELETE))));
+        for (Map.Entry<BinaryRow, Set<Integer>> entry : buckets.entrySet()) {
+            BinaryRow part = entry.getKey();
+            for (Integer bucket : entry.getValue()) {
+                List<DataFileMeta> before =
+                        beforeFiles
+                                .getOrDefault(part, Collections.emptyMap())
+                                .getOrDefault(bucket, Collections.emptyList());
+                List<DataFileMeta> data =
+                        dataFiles
+                                .getOrDefault(part, Collections.emptyMap())
+                                .getOrDefault(bucket, Collections.emptyList());
 
-        splits.addAll(
-                generateSplits(
-                        snapshotId,
-                        true,
-                        false,
-                        splitGenerator,
-                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD))));
+                // deduplicate
+                before.removeIf(data::remove);
+
+                DataSplit split =
+                        DataSplit.builder()
+                                .withSnapshot(plan.snapshotId())
+                                .withPartition(part)
+                                .withBucket(bucket)
+                                .withBeforeFiles(before)
+                                .withDataFiles(data)
+                                .isStreaming(isStreaming)
+                                .build();
+                splits.add(split);
+            }
+        }
 
         return new Plan() {
             @Nullable
@@ -270,6 +316,17 @@ public class SnapshotReaderImpl implements SnapshotReader {
         };
     }
 
+    @Override
+    public Plan readIncrementalDiff(Snapshot before) {
+        withKind(ScanKind.ALL);
+        FileStoreScan.Plan plan = scan.plan();
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
+                groupByPartFiles(plan.files(FileKind.ADD));
+        Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
+                groupByPartFiles(scan.withSnapshot(before).plan().files(FileKind.ADD));
+        return toChangesPlan(false, plan, beforeFiles, dataFiles);
+    }
+
     private RecordComparator partitionComparator() {
         if (lazyPartitionComparator == null) {
             lazyPartitionComparator =
@@ -283,8 +340,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @VisibleForTesting
     public static List<DataSplit> generateSplits(
             long snapshotId,
-            boolean isIncremental,
-            boolean reverseRowKind,
+            boolean isStreaming,
             SplitGenerator splitGenerator,
             Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
         List<DataSplit> splits = new ArrayList<>();
@@ -294,32 +350,21 @@ public class SnapshotReaderImpl implements SnapshotReader {
             Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
             for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
                 int bucket = bucketEntry.getKey();
-                if (isIncremental) {
-                    // streaming splits incremental data files
-                    splitGenerator.splitForStreaming(bucketEntry.getValue()).stream()
-                            .map(
-                                    files ->
-                                            new DataSplit(
-                                                    snapshotId,
-                                                    partition,
-                                                    bucket,
-                                                    files,
-                                                    true,
-                                                    reverseRowKind))
-                            .forEach(splits::add);
-                } else {
-                    splitGenerator.splitForBatch(bucketEntry.getValue()).stream()
-                            .map(
-                                    files ->
-                                            new DataSplit(
-                                                    snapshotId,
-                                                    partition,
-                                                    bucket,
-                                                    files,
-                                                    false,
-                                                    reverseRowKind))
-                            .forEach(splits::add);
-                }
+                List<DataFileMeta> bucketFiles = bucketEntry.getValue();
+                DataSplit.Builder builder =
+                        DataSplit.builder()
+                                .withSnapshot(snapshotId)
+                                .withPartition(partition)
+                                .withBucket(bucket)
+                                .isStreaming(isStreaming);
+                List<List<DataFileMeta>> splitGroups =
+                        isStreaming
+                                ? splitGenerator.splitForStreaming(bucketFiles)
+                                : splitGenerator.splitForBatch(bucketFiles);
+                splitGroups.stream()
+                        .map(builder::withDataFiles)
+                        .map(DataSplit.Builder::build)
+                        .forEach(splits::add);
             }
         }
         return splits;

@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
+import org.apache.paimon.hive.utils.HiveUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -34,7 +35,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
-import org.apache.hadoop.hive.metastore.MetaStoreUtils;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
@@ -42,11 +42,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.metastore.Warehouse.getDnsPath;
-import static org.apache.paimon.hive.HiveTypeUtils.typeInfoToLogicalType;
+import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
+import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
 
 /**
  * {@link HiveMetaHook} for paimon. Currently this class is only used to set input and output
@@ -59,31 +63,30 @@ public class PaimonMetaHook implements HiveMetaHook {
     private static final String COMMENT = "comment";
     private final Configuration conf;
 
+    // paimon table existed before create hive table
+    private final Set<Identifier> existingPaimonTable = new HashSet<>();
+
     public PaimonMetaHook(Configuration conf) {
         this.conf = conf;
     }
 
     @Override
     public void preCreateTable(Table table) throws MetaException {
-        if (table.getPartitionKeysSize() != 0) {
-            throw new MetaException(
-                    "Paimon currently does not support creating partitioned table "
-                            + "with PARTITIONED BY clause. If you want to create a partitioned table, "
-                            + "please set partition fields in properties.");
-        }
 
         // hive ql parse cannot recognize input near '$' in table name, no need to add paimon system
         // table verification.
 
         table.getSd().setInputFormat(PaimonInputFormat.class.getCanonicalName());
         table.getSd().setOutputFormat(PaimonOutputFormat.class.getCanonicalName());
-        String location = LocationKeyExtractor.getLocation(table, conf);
+        table.setDbName(table.getDbName().toLowerCase());
+        table.setTableName(table.getTableName().toLowerCase());
+        String location = LocationKeyExtractor.getPaimonLocation(conf, table);
+        Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
         if (location == null) {
             String warehouse = conf.get(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
             org.apache.hadoop.fs.Path hadoopPath =
                     getDnsPath(new org.apache.hadoop.fs.Path(warehouse), conf);
             warehouse = hadoopPath.toUri().toString();
-            Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
             location = AbstractCatalog.dataTableLocation(warehouse, identifier).toUri().toString();
             table.getSd().setLocation(location);
         }
@@ -100,22 +103,44 @@ public class PaimonMetaHook implements HiveMetaHook {
         SchemaManager schemaManager = new SchemaManager(fileIO, path);
         Optional<TableSchema> tableSchema = schemaManager.latest();
         if (tableSchema.isPresent()) {
+            existingPaimonTable.add(identifier);
             // paimon table already exists
             return;
         }
         // create paimon table
         List<FieldSchema> cols = table.getSd().getCols();
         Schema.Builder schemaBuilder =
-                Schema.newBuilder()
-                        .options(context.options().toMap())
-                        .comment(table.getParameters().get(COMMENT));
+                Schema.newBuilder().comment(table.getParameters().get(COMMENT));
         cols.iterator()
                 .forEachRemaining(
                         fieldSchema ->
                                 schemaBuilder.column(
                                         fieldSchema.getName().toLowerCase(),
-                                        typeInfoToLogicalType(fieldSchema.getType()),
+                                        toPaimonType(fieldSchema.getType()),
                                         fieldSchema.getComment()));
+        // partition columns
+        if (table.getPartitionKeysSize() > 0) {
+            // set metastore.partitioned-table = true
+            context.options().set(METASTORE_PARTITIONED_TABLE, true);
+
+            table.getPartitionKeys()
+                    .iterator()
+                    .forEachRemaining(
+                            fieldSchema ->
+                                    schemaBuilder.column(
+                                            fieldSchema.getName().toLowerCase(),
+                                            toPaimonType(fieldSchema.getType()),
+                                            fieldSchema.getComment()));
+
+            List<String> partitionKeys =
+                    table.getPartitionKeys().stream()
+                            .map(FieldSchema::getName)
+                            .map(String::toLowerCase)
+                            .collect(Collectors.toList());
+            schemaBuilder.partitionKeys(partitionKeys);
+        }
+        schemaBuilder.options(context.options().toMap());
+
         try {
             schemaManager.createTable(schemaBuilder.build());
         } catch (Exception e) {
@@ -125,12 +150,13 @@ public class PaimonMetaHook implements HiveMetaHook {
 
     @Override
     public void rollbackCreateTable(Table table) throws MetaException {
-        if (!MetaStoreUtils.isExternalTable(table)) {
+        Identifier identifier = Identifier.create(table.getDbName(), table.getTableName());
+        if (existingPaimonTable.contains(identifier)) {
             return;
         }
 
         // we have created a paimon table, so we delete it to roll back;
-        String location = LocationKeyExtractor.getLocation(table);
+        String location = LocationKeyExtractor.getPaimonLocation(conf, table);
 
         Path path = new Path(location);
         CatalogContext context = catalogContext(table, location);
@@ -157,7 +183,7 @@ public class PaimonMetaHook implements HiveMetaHook {
     public void commitDropTable(Table table, boolean b) throws MetaException {}
 
     private CatalogContext catalogContext(Table table, String location) {
-        Options options = PaimonJobConf.extractCatalogConfig(conf);
+        Options options = HiveUtils.extractCatalogConfig(conf);
         options.set(CoreOptions.PATH, location);
         table.getParameters().forEach(options::set);
         return CatalogContext.create(options, conf);

@@ -17,7 +17,8 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.spark.sql.sources.Filter
+import org.apache.spark.sql.{SaveMode => SparkSaveMode}
+import org.apache.spark.sql.sources.{AlwaysTrue, Filter}
 
 sealed trait SaveMode extends Serializable
 
@@ -26,3 +27,18 @@ object InsertInto extends SaveMode
 case class Overwrite(filters: Option[Filter]) extends SaveMode
 
 object DynamicOverWrite extends SaveMode
+
+object ErrorIfExists extends SaveMode
+
+object Ignore extends SaveMode
+
+object SaveMode {
+  def transform(saveMode: SparkSaveMode): SaveMode = {
+    saveMode match {
+      case SparkSaveMode.Overwrite => Overwrite(Some(AlwaysTrue))
+      case SparkSaveMode.Ignore => Ignore
+      case SparkSaveMode.Append => InsertInto
+      case SparkSaveMode.ErrorIfExists => ErrorIfExists
+    }
+  }
+}

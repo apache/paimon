@@ -246,7 +246,7 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThat(spark.sql("SHOW CREATE TABLE t_pk_as").collectAsList().toString())
                 .isEqualTo(
                         String.format(
-                                "[[%sTBLPROPERTIES (\n  'path' = '%s')\n]]",
+                                "[[%sTBLPROPERTIES (\n  'path' = '%s',\n  'primary-key' = 'a')\n]]",
                                 showCreateString("t_pk_as", "a BIGINT", "b STRING", "c STRING"),
                                 new Path(warehousePath, "default.db/t_pk_as")));
         List<Row> resultPk = spark.sql("SELECT * FROM t_pk_as").collectAsList();
@@ -273,7 +273,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 "[[%s"
                                         + "PARTITIONED BY (dt)\n"
                                         + "TBLPROPERTIES (\n"
-                                        + "  'path' = '%s')\n"
+                                        + "  'path' = '%s',\n"
+                                        + "  'primary-key' = 'dt,hh')\n"
                                         + "]]",
                                 showCreateString(
                                         "t_all_as",
@@ -309,6 +310,29 @@ public class SparkReadITCase extends SparkReadTestBase {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
                         "Can not set the write-mode to append-only and changelog-producer at the same time.");
+    }
+
+    @Test
+    public void testChangelogProducerOnAppendOnlyTable() {
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "CREATE TABLE T (a INT) TBLPROPERTIES ('changelog-producer' = 'input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
+
+        spark.sql("CREATE TABLE T (a INT)");
+
+        assertThatThrownBy(
+                        () ->
+                                spark.sql(
+                                        "ALTER TABLE T SET TBLPROPERTIES('changelog-producer' 'input')"))
+                .getRootCause()
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
     }
 
     @Test
@@ -358,7 +382,8 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         + "COMMENT 'tbl comment'\n"
                                         + "TBLPROPERTIES (\n"
                                         + "  'k1' = 'v1',\n"
-                                        + "  'path' = '%s')\n]]",
+                                        + "  'path' = '%s',\n"
+                                        + "  'primary-key' = 'a,b')\n]]",
                                 showCreateString("tbl", "a INT COMMENT 'a comment'", "b STRING"),
                                 new Path(warehousePath, "default.db/tbl")));
     }
@@ -378,22 +403,6 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 .map(Row::toString)
                                 .collect(Collectors.toList()))
                 .contains("[k1,v1]", "[k2,v2]");
-    }
-
-    @Test
-    public void testCreateTableWithInvalidPk() {
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                        "CREATE TABLE PartitionedPkTable (\n"
-                                                + "a BIGINT,\n"
-                                                + "b STRING,\n"
-                                                + "c DOUBLE)\n"
-                                                + "PARTITIONED BY (b)\n"
-                                                + "TBLPROPERTIES ('primary-key' = 'a')"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining(
-                        "Primary key constraint [a] should include all partition fields [b]");
     }
 
     @Test

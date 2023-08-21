@@ -48,7 +48,7 @@ under the License.
             <td><h5>changelog-producer</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
-            <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads.<br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' before committing the data writing.</li></ul></td>
+            <td>Whether to double write to a changelog file. This changelog file keeps the details of data changes, it can be read directly during stream reads. This can be applied to tables with primary keys. <br /><br />Possible values:<ul><li>"none": No changelog file.</li><li>"input": Double write to a changelog file when flushing memory table, the changelog is from input.</li><li>"full-compaction": Generate changelog files with each full compaction.</li><li>"lookup": Generate changelog files through 'lookup' before committing the data writing.</li></ul></td>
         </tr>
         <tr>
             <td><h5>changelog-producer.row-deduplicate</h5></td>
@@ -153,6 +153,12 @@ under the License.
             <td>Specify the message format of data files, currently orc, parquet and avro are supported.<br /><br />Possible values:<ul><li>"orc": ORC file format.</li><li>"parquet": Parquet file format.</li><li>"avro": Avro file format.</li></ul></td>
         </tr>
         <tr>
+            <td><h5>file.format.per.level</h5></td>
+            <td style="word-wrap: break-word;"></td>
+            <td>Map</td>
+            <td>Define different file format for different level, you can add the conf like this: 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, the default format which set by `file.format` will be used.</td>
+        </tr>
+        <tr>
             <td><h5>full-compaction.delta-commits</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -169,6 +175,13 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Read incremental changes between start timestamp (exclusive) and end timestamp, for example, 't1,t2' means changes between timestamp t1 and timestamp t2.</td>
+        </tr>
+        <tr>
+            <td><h5>local-merge-buffer-size</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Local merge will buffer and merge input records before they're shuffled by bucket and written into sink. The buffer will be flushed when it is full.
+Mainly to resolve data skew on primary keys. We recommend starting with 64 mb when trying out this feature.</td>
         </tr>
         <tr>
             <td><h5>local-sort.max-num-file-handles</h5></td>
@@ -258,13 +271,21 @@ under the License.
             <td><h5>merge-engine</h5></td>
             <td style="word-wrap: break-word;">deduplicate</td>
             <td><p>Enum</p></td>
-            <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li><li>"aggregation": Aggregate fields with same primary key.</li></ul></td>
+            <td>Specify the merge engine for table with primary key.<br /><br />Possible values:<ul><li>"deduplicate": De-duplicate and keep the last row.</li><li>"partial-update": Partial update non-null fields.</li><li>"aggregation": Aggregate fields with same primary key.</li><li>"first-row": De-duplicate and keep the first row.</li></ul></td>
         </tr>
         <tr>
             <td><h5>metadata.stats-mode</h5></td>
             <td style="word-wrap: break-word;">"truncate(16)"</td>
             <td>String</td>
             <td>The mode of metadata stats collection. none, counts, truncate(16), full is available.<br /><ul><li>"none": means disable the metadata stats collection.</li></ul><ul><li>"counts" means only collect the null count.</li></ul><ul><li>"full": means collect the null count, min/max value.</li></ul><ul><li>"truncate(16)": means collect the null count, min/max value with truncated length of 16.</li></ul><ul><li>Field level stats mode can be specified by fields.{field_name}.stats-mode</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>metastore.partitioned-table</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to create this table as a partitioned table in metastore.
+For example, if you want to list all partitions of a Paimon table in Hive, you need to create this table as a partitioned table in Hive metastore.
+This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>num-levels</h5></td>
@@ -297,10 +318,34 @@ under the License.
             <td>Define the default false positive probability for bloom filters.</td>
         </tr>
         <tr>
+            <td><h5>orc.column.encoding.direct</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Comma-separated list of fields for which dictionary encoding is to be skipped in orc.</td>
+        </tr>
+        <tr>
+            <td><h5>orc.dictionary.key.threshold</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>If the number of distinct keys in a dictionary is greater than this fraction of the total number of non-null rows, turn off dictionary encoding in orc.  Use 1 to always use dictionary encoding.</td>
+        </tr>
+        <tr>
+            <td><h5>orc.write.batch-size</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>write batch size for orc.</td>
+        </tr>
+        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
             <td>Memory page size.</td>
+        </tr>
+        <tr>
+            <td><h5>parquet.enable.dictionary</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Turn off the dictionary encoding for all fields in parquet.</td>
         </tr>
         <tr>
             <td><h5>partial-update.ignore-delete</h5></td>
@@ -400,15 +445,21 @@ under the License.
         </tr>
         <tr>
             <td><h5>sequence.auto-padding</h5></td>
-            <td style="word-wrap: break-word;">none</td>
-            <td><p>Enum</p></td>
-            <td>Specify the way of padding precision up to micro-second if the provided sequence field is used to indicate "time" but doesn't meet the precise.<br /><br />Possible values:<ul><li>"none": No padding for sequence field.</li><li>"second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>"millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li></ul></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the way of padding precision, if the provided sequence field is used to indicate "time" but doesn't meet the precise.<ul><li>You can specific:</li><li>1. "row-kind-flag": Pads a bit flag to indicate whether it is retract (0) or add (1) message.</li><li>2. "second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>3. "millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li><li>4. Composite pattern: for example, "second-to-micro,row-kind-flag".</li></ul></td>
         </tr>
         <tr>
             <td><h5>sequence.field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>The field that generates the sequence number for primary key table, the sequence number determines which data is the most recent.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.watermark-time-zone</h5></td>
+            <td style="word-wrap: break-word;">"UTC"</td>
+            <td>String</td>
+            <td>The time zone to parse the long watermark value to TIMESTAMP value. The default value is 'UTC', which means the watermark is defined on TIMESTAMP column or not defined. If the watermark is defined on TIMESTAMP_LTZ column, the time zone of watermark is user configured time zone, the value should be the user configured local time zone. The option value is either a full name such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.</td>
         </tr>
         <tr>
             <td><h5>snapshot.num-retained.max</h5></td>
@@ -469,6 +520,30 @@ under the License.
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>Whether to read the changes from overwrite in streaming mode.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.automatic-creation</h5></td>
+            <td style="word-wrap: break-word;">none</td>
+            <td><p>Enum</p></td>
+            <td>Whether to create tag automatically. And how to generate tags.<br /><br />Possible values:<ul><li>"none": No automatically created tags.</li><li>"process-time": Based on the time of the machine, create TAG once the processing time passes period time plus delay.</li><li>"watermark": Based on the watermark of the input, create TAG once the watermark passes period time plus delay.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.creation-delay</h5></td>
+            <td style="word-wrap: break-word;">0 ms</td>
+            <td>Duration</td>
+            <td>How long is the delay after the period ends before creating a tag. This can allow some late data to enter the Tag.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.creation-period</h5></td>
+            <td style="word-wrap: break-word;">daily</td>
+            <td><p>Enum</p></td>
+            <td>What frequency is used to generate tags.<br /><br />Possible values:<ul><li>"daily": Generate a tag every day.</li><li>"hourly": Generate a tag every hour.</li><li>"two-hours": Generate a tag every two hours.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>tag.num-retained-max</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>The maximum number of tags to retain.</td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>

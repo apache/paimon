@@ -30,6 +30,8 @@ under the License.
 
 Paimon supports lookup joins on tables with primary keys and append-only tables in Flink. The following example illustrates this feature.
 
+### Prepare
+
 First, let's create a Paimon table and update it in real-time.
 
 ```sql
@@ -67,6 +69,8 @@ CREATE TEMPORARY TABLE Orders (
 );
 ```
 
+### Normal Lookup
+
 You can now use `customers` in a lookup join query.
 
 ```sql
@@ -78,14 +82,43 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
+### Retry Lookup
+
+If the records of `Orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
+You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
+Only for Flink 1.16+.
+
+```sql
+-- enrich each order with customer information
+SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
+o.order_id, o.total, c.country, c.zip
+FROM Orders AS o
+JOIN customers
+FOR SYSTEM_TIME AS OF o.proc_time AS c
+ON o.customer_id = c.id;
+```
+
+### Async Retry Lookup
+
+The problem with synchronous retry is that one record will block subsequent records, causing the entire job to be blocked.
+You can consider using async + allow_unordered to avoid blocking, the records that join missing will no longer block
+other records.
+
+```sql
+-- enrich each order with customer information
+SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'output-mode'='allow_unordered', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
+o.order_id, o.total, c.country, c.zip
+FROM Orders AS o
+JOIN customers /*+ OPTIONS('lookup.async'='true', 'lookup.async-thread-number'='16') */
+FOR SYSTEM_TIME AS OF o.proc_time AS c
+ON o.customer_id = c.id;
+```
+
+### Performance
+
 The lookup join operator will maintain a RocksDB cache locally and pull the latest updates of the table in real time. Lookup join operator will only pull the necessary data, so your filter conditions are very important for performance.
 
 This feature is only suitable for tables containing at most tens of millions of records to avoid excessive use of local disks.
-
-{{< hint info >}}
-If the records of `Orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
-You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
-{{< /hint >}}
 
 ## RocksDB Cache Options
 

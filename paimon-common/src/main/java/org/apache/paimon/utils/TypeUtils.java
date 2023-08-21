@@ -27,7 +27,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
@@ -66,6 +65,7 @@ public class TypeUtils {
             case BOOLEAN:
                 return BinaryStringUtils.toBoolean(str);
             case BINARY:
+                return s.getBytes();
             case VARBINARY:
                 int binaryLength = DataTypeChecks.getLength(type);
                 byte[] bytes = s.getBytes();
@@ -133,16 +133,6 @@ public class TypeUtils {
             default:
                 throw new UnsupportedOperationException("Unsupported type " + type);
         }
-    }
-
-    public static int timestampPrecision(DataType type) {
-        if (type instanceof TimestampType) {
-            return ((TimestampType) type).getPrecision();
-        } else if (type instanceof LocalZonedTimestampType) {
-            return ((LocalZonedTimestampType) type).getPrecision();
-        }
-
-        throw new UnsupportedOperationException("Unsupported type: " + type);
     }
 
     public static boolean isPrimitive(DataType type) {

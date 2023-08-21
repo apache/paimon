@@ -47,7 +47,6 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for {@link CdcRecordChannelComputer}. */
 public class CdcMultiplexRecordChannelComputerTest {
@@ -187,7 +186,7 @@ public class CdcMultiplexRecordChannelComputerTest {
                                         tableId.getDatabaseName(),
                                         tableId.getObjectName(),
                                         record));
-                assertTrue(channel >= 0);
+                assertThat(channel >= 0).isTrue();
             }
         }
     }

@@ -29,6 +29,8 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
@@ -43,6 +45,9 @@ import java.util.List;
  * @param <T> CDC change event type
  */
 public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T, Void> {
+
+    private static final Logger LOG =
+            LoggerFactory.getLogger(CdcDynamicTableParsingProcessFunction.class);
 
     public static final OutputTag<CdcMultiplexRecord> DYNAMIC_OUTPUT_TAG =
             new OutputTag<>("paimon-dynamic-table", TypeInformation.of(CdcMultiplexRecord.class));
@@ -87,14 +92,15 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
         String tableName = parser.parseTableName();
 
         // check for newly added table
-        parser.parseNewTable(database)
+        parser.parseNewTable()
                 .ifPresent(
                         schema -> {
                             Identifier identifier =
                                     new Identifier(database, parser.parseTableName());
                             try {
                                 catalog.createTable(identifier, schema, true);
-                            } catch (Throwable ignored) {
+                            } catch (Exception e) {
+                                LOG.error("create newly added paimon table error.", e);
                             }
                         });
 

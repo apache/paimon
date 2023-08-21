@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -362,5 +363,10 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
             }
             Thread.sleep(1000);
         }
+    }
+
+    protected FileStoreTable getFileStoreTable(String tableName) throws Exception {
+        Identifier identifier = Identifier.create(database, tableName);
+        return (FileStoreTable) catalog().getTable(identifier);
     }
 }

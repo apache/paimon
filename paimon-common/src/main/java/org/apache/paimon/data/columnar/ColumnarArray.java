@@ -116,7 +116,8 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
         if (byteArray.len == byteArray.data.length) {
             return byteArray.data;
         } else {
-            return Arrays.copyOfRange(byteArray.data, byteArray.offset, byteArray.len);
+            return Arrays.copyOfRange(
+                    byteArray.data, byteArray.offset, byteArray.offset + byteArray.len);
         }
     }
 
@@ -245,5 +246,11 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
 
     private BytesColumnVector.Bytes getByteArray(int pos) {
         return ((BytesColumnVector) data).getBytes(offset + pos);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        throw new UnsupportedOperationException(
+                "ColumnarArray do not support equals, please compare fields one by one!");
     }
 }

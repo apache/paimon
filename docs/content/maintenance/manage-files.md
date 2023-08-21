@@ -36,7 +36,7 @@ Many users are concerned about small files, which can lead to:
 Assuming you are using Flink Writer, each checkpoint generates 1-2 snapshots, and the checkpoint forces the files to be
 generated on DFS, so the smaller the checkpoint interval the more small files will be generated.
 
-1. So first thing is decrease checkpoint interval.
+1. So first thing is increase checkpoint interval.
 
 By default, not only checkpoint will cause the file to be generated, but writer's memory (write-buffer-size) exhaustion
 will also flush data to DFS and generate the corresponding file. You can enable `write-buffer-spillable` to generate

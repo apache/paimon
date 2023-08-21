@@ -40,7 +40,7 @@ public interface SplitAssigner {
     List<FileStoreSourceSplit> getNext(int subtask, @Nullable String hostname);
 
     /** Add one split of a specified subtask to the assigner. */
-    void addSplit(int subtask, FileStoreSourceSplit splits);
+    void addSplit(int suggestedTask, FileStoreSourceSplit splits);
 
     /**
      * Adds a set of splits to this assigner. This happens for example when some split processing

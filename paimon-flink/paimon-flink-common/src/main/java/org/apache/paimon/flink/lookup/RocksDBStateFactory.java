@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.flink.RocksDBOptions;
 
@@ -63,34 +62,34 @@ public class RocksDBStateFactory implements Closeable {
         }
     }
 
-    public RocksDBValueState valueState(
+    public <K, V> RocksDBValueState<K, V> valueState(
             String name,
-            Serializer<InternalRow> keySerializer,
-            Serializer<InternalRow> valueSerializer,
+            Serializer<K> keySerializer,
+            Serializer<V> valueSerializer,
             long lruCacheSize)
             throws IOException {
-        return new RocksDBValueState(
+        return new RocksDBValueState<>(
                 db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
-    public RocksDBSetState setState(
+    public <K, V> RocksDBSetState<K, V> setState(
             String name,
-            Serializer<InternalRow> keySerializer,
-            Serializer<InternalRow> valueSerializer,
+            Serializer<K> keySerializer,
+            Serializer<V> valueSerializer,
             long lruCacheSize)
             throws IOException {
-        return new RocksDBSetState(
+        return new RocksDBSetState<>(
                 db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
-    public RocksDBListState listState(
+    public <K, V> RocksDBListState<K, V> listState(
             String name,
-            Serializer<InternalRow> keySerializer,
-            Serializer<InternalRow> valueSerializer,
+            Serializer<K> keySerializer,
+            Serializer<V> valueSerializer,
             long lruCacheSize)
             throws IOException {
 
-        return new RocksDBListState(
+        return new RocksDBListState<>(
                 db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 

@@ -52,7 +52,7 @@ public class TestCdcSourceFunction extends RichParallelSourceFunction<TestCdcEve
 
     @Override
     public void initializeState(FunctionInitializationContext context) throws Exception {
-        numRecordsPerCheckpoint = events.size() / ThreadLocalRandom.current().nextInt(10, 20);
+        numRecordsPerCheckpoint = events.size() / ThreadLocalRandom.current().nextInt(10, 20) + 1;
         recordsThisCheckpoint = new AtomicInteger(0);
 
         remainingEventsCount =

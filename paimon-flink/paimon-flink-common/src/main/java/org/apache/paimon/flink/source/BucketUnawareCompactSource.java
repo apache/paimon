@@ -125,7 +125,7 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
                 new CompactionTaskTypeInfo(),
                 sourceOperator,
                 false,
-                COMPACTION_COORDINATOR_NAME + " -> " + tableIdentifier,
+                COMPACTION_COORDINATOR_NAME + " : " + tableIdentifier,
                 streaming ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED);
     }
 }

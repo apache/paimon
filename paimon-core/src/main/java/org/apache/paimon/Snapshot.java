@@ -83,7 +83,7 @@ public class Snapshot {
     private static final String FIELD_TOTAL_RECORD_COUNT = "totalRecordCount";
     private static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
     private static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
-    private static final String FILED_WATERMARK = "watermark";
+    private static final String FIELD_WATERMARK = "watermark";
 
     // version of snapshot
     // null for paimon <= 0.2
@@ -162,7 +162,7 @@ public class Snapshot {
     // null for paimon <= 0.3
     // null if there is no watermark in new committing, and the previous snapshot does not have a
     // watermark
-    @JsonProperty(FILED_WATERMARK)
+    @JsonProperty(FIELD_WATERMARK)
     @Nullable
     private final Long watermark;
 
@@ -218,7 +218,7 @@ public class Snapshot {
             @JsonProperty(FIELD_TOTAL_RECORD_COUNT) Long totalRecordCount,
             @JsonProperty(FIELD_DELTA_RECORD_COUNT) Long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) Long changelogRecordCount,
-            @JsonProperty(FILED_WATERMARK) Long watermark) {
+            @JsonProperty(FIELD_WATERMARK) Long watermark) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -318,7 +318,7 @@ public class Snapshot {
         return changelogRecordCount;
     }
 
-    @JsonGetter(FILED_WATERMARK)
+    @JsonGetter(FIELD_WATERMARK)
     @Nullable
     public Long watermark() {
         return watermark;

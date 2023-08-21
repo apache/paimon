@@ -55,11 +55,15 @@ public interface SnapshotReader {
 
     SnapshotReader withBucket(int bucket);
 
+    SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);
+
     /** Get splits plan from snapshot. */
     Plan read();
 
     /** Get splits plan from an overwritten snapshot. */
     Plan readOverwrittenChanges();
+
+    Plan readIncrementalDiff(Snapshot before);
 
     /** Get partitions from a snapshot. */
     List<BinaryRow> partitions();

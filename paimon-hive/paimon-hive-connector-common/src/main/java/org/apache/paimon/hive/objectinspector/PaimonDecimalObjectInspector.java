@@ -65,6 +65,9 @@ public class PaimonDecimalObjectInspector extends AbstractPrimitiveJavaObjectIns
             return null;
         }
 
+        if (o instanceof HiveDecimalWritable) {
+            o = ((HiveDecimalWritable) o).getHiveDecimal();
+        }
         BigDecimal result = ((HiveDecimal) o).bigDecimalValue();
         // during the HiveDecimal to BigDecimal conversion the scale is lost, when the value is 0
         result = result.setScale(scale());

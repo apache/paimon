@@ -59,9 +59,7 @@ import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -104,16 +102,14 @@ public abstract class MergeTreeTestBase {
     private KeyValueFileWriterFactory writerFactory;
     private KeyValueFileWriterFactory compactWriterFactory;
     private MergeTreeWriter writer;
-    private SortEngine sortEngine;
 
     @BeforeEach
     public void beforeEach() throws IOException {
         path = new Path(tempDir.toString());
         pathFactory = new FileStorePathFactory(path);
         comparator = Comparator.comparingInt(o -> o.getInt(0));
-        sortEngine = getSortEngine();
         recreateMergeTree(1024 * 1024);
-        Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore").getParent();
         LocalFileIO.create().mkdirs(bucketDir);
     }
 
@@ -138,11 +134,13 @@ public abstract class MergeTreeTestBase {
         configuration.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         configuration.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
         configuration.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
+        configuration.set(CoreOptions.SORT_ENGINE, getSortEngine());
         options = new CoreOptions(configuration);
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
         RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
 
-        FileFormat flushingAvro = new FlushingFileFormat("avro");
+        String identifier = "avro";
+        FileFormat flushingAvro = new FlushingFileFormat(identifier);
         KeyValueFileReaderFactory.Builder readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
                         LocalFileIO.create(),
@@ -173,6 +171,9 @@ public abstract class MergeTreeTestBase {
                         });
         readerFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
         compactReaderFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
+
+        Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
+        pathFactoryMap.put(identifier, pathFactory);
         KeyValueFileWriterFactory.Builder writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         LocalFileIO.create(),
@@ -180,22 +181,10 @@ public abstract class MergeTreeTestBase {
                         keyType,
                         valueType,
                         flushingAvro,
-                        pathFactory,
+                        pathFactoryMap,
                         options.targetFileSize());
-        writerFactory =
-                writerFactoryBuilder.build(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        options.fileCompressionPerLevel(),
-                        options.fileCompression(),
-                        options);
-        compactWriterFactory =
-                writerFactoryBuilder.build(
-                        BinaryRow.EMPTY_ROW,
-                        0,
-                        options.fileCompressionPerLevel(),
-                        options.fileCompression(),
-                        options);
+        writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, options);
+        compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, options);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 
@@ -255,13 +244,12 @@ public abstract class MergeTreeTestBase {
         writeBatch(2);
         CommitIncrement increment = writer.prepareCommit(false);
 
-        Assertions.assertEquals(1, increment.newFilesIncrement().newFiles().size());
+        assertThat(increment.newFilesIncrement().newFiles().size()).isEqualTo(1);
 
-        Assertions.assertEquals(11, increment.compactIncrement().compactBefore().size());
-        Assertions.assertEquals(1, increment.compactIncrement().compactAfter().size());
+        assertThat(increment.compactIncrement().compactBefore().size()).isEqualTo(11);
+        assertThat(increment.compactIncrement().compactAfter().size()).isEqualTo(1);
     }
 
-    @Nullable
     private List<DataFileMeta> generateDataFileToCommit() throws Exception {
         List<DataFileMeta> newFiles = new ArrayList<>();
 
@@ -325,11 +313,9 @@ public abstract class MergeTreeTestBase {
             ex = e;
         }
 
-        Assertions.assertNotNull(ex);
-        Assertions.assertTrue(
-                ExceptionUtils.findThrowable(ex, ExecutionException.class).isPresent());
-        Assertions.assertFalse(
-                ExceptionUtils.stringifyException(ex).contains("CIRCULAR REFERENCE"));
+        assertThat(ex).isNotNull();
+        assertThat(ExceptionUtils.findThrowable(ex, ExecutionException.class)).isPresent();
+        assertThat(ExceptionUtils.stringifyException(ex).contains("CIRCULAR REFERENCE")).isFalse();
     }
 
     interface RunnableWithException {
@@ -406,7 +392,7 @@ public abstract class MergeTreeTestBase {
 
         writer.close();
 
-        Path bucketDir = writerFactory.pathFactory().toPath("ignore").getParent();
+        Path bucketDir = writerFactory.pathFactory(0).toPath("ignore").getParent();
         Set<String> files =
                 Arrays.stream(LocalFileIO.create().listStatus(bucketDir))
                         .map(FileStatus::getPath)
@@ -455,7 +441,7 @@ public abstract class MergeTreeTestBase {
                 new Levels(comparator, files, options.numLevels()),
                 strategy,
                 comparator,
-                options.targetFileSize(),
+                options.compactionFileSize(),
                 options.numSortedRunStopTrigger(),
                 new TestRewriter());
     }
@@ -479,7 +465,11 @@ public abstract class MergeTreeTestBase {
                     rewriter);
         }
 
-        protected CompactResult obtainCompactResult() throws ExecutionException {
+        protected CompactResult obtainCompactResult()
+                throws InterruptedException, ExecutionException {
+            if (taskFuture != null && !taskFuture.isDone()) {
+                taskFuture.get();
+            }
             OutOfMemoryError outOfMemoryError = new OutOfMemoryError();
             throw new ExecutionException("mock", outOfMemoryError);
         }
@@ -502,7 +492,7 @@ public abstract class MergeTreeTestBase {
             assertThat(remove).isTrue();
             // See MergeTreeWriter.updateCompactResult
             if (!newFileNames.contains(file.fileName()) && !afterFiles.contains(file.fileName())) {
-                compactWriterFactory.deleteFile(file.fileName());
+                compactWriterFactory.deleteFile(file.fileName(), file.level());
             }
         }
         compactedFiles.addAll(increment.compactIncrement().compactAfter());
@@ -521,9 +511,7 @@ public abstract class MergeTreeTestBase {
     private void assertRecords(List<TestRecord> expected) throws Exception {
         // compaction will drop delete
         List<DataFileMeta> files =
-                ((MergeTreeCompactManager) ((MergeTreeWriter) writer).compactManager())
-                        .levels()
-                        .allFiles();
+                ((MergeTreeCompactManager) writer.compactManager()).levels().allFiles();
         assertRecords(expected, files, true);
     }
 

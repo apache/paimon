@@ -20,7 +20,7 @@ package org.apache.paimon.hive.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.hive.PaimonJobConf;
+import org.apache.paimon.hive.LocationKeyExtractor;
 import org.apache.paimon.hive.SearchArgumentToPredicateConverter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -28,28 +28,32 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
+import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
 import org.apache.hadoop.mapred.JobConf;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /** Utils for create {@link FileStoreTable} and {@link Predicate}. */
 public class HiveUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(HiveUtils.class);
+    private static final String PAIMON_PREFIX = "paimon.";
 
     public static FileStoreTable createFileStoreTable(JobConf jobConf) {
-        PaimonJobConf wrapper = new PaimonJobConf(jobConf);
-        Options options = PaimonJobConf.extractCatalogConfig(jobConf);
-        options.set(CoreOptions.PATH, wrapper.getLocation());
+        Options options = extractCatalogConfig(jobConf);
+        options.set(CoreOptions.PATH, LocationKeyExtractor.getPaimonLocation(jobConf));
         CatalogContext catalogContext = CatalogContext.create(options, jobConf);
         return FileStoreTableFactory.create(catalogContext);
     }
 
-    public static Optional<Predicate> createPredicate(TableSchema tableSchema, JobConf jobConf) {
+    public static Optional<Predicate> createPredicate(
+            TableSchema tableSchema, JobConf jobConf, boolean limitToReadColumnNames) {
         SearchArgument sarg = ConvertAstToSearchArg.createFromConf(jobConf);
         if (sarg == null) {
             return Optional.empty();
@@ -58,7 +62,28 @@ public class HiveUtils {
                 new SearchArgumentToPredicateConverter(
                         sarg,
                         tableSchema.fieldNames(),
-                        tableSchema.logicalRowType().getFieldTypes());
+                        tableSchema.logicalRowType().getFieldTypes(),
+                        limitToReadColumnNames
+                                ? Arrays.stream(ColumnProjectionUtils.getReadColumnNames(jobConf))
+                                        .collect(Collectors.toSet())
+                                : null);
         return converter.convert();
+    }
+
+    /** Extract paimon catalog conf from Hive conf. */
+    public static Options extractCatalogConfig(Configuration hiveConf) {
+        Map<String, String> configMap = new HashMap<>();
+
+        if (hiveConf != null) {
+            for (Map.Entry<String, String> entry : hiveConf) {
+                String name = entry.getKey();
+                String value = entry.getValue();
+                if (name.startsWith(PAIMON_PREFIX) && !"NULL".equalsIgnoreCase(value)) {
+                    name = name.substring(PAIMON_PREFIX.length());
+                    configMap.put(name, value);
+                }
+            }
+        }
+        return Options.fromMap(configMap);
     }
 }

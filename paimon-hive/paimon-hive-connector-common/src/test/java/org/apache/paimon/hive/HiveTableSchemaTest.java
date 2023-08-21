@@ -37,7 +37,7 @@ import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link HiveSchema}. */
 public class HiveTableSchemaTest {
@@ -131,23 +131,21 @@ public class HiveTableSchemaTest {
         properties.setProperty("location", tempDir.toString());
 
         String expected =
-                String.join(
-                        "\n",
-                        "Hive DDL and paimon schema mismatched! "
-                                + "It is recommended not to write any column definition "
-                                + "as Paimon external table can read schema from the specified location.",
-                        "Mismatched fields are:",
-                        "Field #1",
-                        "Hive DDL          : mismatched string",
-                        "Paimon Schema: b string",
-                        "--------------------",
-                        "Field #2",
-                        "Hive DDL          : c decimal(6,3)",
-                        "Paimon Schema: c decimal(5,3)");
-        IllegalArgumentException exception =
-                assertThrows(
-                        IllegalArgumentException.class, () -> HiveSchema.extract(null, properties));
-        assertThat(exception).hasMessageContaining(expected);
+                "Hive DDL and paimon schema mismatched! "
+                        + "It is recommended not to write any column definition "
+                        + "as Paimon external table can read schema from the specified location.\n"
+                        + "Mismatched fields are:\n"
+                        + "Field #2\n"
+                        + "Hive DDL          : mismatched string\n"
+                        + "Paimon Schema: b string\n"
+                        + "--------------------\n"
+                        + "Field #3\n"
+                        + "Hive DDL          : c decimal(6,3)\n"
+                        + "Paimon Schema: c decimal(5,3)";
+
+        assertThatThrownBy(() -> HiveSchema.extract(null, properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(expected);
     }
 
     @Test
@@ -159,20 +157,13 @@ public class HiveTableSchemaTest {
         properties.setProperty("columns.types", TypeInfoFactory.intTypeInfo.getTypeName());
         properties.setProperty("location", tempDir.toString());
         properties.setProperty("columns.comments", "");
+
         String expected =
-                String.join(
-                        "\n",
-                        "Hive DDL and paimon schema mismatched! "
-                                + "It is recommended not to write any column definition "
-                                + "as Paimon external table can read schema from the specified location.",
-                        "Mismatched fields are:",
-                        "Field #1",
-                        "Hive DDL          : null",
-                        "Paimon Schema: b string",
-                        "--------------------",
-                        "Field #2",
-                        "Hive DDL          : null",
-                        "Paimon Schema: c decimal(5,3)");
+                "Hive DDL and paimon schema mismatched! "
+                        + "It is recommended not to write any column definition "
+                        + "as Paimon external table can read schema from the specified location.\n"
+                        + "There are 1 fields in Hive DDL: a\n"
+                        + "There are 3 fields in Paimon schema: a, b, c";
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(() -> HiveSchema.extract(null, properties))
                 .withMessageContaining(expected);
@@ -198,19 +189,11 @@ public class HiveTableSchemaTest {
         properties.setProperty("location", tempDir.toString());
 
         String expected =
-                String.join(
-                        "\n",
-                        "Hive DDL and paimon schema mismatched! "
-                                + "It is recommended not to write any column definition "
-                                + "as Paimon external table can read schema from the specified location.",
-                        "Mismatched fields are:",
-                        "Field #3",
-                        "Hive DDL          : d int",
-                        "Paimon Schema: null",
-                        "--------------------",
-                        "Field #4",
-                        "Hive DDL          : e string",
-                        "Paimon Schema: null");
+                "Hive DDL and paimon schema mismatched! "
+                        + "It is recommended not to write any column definition "
+                        + "as Paimon external table can read schema from the specified location.\n"
+                        + "There are 5 fields in Hive DDL: a, b, c, d, e\n"
+                        + "There are 3 fields in Paimon schema: a, b, c";
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(() -> HiveSchema.extract(null, properties))
                 .withMessageContaining(expected);
@@ -223,6 +206,111 @@ public class HiveTableSchemaTest {
                                 ROW_TYPE.getFields(),
                                 Collections.emptyList(),
                                 Collections.emptyList(),
+                                new HashMap<>(),
+                                ""));
+    }
+
+    @Test
+    public void testMismatchedPartitionKeyAndType() throws Exception {
+        createSchemaWithPartition();
+
+        Properties properties = new Properties();
+        properties.setProperty("partition_columns", "a/mismatched");
+        properties.setProperty(
+                "partition_columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.longTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName())));
+        properties.setProperty("columns", "c");
+        properties.setProperty(
+                "columns.types", TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName());
+        properties.setProperty("columns.comments", "");
+        properties.setProperty("location", tempDir.toString());
+
+        String expected =
+                String.join(
+                        "\n",
+                        "Hive DDL and paimon schema mismatched! "
+                                + "It is recommended not to write any column definition "
+                                + "as Paimon external table can read schema from the specified location.\n"
+                                + "Mismatched partition keys are:\n"
+                                + "Partition Key #1\n"
+                                + "Hive DDL          : a bigint\n"
+                                + "Paimon Schema: a int\n"
+                                + "--------------------\n"
+                                + "Partition Key #2\n"
+                                + "Hive DDL          : mismatched string\n"
+                                + "Paimon Schema: b string");
+        assertThatThrownBy(() -> HiveSchema.extract(null, properties))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(expected);
+    }
+
+    @Test
+    public void testTooFewPartitionKeys() throws Exception {
+        createSchemaWithPartition();
+
+        Properties properties = new Properties();
+        properties.setProperty("partition_columns", "a");
+        properties.setProperty(
+                "partition_columns.types", TypeInfoFactory.intTypeInfo.getTypeName());
+        properties.setProperty("columns", "c");
+        properties.setProperty(
+                "columns.types", TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName());
+        properties.setProperty("columns.comments", "");
+        properties.setProperty("location", tempDir.toString());
+
+        String expected =
+                "Hive DDL and paimon schema mismatched! "
+                        + "It is recommended not to write any column definition "
+                        + "as Paimon external table can read schema from the specified location.\n"
+                        + "There are 1 partition keys in Hive DDL: a\n"
+                        + "There are 2 partition keys in Paimon schema: a, b";
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveSchema.extract(null, properties))
+                .withMessageContaining(expected);
+    }
+
+    @Test
+    public void testTooManyPartitionKeys() throws Exception {
+        createSchemaWithPartition();
+
+        Properties properties = new Properties();
+        properties.setProperty("partition_columns", "a/b/d");
+        properties.setProperty(
+                "partition_columns.types",
+                String.join(
+                        ":",
+                        Arrays.asList(
+                                TypeInfoFactory.intTypeInfo.getTypeName(),
+                                TypeInfoFactory.stringTypeInfo.getTypeName(),
+                                TypeInfoFactory.intTypeInfo.getTypeName())));
+        properties.setProperty("columns", "c");
+        properties.setProperty(
+                "columns.types", TypeInfoFactory.getDecimalTypeInfo(5, 3).getTypeName());
+        properties.setProperty("columns.comments", "");
+        properties.setProperty("location", tempDir.toString());
+
+        String expected =
+                "Hive DDL and paimon schema mismatched! "
+                        + "It is recommended not to write any column definition "
+                        + "as Paimon external table can read schema from the specified location.\n"
+                        + "There are 3 partition keys in Hive DDL: a, b, d\n"
+                        + "There are 2 partition keys in Paimon schema: a, b";
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> HiveSchema.extract(null, properties))
+                .withMessageContaining(expected);
+    }
+
+    private void createSchemaWithPartition() throws Exception {
+        new SchemaManager(LocalFileIO.create(), new Path(tempDir.toString()))
+                .createTable(
+                        new Schema(
+                                ROW_TYPE.getFields(),
+                                Arrays.asList("a", "b"),
+                                Arrays.asList("a", "b", "c"),
                                 new HashMap<>(),
                                 ""));
     }
