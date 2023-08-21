@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.SinkMode;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
@@ -67,7 +67,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * </ul>
  *
  * <p>To automatically synchronize new table, This action creates a single sink for all Paimon
- * tables to be written. See {@link SinkMode#COMBINED}.
+ * tables to be written. See {@link DatabaseSyncMode#COMBINED}.
  */
 public class MongoDBSyncDatabaseAction extends ActionBase {
 
@@ -157,7 +157,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)
-                        .withSinkMode(SinkMode.COMBINED);
+                        .withMode(DatabaseSyncMode.COMBINED);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

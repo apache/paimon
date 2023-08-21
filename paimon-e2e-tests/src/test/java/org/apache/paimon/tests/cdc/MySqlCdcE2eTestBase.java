@@ -432,7 +432,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
             String action,
             @Nullable String partitionKeys,
             @Nullable String primaryKeys,
-            @Nullable String dataTypeOptions,
+            @Nullable String typeMappingOptions,
             Map<String, String> computedColumn,
             Map<String, String> mysqlConf,
             Map<String, String> tableConf)
@@ -442,10 +442,10 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 StringUtils.isBlank(partitionKeys) ? "" : "--partition-keys " + partitionKeys;
         String primaryKeysStr =
                 StringUtils.isBlank(primaryKeys) ? "" : "--primary-keys " + primaryKeys;
-        String dataTypeOptionsStr =
-                StringUtils.isBlank(dataTypeOptions)
+        String typeMappingStr =
+                StringUtils.isBlank(typeMappingOptions)
                         ? ""
-                        : "--data-type-options " + dataTypeOptions;
+                        : "--type-mapping " + typeMappingOptions;
         String tableStr = action.equals(ACTION_SYNC_TABLE) ? "--table ts_table" : "";
 
         List<String> computedColumns =
@@ -483,7 +483,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         tableStr,
                         partitionKeysStr,
                         primaryKeysStr,
-                        dataTypeOptionsStr,
+                        typeMappingStr,
                         "--mysql-conf",
                         "hostname=mysql-1",
                         "--mysql-conf",

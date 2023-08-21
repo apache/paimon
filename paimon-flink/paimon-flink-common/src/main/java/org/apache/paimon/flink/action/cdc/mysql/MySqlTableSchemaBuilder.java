@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Schema builder for MySQL cdc. */
@@ -40,15 +41,13 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
-    private final DataTypeOptions dataTypeOptions;
+    private final TypeMapping typeMapping;
 
     public MySqlTableSchemaBuilder(
-            Map<String, String> tableConfig,
-            boolean caseSensitive,
-            DataTypeOptions dataTypeOptions) {
+            Map<String, String> tableConfig, boolean caseSensitive, TypeMapping typeMapping) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
-        this.dataTypeOptions = dataTypeOptions;
+        this.typeMapping = typeMapping;
     }
 
     @Override
@@ -66,9 +65,9 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
                             element.get("typeExpression").asText(),
                             length == null ? null : length.asInt(),
                             scale == null ? null : scale.asInt(),
-                            dataTypeOptions);
+                            typeMapping);
 
-            if (!dataTypeOptions.ignoreNotNull()) {
+            if (!typeMapping.containsMode(TO_NULLABLE)) {
                 dataType.copy(element.get("optional").asBoolean());
             }
 

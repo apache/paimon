@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -63,8 +62,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     private static final List<DataTypeRoot> FLOATING_POINT_TYPES =
             Arrays.asList(DataTypeRoot.FLOAT, DataTypeRoot.DOUBLE);
 
-    protected UpdatedDataFieldsProcessFunctionBase(
-            Catalog.Loader catalogLoader, DataTypeOptions.DataTypeMapMode dataTypeMapMode) {
+    protected UpdatedDataFieldsProcessFunctionBase(Catalog.Loader catalogLoader) {
         this.catalogLoader = catalogLoader;
     }
 

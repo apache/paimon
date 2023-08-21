@@ -58,22 +58,20 @@ under the License.
         <td>It is used to specify which source tables are not to be synchronized. The usage is same as "--including-tables". "--excluding-tables" has higher priority than "--including-tables" if you specified both.</td>
     </tr>
     <tr>
-        <td><h5>--sink-mode</h5></td>
-        <td>It is used to specify sink mode.<br />Possible values:<ul><li>"divided" (the default mode if you haven't specified one): start a sink for each table, the synchronization of the new table requires restarting the job.</li><li>"combined": start a single combined sink for all tables, the new table will be automatically synchronized.</li></ul></td>
+        <td><h5>--mode</h5></td>
+        <td>It is used to specify synchronization mode.<br />Possible values:<ul><li>"divided" (the default mode if you haven't specified one): start a sink for each table, the synchronization of the new table requires restarting the job.</li><li>"combined": start a single combined sink for all tables, the new table will be automatically synchronized.</li></ul></td>
     </tr>
     <tr>
-        <td><h5>--data-type-options</h5></td>
+        <td><h5>--type-mapping</h5></td>
         <td>It is used to specify how to map MySQL data type to Paimon type.<br />
             Supported options:
                 <ul>
-                    <li>"tinyint1-not-bool": MySQL TINYINT(1) will be considered as Paimon TINYINT instead of BOOLEAN.</li>
-                    <li>"ignore-not-null": all NOT NULL constraints (except primary keys) will be ignored.
-                        This is used to solve the problem that Flink cannot accept the MySQL 'ALTER TABLE ADD COLUMN column NOT NULL DEFAULT x' operation.
+                    <li>"tinyint1-not-bool": maps MySQL TINYINT(1) to TINYINT instead of BOOLEAN.</li>
+                    <li>"to-nullable": ignores all NOT NULL constraints (except for primary keys).
+                        This is used to solve the problem that Flink cannot accept the MySQL 'ALTER TABLE ADD COLUMN column type NOT NULL DEFAULT x' operation.
                     </li>
-                    <li>"identity": data type map mode that keeps the original data types (default mode).</li>
-                    <li>"all-to-string": data type map mode that maps all MySQL data types to STRING.</li>
+                    <li>"to-string": maps all MySQL types to STRING.</li>
                 </ul>
-            Note that you can only specify one data type map mode.
         </td>
     </tr>
     <tr>

@@ -23,7 +23,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -45,6 +45,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
 /** Converts from MySQL type to {@link DataType}. */
 public class MySqlTypeUtils {
@@ -148,16 +151,11 @@ public class MySqlTypeUtils {
             String type,
             @Nullable Integer length,
             @Nullable Integer scale,
-            DataTypeOptions dataTypeOptions) {
-        switch (dataTypeOptions.dataTypeMapMode()) {
-            case IDENTITY:
-                return MySqlTypeUtils.toDataType(
-                        type, length, scale, dataTypeOptions.tinyint1NotBool());
-            case ALL_TO_STRING:
-                return DataTypes.STRING();
-            default:
-                throw new UnsupportedOperationException(
-                        "Unsupported data type map mode: " + dataTypeOptions.dataTypeMapMode());
+            TypeMapping typeMapping) {
+        if (typeMapping.containsMode(TO_STRING)) {
+            return DataTypes.STRING();
+        } else {
+            return toDataType(type, length, scale, typeMapping.containsMode(TINYINT1_NOT_BOOL));
         }
     }
 
@@ -165,7 +163,7 @@ public class MySqlTypeUtils {
             String type,
             @Nullable Integer length,
             @Nullable Integer scale,
-            Boolean tinyInt1NotBool) {
+            boolean tinyInt1NotBool) {
         switch (type.toUpperCase()) {
             case BIT:
                 if (length == null || length == 1) {

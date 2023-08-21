@@ -25,8 +25,8 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
@@ -73,6 +73,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link EventParser} for MySQL Debezium JSON. */
@@ -90,7 +91,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     @Nullable private final Pattern excludingPattern;
     private final Set<String> includedTables = new HashSet<>();
     private final Set<String> excludedTables = new HashSet<>();
-    private final DataTypeOptions dataTypeOptions;
+    private final TypeMapping typeMapping;
 
     private JsonNode root;
     private JsonNode payload;
@@ -102,7 +103,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             ZoneId serverTimeZone,
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
-            DataTypeOptions dataTypeOptions) {
+            TypeMapping typeMapping) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -111,7 +112,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 ddl -> Optional.empty(),
                 null,
                 null,
-                dataTypeOptions);
+                typeMapping);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -121,7 +122,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            DataTypeOptions dataTypeOptions) {
+            TypeMapping typeMapping) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -130,7 +131,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 schemaBuilder,
                 includingPattern,
                 excludingPattern,
-                dataTypeOptions);
+                typeMapping);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -141,7 +142,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            DataTypeOptions dataTypeOptions) {
+            TypeMapping typeMapping) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
@@ -149,7 +150,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         this.schemaBuilder = schemaBuilder;
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
-        this.dataTypeOptions = dataTypeOptions;
+        this.typeMapping = typeMapping;
     }
 
     @Override
@@ -213,9 +214,9 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                             column.get("typeName").asText(),
                             length == null ? null : length.asInt(),
                             scale == null ? null : scale.asInt(),
-                            dataTypeOptions);
+                            typeMapping);
 
-            if (!dataTypeOptions.ignoreNotNull()) {
+            if (!typeMapping.containsMode(TO_NULLABLE)) {
                 type = type.copy(column.get("optional").asBoolean());
             }
 

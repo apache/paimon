@@ -20,8 +20,8 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
-import org.apache.paimon.flink.action.cdc.SinkMode;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
@@ -57,11 +57,11 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
-                .withSinkMode(SinkMode.fromString(params.get("sink-mode")));
+                .withMode(DatabaseSyncMode.fromString(params.get("mode")));
 
-        if (params.has("data-type-options")) {
-            String[] options = params.get("data-type-options").split(",");
-            action.withDataTypeOptions(DataTypeOptions.parse(options));
+        if (params.has("type-mapping")) {
+            String[] options = params.get("type-mapping").split(",");
+            action.withTypeMapping(TypeMapping.parse(options));
         }
 
         return Optional.of(action);
@@ -86,8 +86,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--table-suffix <paimon-table-suffix>] "
                         + "[--including-tables <mysql-table-name|name-regular-expr>] "
                         + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
-                        + "[--sink-mode <sink-mode>] "
-                        + "[--data-type-map-mode <map-mode>] "
+                        + "[--mode <sync-mode>] "
+                        + "[--type-mapping <option1,option2...>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -122,7 +122,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 "--excluding-tables has higher priority than --including-tables if you specified both.");
         System.out.println();
 
-        System.out.println("--sink-mode is used to specify sink mode. You can specify two modes:");
+        System.out.println(
+                "--mode is used to specify synchronization mode. You can specify two modes:");
         System.out.println(
                 "  1. 'divided' (the default mode if you haven't specified one): "
                         + "start a sink for each table, the synchronization of the new table requires restarting the job;");
@@ -131,7 +132,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println(
-                "--data-type-options is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
 import org.apache.paimon.flink.sink.index.GlobalDynamicCdcBucketSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
@@ -51,8 +50,8 @@ public class CdcSinkBuilder<T> {
     private Table table = null;
     private Identifier identifier = null;
     private Catalog.Loader catalogLoader = null;
+
     @Nullable private Integer parallelism;
-    private DataTypeOptions dataTypeOptions = DataTypeOptions.defaultOptions();
 
     public CdcSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -84,11 +83,6 @@ public class CdcSinkBuilder<T> {
         return this;
     }
 
-    public CdcSinkBuilder<T> withDataTypeOptions(DataTypeOptions dataTypeOptions) {
-        this.dataTypeOptions = dataTypeOptions;
-        return this;
-    }
-
     public DataStreamSink<?> build() {
         Preconditions.checkNotNull(input, "Input DataStream can not be null.");
         Preconditions.checkNotNull(parserFactory, "Event ParserFactory can not be null.");
@@ -115,8 +109,7 @@ public class CdcSinkBuilder<T> {
                                 new UpdatedDataFieldsProcessFunction(
                                         new SchemaManager(dataTable.fileIO(), dataTable.location()),
                                         identifier,
-                                        catalogLoader,
-                                        dataTypeOptions.dataTypeMapMode()));
+                                        catalogLoader));
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 

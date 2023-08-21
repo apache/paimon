@@ -20,8 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
-import org.apache.paimon.flink.action.cdc.SinkMode;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.sink.index.GlobalDynamicCdcBucketSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
@@ -39,8 +38,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.flink.action.cdc.SinkMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.SinkMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
@@ -71,8 +69,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private Catalog.Loader catalogLoader;
     // database to sync, currently only support single database
     private String database;
-    private SinkMode sinkMode = DIVIDED;
-    private DataTypeOptions dataTypeOptions = DataTypeOptions.defaultOptions();
+    private DatabaseSyncMode mode;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -105,13 +102,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withSinkMode(SinkMode sinkMode) {
-        this.sinkMode = sinkMode;
-        return this;
-    }
-
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withDataTypeOptions(DataTypeOptions dataTypeOptions) {
-        this.dataTypeOptions = dataTypeOptions;
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(DatabaseSyncMode mode) {
+        this.mode = mode;
         return this;
     }
 
@@ -121,7 +113,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         Preconditions.checkNotNull(database);
         Preconditions.checkNotNull(catalogLoader);
 
-        if (sinkMode == COMBINED) {
+        if (mode == COMBINED) {
             buildCombinedCdcSink();
         } else {
             buildDividedCdcSink();
@@ -145,9 +137,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         SingleOutputStreamOperatorUtils.getSideOutput(
                         parsed,
                         CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
-                .process(
-                        new MultiTableUpdatedDataFieldsProcessFunction(
-                                catalogLoader, dataTypeOptions.dataTypeMapMode()));
+                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader));
 
         FlinkStreamPartitioner<CdcMultiplexRecord> partitioner =
                 new FlinkStreamPartitioner<>(new CdcMultiplexRecordChannelComputer(catalogLoader));
@@ -187,8 +177,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                                     new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(table.fileIO(), table.location()),
                                             Identifier.create(database, table.name()),
-                                            catalogLoader,
-                                            dataTypeOptions.dataTypeMapMode()));
+                                            catalogLoader));
             schemaChangeProcessFunction.getTransformation().setParallelism(1);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 

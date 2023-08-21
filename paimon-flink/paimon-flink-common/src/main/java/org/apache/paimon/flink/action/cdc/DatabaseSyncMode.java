@@ -31,11 +31,11 @@ import java.io.Serializable;
  * <p>2) COMBINED mode, start a single combined sink for all tables, the new table will be
  * automatically synchronized.
  */
-public enum SinkMode implements Serializable {
+public enum DatabaseSyncMode implements Serializable {
     DIVIDED,
     COMBINED;
 
-    public static SinkMode fromString(@Nullable String mode) {
+    public static DatabaseSyncMode fromString(@Nullable String mode) {
         if (mode == null) {
             return DIVIDED;
         }
@@ -46,7 +46,7 @@ public enum SinkMode implements Serializable {
             case "combined":
                 return COMBINED;
             default:
-                throw new UnsupportedOperationException("Unsupported sink mode: " + mode);
+                throw new UnsupportedOperationException("Unsupported mode: " + mode);
         }
     }
 }

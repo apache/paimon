@@ -24,9 +24,9 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
-import org.apache.paimon.flink.action.cdc.SinkMode;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -56,8 +56,8 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.SinkMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.SinkMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -110,8 +110,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private String tableSuffix = "";
     private String includingTables = ".*";
     @Nullable String excludingTables;
-    private SinkMode sinkMode = DIVIDED;
-    private DataTypeOptions dataTypeOptions = DataTypeOptions.defaultOptions();
+    private DatabaseSyncMode mode = DIVIDED;
+    private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
@@ -173,13 +173,13 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
-    public MySqlSyncDatabaseAction withSinkMode(SinkMode sinkMode) {
-        this.sinkMode = sinkMode;
+    public MySqlSyncDatabaseAction withMode(DatabaseSyncMode mode) {
+        this.mode = mode;
         return this;
     }
 
-    public MySqlSyncDatabaseAction withDataTypeOptions(DataTypeOptions dataTypeOptions) {
-        this.dataTypeOptions = dataTypeOptions;
+    public MySqlSyncDatabaseAction withTypeMapping(TypeMapping typeMapping) {
+        this.typeMapping = typeMapping;
         return this;
     }
 
@@ -205,7 +205,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         tableName ->
                                 shouldMonitorTable(tableName, includingPattern, excludingPattern),
                         excludedTables,
-                        dataTypeOptions);
+                        typeMapping);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
@@ -262,9 +262,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        DataTypeOptions dataTypeOptions = this.dataTypeOptions;
+        TypeMapping typeMapping = this.typeMapping;
         MySqlTableSchemaBuilder schemaBuilder =
-                new MySqlTableSchemaBuilder(tableConfig, caseSensitive, dataTypeOptions);
+                new MySqlTableSchemaBuilder(tableConfig, caseSensitive, typeMapping);
 
         EventParser.Factory<String> parserFactory =
                 () ->
@@ -275,10 +275,10 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 schemaBuilder,
                                 includingPattern,
                                 excludingPattern,
-                                dataTypeOptions);
+                                typeMapping);
 
         String database = this.database;
-        SinkMode sinkMode = this.sinkMode;
+        DatabaseSyncMode mode = this.mode;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
@@ -288,8 +288,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         .withDatabase(database)
                         .withCatalogLoader(catalogLoader())
                         .withTables(fileStoreTables)
-                        .withSinkMode(sinkMode)
-                        .withDataTypeOptions(dataTypeOptions);
+                        .withMode(mode);
 
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
@@ -384,12 +383,12 @@ public class MySqlSyncDatabaseAction extends ActionBase {
      */
     private String buildTableList() {
         String separatorRex = "\\.";
-        if (sinkMode == DIVIDED) {
+        if (mode == DIVIDED) {
             // In DIVIDED mode, we only concern about existed tables
             return monitoredTables.stream()
                     .map(t -> t.getDatabaseName() + separatorRex + t.getObjectName())
                     .collect(Collectors.joining("|"));
-        } else if (sinkMode == COMBINED) {
+        } else if (mode == COMBINED) {
             // In COMBINED mode, we should consider both existed tables and possible newly created
             // tables, so we should use regular expression to monitor all valid tables and exclude
             // certain invalid tables
@@ -428,7 +427,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
             return String.format("(%s)(%s)", excludingPattern, includingPattern);
         }
 
-        throw new UnsupportedOperationException("Unknown DatabaseSyncMode: " + sinkMode);
+        throw new UnsupportedOperationException("Unknown DatabaseSyncMode: " + mode);
     }
 
     // ------------------------------------------------------------------------

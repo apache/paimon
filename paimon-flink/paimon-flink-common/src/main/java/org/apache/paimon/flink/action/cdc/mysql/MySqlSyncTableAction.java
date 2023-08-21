@@ -24,7 +24,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
@@ -95,7 +95,7 @@ public class MySqlSyncTableAction extends ActionBase {
 
     private Map<String, String> tableConfig = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
-    private DataTypeOptions dataTypeOptions = DataTypeOptions.defaultOptions();
+    private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     public MySqlSyncTableAction(
             String warehouse, String database, String table, Map<String, String> mySqlConfig) {
@@ -142,8 +142,8 @@ public class MySqlSyncTableAction extends ActionBase {
         return this;
     }
 
-    public MySqlSyncTableAction withDataTypeOptions(DataTypeOptions dataTypeOptions) {
-        this.dataTypeOptions = dataTypeOptions;
+    public MySqlSyncTableAction withTypeMapping(TypeMapping typeMapping) {
+        this.typeMapping = typeMapping;
         return this;
     }
 
@@ -161,7 +161,7 @@ public class MySqlSyncTableAction extends ActionBase {
 
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig, monitorTablePredication(), new ArrayList<>(), dataTypeOptions);
+                        mySqlConfig, monitorTablePredication(), new ArrayList<>(), typeMapping);
         validateMySqlTableInfos(mySqlSchemasInfo);
 
         catalog.createDatabase(database, true);
@@ -207,11 +207,11 @@ public class MySqlSyncTableAction extends ActionBase {
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        DataTypeOptions dataTypeOptions = this.dataTypeOptions;
+        TypeMapping typeMapping = this.typeMapping;
         EventParser.Factory<String> parserFactory =
                 () ->
                         new MySqlDebeziumJsonEventParser(
-                                zoneId, caseSensitive, computedColumns, dataTypeOptions);
+                                zoneId, caseSensitive, computedColumns, typeMapping);
 
         CdcSinkBuilder<String> sinkBuilder =
                 new CdcSinkBuilder<String>()
@@ -221,8 +221,7 @@ public class MySqlSyncTableAction extends ActionBase {
                         .withParserFactory(parserFactory)
                         .withTable(table)
                         .withIdentifier(identifier)
-                        .withCatalogLoader(catalogLoader())
-                        .withDataTypeOptions(dataTypeOptions);
+                        .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

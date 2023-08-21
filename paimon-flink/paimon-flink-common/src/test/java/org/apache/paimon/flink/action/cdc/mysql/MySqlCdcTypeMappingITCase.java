@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -35,13 +35,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.flink.action.cdc.DataTypeOptions.DataTypeMapMode.ALL_TO_STRING;
-import static org.apache.paimon.flink.action.cdc.DataTypeOptions.DataTypeMapMode.IDENTITY;
-import static org.apache.paimon.flink.action.cdc.SinkMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IT test for {@link DataTypeOptions} in MySQL CDC. */
-public class MySqlCdcDataTypeOptionsITCase extends MySqlActionITCaseBase {
+/** IT test for {@link TypeMapping} in MySQL CDC. */
+public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @BeforeAll
     public static void startContainers() {
@@ -60,8 +61,8 @@ public class MySqlCdcDataTypeOptionsITCase extends MySqlActionITCaseBase {
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
-                        .withSinkMode(COMBINED)
-                        .withDataTypeOptions(new DataTypeOptions(IDENTITY, true, false));
+                        .withMode(COMBINED)
+                        .withTypeMapping(new TypeMapping(Collections.singleton(TINYINT1_NOT_BOOL)));
         runActionWithDefaultEnv(action);
 
         // read old data
@@ -122,7 +123,7 @@ public class MySqlCdcDataTypeOptionsITCase extends MySqlActionITCaseBase {
                 new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
                         .withPartitionKeys("pt")
                         .withPrimaryKeys("pt", "_id")
-                        .withDataTypeOptions(new DataTypeOptions(ALL_TO_STRING, false, false));
+                        .withTypeMapping(new TypeMapping(Collections.singleton(TO_STRING)));
         runActionWithDefaultEnv(action);
 
         int allTypeNums = 76;
@@ -305,8 +306,8 @@ public class MySqlCdcDataTypeOptionsITCase extends MySqlActionITCaseBase {
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .excludingTables("all_types_table")
-                        .withSinkMode(COMBINED)
-                        .withDataTypeOptions(new DataTypeOptions(ALL_TO_STRING, false, false));
+                        .withMode(COMBINED)
+                        .withTypeMapping(new TypeMapping(Collections.singleton(TO_STRING)));
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -380,8 +381,8 @@ public class MySqlCdcDataTypeOptionsITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
-                        .withSinkMode(COMBINED)
-                        .withDataTypeOptions(new DataTypeOptions(IDENTITY, false, true));
+                        .withMode(COMBINED)
+                        .withTypeMapping(new TypeMapping(Collections.singleton(TO_NULLABLE)));
         runActionWithDefaultEnv(action);
 
         FileStoreTable table = getFileStoreTable("t1");

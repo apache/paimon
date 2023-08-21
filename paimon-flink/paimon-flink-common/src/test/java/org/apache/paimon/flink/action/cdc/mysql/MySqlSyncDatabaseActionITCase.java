@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.SinkMode;
+import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -57,8 +57,8 @@ import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.SinkMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.SinkMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -576,7 +576,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .includingTables("t.+")
                         .excludingTables(".*a$")
-                        .withSinkMode(COMBINED);
+                        .withMode(COMBINED);
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -860,7 +860,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 new MySqlSyncDatabaseAction(warehouse, database, catalogConfig, mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
                         .includingTables("t.+")
-                        .withSinkMode(COMBINED);
+                        .withMode(COMBINED);
         StreamExecutionEnvironment env = getBasicEnv();
         action.build(env);
 
@@ -899,7 +899,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .withTableConfig(tableConfig)
-                        .withSinkMode(COMBINED);
+                        .withMode(COMBINED);
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -941,11 +941,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         ? "database_shard_.*"
                         : "database_shard_1|database_shard_2");
 
-        SinkMode sinkMode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
-                        .withSinkMode(sinkMode);
+                        .withMode(mode);
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -1017,7 +1017,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     Collections.singletonList("k"));
 
             // test newly created table
-            if (sinkMode == COMBINED) {
+            if (mode == COMBINED) {
                 statement.executeUpdate(
                         "CREATE TABLE database_shard_1.t4 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
                 statement.executeUpdate("INSERT INTO database_shard_1.t4 VALUES (1, 'db1_1')");
@@ -1048,12 +1048,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "without_merging_shard_.*");
 
-        SinkMode sinkMode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
                         .mergeShards(false)
-                        .withSinkMode(sinkMode);
+                        .withMode(mode);
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -1116,7 +1116,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     Collections.singletonList("k"));
 
             // test newly created table
-            if (sinkMode == COMBINED) {
+            if (mode == COMBINED) {
                 statement.executeUpdate(
                         "CREATE TABLE without_merging_shard_1.t3 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
                 statement.executeUpdate(
@@ -1170,7 +1170,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .ignoreIncompatible(true)
-                        .withSinkMode(COMBINED);
+                        .withMode(COMBINED);
         action.build(StreamExecutionEnvironment.getExecutionEnvironment());
 
         assertThat(action.monitoredTables())

@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
@@ -65,9 +65,9 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
                     new ArrayList<>(params.getMultiParameter("computed-column")));
         }
 
-        if (params.has("data-type-options")) {
-            String[] options = params.get("data-type-options").split(",");
-            action.withDataTypeOptions(DataTypeOptions.parse(options));
+        if (params.has("type-mapping")) {
+            String[] options = params.get("type-mapping").split(",");
+            action.withTypeMapping(TypeMapping.parse(options));
         }
 
         return Optional.of(action);
@@ -86,7 +86,7 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
                         + "--table <table-name> "
                         + "[--partition-keys <partition-keys>] "
                         + "[--primary-keys <primary-keys>] "
-                        + "[--data-type-map-mode] <map-mode> "
+                        + "[--type-mapping <option1,option2...>] "
                         + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
@@ -106,7 +106,7 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println(
-                "--data-type-options is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("Please see doc for usage of --computed-column.");

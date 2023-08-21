@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -52,9 +51,8 @@ public class MultiTableUpdatedDataFieldsProcessFunction
 
     private final Map<Identifier, SchemaManager> schemaManagers = new HashMap<>();
 
-    public MultiTableUpdatedDataFieldsProcessFunction(
-            Catalog.Loader catalogLoader, DataTypeOptions.DataTypeMapMode dataTypeMapMode) {
-        super(catalogLoader, dataTypeMapMode);
+    public MultiTableUpdatedDataFieldsProcessFunction(Catalog.Loader catalogLoader) {
+        super(catalogLoader);
     }
 
     @Override

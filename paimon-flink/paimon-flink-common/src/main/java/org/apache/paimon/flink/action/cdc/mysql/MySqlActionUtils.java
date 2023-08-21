@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchema;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
@@ -61,6 +61,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for MySQL Action. * */
@@ -96,13 +97,14 @@ public class MySqlActionUtils {
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables,
-            DataTypeOptions dataTypeOptions)
+            TypeMapping typeMapping)
             throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
         MySqlSchemasInfo mySqlSchemasInfo = new MySqlSchemasInfo();
         try (Connection conn =
-                MySqlActionUtils.getConnection(mySqlConfig, dataTypeOptions.tinyint1NotBool())) {
+                MySqlActionUtils.getConnection(
+                        mySqlConfig, typeMapping.containsMode(TINYINT1_NOT_BOOL))) {
             DatabaseMetaData metaData = conn.getMetaData();
             try (ResultSet schemas = metaData.getCatalogs()) {
                 while (schemas.next()) {
@@ -114,7 +116,7 @@ public class MySqlActionUtils {
                                 String tableName = tables.getString("TABLE_NAME");
                                 MySqlSchema mySqlSchema =
                                         MySqlSchema.buildSchema(
-                                                metaData, databaseName, tableName, dataTypeOptions);
+                                                metaData, databaseName, tableName, typeMapping);
                                 Identifier identifier = Identifier.create(databaseName, tableName);
                                 if (monitorTablePredication.test(tableName)) {
                                     mySqlSchemasInfo.addSchema(identifier, mySqlSchema);

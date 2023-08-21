@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
-import org.apache.paimon.flink.action.cdc.DataTypeOptions;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
@@ -50,7 +50,7 @@ public class MySqlSchema {
             DatabaseMetaData metaData,
             String databaseName,
             String tableName,
-            DataTypeOptions dataTypeOptions)
+            TypeMapping typeMapping)
             throws SQLException {
         LinkedHashMap<String, Pair<DataType, String>> fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
@@ -69,7 +69,7 @@ public class MySqlSchema {
                     scale = null;
                 }
                 DataType paimonType =
-                        MySqlTypeUtils.toDataType(fieldType, precision, scale, dataTypeOptions);
+                        MySqlTypeUtils.toDataType(fieldType, precision, scale, typeMapping);
 
                 fields.put(fieldName, Pair.of(paimonType, fieldComment));
             }
