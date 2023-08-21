@@ -41,6 +41,7 @@ public class MySqlComputedColumnE2ETest extends MySqlCdcE2eTestBase {
                 ACTION_SYNC_TABLE,
                 "_year",
                 "pk,_year",
+                null,
                 ImmutableMap.of("_year", "'year(_datetime)'"),
                 ImmutableMap.of("database-name", "'test_computed_column'", "table-name", "'T'"),
                 ImmutableMap.of("bucket", "2"));

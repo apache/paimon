@@ -46,6 +46,19 @@ under the License.
         <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".</td>
     </tr>
     <tr>
+        <td><h5>--type-mapping</h5></td>
+        <td>It is used to specify how to map MySQL data type to Paimon type.<br />
+            Supported options:
+            <ul>
+                <li>"tinyint1-not-bool": maps MySQL TINYINT(1) to TINYINT instead of BOOLEAN.</li>
+                <li>"to-nullable": ignores all NOT NULL constraints (except for primary keys).
+                    This is used to solve the problem that Flink cannot accept the MySQL 'ALTER TABLE ADD COLUMN column type NOT NULL DEFAULT x' operation.
+                </li>
+                <li>"to-string": maps all MySQL types to STRING.</li>
+            </ul>
+        </td>
+    </tr>
+    <tr>
         <td><h5>--computed-column</h5></td>
         <td>The definitions of computed columns. The argument field is from MySQL table field name. See <a href="#computed-functions">here</a> for a complete list of configurations. </td>
     </tr>

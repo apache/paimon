@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.types.DataType;
@@ -49,29 +50,28 @@ public class MySqlSchema {
             DatabaseMetaData metaData,
             String databaseName,
             String tableName,
-            boolean convertTinyintToBool)
+            TypeMapping typeMapping)
             throws SQLException {
         LinkedHashMap<String, Pair<DataType, String>> fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
                 String fieldType = rs.getString("TYPE_NAME");
-                Integer precision = rs.getInt("COLUMN_SIZE");
                 String fieldComment = rs.getString("REMARKS");
 
+                Integer precision = rs.getInt("COLUMN_SIZE");
                 if (rs.wasNull()) {
                     precision = null;
                 }
+
                 Integer scale = rs.getInt("DECIMAL_DIGITS");
                 if (rs.wasNull()) {
                     scale = null;
                 }
-                fields.put(
-                        fieldName,
-                        Pair.of(
-                                MySqlTypeUtils.toDataType(
-                                        fieldType, precision, scale, convertTinyintToBool),
-                                fieldComment));
+                DataType paimonType =
+                        MySqlTypeUtils.toDataType(fieldType, precision, scale, typeMapping);
+
+                fields.put(fieldName, Pair.of(paimonType, fieldComment));
             }
         }
 

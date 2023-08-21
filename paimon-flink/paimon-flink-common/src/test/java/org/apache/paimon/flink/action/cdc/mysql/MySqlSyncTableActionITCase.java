@@ -796,58 +796,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME);
-        mySqlConfig.put("table-name", "test_tinyint1_convert");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
-        runActionWithDefaultEnv(action);
-
-        checkTableSchema(
-                "[{\"id\":0,\"name\":\"pk\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
-                        + "{\"id\":1,\"name\":\"_tinyint1\",\"type\":\"TINYINT\",\"description\":\"\"}]");
-
-        try (Statement statement = getStatement()) {
-            statement.execute("USE " + DATABASE_NAME);
-            statement.executeUpdate("INSERT INTO test_tinyint1_convert VALUES (1, 21), (2, 42)");
-
-            FileStoreTable table = getFileStoreTable();
-            RowType rowType =
-                    RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.TINYINT()},
-                            new String[] {"pk", "_tinyint1"});
-            List<String> expected = Arrays.asList("+I[1, 21]", "+I[2, 42]");
-            waitForResult(expected, table, rowType, Collections.singletonList("pk"));
-
-            // test schema evolution
-            statement.executeUpdate(
-                    "ALTER TABLE test_tinyint1_convert ADD COLUMN _new_tinyint1 TINYINT(1)");
-            statement.executeUpdate(
-                    "INSERT INTO test_tinyint1_convert VALUES (3, 63, 1), (4, 127, -128)");
-
-            rowType =
-                    RowType.of(
-                            new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.TINYINT(), DataTypes.TINYINT()
-                            },
-                            new String[] {"pk", "_tinyint1", "_new_tinyint1"});
-            waitForResult(
-                    Arrays.asList(
-                            "+I[1, 21, NULL]",
-                            "+I[2, 42, NULL]",
-                            "+I[3, 63, 1]",
-                            "+I[4, 127, -128]"),
-                    table,
-                    rowType,
-                    Collections.singletonList("pk"));
-        }
-    }
-
-    @Test
-    @Timeout(60)
     public void testSyncShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 

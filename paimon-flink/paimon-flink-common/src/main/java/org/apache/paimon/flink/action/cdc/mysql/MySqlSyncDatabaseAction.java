@@ -26,6 +26,7 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -57,7 +58,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
 import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -111,6 +111,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private String includingTables = ".*";
     @Nullable String excludingTables;
     private DatabaseSyncMode mode = DIVIDED;
+    private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
@@ -177,6 +178,11 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    public MySqlSyncDatabaseAction withTypeMapping(TypeMapping typeMapping) {
+        this.typeMapping = typeMapping;
+        return this;
+    }
+
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
                 !mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
@@ -198,7 +204,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         mySqlConfig,
                         tableName ->
                                 shouldMonitorTable(tableName, includingPattern, excludingPattern),
-                        excludedTables);
+                        excludedTables,
+                        typeMapping);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
@@ -255,9 +262,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        Boolean convertTinyint1ToBool = mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL);
+        TypeMapping typeMapping = this.typeMapping;
         MySqlTableSchemaBuilder schemaBuilder =
-                new MySqlTableSchemaBuilder(tableConfig, caseSensitive, convertTinyint1ToBool);
+                new MySqlTableSchemaBuilder(tableConfig, caseSensitive, typeMapping);
 
         EventParser.Factory<String> parserFactory =
                 () ->
@@ -268,7 +275,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 schemaBuilder,
                                 includingPattern,
                                 excludingPattern,
-                                convertTinyint1ToBool);
+                                typeMapping);
 
         String database = this.database;
         DatabaseSyncMode mode = this.mode;

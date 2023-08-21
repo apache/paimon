@@ -34,7 +34,7 @@ import org.testcontainers.containers.Container;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 
-import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -114,6 +114,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 ACTION_SYNC_TABLE,
                 "pt",
                 "pt,_id",
+                null,
                 ImmutableMap.of(),
                 ImmutableMap.of(
                         "database-name", "paimon_sync_table", "table-name", "schema_evolution_.+"),
@@ -196,9 +197,9 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
 
     @Test
     public void testSyncDatabase() throws Exception {
-
         runAction(
                 ACTION_SYNC_DATABASE,
+                null,
                 null,
                 null,
                 ImmutableMap.of(),
@@ -273,6 +274,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 ACTION_SYNC_TABLE,
                 "pt",
                 "pt,_id",
+                "tinyint1-not-bool",
                 ImmutableMap.of(),
                 ImmutableMap.of(
                         "database-name",
@@ -338,6 +340,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 ACTION_SYNC_DATABASE,
                 null,
                 null,
+                "tinyint1-not-bool",
                 ImmutableMap.of(),
                 ImmutableMap.of(
                         "database-name",
@@ -426,18 +429,23 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
     }
 
     protected void runAction(
-            @Nonnull String action,
-            String partitionKeys,
-            String primaryKeys,
-            @Nonnull Map<String, String> computedColumn,
-            @Nonnull Map<String, String> mysqlConf,
-            @Nonnull Map<String, String> tableConf)
+            String action,
+            @Nullable String partitionKeys,
+            @Nullable String primaryKeys,
+            @Nullable String typeMappingOptions,
+            Map<String, String> computedColumn,
+            Map<String, String> mysqlConf,
+            Map<String, String> tableConf)
             throws Exception {
 
         String partitionKeysStr =
                 StringUtils.isBlank(partitionKeys) ? "" : "--partition-keys " + partitionKeys;
         String primaryKeysStr =
                 StringUtils.isBlank(primaryKeys) ? "" : "--primary-keys " + primaryKeys;
+        String typeMappingStr =
+                StringUtils.isBlank(typeMappingOptions)
+                        ? ""
+                        : "--type-mapping " + typeMappingOptions;
         String tableStr = action.equals(ACTION_SYNC_TABLE) ? "--table ts_table" : "";
 
         List<String> computedColumns =
@@ -475,6 +483,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         tableStr,
                         partitionKeysStr,
                         primaryKeysStr,
+                        typeMappingStr,
                         "--mysql-conf",
                         "hostname=mysql-1",
                         "--mysql-conf",
