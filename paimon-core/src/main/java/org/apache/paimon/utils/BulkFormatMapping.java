@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -107,7 +108,10 @@ public class BulkFormatMapping {
             RowType keyType = new RowType(dataKeyFields);
             RowType valueType = new RowType(dataValueFields);
             RowType expectedReadRowType = KeyValue.schema(keyType, valueType);
-            RowType storageRowType = RowTypeUtils.toStorageRowType(expectedReadRowType);
+            RowType storageRowType =
+                    RowTypeUtils.toStorageRowType(
+                            expectedReadRowType,
+                            CoreOptions.fromMap(dataSchema.options()).thinMode());
 
             int[][] dataKeyProjection =
                     SchemaEvolutionUtil.createDataProjection(

@@ -28,7 +28,12 @@ import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 
 /** Utils to convert table schema RowType to real storage RowType. */
 public class RowTypeUtils {
-    public static RowType toStorageRowType(RowType keyWithValue) {
+
+    public static RowType toStorageRowType(RowType keyWithValue, boolean thinMode) {
+        if (!thinMode) {
+            return keyWithValue;
+        }
+
         List<String> fields = keyWithValue.getFieldNames();
 
         List<DataField> dataFields = keyWithValue.getFields();

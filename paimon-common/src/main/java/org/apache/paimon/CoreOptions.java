@@ -833,6 +833,12 @@ public class CoreOptions implements Serializable {
                                     + " the value should be the user configured local time zone. The option value is either a full name"
                                     + " such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.");
 
+    public static final ConfigOption<Boolean> STORAGE_THIN_MODE =
+            key("storage.thin.mode")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Enable storage thin mode to avoid duplicate columns store.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1205,6 +1211,10 @@ public class CoreOptions implements Serializable {
 
     public String sinkWatermarkTimeZone() {
         return options.get(SINK_WATERMARK_TIME_ZONE);
+    }
+
+    public boolean thinMode() {
+        return options.get(STORAGE_THIN_MODE);
     }
 
     public Map<String, String> getFieldDefaultValues() {

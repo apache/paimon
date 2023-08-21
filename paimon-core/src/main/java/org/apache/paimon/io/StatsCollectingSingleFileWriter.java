@@ -56,13 +56,14 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             RowType writeSchema,
             @Nullable TableStatsExtractor tableStatsExtractor,
             String compression,
-            FieldStatsCollector.Factory[] statsCollectors) {
+            FieldStatsCollector.Factory[] statsCollectors,
+            boolean thinMode) {
         super(fileIO, factory, path, converter, compression);
         this.tableStatsExtractor = tableStatsExtractor;
         if (this.tableStatsExtractor == null) {
             this.tableStatsCollector = new TableStatsCollector(writeSchema, statsCollectors);
         }
-        RowType storageSchema = RowTypeUtils.toStorageRowType(writeSchema);
+        RowType storageSchema = RowTypeUtils.toStorageRowType(writeSchema, thinMode);
         projection = RowTypeUtils.projectionRowTypeWithKeyPrefix(storageSchema, writeSchema);
         Preconditions.checkArgument(
                 statsCollectors.length == writeSchema.getFieldCount(),

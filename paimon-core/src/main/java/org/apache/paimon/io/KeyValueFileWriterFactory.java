@@ -165,7 +165,7 @@ public class KeyValueFileWriterFactory {
         public KeyValueFileWriterFactory build(
                 BinaryRow partition, int bucket, CoreOptions options) {
             RowType fileRowType = KeyValue.schema(keyType, valueType);
-            RowType storageRowType = RowTypeUtils.toStorageRowType(fileRowType);
+            RowType storageRowType = RowTypeUtils.toStorageRowType(fileRowType, options.thinMode());
             WriteFormatContext context =
                     new WriteFormatContext(
                             partition,

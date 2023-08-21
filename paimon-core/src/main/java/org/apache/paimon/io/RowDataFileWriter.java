@@ -63,7 +63,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 writeSchema,
                 tableStatsExtractor,
                 fileCompression,
-                statsCollectors);
+                statsCollectors,
+                false);
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);

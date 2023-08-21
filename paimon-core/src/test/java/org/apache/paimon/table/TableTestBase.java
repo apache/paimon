@@ -151,6 +151,10 @@ public abstract class TableTestBase {
         return catalog.getTable(identifier());
     }
 
+    public void dropTableDefault() throws Exception {
+        catalog.dropTable(identifier(), true);
+    }
+
     private List<CommitMessage> writeOnce(Table table, int time, int size) throws Exception {
         StreamWriteBuilder builder = table.newStreamWriteBuilder();
         builder.withCommitUser(commitUser);
