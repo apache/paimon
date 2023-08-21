@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -29,21 +31,29 @@ import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -134,14 +144,6 @@ public class CompactActionForDbITCase extends ActionITCaseBase {
                 .build(env);
         env.execute();
 
-        // source 端没有问题
-        // +I 2|20221208|15|0|0|default|table1
-        // +I 2|20221209|15|0|0|default|table1
-        // +I 2|20221208|16|0|0|default|table1
-        // +I 2|20221208|15|0|0|default|table2
-        // +I 2|20221209|15|0|0|default|table2
-        // +I 2|20221208|16|0|0|default|table2
-
         snapshot = snapshotManager1.snapshot(snapshotManager1.latestSnapshotId());
         assertThat(snapshot.id()).isEqualTo(3);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
@@ -163,6 +165,106 @@ public class CompactActionForDbITCase extends ActionITCaseBase {
         }
     }
 
+    @Test
+    public void testStreamingCompact() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        createDatabase();
+
+        options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
+        options.put(
+                FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL.key(),
+                "1s");
+        options.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        //        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        // test that dedicated compact job will expire snapshots
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
+
+        FileStoreTable table =
+                createFileStoreTable(
+                        "table1",
+                        ROW_TYPE,
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        options);
+        snapshotManager = table.snapshotManager();
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+
+        // base records
+        writeData(
+                rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+        Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
+        assertThat(snapshot.id()).isEqualTo(1);
+        assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+
+        // no full compaction has happened, so plan should be empty
+        StreamTableScan scan = table.newReadBuilder().newStreamScan();
+        TableScan.Plan plan = scan.plan();
+        assertThat(plan.splits()).isEmpty();
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
+        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
+        env.getCheckpointConfig().setCheckpointInterval(500);
+        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
+
+        new CompactActionForDb(
+                        warehouse,
+                        database,
+                        table.bucketMode(),
+                        Options.fromMap(table.options()),
+                        table.coreOptions())
+                .build(env);
+        JobClient client = env.executeAsync();
+
+        // first full compaction
+        validateResult(
+                table,
+                scan,
+                Arrays.asList(
+                        "+I[1, 100, 15, 20221208]",
+                        "+I[1, 100, 15, 20221209]",
+                        "+I[1, 100, 16, 20221208]"),
+                60_000);
+
+        // incremental records
+        writeData(
+                rowData(1, 101, 15, BinaryString.fromString("20221208")),
+                rowData(1, 101, 16, BinaryString.fromString("20221208")),
+                rowData(1, 101, 15, BinaryString.fromString("20221209")));
+
+        // second full compaction
+        validateResult(
+                table,
+                scan,
+                Arrays.asList(
+                        "+U[1, 101, 15, 20221208]",
+                        "+U[1, 101, 15, 20221209]",
+                        "+U[1, 101, 16, 20221208]",
+                        "-U[1, 100, 15, 20221208]",
+                        "-U[1, 100, 15, 20221209]",
+                        "-U[1, 100, 16, 20221208]"),
+                60_000);
+        System.out.println("ok");
+
+        // assert dedicated compact job will expire snapshots
+        CommonTestUtils.waitUtil(
+                () ->
+                        snapshotManager.latestSnapshotId() - 2
+                                == snapshotManager.earliestSnapshotId(),
+                Duration.ofSeconds(60_000),
+                Duration.ofSeconds(100),
+                String.format("Cannot validate snapshot expiration in %s milliseconds.", 60_000));
+
+        client.cancel();
+    }
+
     protected void createDatabase() throws Catalog.DatabaseAlreadyExistException {
         catalog = catalog();
         catalog.createDatabase(database, true);
@@ -181,5 +283,31 @@ public class CompactActionForDbITCase extends ActionITCaseBase {
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
                 false);
         return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    private void validateResult(
+            FileStoreTable table, StreamTableScan scan, List<String> expected, long timeout)
+            throws Exception {
+        List<String> actual = new ArrayList<>();
+        long start = System.currentTimeMillis();
+        while (actual.size() != expected.size()) {
+            TableScan.Plan plan = scan.plan();
+            actual.addAll(getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE));
+            //            for (String line : actual) {
+            //                System.out.println(line);
+            //            }
+
+            if (System.currentTimeMillis() - start > timeout) {
+                break;
+            }
+        }
+        if (actual.size() != expected.size()) {
+            throw new TimeoutException(
+                    String.format(
+                            "Cannot collect %s records in %s milliseconds.",
+                            expected.size(), timeout));
+        }
+        actual.sort(String::compareTo);
+        assertThat(actual).isEqualTo(expected);
     }
 }

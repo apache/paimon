@@ -174,7 +174,7 @@ public class BatchMonitorFunction extends RichSourceFunction<Tuple2<Split, Strin
                     return;
                 }
                 try {
-                    // 传出去的split需要带有table name信息
+                    // the output type should contain table_name
                     List<Tuple2<Split, String>> splits = new ArrayList<>();
                     for (StreamTableScan scan : scansMap.keySet()) {
                         splits.addAll(
@@ -183,8 +183,6 @@ public class BatchMonitorFunction extends RichSourceFunction<Tuple2<Split, Strin
                                         .collect(Collectors.toList()));
                     }
                     isEmpty = splits.isEmpty();
-                    System.out.println("scansMap: " + scansMap.size());
-                    System.out.println("split: " + splits.size());
                     splits.forEach(ctx::collect);
 
                     if (emitSnapshotWatermark) {
@@ -230,34 +228,6 @@ public class BatchMonitorFunction extends RichSourceFunction<Tuple2<Split, Strin
         }
     }
 
-    //    public static DataStream<RowData> buildSource(
-    //            StreamExecutionEnvironment env,
-    //            String name,
-    //            TypeInformation<RowData> typeInfo,
-    //            ReadBuilder readBuilder,
-    //            long monitorInterval,
-    //            boolean emitSnapshotWatermark) {
-    //        BatchMonitorFunction function =
-    //                new BatchMonitorFunction(
-    //                        Collections.singletonList(readBuilder),
-    //                        monitorInterval,
-    //                        emitSnapshotWatermark);
-    //        StreamSource<Split, ?> sourceOperator = new StreamSource<>(function);
-    //        boolean isParallel = false;
-    //        return new DataStreamSource<>(
-    //                        env,
-    //                        new JavaTypeInfo<>(Split.class),
-    //                        sourceOperator,
-    //                        isParallel,
-    //                        name + "-Monitor",
-    //                        Boundedness.BOUNDED)
-    //                .forceNonParallel()
-    //                .partitionCustom(
-    //                        (key, numPartitions) -> key % numPartitions,
-    //                        split -> ((DataSplit) split).bucket())
-    //                .transform(name + "-Reader", typeInfo, new ReadOperator(readBuilder));
-    //    }
-
     public static DataStream<RowData> buildSource(
             StreamExecutionEnvironment env,
             String name,
@@ -272,25 +242,17 @@ public class BatchMonitorFunction extends RichSourceFunction<Tuple2<Split, Strin
         TupleTypeInfo<Tuple2<Split, String>> tupleTypeInfo =
                 new TupleTypeInfo<>(
                         new JavaTypeInfo<>(Split.class), BasicTypeInfo.STRING_TYPE_INFO);
-        DataStream<RowData> ds =
-                new DataStreamSource<>(
-                                env,
-                                tupleTypeInfo,
-                                sourceOperator,
-                                isParallel,
-                                name + "-Monitor",
-                                Boundedness.BOUNDED)
-                        .forceNonParallel()
-                        .partitionCustom(
-                                (key, numPartitions) -> key % numPartitions,
-                                split -> ((DataSplit) split.f0).bucket())
-                        .transform(name + "-Reader", typeInfo, new ReadOperator2(readBuilders));
-        // new ReadOperator2(readBuilders)，对于datastream中的每个元素，都对所有的readBuilder进行了读取操作
-        try {
-            ds.executeAndCollect();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return ds;
+        return new DataStreamSource<>(
+                        env,
+                        tupleTypeInfo,
+                        sourceOperator,
+                        isParallel,
+                        name + "-Monitor",
+                        Boundedness.BOUNDED)
+                .forceNonParallel()
+                .partitionCustom(
+                        (key, numPartitions) -> key % numPartitions,
+                        split -> ((DataSplit) split.f0).bucket())
+                .transform(name + "-Reader", typeInfo, new ReadOperator2(readBuilders));
     }
 }

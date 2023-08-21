@@ -92,7 +92,7 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
         if (!defaultOptions) {
             // change options to test whether CompactorSourceBuilder work normally
             table1 = table1.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
-            table2 = table2.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2"));
+            table2 = table2.copy(Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
         }
         StreamWriteBuilder streamWriteBuilder =
                 table1.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -140,9 +140,13 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
         assertThat(actual)
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "+I 2|20221208|15|0|0",
-                                "+I 2|20221208|16|0|0",
-                                "+I 2|20221209|15|0|0"));
+                                "+I 3|20221208|15|0|0|testdb|table2",
+                                "+I 3|20221208|16|0|0|testdb|table2",
+                                "+I 3|20221209|15|0|0|testdb|table2",
+                                "+I 3|20221209|16|0|0|testdb|table2",
+                                "+I 2|20221208|15|0|0|testdb|table1",
+                                "+I 2|20221208|16|0|0|testdb|table1",
+                                "+I 2|20221209|15|0|0|testdb|table1"));
 
         write.close();
         commit.close();
@@ -152,7 +156,8 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
     @ParameterizedTest(name = "defaultOptions = {0}")
     @ValueSource(booleans = {true, false})
     public void testStreamingRead(boolean defaultOptions) throws Exception {
-        FileStoreTable table = createFileStoreTable();
+        FileStoreTable table = createFileStoreTable("table1");
+        FileStoreTable table2 = createFileStoreTable("table2");
         if (!defaultOptions) {
             // change options to test whether CompactorSourceBuilder work normally
             Map<String, String> dynamicOptions = new HashMap<>();
@@ -162,17 +167,22 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
                     CoreOptions.ChangelogProducer.NONE.toString());
             dynamicOptions.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "0");
             table = table.copy(dynamicOptions);
+
+            table2 = table2.copy(dynamicOptions);
         }
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
         StreamTableWrite write = streamWriteBuilder.newWrite();
         StreamTableCommit commit = streamWriteBuilder.newCommit();
 
+        StreamWriteBuilder streamWriteBuilder2 =
+                table2.newStreamWriteBuilder().withCommitUser(commitUser);
+        StreamTableWrite write2 = streamWriteBuilder2.newWrite();
+        StreamTableCommit commit2 = streamWriteBuilder2.newCommit();
+
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
         commit.commit(0, write.prepareCommit(true, 0));
-        // +I 1|20221208|15|0|1
-        // +I 1|20221208|16|0|1
 
         write.write(rowData(1, 1511, BinaryString.fromString("20221208"), 15));
         write.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
@@ -183,49 +193,72 @@ public class MonitorCompactorSourceBuilderITCase extends AbstractTestBase {
         write.write(rowData(2, 1520, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1621, BinaryString.fromString("20221208"), 16));
         commit.commit(2, write.prepareCommit(true, 2));
-        // +I 4|20221208|15|0|1
-        // +I 4|20221208|16|0|1
 
         write.write(rowData(1, 1512, BinaryString.fromString("20221208"), 15));
         write.write(rowData(2, 1620, BinaryString.fromString("20221209"), 16));
         commit.commit(3, write.prepareCommit(true, 3));
-        // +I 4|20221208|15|0|1
-        // +I 4|20221208|16|0|1
-        // +I 5|20221208|15|0|1
-        // +I 5|20221209|16|0|1
+
+        // ************************ for table2
+
+        write2.write(rowData(1, 1510, BinaryString.fromString("20221208"), 15));
+        write2.write(rowData(2, 1620, BinaryString.fromString("20221208"), 16));
+        commit2.commit(0, write2.prepareCommit(true, 0));
+
+        write2.write(rowData(1, 1511, BinaryString.fromString("20221208"), 15));
+        write2.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
+        write2.compact(binaryRow("20221208", 15), 0, true);
+        write2.compact(binaryRow("20221209", 15), 0, true);
+        commit2.commit(1, write2.prepareCommit(true, 1));
+
+        write2.write(rowData(2, 1520, BinaryString.fromString("20221208"), 15));
+        write2.write(rowData(2, 1621, BinaryString.fromString("20221208"), 16));
+        commit2.commit(2, write2.prepareCommit(true, 2));
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         DataStream<RowData> compactorSource =
-                new MonitorCompactorSourceBuilder("test", Collections.singletonList(table))
+                new MonitorCompactorSourceBuilder(
+                                "test", Stream.of(table, table2).collect(Collectors.toList()))
                         .withContinuousMode(true)
                         .withEnv(env)
                         .build();
         CloseableIterator<RowData> it = compactorSource.executeAndCollect();
 
         List<String> actual = new ArrayList<>();
-        for (int i = 0; i < 4; i++) {
-            actual.add(toString(it.next()));
+        for (int i = 0; i < 6; i++) {
+            actual.add(toString2(it.next()));
         }
         //
         assertThat(actual)
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "+I 4|20221208|15|0|1",
-                                "+I 4|20221208|16|0|1",
-                                "+I 5|20221208|15|0|1",
-                                "+I 5|20221209|16|0|1"));
+                                "+I 4|20221208|15|0|1|test|table1",
+                                "+I 4|20221208|16|0|1|test|table1",
+                                "+I 4|20221208|15|0|1|test|table2",
+                                "+I 4|20221208|16|0|1|test|table2",
+                                "+I 5|20221209|16|0|1|test|table1",
+                                "+I 5|20221208|15|0|1|test|table1"));
 
         write.write(rowData(2, 1520, BinaryString.fromString("20221209"), 15));
         write.write(rowData(1, 1510, BinaryString.fromString("20221208"), 16));
         write.write(rowData(1, 1511, BinaryString.fromString("20221209"), 15));
         commit.commit(4, write.prepareCommit(true, 4));
 
+        write2.write(rowData(2, 1520, BinaryString.fromString("20221209"), 15));
+        write2.write(rowData(1, 1510, BinaryString.fromString("20221208"), 16));
+        write2.write(rowData(1, 1511, BinaryString.fromString("20221209"), 15));
+        commit2.commit(3, write2.prepareCommit(true, 3));
+
         actual.clear();
-        for (int i = 0; i < 2; i++) {
-            actual.add(toString(it.next()));
+        for (int i = 0; i < 4; i++) {
+            actual.add(toString2(it.next()));
         }
         assertThat(actual)
-                .hasSameElementsAs(Arrays.asList("+I 6|20221208|16|0|1", "+I 6|20221209|15|0|1"));
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "+I 6|20221208|16|0|1|test|table1",
+                                "+I 6|20221209|15|0|1|test|table1",
+                                "+I 5|20221208|16|0|1|test|table2",
+                                "+I 5|20221209|15|0|1|test|table2"));
 
         write.close();
         commit.close();

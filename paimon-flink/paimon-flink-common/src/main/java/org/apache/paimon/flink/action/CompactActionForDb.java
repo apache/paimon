@@ -36,6 +36,7 @@ import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.util.CloseableIterator;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -127,16 +128,6 @@ public class CompactActionForDb extends ActionBase {
         DataStream<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
 
-        //        CloseableIterator<RowData> it = null;
-        //        try {
-        //            it = source.executeAndCollect();
-        //            while (it.hasNext()) {
-        //                System.out.println(toString2(it.next()));
-        //            }
-        //        } catch (Exception e) {
-        //            e.printStackTrace();
-        //        }
-
         sinkBuilder.withInput(source).build();
     }
 
@@ -156,28 +147,5 @@ public class CompactActionForDb extends ActionBase {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         build(env);
         execute(env, "Compact job");
-    }
-
-    private String toString2(RowData rowData) {
-        DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
-        int numFiles;
-        try {
-            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(3)).size();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-
-        BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
-
-        return String.format(
-                "%s %d|%s|%d|%d|%d|%s|%s",
-                rowData.getRowKind().shortString(),
-                rowData.getLong(0),
-                partition.getString(0),
-                partition.getInt(1),
-                rowData.getInt(2),
-                numFiles,
-                rowData.getString(4),
-                rowData.getString(5));
     }
 }

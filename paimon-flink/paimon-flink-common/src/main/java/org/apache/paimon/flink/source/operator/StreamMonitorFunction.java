@@ -28,17 +28,22 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
+import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
 import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.streaming.api.operators.StreamSource;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.Preconditions;
@@ -46,42 +51,48 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /** this is a doc. */
-public class StreamMonitorFunction extends RichSourceFunction<Split>
+public class StreamMonitorFunction extends RichSourceFunction<Tuple2<Split, String>>
         implements CheckpointedFunction, CheckpointListener {
 
     private static final long serialVersionUID = 1L;
 
     private static final Logger LOG = LoggerFactory.getLogger(MonitorFunction.class);
 
-    private final ReadBuilder readBuilder;
+    private final List<ReadBuilder> readBuilders;
     private final long monitorInterval;
     private final boolean emitSnapshotWatermark;
 
     private volatile boolean isRunning = true;
 
-    private transient StreamTableScan scan;
-    private transient SourceContext<Split> ctx;
+    private transient Map<StreamTableScan, String> scansMap;
+    private transient SourceContext<Tuple2<Split, String>> ctx;
 
     private transient ListState<Long> checkpointState;
     private transient ListState<Tuple2<Long, Long>> nextSnapshotState;
     private transient TreeMap<Long, Long> nextSnapshotPerCheckpoint;
 
     public StreamMonitorFunction(
-            ReadBuilder readBuilder, long monitorInterval, boolean emitSnapshotWatermark) {
-        this.readBuilder = readBuilder;
+            List<ReadBuilder> readBuilders, long monitorInterval, boolean emitSnapshotWatermark) {
+        this.readBuilders = readBuilders;
         this.monitorInterval = monitorInterval;
         this.emitSnapshotWatermark = emitSnapshotWatermark;
     }
 
     @Override
     public void initializeState(FunctionInitializationContext context) throws Exception {
-        this.scan = readBuilder.newStreamScan();
+        scansMap = new HashMap<>();
+        for (ReadBuilder readBuilder : readBuilders) {
+            scansMap.put(readBuilder.newStreamScan(), readBuilder.tableName());
+        }
 
         this.checkpointState =
                 context.getOperatorStateStore()
@@ -120,7 +131,9 @@ public class StreamMonitorFunction extends RichSourceFunction<Split>
                     getClass().getSimpleName() + " retrieved invalid state.");
 
             if (retrievedStates.size() == 1) {
-                this.scan.restore(retrievedStates.get(0));
+                for (StreamTableScan scan : this.scansMap.keySet()) {
+                    scan.restore(retrievedStates.get(0));
+                }
             }
 
             for (Tuple2<Long, Long> tuple2 : nextSnapshotState.get()) {
@@ -134,7 +147,7 @@ public class StreamMonitorFunction extends RichSourceFunction<Split>
     @Override
     public void snapshotState(FunctionSnapshotContext ctx) throws Exception {
         this.checkpointState.clear();
-        Long nextSnapshot = this.scan.checkpoint();
+        Long nextSnapshot = this.scansMap.keySet().iterator().next().checkpoint();
         if (nextSnapshot != null) {
             this.checkpointState.add(nextSnapshot);
             this.nextSnapshotPerCheckpoint.put(ctx.getCheckpointId(), nextSnapshot);
@@ -151,7 +164,7 @@ public class StreamMonitorFunction extends RichSourceFunction<Split>
 
     @SuppressWarnings("BusyWait")
     @Override
-    public void run(SourceContext<Split> ctx) throws Exception {
+    public void run(SourceContext<Tuple2<Split, String>> ctx) throws Exception {
         this.ctx = ctx;
         while (isRunning) {
             boolean isEmpty;
@@ -160,12 +173,18 @@ public class StreamMonitorFunction extends RichSourceFunction<Split>
                     return;
                 }
                 try {
-                    List<Split> splits = scan.plan().splits();
+                    List<Tuple2<Split, String>> splits = new ArrayList<>();
+                    for (StreamTableScan scan : scansMap.keySet()) {
+                        splits.addAll(
+                                scan.plan().splits().stream()
+                                        .map(split -> new Tuple2<>(split, scansMap.get(scan)))
+                                        .collect(Collectors.toList()));
+                    }
                     isEmpty = splits.isEmpty();
                     splits.forEach(ctx::collect);
 
                     if (emitSnapshotWatermark) {
-                        Long watermark = scan.watermark();
+                        Long watermark = scansMap.keySet().iterator().next().watermark();
                         if (watermark != null) {
                             ctx.emitWatermark(new Watermark(watermark));
                         }
@@ -191,7 +210,7 @@ public class StreamMonitorFunction extends RichSourceFunction<Split>
         NavigableMap<Long, Long> nextSnapshots =
                 nextSnapshotPerCheckpoint.headMap(checkpointId, true);
         OptionalLong max = nextSnapshots.values().stream().mapToLong(Long::longValue).max();
-        max.ifPresent(scan::notifyCheckpointComplete);
+        max.ifPresent(scansMap.keySet().iterator().next()::notifyCheckpointComplete);
         nextSnapshots.clear();
     }
 
@@ -211,18 +230,28 @@ public class StreamMonitorFunction extends RichSourceFunction<Split>
             StreamExecutionEnvironment env,
             String name,
             TypeInformation<RowData> typeInfo,
-            ReadBuilder readBuilder,
+            List<ReadBuilder> readBuilders,
             long monitorInterval,
             boolean emitSnapshotWatermark) {
-        return env.addSource(
-                        new StreamMonitorFunction(
-                                readBuilder, monitorInterval, emitSnapshotWatermark),
+
+        StreamMonitorFunction function =
+                new StreamMonitorFunction(readBuilders, monitorInterval, emitSnapshotWatermark);
+        StreamSource<Tuple2<Split, String>, ?> sourceOperator = new StreamSource<>(function);
+        boolean isParallel = false;
+        TupleTypeInfo<Tuple2<Split, String>> tupleTypeInfo =
+                new TupleTypeInfo<>(
+                        new JavaTypeInfo<>(Split.class), BasicTypeInfo.STRING_TYPE_INFO);
+        return new DataStreamSource<>(
+                        env,
+                        tupleTypeInfo,
+                        sourceOperator,
+                        isParallel,
                         name + "-Monitor",
-                        new JavaTypeInfo<>(Split.class))
+                        Boundedness.CONTINUOUS_UNBOUNDED)
                 .forceNonParallel()
                 .partitionCustom(
                         (key, numPartitions) -> key % numPartitions,
-                        split -> ((DataSplit) split).bucket())
-                .transform(name + "-Reader", typeInfo, new ReadOperator(readBuilder));
+                        split -> ((DataSplit) split.f0).bucket())
+                .transform(name + "-Reader", typeInfo, new ReadOperator2(readBuilders));
     }
 }

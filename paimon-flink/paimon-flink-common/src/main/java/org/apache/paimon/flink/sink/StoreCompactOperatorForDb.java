@@ -67,10 +67,11 @@ public class StoreCompactOperatorForDb
             String initialCommitUser,
             Options options) {
         super(options);
-        //        Preconditions.checkArgument(
-        //                !table.coreOptions().writeOnly(),
-        //                CoreOptions.WRITE_ONLY.key() + " should not be true for
-        // StoreCompactOperator.");
+        // should guarantee table.coreOptions().writeOnly() = false!!
+        //                Preconditions.checkArgument(
+        //                        !table.coreOptions().writeOnly(),
+        //                        CoreOptions.WRITE_ONLY.key() + " should not be true for
+        //         StoreCompactOperator.");
         this.catalogLoader = catalogLoader;
         this.storeSinkWriteProvider = storeSinkWriteProvider;
         this.initialCommitUser = initialCommitUser;

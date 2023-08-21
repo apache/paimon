@@ -104,20 +104,28 @@ public class MonitorCompactorSourceBuilder {
         //        }
         RowType produceType = bucketsTables.get(0).rowType();
         if (isContinuous) {
-            for (BucketsTable2 bucketsTable : bucketsTables) {
-                bucketsTable = bucketsTable.copy(streamingCompactOptions());
-            }
+            bucketsTables =
+                    bucketsTables.stream()
+                            .map(bucketsTable -> bucketsTable.copy(streamingCompactOptions()))
+                            .collect(Collectors.toList());
             return StreamMonitorFunction.buildSource(
                     env,
                     "source",
                     InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)),
-                    bucketsTables.get(0).newReadBuilder().withFilter(partitionPredicate),
-                    10,
+                    bucketsTables.stream()
+                            .map(
+                                    bucketsTable ->
+                                            bucketsTable
+                                                    .newReadBuilder()
+                                                    .withFilter(partitionPredicate))
+                            .collect(Collectors.toList()),
+                    1,
                     false);
         } else {
-            for (BucketsTable2 bucketsTable : bucketsTables) {
-                bucketsTable = bucketsTable.copy(batchCompactOptions());
-            }
+            bucketsTables =
+                    bucketsTables.stream()
+                            .map(bucketsTable -> bucketsTable.copy(batchCompactOptions()))
+                            .collect(Collectors.toList());
             return BatchMonitorFunction.buildSource(
                     env,
                     "source",
