@@ -166,7 +166,6 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
     protected List<SchemaChange> extractSchemaChanges(
             SchemaManager schemaManager, List<DataField> updatedDataFields) {
-
         RowType oldRowType = schemaManager.latest().get().logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();
         for (DataField oldField : oldRowType.getFields()) {

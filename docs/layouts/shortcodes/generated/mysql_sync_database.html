@@ -62,6 +62,19 @@ under the License.
         <td>It is used to specify synchronization mode.<br />Possible values:<ul><li>"divided" (the default mode if you haven't specified one): start a sink for each table, the synchronization of the new table requires restarting the job.</li><li>"combined": start a single combined sink for all tables, the new table will be automatically synchronized.</li></ul></td>
     </tr>
     <tr>
+        <td><h5>--type-mapping</h5></td>
+        <td>It is used to specify how to map MySQL data type to Paimon type.<br />
+            Supported options:
+                <ul>
+                    <li>"tinyint1-not-bool": maps MySQL TINYINT(1) to TINYINT instead of BOOLEAN.</li>
+                    <li>"to-nullable": ignores all NOT NULL constraints (except for primary keys).
+                        This is used to solve the problem that Flink cannot accept the MySQL 'ALTER TABLE ADD COLUMN column type NOT NULL DEFAULT x' operation.
+                    </li>
+                    <li>"to-string": maps all MySQL types to STRING.</li>
+                </ul>
+        </td>
+    </tr>
+    <tr>
         <td><h5>--mysql-conf</h5></td>
         <td>The configuration for Flink CDC MySQL table sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name and table-name are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document</a> for a complete list of configurations.</td>
     </tr>

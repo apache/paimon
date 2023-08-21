@@ -21,40 +21,37 @@
 GRANT ALL PRIVILEGES ON *.* TO 'paimonuser'@'%';
 
 -- ################################################################################
---  MySqlSyncTableActionITCase
+--  MySqlCdcTypeMappingITCase
 -- ################################################################################
 
-CREATE DATABASE paimon_sync_table;
-USE paimon_sync_table;
+-- ################################################################################
+--  testTinyInt1NotBool
+-- ################################################################################
 
-CREATE TABLE schema_evolution_1 (
-    pt INT comment  'primary',
-    _id INT comment  '_id',
-    v1 VARCHAR(10) comment  'v1',
-    PRIMARY KEY (_id)
+CREATE DATABASE tinyint1_not_bool_test;
+USE tinyint1_not_bool_test;
+
+CREATE TABLE t1 (
+    pk INT,
+    _tinyint1 TINYINT(1),
+    PRIMARY KEY (pk)
 );
 
-CREATE TABLE schema_evolution_2 (
-    pt INT comment 'primary',
-    _id INT comment  '_id',
-    v1 VARCHAR(10) comment  'v1',
-    PRIMARY KEY (_id)
-);
+INSERT INTO t1 VALUES (1, 1);
 
-CREATE TABLE schema_evolution_multiple (
-    _id INT comment 'primary',
-    v1 VARCHAR(10) comment 'v1',
-    v2 INT comment 'v2',
-    v3 VARCHAR(10) comment 'v3',
-    PRIMARY KEY (_id)
-);
+CREATE DATABASE all_to_string_test;
+USE all_to_string_test;
+
+-- ################################################################################
+--  testReadAllTypes
+-- ################################################################################
 
 CREATE TABLE all_types_table (
     _id INT,
     pt DECIMAL(2, 1),
     -- BIT
     _bit1 BIT,
-    _bit BIT(64),
+    -- _bit BIT(64), TODO
     -- TINYINT
     _tinyint1 TINYINT(1),
     _boolean BOOLEAN,
@@ -152,11 +149,10 @@ CREATE TABLE all_types_table (
     PRIMARY KEY (_id)
 );
 
-
 INSERT INTO all_types_table VALUES (
     1, 1.1,
     -- BIT
-    1, B'11111000111',
+    1, -- B'11111000111', TODO
     -- TINYINT
     true, true, false, 1, 2, 3,
     -- SMALLINT
@@ -212,7 +208,7 @@ INSERT INTO all_types_table VALUES (
     'a,b'
 ), (
     2, 2.2,
-    NULL, NULL,
+    NULL,
     NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL,
     NULL, NULL, NULL,
@@ -246,70 +242,27 @@ INSERT INTO all_types_table VALUES (
     NULL
 );
 
-CREATE TABLE incompatible_field_1 (
-    _id INT,
-    v1 DATETIME,
-    PRIMARY KEY (_id)
-);
+-- ################################################################################
+--  testSchemaEvolutionAndNewlyCreatedTable
+-- ################################################################################
 
-CREATE TABLE incompatible_field_2 (
-    _id INT,
+CREATE TABLE schema_evolution_test (
+    pk INT,
     v1 INT,
-    PRIMARY KEY (_id)
-);
-
-CREATE TABLE incompatible_pk_1 (
-    a INT,
-    b BIGINT,
-    c VARCHAR(20),
-    PRIMARY KEY (a, b)
-);
-
-CREATE TABLE incompatible_pk_2 (
-    a INT,
-    b BIGINT,
-    c VARCHAR(20),
-    PRIMARY KEY (a)
-);
-
-CREATE TABLE test_computed_column (
-    pk INT,
-    _date DATE,
-    _datetime DATETIME,
-    _timestamp TIMESTAMP,
     PRIMARY KEY (pk)
 );
 
 -- ################################################################################
---  testSyncShard
+--  testIgnoreNotNull
 -- ################################################################################
 
-CREATE DATABASE shard_1;
-USE shard_1;
+CREATE DATABASE ignore_not_null_test;
+USE ignore_not_null_test;
 
 CREATE TABLE t1 (
     pk INT,
-    _date VARCHAR(10),
+    v1 VARCHAR(10) NOT NULL,
     PRIMARY KEY (pk)
 );
 
-CREATE TABLE t2 (
-    pk INT,
-    _date VARCHAR(10),
-    PRIMARY KEY (pk)
-);
-
-CREATE DATABASE shard_2;
-USE shard_2;
-
-CREATE TABLE t1 (
-    pk INT,
-    _date VARCHAR(10),
-    PRIMARY KEY (pk)
-);
-
-CREATE TABLE t2 (
-    pk INT,
-    _date VARCHAR(10),
-    PRIMARY KEY (pk)
-);
+INSERT INTO t1 VALUES (1, 'A');

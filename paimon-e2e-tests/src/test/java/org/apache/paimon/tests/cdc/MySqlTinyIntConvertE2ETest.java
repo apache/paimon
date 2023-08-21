@@ -41,14 +41,9 @@ public class MySqlTinyIntConvertE2ETest extends MySqlCdcE2eTestBase {
                 ACTION_SYNC_TABLE,
                 null,
                 "pk",
+                "tinyint1-not-bool",
                 ImmutableMap.of(),
-                ImmutableMap.of(
-                        "database-name",
-                        "test_tinyint_convert",
-                        "table-name",
-                        "'T'",
-                        "mysql.converter.tinyint1-to-bool",
-                        "false"),
+                ImmutableMap.of("database-name", "test_tinyint_convert", "table-name", "'T'"),
                 ImmutableMap.of("bucket", "2"));
 
         try (Connection conn = getMySqlConnection();
