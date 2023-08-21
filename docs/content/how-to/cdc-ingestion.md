@@ -601,8 +601,8 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 ## Special Data Type Mapping
 1. MySQL TINYINT(1) type will be mapped to Boolean by default. If you want to store number (-128~127) in it like MySQL, 
 you can specify type mapping option `tinyint1-not-bool`, then the column will be mapped to TINYINT in Paimon table.
-2. You can use type mapping option `ignore-not-null` to ignore all NOT NULL constraints (except primary keys).
-3. You can use type mapping option `all-to-string` to map all MySQL data type to STRING.
+2. You can use type mapping option `to-nullable` to ignore all NOT NULL constraints (except primary keys).
+3. You can use type mapping option `to-string` to map all MySQL data type to STRING.
 4. MySQL BIT(1) type will be mapped to Boolean.
 5. When using Hive catalog, MySQL TIME type will be mapped to STRING.
 
