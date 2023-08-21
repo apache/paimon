@@ -179,8 +179,8 @@ public class MySqlTypeUtils {
                 // User should not use tinyint(1) to store number although jdbc url parameter
                 // tinyInt1isBit=false can help change the return value, it's not a general way.
                 // Mybatis and mysql-connector-java map tinyint(1) to boolean by default, we behave
-                // the same way by default. To store number (-128~127), user can set the data type
-                // options 'tinyint1-not-bool' then tinyint(1) will be mapped to tinyint.
+                // the same way by default. To store number (-128~127), user can set the type
+                // mapping option 'tinyint1-not-bool' then tinyint(1) will be mapped to tinyint.
                 return length != null && length == 1 && !tinyInt1NotBool
                         ? DataTypes.BOOLEAN()
                         : DataTypes.TINYINT();

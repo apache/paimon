@@ -46,7 +46,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
     @BeforeAll
     public static void startContainers() {
-        MYSQL_CONTAINER.withSetupSQL("mysql/datatype_options_test_setup.sql");
+        MYSQL_CONTAINER.withSetupSQL("mysql/type_mapping_test_setup.sql");
         start();
     }
 
