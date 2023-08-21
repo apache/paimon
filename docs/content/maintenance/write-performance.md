@@ -163,6 +163,18 @@ One can easily see that too many sorted runs will result in poor query performan
 
 Compaction will become less frequent when `num-sorted-run.compaction-trigger` becomes larger, thus improving writing performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the table. This is a trade-off between writing and query performance.
 
+## Local Merging
+
+If your job suffers from primary key data skew
+(for example, you want to count the number of views for each pages in a website,
+and some particular pages are very popular among the users),
+you can set `'local-merge-buffer-size'` so that input records will be buffered and merged
+before they're shuffled by bucket and written into sink.
+This is particularly useful when the same primary key is updated frequently between snapshots.
+
+The buffer will be flushed when it is full. We recommend starting with `64 mb`
+when you are faced with data skew but don't know where to start adjusting buffer size.
+
 ## File Format
 
 If you want to achieve ultimate compaction performance, you can consider using row storage file format AVRO.

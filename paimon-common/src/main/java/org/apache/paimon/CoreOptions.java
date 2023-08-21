@@ -856,6 +856,17 @@ public class CoreOptions implements Serializable {
                                     + " the value should be the user configured local time zone. The option value is either a full name"
                                     + " such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.");
 
+    public static final ConfigOption<MemorySize> LOCAL_MERGE_BUFFER_SIZE =
+            key("local-merge-buffer-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Local merge will buffer and merge input records "
+                                    + "before they're shuffled by bucket and written into sink. "
+                                    + "The buffer will be flushed when it is full.\n"
+                                    + "Mainly to resolve data skew on primary keys. "
+                                    + "We recommend starting with 64 mb when trying out this feature.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1260,6 +1271,14 @@ public class CoreOptions implements Serializable {
 
     public int orcWriteBatch() {
         return options.getInteger(ORC_WRITE_BATCH_SIZE.key(), ORC_WRITE_BATCH_SIZE.defaultValue());
+    }
+
+    public boolean localMergeEnabled() {
+        return options.get(LOCAL_MERGE_BUFFER_SIZE) != null;
+    }
+
+    public long localMergeBufferSize() {
+        return options.get(LOCAL_MERGE_BUFFER_SIZE).getBytes();
     }
 
     /** Specifies the merge engine for table with primary key. */
