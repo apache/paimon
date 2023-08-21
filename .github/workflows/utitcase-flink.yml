@@ -44,7 +44,7 @@ jobs:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'adopt'
       - name: Build and Test
-        timeout-minutes: 60
+        timeout-minutes: 80
         run: |
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
