@@ -177,6 +177,10 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     public void createTable(ObjectPath tablePath, CatalogBaseTable table, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException, CatalogException {
         String connector = table.getOptions().get(CONNECTOR.key());
+        if (connector == null) {
+            throw new RuntimeException(
+                    "FlinkGenericCatalog can not create table without 'connector' key.");
+        }
         if (FlinkCatalogFactory.IDENTIFIER.equals(connector)) {
             paimon.createTable(tablePath, table, ignoreIfExists);
         } else {
