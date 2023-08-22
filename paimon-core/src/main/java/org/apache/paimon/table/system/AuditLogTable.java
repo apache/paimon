@@ -51,6 +51,7 @@ import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -150,6 +151,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return dataTable.snapshotManager();
+    }
+
+    @Override
+    public TagManager tagManager() {
+        return dataTable.tagManager();
     }
 
     @Override

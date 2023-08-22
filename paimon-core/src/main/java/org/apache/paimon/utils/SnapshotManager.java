@@ -22,13 +22,19 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
+import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Function;
@@ -212,6 +218,39 @@ public class SnapshotManager implements Serializable {
             }
         }
         return Optional.empty();
+    }
+
+    /** Find the snapshot of the specified identifiers written by the specified user. */
+    public List<Snapshot> findSnapshotsForIdentifiers(
+            @Nonnull String user, List<Long> identifiers) {
+        if (identifiers.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Long latestId = latestSnapshotId();
+        if (latestId == null) {
+            return Collections.emptyList();
+        }
+        long earliestId =
+                Preconditions.checkNotNull(
+                        earliestSnapshotId(),
+                        "Latest snapshot id is not null, but earliest snapshot id is null. "
+                                + "This is unexpected.");
+
+        long minSearchedIdentifier = identifiers.stream().min(Long::compareTo).get();
+        List<Snapshot> matchedSnapshots = new ArrayList<>();
+        Set<Long> remainingIdentifiers = new HashSet<>(identifiers);
+        for (long id = latestId; id >= earliestId && !remainingIdentifiers.isEmpty(); id--) {
+            Snapshot snapshot = snapshot(id);
+            if (user.equals(snapshot.commitUser())) {
+                if (remainingIdentifiers.remove(snapshot.commitIdentifier())) {
+                    matchedSnapshots.add(snapshot);
+                }
+                if (snapshot.commitIdentifier() <= minSearchedIdentifier) {
+                    break;
+                }
+            }
+        }
+        return matchedSnapshots;
     }
 
     /**
