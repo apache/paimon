@@ -281,30 +281,27 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             return Collections.emptyList();
         }
         List<CdcRecord> records = new ArrayList<>();
-        parseRecord(payload.get("before"), RowKind.DELETE).ifPresent(records::add);
-        parseRecord(payload.get("after"), RowKind.INSERT).ifPresent(records::add);
-        return records;
-    }
 
-    private Optional<CdcRecord> parseRecord(JsonNode recordRow, RowKind kind) {
-        Map<String, String> fields = new HashMap<>();
-        Set<String> encodedFields = new HashSet<>();
-        extractRow(recordRow, fields, encodedFields);
-
-        if (fields.size() > 0) {
-            fields = caseSensitive ? fields : keyCaseInsensitive(fields);
-            return Optional.of(new CdcRecord(kind, fields, encodedFields));
-        } else {
-            return Optional.empty();
+        Map<String, String> before = extractRow(payload.get("before"));
+        if (before.size() > 0) {
+            before = caseSensitive ? before : keyCaseInsensitive(before);
+            records.add(new CdcRecord(RowKind.DELETE, before));
         }
+
+        Map<String, String> after = extractRow(payload.get("after"));
+        if (after.size() > 0) {
+            after = caseSensitive ? after : keyCaseInsensitive(after);
+            records.add(new CdcRecord(RowKind.INSERT, after));
+        }
+
+        return records;
     }
 
     private String getDatabaseName() {
         return payload.get("source").get("db").asText();
     }
 
-    private void extractRow(
-            JsonNode recordRow, Map<String, String> fields, Set<String> encodedFields) {
+    private Map<String, String> extractRow(JsonNode recordRow) {
         JsonNode schema =
                 Preconditions.checkNotNull(
                         root.get("schema"),
@@ -338,9 +335,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         Map<String, Object> jsonMap =
                 objectMapper.convertValue(recordRow, new TypeReference<Map<String, Object>>() {});
         if (jsonMap == null) {
-            return;
+            return new HashMap<>();
         }
 
+        Map<String, String> resultMap = new HashMap<>();
         for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue();
@@ -365,7 +363,6 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     newValue = StringUtils.bytesToBinaryString(bigEndian);
                 } else {
                     newValue = Base64.getEncoder().encodeToString(bigEndian);
-                    encodedFields.add(fieldName);
                 }
             } else if (("bytes".equals(mySqlType) && className == null)) {
                 // MySQL binary, varbinary, blob
@@ -451,15 +448,17 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 }
             }
 
-            fields.put(fieldName, newValue);
+            resultMap.put(fieldName, newValue);
         }
 
         // generate values of computed columns
         for (ComputedColumn computedColumn : computedColumns) {
-            fields.put(
+            resultMap.put(
                     computedColumn.columnName(),
-                    computedColumn.eval(fields.get(computedColumn.fieldReference())));
+                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
         }
+
+        return resultMap;
     }
 
     private Map<String, String> keyCaseInsensitive(Map<String, String> origin) {

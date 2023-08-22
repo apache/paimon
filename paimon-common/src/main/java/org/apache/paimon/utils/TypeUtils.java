@@ -32,7 +32,9 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -50,6 +52,14 @@ public class TypeUtils {
     }
 
     public static Object castFromString(String s, DataType type) {
+        return castFromStringInternal(s, type, false);
+    }
+
+    public static Object castFromCdcValueString(String s, DataType type) {
+        return castFromStringInternal(s, type, true);
+    }
+
+    private static Object castFromStringInternal(String s, DataType type, boolean isCdcValue) {
         BinaryString str = BinaryString.fromString(s);
         switch (type.getTypeRoot()) {
             case CHAR:
@@ -65,7 +75,9 @@ public class TypeUtils {
             case BOOLEAN:
                 return BinaryStringUtils.toBoolean(str);
             case BINARY:
-                return s.getBytes();
+                return isCdcValue
+                        ? Base64.getDecoder().decode(s)
+                        : s.getBytes(StandardCharsets.UTF_8);
             case VARBINARY:
                 int binaryLength = DataTypeChecks.getLength(type);
                 byte[] bytes = s.getBytes();
