@@ -117,7 +117,7 @@ SELECT window_start, window_end, COUNT(`user`) FROM TABLE(
  TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
 ```
 
-You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
+You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
 which will make sure no sources/splits/shards/partitions increase their watermarks too far ahead of the rest:
 
 <table class="configuration table table-bordered">

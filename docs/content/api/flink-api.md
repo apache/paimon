@@ -54,7 +54,7 @@ Please choose your Flink version.
 Paimon relies on Hadoop environment, you should add hadoop classpath or bundled jar.
 
 Paimon does not provide a DataStream API, but you can read or write to Paimon tables by the conversion between DataStream and Table in Flink.
-See [DataStream API Integration](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/data_stream_api/).
+See [DataStream API Integration](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/data_stream_api/).
 
 ## Write to Table 
 

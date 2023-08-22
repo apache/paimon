@@ -75,7 +75,7 @@ INSERT { INTO | OVERWRITE } table_identifier [ part_spec ] [ column_list ] { val
 
 For more information, please check the syntax document:
 
-[Flink INSERT Statement](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sql/insert/)
+[Flink INSERT Statement](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/insert/)
 
 [Spark INSERT Statement](https://spark.apache.org/docs/latest/sql-ref-syntax-dml-insert-table.html)
 

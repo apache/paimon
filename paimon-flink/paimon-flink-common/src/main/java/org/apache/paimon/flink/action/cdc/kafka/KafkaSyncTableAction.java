@@ -50,7 +50,7 @@ import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComput
  * <p>This topic must be from canal-json format.
  *
  * <p>You should specify Kafka source topic in {@code kafkaConfig}. See <a
- * href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/">document
+ * href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/">document
  * of flink-connectors</a> for detailed keys and values.
  *
  * <p>If the specified Paimon table does not exist, this action will automatically create the table.

@@ -115,8 +115,8 @@ WHERE order_status = 'verified';
 The pipeline has been running well for the past few weeks. However, the data volume has grown fast recently, 
 and the job's latency keeps increasing. To improve the data freshness, users can 
 - Suspend the streaming job with a savepoint ( see 
-  [Suspended State](https://nightlies.apache.org/flink/flink-docs-master/docs/internals/job_scheduling/) and 
-  [Stopping a Job Gracefully Creating a Final Savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/deployment/cli/) )
+  [Suspended State](https://nightlies.apache.org/flink/flink-docs-stable/docs/internals/job_scheduling/) and 
+  [Stopping a Job Gracefully Creating a Final Savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/cli/) )
   ```bash
   $ ./bin/flink stop \
         --savepointPath /tmp/flink-savepoints \
@@ -149,7 +149,7 @@ and the job's latency keeps increasing. To improve the data freshness, users can
   WHERE dt IN ('2022-06-20', '2022-06-21', '2022-06-22');
   ```
 - After overwrite job has finished, switch back to streaming mode. And now, the parallelism can be increased alongside with bucket number to restore the streaming job from the savepoint 
-( see [Start a SQL Job from a savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/sqlclient/#start-a-sql-job-from-a-savepoint) )
+( see [Start a SQL Job from a savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sqlclient/#start-a-sql-job-from-a-savepoint) )
   ```sql
   SET 'execution.runtime-mode' = 'streaming';
   SET 'execution.savepoint.path' = <savepointPath>;

@@ -109,7 +109,7 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
                         + "are required configurations, others are optional.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/");
+                        + "see https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/");
         System.out.println();
         System.out.println();
 

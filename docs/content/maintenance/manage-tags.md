@@ -237,7 +237,7 @@ You can set `sink.savepoint.auto-tag` to `true` to enable the feature of automat
 
 **Step 2: Trigger savepoint.**
 
-You can refer to [flink savepoint](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/ops/state/savepoints/#operations) 
+You can refer to [flink savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#operations) 
 to learn how to configure and trigger savepoint.
 
 **Step 3: Choose the tag corresponding to the savepoint.**
@@ -251,4 +251,4 @@ The tag corresponding to the savepoint will be named in the form of `savepoint-$
 
 **Step 5: Restart from the savepoint.**
 
-You can refer to [here](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/ops/state/savepoints/#resuming-from-savepoints) to learn how to restart from a specified savepoint.
+You can refer to [here](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#resuming-from-savepoints) to learn how to restart from a specified savepoint.
