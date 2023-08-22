@@ -402,8 +402,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.STRING(), // _text
                             DataTypes.STRING(), // _mediumtext
                             DataTypes.STRING(), // _longtext
-                            DataTypes.BYTES(), // _bin
-                            DataTypes.BYTES(), // _varbin
+                            DataTypes.VARBINARY(10), // _bin
+                            DataTypes.VARBINARY(20), // _varbin
                             DataTypes.BYTES(), // _tinyblob
                             DataTypes.BYTES(), // _blob
                             DataTypes.BYTES(), // _mediumblob

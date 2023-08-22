@@ -27,6 +27,7 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VarBinaryType;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -277,9 +278,14 @@ public class MySqlTypeUtils {
             case MULTIPOLYGON:
             case GEOMETRYCOLLECTION:
                 return DataTypes.STRING();
-                // MySQL BINARY and VARBINARY are stored as bytes in JSON
+                // MySQL BINARY and VARBINARY are stored as bytes in JSON. We convert them to
+                // DataTypes.VARBINARY to remain the length information
             case BINARY:
             case VARBINARY:
+                return length == null || length == 0
+                        ? DataTypes.VARBINARY(VarBinaryType.DEFAULT_LENGTH)
+                        : DataTypes.VARBINARY(length);
+
             case TINYBLOB:
             case BLOB:
             case MEDIUMBLOB:

@@ -80,7 +80,7 @@ public class TypeUtils {
                         : s.getBytes(StandardCharsets.UTF_8);
             case VARBINARY:
                 int binaryLength = DataTypeChecks.getLength(type);
-                byte[] bytes = s.getBytes();
+                byte[] bytes = s.getBytes(StandardCharsets.UTF_8);
                 if (bytes.length > binaryLength) {
                     throw new IllegalArgumentException(
                             String.format(
