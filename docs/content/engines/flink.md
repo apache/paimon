@@ -125,6 +125,10 @@ You can now start Flink SQL client to execute SQL scripts.
 
 **Step 5: Create a Catalog and a Table**
 
+{{< tabs "Create Flink Catalog" >}}
+
+{{< tab "Catalog" >}}
+
 ```sql
 -- if you're trying out Paimon in a distributed environment,
 -- the warehouse path should be set to a shared file system, such as HDFS or OSS
@@ -141,6 +145,37 @@ CREATE TABLE word_count (
     cnt BIGINT
 );
 ```
+
+{{< /tab >}}
+
+{{< tab "Generic-Catalog" >}}
+
+Using FlinkGenericCatalog, you need to use Hive metastore. Then, you can use all the tables from Paimon, Hive, and
+Flink Generic Tables (Kafka and other tables)!
+
+In this mode, you should use 'connector' option for creating tables.
+
+```sql
+CREATE CATALOG my_catalog WITH (
+    'type'='paimon-generic',
+    'hive-conf-dir'='...',
+    'hadoop-conf-dir'='...'
+);
+
+USE CATALOG my_catalog;
+
+-- create a word count table
+CREATE TABLE word_count (
+    word STRING PRIMARY KEY NOT ENFORCED,
+    cnt BIGINT
+) WITH (
+    'connector'='paimon'
+);
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
 
 **Step 6: Write Data**
 

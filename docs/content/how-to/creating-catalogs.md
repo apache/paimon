@@ -106,6 +106,8 @@ USE CATALOG my_hive;
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
+Also, you can create [FlinkGenericCatalog]({{< ref "engines/flink" >}}).
+
 {{< /tab >}}
 
 {{< tab "Spark3" >}}
@@ -129,6 +131,8 @@ After `spark-sql` is started, you can switch to the `default` database of the `p
 ```sql
 USE paimon.default;
 ```
+
+Also, you can create [SparkGenericCatalog]({{< ref "engines/spark3" >}}).
 
 {{< /tab >}}
 
