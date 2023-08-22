@@ -374,17 +374,20 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
     }
 
     protected void waitTablesCreated(String... tables) throws Exception {
+        final int timeoutSeconds = 50;
         CommonTestUtils.waitUtil(
                 () -> {
                     try {
-                        List<String> existed = catalog().listTables(database);
-                        return existed.containsAll(Arrays.asList(tables));
+                        List<String> existedTables = catalog().listTables(database);
+                        return Arrays.stream(tables).allMatch(existedTables::contains);
                     } catch (Catalog.DatabaseNotExistException e) {
-                        throw new RuntimeException(e);
+                        throw new RuntimeException("Database does not exist: " + database, e);
                     }
                 },
-                Duration.ofSeconds(50),
+                Duration.ofSeconds(timeoutSeconds),
                 Duration.ofMillis(100),
-                "Failed to wait tables to be created in 5 seconds.");
+                String.format(
+                        "Failed to wait for tables to be created within %d seconds.",
+                        timeoutSeconds));
     }
 }

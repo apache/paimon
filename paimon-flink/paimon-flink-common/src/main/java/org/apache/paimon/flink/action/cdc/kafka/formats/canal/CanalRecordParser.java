@@ -93,9 +93,11 @@ public class CanalRecordParser extends RecordParser {
                                 ? null
                                 : (ArrayNode) root.get(FIELD_OLD);
                 for (int i = 0; i < data.size(); i++) {
-                    Map<String, String> after = extractRow(data.get(i), mySqlFieldTypes);
+                    Map<String, String> after =
+                            extractRow(data.get(i), mySqlFieldTypes, paimonFieldTypes);
                     if (old != null) {
-                        Map<String, String> before = extractRow(old.get(i), mySqlFieldTypes);
+                        Map<String, String> before =
+                                extractRow(old.get(i), mySqlFieldTypes, paimonFieldTypes);
                         // fields in "old" (before) means the fields are changed
                         // fields not in "old" (before) means the fields are not changed,
                         // so we just copy the not changed fields into before
@@ -127,7 +129,8 @@ public class CanalRecordParser extends RecordParser {
                 // fall through
             case OP_DELETE:
                 for (JsonNode datum : data) {
-                    Map<String, String> after = extractRow(datum, mySqlFieldTypes);
+                    Map<String, String> after =
+                            extractRow(datum, mySqlFieldTypes, paimonFieldTypes);
                     after = caseSensitive ? after : keyCaseInsensitive(after);
                     RowKind kind = type.equals(OP_INSERT) ? RowKind.INSERT : RowKind.DELETE;
                     records.add(
@@ -220,7 +223,10 @@ public class CanalRecordParser extends RecordParser {
         return fieldTypes;
     }
 
-    private Map<String, String> extractRow(JsonNode record, Map<String, String> mySqlFieldTypes) {
+    private Map<String, String> extractRow(
+            JsonNode record,
+            Map<String, String> mySqlFieldTypes,
+            LinkedHashMap<String, DataType> paimonFieldTypes) {
         Map<String, Object> jsonMap =
                 OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
         if (jsonMap == null) {
@@ -262,6 +268,7 @@ public class CanalRecordParser extends RecordParser {
             resultMap.put(
                     computedColumn.columnName(),
                     computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
+            paimonFieldTypes.put(computedColumn.columnName(), computedColumn.columnType());
         }
 
         return resultMap;

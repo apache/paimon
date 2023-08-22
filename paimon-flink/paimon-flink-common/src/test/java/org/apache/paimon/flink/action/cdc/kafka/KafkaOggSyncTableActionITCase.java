@@ -160,8 +160,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[102, car battery, 12V car battery, 8.100000381469727, NULL, NULL]",
                         "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.800000011920929, 18, NULL]",
                         "+I[104, hammer, 12oz carpenter's hammer, 0.75, 24, NULL]",
-                        "+I[107, rocks, box of assorted rocks, 5.300000190734863, NULL, NULL]",
-                        "+U[105, hammer, 14oz carpenter's hammer, 0.875, NULL, Beijing]");
+                        "+I[105, hammer, 14oz carpenter's hammer, 0.875, NULL, Beijing]",
+                        "+I[107, rocks, box of assorted rocks, 5.300000190734863, NULL, NULL]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 

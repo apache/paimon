@@ -299,9 +299,9 @@ If a message in a Kafka topic is a change event captured from another database u
     </tbody>
 </table>
 
-**Note that**
-
+{{< hint info >}}
 In Oracle GoldenGate, the data format synchronized to Kafka does not include field data type information. As a result, Paimon sets the data type for all fields to "String" by default.
+{{< /hint >}}
 
 ### Synchronizing Tables
 

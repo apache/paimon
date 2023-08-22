@@ -33,6 +33,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeRefe
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,6 +50,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  */
 public class OggRecordParser extends RecordParser {
 
+    private static final DataType STRING_DATA_TYPE = DataTypes.STRING();
     private static final String FIELD_PRIMARY_KEYS = "primary_keys";
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_AFTER = "after";
@@ -72,8 +74,8 @@ public class OggRecordParser extends RecordParser {
         String type = extractString(FIELD_TYPE);
         switch (type) {
             case OP_UPDATE:
-                processRecord(root.get(FIELD_BEFORE), RowKind.UPDATE_BEFORE, records);
-                processRecord(root.get(FIELD_AFTER), RowKind.UPDATE_AFTER, records);
+                processRecord(root.get(FIELD_BEFORE), RowKind.DELETE, records);
+                processRecord(root.get(FIELD_AFTER), RowKind.INSERT, records);
                 break;
             case OP_INSERT:
                 processRecord(root.get(FIELD_AFTER), RowKind.INSERT, records);
@@ -196,23 +198,25 @@ public class OggRecordParser extends RecordParser {
                 OBJECT_MAPPER.convertValue(
                         record, new TypeReference<LinkedHashMap<String, String>>() {});
         if (linkedHashMap == null) {
-            return new HashMap<>();
+            return Collections.emptyMap();
         }
 
         Map<String, String> resultMap = new HashMap<>();
-        for (Map.Entry<String, String> entry : linkedHashMap.entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            paimonFieldTypes.put(key, DataTypes.STRING());
-            resultMap.put(key, value);
-        }
+        linkedHashMap.forEach(
+                (key, value) -> {
+                    paimonFieldTypes.put(key, STRING_DATA_TYPE);
+                    resultMap.put(key, value);
+                });
 
         // generate values for computed columns
-        for (ComputedColumn computedColumn : computedColumns) {
-            resultMap.put(
-                    computedColumn.columnName(),
-                    computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
-        }
+        computedColumns.forEach(
+                computedColumn -> {
+                    resultMap.put(
+                            computedColumn.columnName(),
+                            computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
+                    paimonFieldTypes.put(computedColumn.columnName(), STRING_DATA_TYPE);
+                });
+
         return resultMap;
     }
 }
