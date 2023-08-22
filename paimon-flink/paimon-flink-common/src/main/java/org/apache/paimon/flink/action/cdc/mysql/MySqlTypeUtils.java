@@ -279,13 +279,12 @@ public class MySqlTypeUtils {
             case GEOMETRYCOLLECTION:
                 return DataTypes.STRING();
                 // MySQL BINARY and VARBINARY are stored as bytes in JSON. We convert them to
-                // DataTypes.VARBINARY to remain the length information
+                // DataTypes.VARBINARY to retain the length information
             case BINARY:
             case VARBINARY:
                 return length == null || length == 0
                         ? DataTypes.VARBINARY(VarBinaryType.DEFAULT_LENGTH)
                         : DataTypes.VARBINARY(length);
-
             case TINYBLOB:
             case BLOB:
             case MEDIUMBLOB:
