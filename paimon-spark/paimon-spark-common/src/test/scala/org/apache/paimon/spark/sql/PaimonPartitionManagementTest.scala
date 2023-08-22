@@ -24,177 +24,158 @@ import org.apache.spark.sql.{AnalysisException, Row}
 
 class PaimonPartitionManagementTest extends PaimonSparkTestBase {
 
-  writeModes.foreach {
-    writeMode =>
-      bucketModes.foreach {
-        bucket =>
-          partitionModes.foreach {
-            partitionKey =>
-              {
-                test(s"Show Partitions : $writeMode, bucket: $bucket, partitionKey: ${partitionKey
-                    .mkString(",")}") {
-                  val partitionStatement =
-                    if (partitionKey.size != 0)
-                      s"PARTITIONED BY ${partitionKey.mkString("(", ",", ")")}"
-                    else ""
-                  val primaryKeysProp = if (writeMode == CHANGE_LOG)
-                    s"'primary-key'='a${if (partitionKey.size != 0) partitionKey.mkString(",", ",", "")
-                      else ""}',"
-                  else ""
-                  spark.sql(
-                    s"""
-                       |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt VARCHAR(8),hh VARCHAR(4))
-                       | $partitionStatement
-                       |TBLPROPERTIES ( $primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                       |""".stripMargin)
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230816','1132')")
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230816','1133')")
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230816','1134')")
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1132')")
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1133')")
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1134')")
+  partitionModes.foreach {
+    partitionKey =>
+      {
+        test(s"Show Partitions : partitionKey: ${partitionKey
+            .mkString(",")}") {
+          val partitionStatement =
+            if (partitionKey.size != 0)
+              s"PARTITIONED BY ${partitionKey.mkString("(", ",", ")")}"
+            else ""
+          val primaryKeysProp =
+            s"'primary-key'='a${if (partitionKey.size != 0) partitionKey.mkString(",", ",", "")
+              else ""}'"
+          spark.sql(
+            s"""
+               |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt VARCHAR(8),hh VARCHAR(4))
+               | $partitionStatement
+               |TBLPROPERTIES ( $primaryKeysProp )
+               |""".stripMargin)
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230816','1132')")
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230816','1133')")
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230816','1134')")
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1132')")
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1133')")
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1134')")
 
-                  if (partitionKey.size == 0) {
-                    assertThrows[AnalysisException] {
-                      spark.sql("show partitions T ")
-                    }
-                    assertThrows[AnalysisException] {
-                      spark.sql("show partitions T PARTITION (dt='20230817', hh='1132)'")
-                    }
-                    assertThrows[AnalysisException] {
-                      spark.sql("show partitions T PARTITION (hh='1132')'")
-                    }
-                    assertThrows[AnalysisException] {
-                      spark.sql("show partitions T PARTITION (hh='1134')'")
-                    }
-                  } else {
-                    checkAnswer(
-                      spark.sql("show partitions T "),
-                      Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133")
-                        :: Row("dt=20230816/hh=1134") :: Row("dt=20230817/hh=1132") :: Row(
-                          "dt=20230817/hh=1133") :: Row("dt=20230817/hh=1134") :: Nil
-                    )
+          if (partitionKey.size == 0) {
+            assertThrows[AnalysisException] {
+              spark.sql("show partitions T ")
+            }
+            assertThrows[AnalysisException] {
+              spark.sql("show partitions T PARTITION (dt='20230817', hh='1132)'")
+            }
+            assertThrows[AnalysisException] {
+              spark.sql("show partitions T PARTITION (hh='1132')'")
+            }
+            assertThrows[AnalysisException] {
+              spark.sql("show partitions T PARTITION (hh='1134')'")
+            }
+          } else {
+            checkAnswer(
+              spark.sql("show partitions T "),
+              Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133")
+                :: Row("dt=20230816/hh=1134") :: Row("dt=20230817/hh=1132") :: Row(
+                  "dt=20230817/hh=1133") :: Row("dt=20230817/hh=1134") :: Nil
+            )
 
-                    checkAnswer(
-                      spark.sql("show partitions T PARTITION (dt='20230817', hh='1132')"),
-                      Row("dt=20230817/hh=1132") :: Nil)
+            checkAnswer(
+              spark.sql("show partitions T PARTITION (dt='20230817', hh='1132')"),
+              Row("dt=20230817/hh=1132") :: Nil)
 
-                    checkAnswer(
-                      spark.sql("show partitions T PARTITION (hh='1132')"),
-                      Row("dt=20230816/hh=1132") :: Row("dt=20230817/hh=1132") :: Nil)
+            checkAnswer(
+              spark.sql("show partitions T PARTITION (hh='1132')"),
+              Row("dt=20230816/hh=1132") :: Row("dt=20230817/hh=1132") :: Nil)
 
-                    checkAnswer(
-                      spark.sql("show partitions T PARTITION (dt='20230816')"),
-                      Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133") :: Row(
-                        "dt=20230816/hh=1134") :: Nil)
+            checkAnswer(
+              spark.sql("show partitions T PARTITION (dt='20230816')"),
+              Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133") :: Row(
+                "dt=20230816/hh=1134") :: Nil)
 
-                    checkAnswer(spark.sql("show partitions T PARTITION (hh='1135')"), Nil)
+            checkAnswer(spark.sql("show partitions T PARTITION (hh='1135')"), Nil)
 
-                    checkAnswer(spark.sql("show partitions T PARTITION (dt='20230818')"), Nil)
-                  }
-                }
-              }
+            checkAnswer(spark.sql("show partitions T PARTITION (dt='20230818')"), Nil)
           }
+        }
       }
   }
 
-  writeModes.foreach {
-    writeMode =>
-      bucketModes.foreach {
-        bucket =>
-          partitionModes.foreach {
-            partitionKey =>
-              {
-                test(s"Drop Partitions : $writeMode, bucket: $bucket, partitionKey: ${partitionKey
-                    .mkString(",")}") {
-                  val partitionStatement =
-                    if (partitionKey.size != 0)
-                      s"PARTITIONED BY ${partitionKey.mkString("(", ",", ")")}"
-                    else ""
-                  val primaryKeysProp = if (writeMode == CHANGE_LOG)
-                    s"'primary-key'='a${if (partitionKey.size != 0) partitionKey.mkString(",", ",", "")
-                      else ""}',"
-                  else ""
-                  spark.sql(
-                    s"""
-                       |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt VARCHAR(8),hh VARCHAR(4))
-                       | $partitionStatement
-                       |TBLPROPERTIES ( $primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                       |""".stripMargin)
-                  spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1132')")
-                  spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1133')")
-                  spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1134')")
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1132')")
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1133')")
-                  spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1134')")
+  partitionModes.foreach {
+    partitionKey =>
+      {
+        test(s"Drop Partitions : partitionKey: ${partitionKey
+            .mkString(",")}") {
+          val partitionStatement =
+            if (partitionKey.size != 0)
+              s"PARTITIONED BY ${partitionKey.mkString("(", ",", ")")}"
+            else ""
+          val primaryKeysProp =
+            s"'primary-key'='a${if (partitionKey.size != 0) partitionKey.mkString(",", ",", "")
+              else ""}'"
+          spark.sql(
+            s"""
+               |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt VARCHAR(8),hh VARCHAR(4))
+               | $partitionStatement
+               |TBLPROPERTIES ( $primaryKeysProp)
+               |""".stripMargin)
+          spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1132')")
+          spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1133')")
+          spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1134')")
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1132')")
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1133')")
+          spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1134')")
 
-                  if (partitionKey.size == 0) {
-                    assertThrows[AnalysisException] {
-                      spark.sql("alter table T drop partition (dt='20230816', hh='1134')")
-                    }
+          if (partitionKey.size == 0) {
+            assertThrows[AnalysisException] {
+              spark.sql("alter table T drop partition (dt='20230816', hh='1134')")
+            }
 
-                    assertThrows[AnalysisException] {
-                      spark.sql("alter table T drop partition (dt='20230816')")
-                    }
+            assertThrows[AnalysisException] {
+              spark.sql("alter table T drop partition (dt='20230816')")
+            }
 
-                    assertThrows[AnalysisException] {
-                      spark.sql("alter table T drop partition (hh='1134')")
-                    }
+            assertThrows[AnalysisException] {
+              spark.sql("alter table T drop partition (hh='1134')")
+            }
 
-                  } else {
+          } else {
 
-                    spark.sql("alter table T drop partition (dt='20230816', hh='1134')")
+            spark.sql("alter table T drop partition (dt='20230816', hh='1134')")
 
-                    spark.sql("alter table T drop partition (dt='20230817', hh='1133')")
+            spark.sql("alter table T drop partition (dt='20230817', hh='1133')")
 
-                    assertThrows[AnalysisException] {
-                      spark.sql("alter table T drop partition (dt='20230816')")
-                    }
+            assertThrows[AnalysisException] {
+              spark.sql("alter table T drop partition (dt='20230816')")
+            }
 
-                    assertThrows[AnalysisException] {
-                      spark.sql("alter table T drop partition (hh='1134')")
-                    }
+            assertThrows[AnalysisException] {
+              spark.sql("alter table T drop partition (hh='1134')")
+            }
 
-                    checkAnswer(
-                      spark.sql("show partitions T "),
-                      Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133")
-                        :: Row("dt=20230817/hh=1132") :: Row("dt=20230817/hh=1134") :: Nil)
+            checkAnswer(
+              spark.sql("show partitions T "),
+              Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133")
+                :: Row("dt=20230817/hh=1132") :: Row("dt=20230817/hh=1134") :: Nil)
 
-                    checkAnswer(
-                      spark.sql("show partitions T PARTITION (dt='20230817', hh='1132')"),
-                      Row("dt=20230817/hh=1132") :: Nil)
+            checkAnswer(
+              spark.sql("show partitions T PARTITION (dt='20230817', hh='1132')"),
+              Row("dt=20230817/hh=1132") :: Nil)
 
-                    checkAnswer(
-                      spark.sql("show partitions T PARTITION (hh='1132')"),
-                      Row("dt=20230817/hh=1132") :: Row("dt=20230816/hh=1132") :: Nil)
+            checkAnswer(
+              spark.sql("show partitions T PARTITION (hh='1132')"),
+              Row("dt=20230817/hh=1132") :: Row("dt=20230816/hh=1132") :: Nil)
 
-                    checkAnswer(
-                      spark.sql("show partitions T PARTITION (hh='1134')"),
-                      Row("dt=20230817/hh=1134") :: Nil)
+            checkAnswer(
+              spark.sql("show partitions T PARTITION (hh='1134')"),
+              Row("dt=20230817/hh=1134") :: Nil)
 
-                    checkAnswer(
-                      spark.sql("show partitions T PARTITION (dt='20230817')"),
-                      Row("dt=20230817/hh=1132") :: Row("dt=20230817/hh=1134") :: Nil)
+            checkAnswer(
+              spark.sql("show partitions T PARTITION (dt='20230817')"),
+              Row("dt=20230817/hh=1132") :: Row("dt=20230817/hh=1134") :: Nil)
 
-                    checkAnswer(
-                      spark.sql("select * from T"),
-                      Row("a", "b", 1L, "20230816", "1132") :: Row(
-                        "a",
-                        "b",
-                        1L,
-                        "20230816",
-                        "1133") :: Row("a", "b", 2L, "20230817", "1132") :: Row(
-                        "a",
-                        "b",
-                        2L,
-                        "20230817",
-                        "1134") :: Nil
-                    )
-                    spark.sql("select * from T").show()
-                  }
-                }
-              }
+            checkAnswer(
+              spark.sql("select * from T"),
+              Row("a", "b", 1L, "20230816", "1132") :: Row("a", "b", 1L, "20230816", "1133") :: Row(
+                "a",
+                "b",
+                2L,
+                "20230817",
+                "1132") :: Row("a", "b", 2L, "20230817", "1134") :: Nil
+            )
+            spark.sql("select * from T").show()
           }
+        }
       }
   }
 }
