@@ -71,7 +71,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     public void setRawEvent(RichCdcMultiplexRecord record) {
         this.record = record;
         this.currentTable = record.tableName();
-        this.shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable(record.primaryKeys());
+        this.shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable();
         if (shouldSynchronizeCurrentTable) {
             this.currentParser = parsers.computeIfAbsent(currentTable, t -> new RichEventParser());
             this.currentParser.setRawEvent(record.toRichCdcRecord());
@@ -106,7 +106,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
         return Optional.empty();
     }
 
-    private boolean shouldSynchronizeCurrentTable(List<String> primaryKeys) {
+    private boolean shouldSynchronizeCurrentTable() {
         if (includedTables.contains(currentTable)) {
             return true;
         }
@@ -125,15 +125,6 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
         if (!shouldSynchronize) {
             LOG.debug(
                     "Source table {} won't be synchronized because it was excluded. ",
-                    currentTable);
-            excludedTables.add(currentTable);
-            return false;
-        }
-
-        if (primaryKeys.isEmpty()) {
-            LOG.debug(
-                    "Didn't find primary keys from kafka topic's table schemas for table '{}'. "
-                            + "This table won't be synchronized.",
                     currentTable);
             excludedTables.add(currentTable);
             return false;
