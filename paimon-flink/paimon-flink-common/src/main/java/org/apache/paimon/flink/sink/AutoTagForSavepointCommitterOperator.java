@@ -127,8 +127,10 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         commitOperator.notifyCheckpointComplete(checkpointId);
-        if (identifiersForTags.remove(checkpointId)) {
-            createTagForIdentifiers(Collections.singletonList(checkpointId));
+        // savepoint do not trigger notifyCheckpointComplete method
+        long savepointId = checkpointId - 1;
+        if (identifiersForTags.remove(savepointId)) {
+            createTagForIdentifiers(Collections.singletonList(savepointId));
         }
     }
 
