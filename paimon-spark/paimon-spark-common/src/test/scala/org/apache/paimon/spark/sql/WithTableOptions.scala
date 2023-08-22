@@ -25,6 +25,7 @@ trait WithTableOptions {
   // 3: fixed bucket, -1: dynamic bucket
   protected val bucketModes: Seq[Int] = Seq(3, -1)
 
-  protected val writeModes: Seq[WriteMode] = Seq(CHANGE_LOG, APPEND_ONLY)
+  protected val writeModes: Seq[WriteMode] = Seq(CHANGE_LOG, APPEND_ONLY);
+  protected val partitionModes: Seq[Seq[String]] = Seq(Seq("dt", "hh"), Seq())
 
 }
