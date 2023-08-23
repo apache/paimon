@@ -31,11 +31,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
 
-/**
- * Most of the content of this class is referenced from Iceberg's ZOrderByteUtils
- *
- * <p>Tests for {@link ZOrderByteUtils}.
- */
+/** Tests for {@link ZOrderByteUtils}. */
 public class TestZOrderByteUtil {
     private static final byte IIIIIIII = (byte) 255;
     private static final byte IOIOIOIO = (byte) 170;
