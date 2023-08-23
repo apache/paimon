@@ -56,7 +56,7 @@ public class CdcRecordUtils {
             DataField dataField = dataFields.get(i);
             genericRow.setField(
                     i,
-                    TypeUtils.castFromString(
+                    TypeUtils.castFromCdcValueString(
                             record.fields().get(dataField.name()), dataField.type()));
         }
         return genericRow;
@@ -100,7 +100,7 @@ public class CdcRecordUtils {
             // TODO TypeUtils.castFromString cannot deal with complex types like arrays and
             //  maps. Change type of CdcRecord#field if needed.
             try {
-                genericRow.setField(idx, TypeUtils.castFromString(value, type));
+                genericRow.setField(idx, TypeUtils.castFromCdcValueString(value, type));
             } catch (Exception e) {
                 LOG.info(
                         "Failed to convert value "

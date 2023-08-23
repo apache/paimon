@@ -427,7 +427,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                             DataTypes.STRING(), // _text
                             DataTypes.STRING(), // _mediumtext
                             DataTypes.STRING(), // _longtext
-                            DataTypes.BINARY(10), // _bin
+                            DataTypes.VARBINARY(10), // _bin
                             DataTypes.VARBINARY(20), // _varbin
                             DataTypes.BYTES(), // _tinyblob
                             DataTypes.BYTES(), // _blob

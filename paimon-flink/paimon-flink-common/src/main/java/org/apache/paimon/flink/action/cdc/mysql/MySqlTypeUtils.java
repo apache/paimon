@@ -24,7 +24,6 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.TimestampType;
@@ -279,10 +278,9 @@ public class MySqlTypeUtils {
             case MULTIPOLYGON:
             case GEOMETRYCOLLECTION:
                 return DataTypes.STRING();
+                // MySQL BINARY and VARBINARY are stored as bytes in JSON. We convert them to
+                // DataTypes.VARBINARY to retain the length information
             case BINARY:
-                return length == null || length == 0
-                        ? DataTypes.BINARY(BinaryType.DEFAULT_LENGTH)
-                        : DataTypes.BINARY(length);
             case VARBINARY:
                 return length == null || length == 0
                         ? DataTypes.VARBINARY(VarBinaryType.DEFAULT_LENGTH)
