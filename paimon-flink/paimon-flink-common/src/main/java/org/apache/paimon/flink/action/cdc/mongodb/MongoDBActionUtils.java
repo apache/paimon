@@ -176,6 +176,7 @@ public class MongoDBActionUtils {
                 tableConfig,
                 sourceColumns,
                 null,
-                Collections.emptyList());
+                Collections.emptyList(),
+                null);
     }
 }

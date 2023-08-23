@@ -62,6 +62,10 @@ under the License.
         <td>It is used to specify synchronization mode.<br />Possible values:<ul><li>"divided" (the default mode if you haven't specified one): start a sink for each table, the synchronization of the new table requires restarting the job.</li><li>"combined": start a single combined sink for all tables, the new table will be automatically synchronized.</li></ul></td>
     </tr>
     <tr>
+        <td><h5>--sync-table-comment</h5></td>
+        <td>It is used to specify whether to synchronize table comment, the default value is false. </td>
+    </tr>
+    <tr>
         <td><h5>--type-mapping</h5></td>
         <td>It is used to specify how to map MySQL data type to Paimon type.<br />
             Supported options:

@@ -140,7 +140,8 @@ public class CdcActionCommonUtils {
             Map<String, String> tableConfig,
             LinkedHashMap<String, DataType> sourceColumns,
             @Nullable List<String> sourceColumnComments,
-            List<String> sourcePrimaryKeys) {
+            List<String> sourcePrimaryKeys,
+            String tableComment) {
         Schema.Builder builder = Schema.newBuilder();
 
         // options
@@ -189,6 +190,8 @@ public class CdcActionCommonUtils {
         if (!specifiedPartitionKeys.isEmpty()) {
             builder.partitionKeys(specifiedPartitionKeys);
         }
+
+        builder.comment(tableComment);
 
         return builder.build();
     }

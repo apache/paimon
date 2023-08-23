@@ -38,18 +38,23 @@ public class MySqlSchema {
 
     private final LinkedHashMap<String, Pair<DataType, String>> fields;
     private final List<String> primaryKeys;
+    private final String tableComment;
 
     private MySqlSchema(
-            LinkedHashMap<String, Pair<DataType, String>> fields, List<String> primaryKeys) {
+            LinkedHashMap<String, Pair<DataType, String>> fields,
+            List<String> primaryKeys,
+            String tableComment) {
         this.fields = fields;
         this.primaryKeys = primaryKeys;
+        this.tableComment = tableComment;
     }
 
     public static MySqlSchema buildSchema(
             DatabaseMetaData metaData,
             String databaseName,
             String tableName,
-            TypeMapping typeMapping)
+            TypeMapping typeMapping,
+            String tableComment)
             throws SQLException {
         LinkedHashMap<String, Pair<DataType, String>> fields = new LinkedHashMap<>();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
@@ -82,7 +87,7 @@ public class MySqlSchema {
             }
         }
 
-        return new MySqlSchema(fields, primaryKeys);
+        return new MySqlSchema(fields, primaryKeys, tableComment);
     }
 
     public LinkedHashMap<String, Pair<DataType, String>> fields() {
@@ -91,6 +96,10 @@ public class MySqlSchema {
 
     public List<String> primaryKeys() {
         return primaryKeys;
+    }
+
+    public String tableComment() {
+        return tableComment;
     }
 
     public LinkedHashMap<String, DataType> typeMapping() {

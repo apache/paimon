@@ -117,6 +117,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
     private final List<Identifier> excludedTables = new ArrayList<>();
+    private boolean syncTableComment = false;
 
     public MySqlSyncDatabaseAction(
             String warehouse,
@@ -179,6 +180,11 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    public MySqlSyncDatabaseAction syncTabLeComment(boolean syncTableComment) {
+        this.syncTableComment = syncTableComment;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
@@ -202,7 +208,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         tableName ->
                                 shouldMonitorTable(tableName, includingPattern, excludingPattern),
                         excludedTables,
-                        typeMapping);
+                        typeMapping,
+                        syncTableComment);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);

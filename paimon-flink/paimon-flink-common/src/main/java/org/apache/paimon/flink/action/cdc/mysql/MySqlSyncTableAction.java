@@ -98,6 +98,8 @@ public class MySqlSyncTableAction extends ActionBase {
     private List<String> computedColumnArgs = new ArrayList<>();
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
+    private boolean syncTableComment = false;
+
     public MySqlSyncTableAction(
             String warehouse,
             String database,
@@ -143,6 +145,11 @@ public class MySqlSyncTableAction extends ActionBase {
         return this;
     }
 
+    public MySqlSyncTableAction syncTabLeComment(boolean syncTableComment) {
+        this.syncTableComment = syncTableComment;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
@@ -158,7 +165,11 @@ public class MySqlSyncTableAction extends ActionBase {
 
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig, monitorTablePredication(), new ArrayList<>(), typeMapping);
+                        mySqlConfig,
+                        monitorTablePredication(),
+                        new ArrayList<>(),
+                        typeMapping,
+                        syncTableComment);
         validateMySqlTableInfos(mySqlSchemasInfo);
 
         catalog.createDatabase(database, true);

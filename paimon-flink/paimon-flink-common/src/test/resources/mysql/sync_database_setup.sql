@@ -449,3 +449,17 @@ CREATE TABLE t3 (
     k INT,
     v2 VARCHAR(10)
 );
+
+
+-- ################################################################################
+--  testTableComment
+-- ################################################################################
+
+CREATE DATABASE paimon_sync_table_comment;
+USE paimon_sync_table_comment;
+
+CREATE TABLE t1 (
+    id INT,
+    name VARCHAR(10),
+    PRIMARY KEY (id)
+) COMMENT 'table comment';

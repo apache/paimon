@@ -38,6 +38,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.annotation.Nullable;
 
@@ -553,6 +555,29 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     @Timeout(600)
     public void testNewlyAddedTableSingleTableWithSavepoint() throws Exception {
         testNewlyAddedTable(1, true, true, "paimon_sync_database_newly_added_tables_4");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testTableComment(boolean syncTableComment) throws Exception {
+        String mySqlDatabase = "paimon_sync_table_comment";
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", mySqlDatabase);
+
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withMode(COMBINED.configString())
+                        .syncTableComment(syncTableComment)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table1 = getFileStoreTable("t1");
+        if (syncTableComment) {
+            assertThat(table1.comment().get()).isEqualTo("table comment");
+        } else {
+            assertThat(table1.comment().get()).isEqualTo("");
+        }
     }
 
     @Test

@@ -162,6 +162,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(nullableToArgs("--including-tables", includingTables));
             args.addAll(nullableToArgs("--excluding-tables", excludingTables));
             args.addAll(nullableToArgs("--mode", mode));
+            args.addAll(nullableToArgs("--sync-table-comment", syncTableComment));
 
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
 

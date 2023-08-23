@@ -27,6 +27,7 @@ import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.StringUtils;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -46,6 +47,7 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -71,17 +73,30 @@ public class MySqlActionUtils {
                     .withDescription(
                             "Whether capture the scan the newly added tables or not, by default is true.");
 
-    static Connection getConnection(Configuration mySqlConfig, boolean tinyint1NotBool)
+    static Connection getConnection(
+            Configuration mySqlConfig, boolean tinyint1NotBool, boolean syncTableComment)
             throws Exception {
         String url =
                 String.format(
-                        "jdbc:mysql://%s:%d%s",
+                        "jdbc:mysql://%s:%d",
                         mySqlConfig.get(MySqlSourceOptions.HOSTNAME),
-                        mySqlConfig.get(MySqlSourceOptions.PORT),
-                        // we need to add the `tinyInt1isBit` parameter to the connection url to
-                        // make sure the tinyint(1) in MySQL is converted to bits or not. Refer to
-                        // https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-connp-props-result-sets.html#cj-conn-prop_tinyInt1isBit
-                        tinyint1NotBool ? "?tinyInt1isBit=false" : "");
+                        mySqlConfig.get(MySqlSourceOptions.PORT));
+
+        List<String> params = new ArrayList<>();
+        // we need to add the `tinyInt1isBit` parameter to the connection url to
+        // make sure the tinyint(1) in MySQL is converted to bits or not. Refer to
+        // https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-connp-props-result-sets.html#cj-conn-prop_tinyInt1isBit
+        if (tinyint1NotBool) {
+            params.add("tinyInt1isBit=false");
+        }
+        if (syncTableComment) {
+            params.add("useInformationSchema=true");
+        }
+
+        String param = StringUtils.join(params, "&");
+        if (!StringUtils.isBlank(param)) {
+            url = url + "?" + param;
+        }
 
         return DriverManager.getConnection(
                 url,
@@ -93,14 +108,17 @@ public class MySqlActionUtils {
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables,
-            TypeMapping typeMapping)
+            TypeMapping typeMapping,
+            boolean syncTableComment)
             throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
         MySqlSchemasInfo mySqlSchemasInfo = new MySqlSchemasInfo();
         try (Connection conn =
                 MySqlActionUtils.getConnection(
-                        mySqlConfig, typeMapping.containsMode(TINYINT1_NOT_BOOL))) {
+                        mySqlConfig,
+                        typeMapping.containsMode(TINYINT1_NOT_BOOL),
+                        syncTableComment)) {
             DatabaseMetaData metaData = conn.getMetaData();
             try (ResultSet schemas = metaData.getCatalogs()) {
                 while (schemas.next()) {
@@ -110,9 +128,17 @@ public class MySqlActionUtils {
                         try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
                             while (tables.next()) {
                                 String tableName = tables.getString("TABLE_NAME");
+                                String tableComment = null;
+                                if (syncTableComment) {
+                                    tableComment = tables.getString("REMARKS");
+                                }
                                 MySqlSchema mySqlSchema =
                                         MySqlSchema.buildSchema(
-                                                metaData, databaseName, tableName, typeMapping);
+                                                metaData,
+                                                databaseName,
+                                                tableName,
+                                                typeMapping,
+                                                tableComment);
                                 Identifier identifier = Identifier.create(databaseName, tableName);
                                 if (monitorTablePredication.test(tableName)) {
                                     mySqlSchemasInfo.addSchema(identifier, mySqlSchema);
@@ -150,7 +176,8 @@ public class MySqlActionUtils {
                 tableConfig,
                 sourceColumns,
                 mySqlSchema.comments(),
-                primaryKeys);
+                primaryKeys,
+                mySqlSchema.tableComment());
     }
 
     static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {

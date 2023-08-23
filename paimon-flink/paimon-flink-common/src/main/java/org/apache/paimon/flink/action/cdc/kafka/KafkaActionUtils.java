@@ -83,7 +83,8 @@ class KafkaActionUtils {
                 tableConfig,
                 sourceColumns,
                 null,
-                primaryKeys);
+                primaryKeys,
+                null);
     }
 
     static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {

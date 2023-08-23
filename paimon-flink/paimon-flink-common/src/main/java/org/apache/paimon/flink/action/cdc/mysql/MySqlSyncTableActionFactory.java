@@ -70,6 +70,10 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
             action.withTypeMapping(TypeMapping.parse(options));
         }
 
+        if (params.has("sync-tabLe-comment")) {
+            action.syncTabLeComment(Boolean.parseBoolean(params.get("sync-tabLe-comment")));
+        }
+
         return Optional.of(action);
     }
 
@@ -87,6 +91,7 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
                         + "[--partition-keys <partition-keys>] "
                         + "[--primary-keys <primary-keys>] "
                         + "[--type-mapping <option1,option2...>] "
+                        + "[--sync-table-comment <true/false>] "
                         + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
@@ -107,6 +112,10 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
 
         System.out.println(
                 "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+        System.out.println();
+
+        System.out.println(
+                "--sync-table-comment is used to specify whether to synchronize table comment, the default value is false.");
         System.out.println();
 
         System.out.println("Please see doc for usage of --computed-column.");

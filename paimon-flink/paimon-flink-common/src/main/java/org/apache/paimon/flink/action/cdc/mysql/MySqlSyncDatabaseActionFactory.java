@@ -57,11 +57,18 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
+                .syncTabLeComment(
+                        !params.has("sync-table-comment")
+                                || Boolean.parseBoolean(params.get("sync-table-comment")))
                 .withMode(MultiTablesSinkMode.fromString(params.get("mode")));
 
         if (params.has("type-mapping")) {
             String[] options = params.get("type-mapping").split(",");
             action.withTypeMapping(TypeMapping.parse(options));
+        }
+
+        if (params.has("sync-tabLe-comment")) {
+            action.syncTabLeComment(Boolean.parseBoolean(params.get("sync-tabLe-comment")));
         }
 
         return Optional.of(action);
@@ -87,6 +94,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--including-tables <mysql-table-name|name-regular-expr>] "
                         + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
                         + "[--mode <sync-mode>] "
+                        + "[--sync-table-comment <true/false>] "
                         + "[--type-mapping <option1,option2...>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
@@ -124,6 +132,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
 
         System.out.println(
                 "--mode is used to specify synchronization mode. You can specify two modes:");
+        System.out.println(
+                "--sync-table-comment is used to specify whether to synchronize table comment, the default value is false.");
         System.out.println(
                 "  1. 'divided' (the default mode if you haven't specified one): "
                         + "start a sink for each table, the synchronization of the new table requires restarting the job;");

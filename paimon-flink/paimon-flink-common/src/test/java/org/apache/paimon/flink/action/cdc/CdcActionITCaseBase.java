@@ -256,6 +256,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         @Nullable protected String includingTables;
         @Nullable protected String excludingTables;
         @Nullable protected String mode;
+        @Nullable protected boolean syncTableComment;
         protected final List<String> typeMappingModes = new ArrayList<>();
 
         public SyncDatabaseActionBuilder(Map<String, String> sourceConfig) {
@@ -309,6 +310,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
         public SyncDatabaseActionBuilder<T> withTypeMappingModes(String... typeMappingModes) {
             this.typeMappingModes.addAll(Arrays.asList(typeMappingModes));
+            return this;
+        }
+
+        public SyncDatabaseActionBuilder<T> syncTableComment(boolean syncTableComment) {
+            this.syncTableComment = syncTableComment;
             return this;
         }
 
