@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -26,8 +25,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
 
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,9 +38,11 @@ import java.util.Map;
 public class StoreCommitter implements Committer<Committable, ManifestCommittable> {
 
     private final TableCommitImpl commit;
+    @Nullable private final CommitterMetrics metrics;
 
-    public StoreCommitter(TableCommit commit) {
+    public StoreCommitter(TableCommit commit, @Nullable CommitterMetrics metrics) {
         this.commit = (TableCommitImpl) commit;
+        this.metrics = metrics;
     }
 
     @Override
@@ -66,12 +66,10 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     @Override
-    public void commit(List<ManifestCommittable> committables, OperatorIOMetricGroup metricGroup)
+    public void commit(List<ManifestCommittable> committables)
             throws IOException, InterruptedException {
         commit.commitMultiple(committables);
-        Tuple2<Long, Long> numBytesAndRecords = calcDataBytesAndRecordsSend(committables);
-        metricGroup.getNumBytesOutCounter().inc(numBytesAndRecords.f0);
-        metricGroup.getNumRecordsOutCounter().inc(numBytesAndRecords.f1);
+        calcNumBytesAndRecordsOut(committables);
     }
 
     @Override
@@ -93,10 +91,13 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
         commit.close();
     }
 
-    @VisibleForTesting
-    static Tuple2<Long, Long> calcDataBytesAndRecordsSend(List<ManifestCommittable> committables) {
-        long bytesSend = 0;
-        long recordsSend = 0;
+    private void calcNumBytesAndRecordsOut(List<ManifestCommittable> committables) {
+        if (metrics == null) {
+            return;
+        }
+
+        long bytesOut = 0;
+        long recordsOut = 0;
         for (ManifestCommittable committable : committables) {
             List<CommitMessage> commitMessages = committable.fileCommittables();
             for (CommitMessage commitMessage : commitMessages) {
@@ -106,18 +107,19 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
                 long dataFileRowCountInc =
                         calcTotalFileRowCount(
                                 ((CommitMessageImpl) commitMessage).newFilesIncrement().newFiles());
-                bytesSend += dataFileSizeInc;
-                recordsSend += dataFileRowCountInc;
+                bytesOut += dataFileSizeInc;
+                recordsOut += dataFileRowCountInc;
             }
         }
-        return Tuple2.of(bytesSend, recordsSend);
+        metrics.increaseNumBytesOut(bytesOut);
+        metrics.increaseNumRecordsOut(recordsOut);
     }
 
     private static long calcTotalFileSize(List<DataFileMeta> files) {
-        return files.stream().mapToLong(f -> f.fileSize()).reduce(Long::sum).orElse(0);
+        return files.stream().mapToLong(DataFileMeta::fileSize).reduce(Long::sum).orElse(0);
     }
 
     private static long calcTotalFileRowCount(List<DataFileMeta> files) {
-        return files.stream().mapToLong(f -> f.rowCount()).reduce(Long::sum).orElse(0);
+        return files.stream().mapToLong(DataFileMeta::rowCount).reduce(Long::sum).orElse(0);
     }
 }

@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -49,9 +48,10 @@ public class UnawareBucketCompactionSink extends FlinkSink<AppendOnlyCompactionT
     }
 
     @Override
-    protected SerializableFunction<String, Committer<Committable, ManifestCommittable>>
-            createCommitterFactory(boolean streamingCheckpointEnabled) {
-        return s -> new StoreCommitter(table.newCommit(s));
+    protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory(
+            boolean streamingCheckpointEnabled) {
+        return (s, metricGroup) ->
+                new StoreCommitter(table.newCommit(s), new CommitterMetrics(metricGroup));
     }
 
     @Override

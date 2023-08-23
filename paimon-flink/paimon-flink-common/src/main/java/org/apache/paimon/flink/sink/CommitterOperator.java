@@ -17,8 +17,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.utils.SerializableFunction;
-
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -65,7 +63,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     /** Group the committable by the checkpoint id. */
     protected final NavigableMap<Long, GlobalCommitT> committablesPerCheckpoint;
 
-    private final SerializableFunction<String, Committer<CommitT, GlobalCommitT>> committerFactory;
+    private final Committer.Factory<CommitT, GlobalCommitT> committerFactory;
 
     private final CommittableStateManager<GlobalCommitT> committableStateManager;
 
@@ -84,7 +82,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     public CommitterOperator(
             boolean streamingCheckpointEnabled,
             String initialCommitUser,
-            SerializableFunction<String, Committer<CommitT, GlobalCommitT>> committerFactory,
+            Committer.Factory<CommitT, GlobalCommitT> committerFactory,
             CommittableStateManager<GlobalCommitT> committableStateManager) {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
         this.initialCommitUser = initialCommitUser;
@@ -107,7 +105,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
         // parallelism of commit operator is always 1, so commitUser will never be null
-        committer = committerFactory.apply(commitUser);
+        committer = committerFactory.create(commitUser, getMetricGroup().getIOMetricGroup());
 
         committableStateManager.initializeState(context, committer);
     }
@@ -156,7 +154,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     private void commitUpToCheckpoint(long checkpointId) throws Exception {
         NavigableMap<Long, GlobalCommitT> headMap =
                 committablesPerCheckpoint.headMap(checkpointId, true);
-        committer.commit(committables(headMap), getMetricGroup().getIOMetricGroup());
+        committer.commit(committables(headMap));
         headMap.clear();
     }
 
