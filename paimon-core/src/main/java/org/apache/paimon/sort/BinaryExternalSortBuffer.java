@@ -159,11 +159,8 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         return new MutableObjectIterator<BinaryRow>() {
             @Override
             public BinaryRow next(BinaryRow reuse) throws IOException {
-                BinaryRow row = iterator.next();
-                if (row != null) {
-                    return row.copy(reuse);
-                }
-                return null;
+                // BinaryMergeIterator ignore reuse object argument, use its own reusing object
+                return next();
             }
 
             @Override
