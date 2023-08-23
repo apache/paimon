@@ -90,7 +90,7 @@ Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You sho
 
 The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs:///path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
-If your Hive requires security authentication such as Kerberos, LDAP, Ranger and so on. You can specify the hive-conf-dir parameter to the hive-site.xml file path.
+If your Hive requires security authentication such as Kerberos, LDAP, Ranger or you want the paimon table to be managed by Apache Atlas(Setting 'hive.metastore.event.listeners' in hive-site.xml). You can specify the hive-conf-dir parameter to the hive-site.xml file path.
 
 ```sql
 CREATE CATALOG my_hive WITH (
