@@ -21,7 +21,7 @@ package org.apache.paimon.utils;
 
 import java.nio.ByteBuffer;
 
-/** Bytes utils to process ByteBuffer.  */
+/** Bytes utils to process ByteBuffer. */
 public class Bytes {
 
     public static ByteBuffer reuse(ByteBuffer reuse, int length) {

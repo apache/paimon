@@ -45,7 +45,6 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Bytes;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.ZOrderByteUtils;
 
 import java.io.Serializable;
