@@ -459,7 +459,11 @@ class StoreMultiCommitterTest {
                 new CommitterOperator<>(
                         true,
                         initialCommitUser,
-                        user -> new StoreMultiCommitter(initialCommitUser, catalogLoader),
+                        (user, metricGroup) ->
+                                new StoreMultiCommitter(
+                                        catalogLoader,
+                                        initialCommitUser,
+                                        new CommitterMetrics(metricGroup)),
                         new RestoreAndFailCommittableStateManager<>(
                                 () ->
                                         new VersionedSerializerWrapper<>(
@@ -473,7 +477,11 @@ class StoreMultiCommitterTest {
                 new CommitterOperator<>(
                         true,
                         initialCommitUser,
-                        user -> new StoreMultiCommitter(initialCommitUser, catalogLoader),
+                        (user, metricGroup) ->
+                                new StoreMultiCommitter(
+                                        catalogLoader,
+                                        initialCommitUser,
+                                        new CommitterMetrics(metricGroup)),
                         new CommittableStateManager<WrappedManifestCommittable>() {
                             @Override
                             public void initializeState(

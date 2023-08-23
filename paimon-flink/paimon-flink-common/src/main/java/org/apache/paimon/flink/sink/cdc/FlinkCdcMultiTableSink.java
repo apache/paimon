@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.sink.CommittableStateManager;
 import org.apache.paimon.flink.sink.Committer;
+import org.apache.paimon.flink.sink.CommitterMetrics;
 import org.apache.paimon.flink.sink.CommitterOperator;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.sink.MultiTableCommittable;
@@ -33,7 +34,6 @@ import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -122,14 +122,14 @@ public class FlinkCdcMultiTableSink implements Serializable {
     }
 
     // Table committers are dynamically created at runtime
-    protected SerializableFunction<
-                    String, Committer<MultiTableCommittable, WrappedManifestCommittable>>
+    protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>
             createCommitterFactory() {
         // If checkpoint is enabled for streaming job, we have to
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
         // a restart.
-        return user -> new StoreMultiCommitter(user, catalogLoader);
+        return (user, metricGroup) ->
+                new StoreMultiCommitter(catalogLoader, user, new CommitterMetrics(metricGroup));
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {

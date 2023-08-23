@@ -37,7 +37,7 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
@@ -49,7 +49,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -324,24 +324,24 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         FileStoreTable table = createFileStoreTable();
 
         StreamTableWrite write = table.newWrite(initialCommitUser);
-        StreamTableCommit commit = table.newCommit(initialCommitUser);
-
         write.write(GenericRow.of(1, 10L));
         write.write(GenericRow.of(1, 20L));
         List<CommitMessage> committable = write.prepareCommit(false, 0);
-
-        commit.commit(0, committable);
+        write.close();
 
         ManifestCommittable manifestCommittable = new ManifestCommittable(0);
         for (CommitMessage commitMessage : committable) {
             manifestCommittable.addFileCommittable(commitMessage);
         }
-        write.close();
-        Tuple2<Long, Long> numBytesAndRecords =
-                StoreCommitter.calcDataBytesAndRecordsSend(
-                        new ArrayList<>(Arrays.asList(manifestCommittable)));
-        assertThat(numBytesAndRecords.f0).isEqualTo(275);
-        assertThat(numBytesAndRecords.f1).isEqualTo(2);
+
+        StreamTableCommit commit = table.newCommit(initialCommitUser);
+        CommitterMetrics metrics =
+                new CommitterMetrics(UnregisteredMetricsGroup.createOperatorIOMetricGroup());
+        StoreCommitter committer = new StoreCommitter(commit, metrics);
+        committer.commit(Collections.singletonList(manifestCommittable));
+        assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(275);
+        assertThat(metrics.getNumRecordsOutCounter().getCount()).isEqualTo(2);
+        committer.close();
     }
 
     // ------------------------------------------------------------------------
@@ -390,9 +390,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         return new CommitterOperator<>(
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
-                user ->
+                (user, metricGroup) ->
                         new StoreCommitter(
-                                table.newStreamWriteBuilder().withCommitUser(user).newCommit()),
+                                table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
+                                new CommitterMetrics(metricGroup)),
                 committableStateManager);
     }
 
@@ -404,9 +405,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         return new CommitterOperator<Committable, ManifestCommittable>(
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
-                user ->
+                (user, metricGroup) ->
                         new StoreCommitter(
-                                table.newStreamWriteBuilder().withCommitUser(user).newCommit()),
+                                table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
+                                new CommitterMetrics(metricGroup)),
                 committableStateManager) {
             @Override
             public void initializeState(StateInitializationContext context) throws Exception {
