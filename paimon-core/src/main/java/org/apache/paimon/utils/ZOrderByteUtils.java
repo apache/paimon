@@ -42,6 +42,12 @@ import java.util.Arrays;
 public class ZOrderByteUtils {
 
     public static final int PRIMITIVE_BUFFER_SIZE = 8;
+    public static final byte[] NULL_BYTES = new byte[PRIMITIVE_BUFFER_SIZE];
+    private static ThreadLocal<CharsetEncoder> encoderThreadLocal = new ThreadLocal<>();
+
+    static {
+        Arrays.fill(NULL_BYTES, (byte) 0x00);
+    }
 
     private ZOrderByteUtils() {}
 
@@ -124,11 +130,12 @@ public class ZOrderByteUtils {
      * Truncating longer strings and right padding 0 for shorter strings.
      */
     @SuppressWarnings("ByteBufferBackingArray")
-    public static ByteBuffer stringToOrderedBytes(
-            String val, int length, ByteBuffer reuse, CharsetEncoder encoder) {
-        Preconditions.checkArgument(
-                encoder.charset().equals(StandardCharsets.UTF_8),
-                "Cannot use an encoder not using UTF_8 as it's Charset");
+    public static ByteBuffer stringToOrderedBytes(String val, int length, ByteBuffer reuse) {
+        CharsetEncoder encoder = encoderThreadLocal.get();
+        if (encoder == null) {
+            encoder = StandardCharsets.UTF_8.newEncoder();
+            encoderThreadLocal.set(encoder);
+        }
 
         ByteBuffer bytes = ByteBuffers.reuse(reuse, length);
         Arrays.fill(bytes.array(), 0, length, (byte) 0x00);

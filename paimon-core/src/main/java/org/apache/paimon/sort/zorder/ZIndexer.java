@@ -18,6 +18,7 @@
 
 package org.apache.paimon.sort.zorder;
 
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
@@ -48,18 +49,18 @@ import org.apache.paimon.utils.ZOrderByteUtils;
 
 import java.io.Serializable;
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
+import static org.apache.paimon.utils.ZOrderByteUtils.NULL_BYTES;
 import static org.apache.paimon.utils.ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE;
 
 /** Z-indexer for responsibility to generate z-index. */
 public class ZIndexer implements Serializable {
 
-    private final Set<ZorderBaseFunction> functionSet;
+    private final Set<RowProcessor> functionSet;
     private final int[] fieldsIndex;
     private final int totalBytes;
     private transient ByteBuffer reuse;
@@ -84,7 +85,7 @@ public class ZIndexer implements Serializable {
 
     public void open() {
         this.reuse = ByteBuffer.allocate(totalBytes);
-        functionSet.forEach(ZorderBaseFunction::open);
+        functionSet.forEach(RowProcessor::open);
     }
 
     public int size() {
@@ -95,279 +96,301 @@ public class ZIndexer implements Serializable {
         byte[][] columnBytes = new byte[fieldsIndex.length][];
 
         int index = 0;
-        for (ZorderBaseFunction f : functionSet) {
-            columnBytes[index++] = f.apply(row);
+        for (RowProcessor f : functionSet) {
+            columnBytes[index++] = f.zvalue(row);
         }
 
         return ZOrderByteUtils.interleaveBits(columnBytes, totalBytes, reuse);
     }
 
-    public Set<ZorderBaseFunction> constructFunctionMap(List<DataField> fields) {
-        Set<ZorderBaseFunction> zorderFunctionSet = new LinkedHashSet<>();
+    public Set<RowProcessor> constructFunctionMap(List<DataField> fields) {
+        Set<RowProcessor> zorderFunctionSet = new LinkedHashSet<>();
         // Construct zorderFunctionSet and fill dataTypes, rowFields
         for (int fieldIndex = 0; fieldIndex < fieldsIndex.length; fieldIndex++) {
             int index = fieldsIndex[fieldIndex];
             DataField field = fields.get(index);
-            zorderFunctionSet.add(zmapColumnToCalculator(field).setPosition(index));
+            zorderFunctionSet.add(zmapColumnToCalculator(field, index));
         }
         return zorderFunctionSet;
     }
 
-    public static ZorderBaseFunction zmapColumnToCalculator(DataField field) {
+    public static RowProcessor zmapColumnToCalculator(DataField field, int index) {
         DataType type = field.type();
-        return type.accept(new TypeVisitor());
+        return type.accept(new TypeVisitor(index));
     }
 
     /** Type Visitor to generate function map from row column to z-index. */
-    public static class TypeVisitor implements DataTypeVisitor<ZorderBaseFunction> {
+    public static class TypeVisitor implements DataTypeVisitor<RowProcessor> {
 
-        @Override
-        public ZorderBaseFunction visit(CharType charType) {
-            return new ZorderStringFunction();
+        private final int fieldIndex;
+
+        public TypeVisitor(int index) {
+            this.fieldIndex = index;
         }
 
         @Override
-        public ZorderBaseFunction visit(VarCharType varCharType) {
-            return new ZorderStringFunction();
+        public RowProcessor visit(CharType charType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(charType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.stringToOrderedBytes(
+                                                o.toString(), PRIMITIVE_BUFFER_SIZE, reuse)
+                                        .array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(BooleanType booleanType) {
-            return new ZorderBooleanFunction();
+        public RowProcessor visit(VarCharType varCharType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(varCharType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.stringToOrderedBytes(
+                                                o.toString(), PRIMITIVE_BUFFER_SIZE, reuse)
+                                        .array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(BinaryType binaryType) {
-            return new ZorderBytesFunction();
+        public RowProcessor visit(BooleanType booleanType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(booleanType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        ByteBuffers.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+                        reuse.put(0, (byte) ((boolean) o ? -127 : 0));
+                        return reuse.array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(VarBinaryType varBinaryType) {
-            return new ZorderBytesFunction();
+        public RowProcessor visit(BinaryType binaryType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(binaryType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.byteTruncateOrFill(
+                                                (byte[]) o, PRIMITIVE_BUFFER_SIZE, reuse)
+                                        .array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(DecimalType decimalType) {
-            return new ZorderDecimalFunction(decimalType.getPrecision(), decimalType.getScale());
+        public RowProcessor visit(VarBinaryType varBinaryType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(varBinaryType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.byteTruncateOrFill(
+                                                (byte[]) o, PRIMITIVE_BUFFER_SIZE, reuse)
+                                        .array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(TinyIntType tinyIntType) {
-            return new ZorderTinyIntFunction();
+        public RowProcessor visit(DecimalType decimalType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(decimalType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.byteTruncateOrFill(
+                                                ((Decimal) o).toUnscaledBytes(),
+                                                PRIMITIVE_BUFFER_SIZE,
+                                                reuse)
+                                        .array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(SmallIntType smallIntType) {
-            return new ZorderShortFunction();
+        public RowProcessor visit(TinyIntType tinyIntType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(tinyIntType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.tinyintToOrderedBytes((byte) o, reuse).array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(IntType intType) {
-            return new ZorderIntFunction();
+        public RowProcessor visit(SmallIntType smallIntType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(smallIntType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.shortToOrderedBytes((short) o, reuse).array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(BigIntType bigIntType) {
-            return new ZorderLongFunction();
+        public RowProcessor visit(IntType intType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(intType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.intToOrderedBytes((int) o, reuse).array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(FloatType floatType) {
-            return new ZorderFloatFunction();
+        public RowProcessor visit(BigIntType bigIntType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(bigIntType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.longToOrderedBytes((long) o, reuse).array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(DoubleType doubleType) {
-            return new ZorderDoubleFunction();
+        public RowProcessor visit(FloatType floatType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(floatType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.floatToOrderedBytes((float) o, reuse).array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(DateType dateType) {
-            return new ZorderDateFunction();
+        public RowProcessor visit(DoubleType doubleType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(doubleType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.doubleToOrderedBytes((double) o, reuse).array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(TimeType timeType) {
-            return new ZorderTimeFunction();
+        public RowProcessor visit(DateType dateType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(dateType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.intToOrderedBytes((int) o, reuse).array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(TimestampType timestampType) {
-            return new ZorderTimestampFunction(timestampType.getPrecision());
+        public RowProcessor visit(TimeType timeType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(timeType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.intToOrderedBytes((int) o, reuse).array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(LocalZonedTimestampType localZonedTimestampType) {
-            return new ZorderTimestampFunction(localZonedTimestampType.getPrecision());
+        public RowProcessor visit(TimestampType timestampType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(timestampType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.longToOrderedBytes(
+                                                ((Timestamp) o).getMillisecond(), reuse)
+                                        .array();
+                    });
         }
 
         @Override
-        public ZorderBaseFunction visit(ArrayType arrayType) {
+        public RowProcessor visit(LocalZonedTimestampType localZonedTimestampType) {
+            final InternalRow.FieldGetter fieldGetter =
+                    InternalRow.createFieldGetter(localZonedTimestampType, fieldIndex);
+            return new RowProcessor(
+                    (row, reuse) -> {
+                        Object o = fieldGetter.getFieldOrNull(row);
+                        return o == null
+                                ? NULL_BYTES
+                                : ZOrderByteUtils.longToOrderedBytes(
+                                                ((Timestamp) o).getMillisecond(), reuse)
+                                        .array();
+                    });
+        }
+
+        @Override
+        public RowProcessor visit(ArrayType arrayType) {
             throw new RuntimeException("Unsupported type");
         }
 
         @Override
-        public ZorderBaseFunction visit(MultisetType multisetType) {
+        public RowProcessor visit(MultisetType multisetType) {
             throw new RuntimeException("Unsupported type");
         }
 
         @Override
-        public ZorderBaseFunction visit(MapType mapType) {
+        public RowProcessor visit(MapType mapType) {
             throw new RuntimeException("Unsupported type");
         }
 
         @Override
-        public ZorderBaseFunction visit(RowType rowType) {
+        public RowProcessor visit(RowType rowType) {
             throw new RuntimeException("Unsupported type");
         }
     }
 
     /** BaseFunction to convert row field record to devoted bytes. */
-    public abstract static class ZorderBaseFunction
-            implements Function<InternalRow, byte[]>, Serializable {
+    public static class RowProcessor implements Serializable {
 
-        protected int position;
-        protected transient ByteBuffer reuse;
+        private transient ByteBuffer reuse;
+        private final ZProcessFunction process;
+
+        public RowProcessor(ZProcessFunction process) {
+            this.process = process;
+        }
 
         public void open() {
             reuse = ByteBuffer.allocate(PRIMITIVE_BUFFER_SIZE);
         }
 
-        public ZorderBaseFunction setPosition(int position) {
-            this.position = position;
-            return this;
+        public byte[] zvalue(InternalRow o) {
+            return process.apply(o, reuse);
         }
     }
 
-    /** Function used for Type Byte(TinyInt). */
-    public static class ZorderTinyIntFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow b) {
-            return ZOrderByteUtils.tinyintToOrderedBytes(b.getByte(position), reuse).array();
-        }
-    }
-
-    /** Function used for Type Short. */
-    public static class ZorderShortFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow s) {
-            return ZOrderByteUtils.shortToOrderedBytes(s.getShort(position), reuse).array();
-        }
-    }
-
-    /** Function used for Type Int. */
-    public static class ZorderIntFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow i) {
-            return ZOrderByteUtils.intToOrderedBytes(i.getInt(position), reuse).array();
-        }
-    }
-
-    /** Function used for Type String. */
-    public static class ZorderStringFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow s) {
-            return ZOrderByteUtils.stringToOrderedBytes(
-                            s.getString(position).toString(),
-                            PRIMITIVE_BUFFER_SIZE,
-                            reuse,
-                            StandardCharsets.UTF_8.newEncoder())
-                    .array();
-        }
-    }
-
-    /** Function used for Type Long. */
-    public static class ZorderLongFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow val) {
-            return ZOrderByteUtils.longToOrderedBytes(val.getLong(position), reuse).array();
-        }
-    }
-
-    /** Function used for Type Date. */
-    public static class ZorderDateFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow val) {
-            int date = val.getInt(position);
-            return ZOrderByteUtils.intToOrderedBytes(date, reuse).array();
-        }
-    }
-
-    /** Function used for Type Time. */
-    public static class ZorderTimeFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow val) {
-            long date = val.getLong(position);
-            return ZOrderByteUtils.longToOrderedBytes(date, reuse).array();
-        }
-    }
-
-    /** Function used for Type Timestamp. */
-    public static class ZorderTimestampFunction extends ZorderBaseFunction {
-
-        private final int precision;
-
-        public ZorderTimestampFunction(int precision) {
-            this.precision = precision;
-        }
-
-        public byte[] apply(InternalRow val) {
-            Timestamp time = val.getTimestamp(position, precision);
-            return ZOrderByteUtils.longToOrderedBytes(time.getMillisecond(), reuse).array();
-        }
-    }
-
-    /** Function used for Type Float. */
-    public static class ZorderFloatFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow f) {
-            return ZOrderByteUtils.floatToOrderedBytes(f.getFloat(position), reuse).array();
-        }
-    }
-
-    /** Function used for Type Double. */
-    public static class ZorderDoubleFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow d) {
-            return ZOrderByteUtils.doubleToOrderedBytes(d.getDouble(position), reuse).array();
-        }
-    }
-
-    /** Function used for Type Decimal. */
-    public static class ZorderDecimalFunction extends ZorderBaseFunction {
-
-        private int precise;
-        private int scale;
-
-        public ZorderDecimalFunction(int precise, int scale) {
-            this.precise = precise;
-            this.scale = scale;
-        }
-
-        public byte[] apply(InternalRow b) {
-            return ZOrderByteUtils.doubleToOrderedBytes(
-                            b.getDecimal(position, precise, scale).toUnscaledLong(), reuse)
-                    .array();
-        }
-    }
-
-    /** Function used for Type Boolean. */
-    public static class ZorderBooleanFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow b) {
-            reuse = ByteBuffers.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
-            reuse.put(0, (byte) (b.getBoolean(position) ? -127 : 0));
-            return reuse.array();
-        }
-    }
-
-    /** Function used for Type Bytes. */
-    public static class ZorderBytesFunction extends ZorderBaseFunction {
-
-        public byte[] apply(InternalRow bytes) {
-            return ZOrderByteUtils.byteTruncateOrFill(
-                            bytes.getBinary(position), PRIMITIVE_BUFFER_SIZE, reuse)
-                    .array();
-        }
-    }
+    interface ZProcessFunction extends BiFunction<InternalRow, ByteBuffer, byte[]>, Serializable {}
 }

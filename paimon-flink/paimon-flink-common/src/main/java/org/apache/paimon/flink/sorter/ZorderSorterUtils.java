@@ -25,6 +25,7 @@ import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.shuffle.RangeShuffleUtil;
 import org.apache.paimon.sort.zorder.ZIndexer;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -51,7 +52,7 @@ import java.util.Comparator;
  *
  * <pre>
  *                         toPaimonDataStream                        add z-order column                             range shuffle by z-order                                 local sort                                              remove z-index
- * DataStream[RowData] ----------------> DataStream[PaimonRowData] -------------------> DataStream[PaimonRowData] -------------------------> DataStream[PaimonRowData] -----------------------> DataStream[PaimonRowData sorted] ----------------------------> DataStream[RowData sorted]
+ * DataStream[RowData] -------------------> DataStream[PaimonRowData] -------------------> DataStream[PaimonRowData] -------------------------> DataStream[PaimonRowData] -----------------------> DataStream[PaimonRowData sorted] ----------------------------> DataStream[RowData sorted]
  *                                                                                                                                                                                                                                back to flink RowData
  * </pre>
  */
@@ -65,16 +66,19 @@ public class ZorderSorterUtils {
      *
      * @param inputStream the stream wait to be ordered
      * @param zIndexer generate z-index by the given row
-     * @param valueRowType the RowData's row type schema
+     * @param table the FileStoreTable
      * @return
      */
     public static DataStream<RowData> sortStreamByZorder(
-            DataStream<RowData> inputStream, ZIndexer zIndexer, RowType valueRowType) {
+            DataStream<RowData> inputStream, ZIndexer zIndexer, FileStoreTable table) {
 
-        int fieldCount = valueRowType.getFieldCount();
-        int parallelism = inputStream.getParallelism();
-        int sampleSize = parallelism * 1000;
-        int rangeNum = parallelism * 10;
+        final RowType valueRowType = table.rowType();
+        final int fieldCount = valueRowType.getFieldCount();
+        final int parallelism = inputStream.getParallelism();
+        final int sampleSize = parallelism * 1000;
+        final int rangeNum = parallelism * 10;
+        final long maxSortMemory = table.coreOptions().writeBufferSize();
+        final int pageSize = table.coreOptions().pageSize();
 
         // generate the z-index as the key of Pair.
         DataStream<Pair<byte[], RowData>> inputWithKey =
@@ -124,7 +128,7 @@ public class ZorderSorterUtils {
                 .transform(
                         "LOCAL SORT",
                         TypeInformation.of(InternalRow.class),
-                        new SortOperator(KEY_TYPE, valueRowType))
+                        new SortOperator(KEY_TYPE, valueRowType, maxSortMemory, pageSize))
                 .setParallelism(parallelism)
                 // remove the z-index column from every row
                 .map(
@@ -147,7 +151,6 @@ public class ZorderSorterUtils {
                             }
                         })
                 .setParallelism(parallelism)
-                // back to `RowData` to enable flink table environment convert it back to `Table`
                 .map(FlinkRowData::new, inputStream.getType())
                 .setParallelism(parallelism);
     }

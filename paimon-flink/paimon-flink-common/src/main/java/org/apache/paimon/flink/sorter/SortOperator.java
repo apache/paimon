@@ -29,7 +29,6 @@ import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.DataField;
@@ -55,12 +54,17 @@ public class SortOperator extends TableStreamOperator<InternalRow>
 
     private final RowType keyRowType;
     private final RowType valueRowType;
+    private final long maxMemory;
+    private final int pageSize;
+    private final int arity;
     private transient BinaryExternalSortBuffer buffer;
-    private transient BinaryRow reuseBinaryRow;
 
-    public SortOperator(RowType keyType, RowType valueRowType) {
+    public SortOperator(RowType keyType, RowType valueRowType, long maxMemory, int pageSize) {
         this.keyRowType = keyType;
         this.valueRowType = valueRowType;
+        this.maxMemory = maxMemory;
+        this.pageSize = pageSize;
+        this.arity = keyType.getFieldCount() + valueRowType.getFieldCount();
     }
 
     @Override
@@ -75,7 +79,6 @@ public class SortOperator extends TableStreamOperator<InternalRow>
         fields.addAll(dataFields);
 
         RowType rowType = new RowType(fields);
-        reuseBinaryRow = new BinaryRow(rowType.getFieldCount());
 
         InternalRowSerializer serializer = InternalSerializers.create(rowType);
         NormalizedKeyComputer normalizedKeyComputer =
@@ -84,10 +87,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
         RecordComparator keyComparator =
                 CodeGenUtils.newRecordComparator(rowType.getFieldTypes(), "MemTableComparator");
 
-        MemorySegmentPool memoryPool =
-                new HeapMemorySegmentPool(
-                        MemorySize.parse("512 mb").getBytes(),
-                        (int) MemorySize.parse("64 kb").getBytes());
+        MemorySegmentPool memoryPool = new HeapMemorySegmentPool(maxMemory, pageSize);
 
         BinaryInMemorySortBuffer inMemorySortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
@@ -110,8 +110,9 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     public void endInput() throws Exception {
         if (buffer.size() > 0) {
             MutableObjectIterator<BinaryRow> iterator = buffer.sortedIterator();
-            while ((iterator.next(reuseBinaryRow)) != null) {
-                output.collect(new StreamRecord<>(reuseBinaryRow));
+            BinaryRow binaryRow = new BinaryRow(arity);
+            while ((binaryRow = iterator.next(binaryRow)) != null) {
+                output.collect(new StreamRecord<>(binaryRow));
             }
         }
     }

@@ -44,24 +44,12 @@ under the License.
     </thead>
     <tbody>
     <tr>
-        <td><h5>--warehouse</h5></td>
-        <td>The path to Paimon warehouse.</td>
-    </tr>
-    <tr>
-        <td><h5>--database</h5></td>
-        <td>The database name in Paimon catalog.</td>
-    </tr>
-    <tr>
-        <td><h5>--table</h5></td>
-        <td>The Paimon table name.</td>
-    </tr>
-    <tr>
-        <td><h5>--select</h5></td>
-        <td>The select sql that can be compiled by flink. We order all the data found by the select-clause. For example: --select "select * from source where id > 10"</td>
+        <td><h5>--order-strategy</h5></td>
+        <td>the order strategy now only support zorder. For example: --order-strategy zorder</td>
     </tr>
     <tr>
         <td><h5>--order-by</h5></td>
-        <td>Specify the order. Now we have zorder and order. "zorder" will sort the data by z-order. For example: --order-by zorder(col0, col1)  --order-by order(a,b,c)</td>
+        <td>Specify the order columns. For example: --order-by col0, col1</td>
     </tr>
     </tbody>
 </table>

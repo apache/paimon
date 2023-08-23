@@ -24,8 +24,6 @@ import org.junit.Test;
 import org.testcontainers.shaded.com.google.common.primitives.UnsignedBytes;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.CharsetEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Random;
 
@@ -352,17 +350,14 @@ public class TestZOrderByteUtil {
 
     @Test
     public void testStringOrdering() {
-        CharsetEncoder encoder = StandardCharsets.UTF_8.newEncoder();
         ByteBuffer aBuffer = ByteBuffer.allocate(128);
         ByteBuffer bBuffer = ByteBuffer.allocate(128);
         for (int i = 0; i < NUM_TESTS; i++) {
             String aString = randomString();
             String bString = randomString();
             int stringCompare = Integer.signum(aString.compareTo(bString));
-            byte[] aBytes =
-                    ZOrderByteUtils.stringToOrderedBytes(aString, 128, aBuffer, encoder).array();
-            byte[] bBytes =
-                    ZOrderByteUtils.stringToOrderedBytes(bString, 128, bBuffer, encoder).array();
+            byte[] aBytes = ZOrderByteUtils.stringToOrderedBytes(aString, 128, aBuffer).array();
+            byte[] bBytes = ZOrderByteUtils.stringToOrderedBytes(bString, 128, bBuffer).array();
             int byteCompare =
                     Integer.signum(
                             UnsignedBytes.lexicographicalComparator().compare(aBytes, bBytes));
