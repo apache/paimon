@@ -39,6 +39,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -158,6 +159,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     @Override
     public void setRawEvent(String rawEvent) {
         try {
+            objectMapper.configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
             root = objectMapper.readValue(rawEvent, JsonNode.class);
             payload = root.get("payload");
             currentTable = payload.get("source").get("table").asText();
