@@ -40,8 +40,6 @@ import java.util.Arrays;
  *
  * <p>Most of these techniques are derived from
  * https://aws.amazon.com/blogs/database/z-order-indexing-for-multifaceted-queries-in-amazon-dynamodb-part-2/
- *
- * <p>Most of the content of this class is referenced from Iceberg's ZOrderByteUtils.
  */
 public class ZOrderByteUtils {
 
