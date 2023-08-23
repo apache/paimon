@@ -115,8 +115,7 @@ public class FlinkConnectorOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "If it is false, parallelism of source are set by "
-                                    + SCAN_PARALLELISM.key()
+                            "If it is false, parallelism of source are set by global parallelism."
                                     + ". Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).");
 
     @Deprecated
