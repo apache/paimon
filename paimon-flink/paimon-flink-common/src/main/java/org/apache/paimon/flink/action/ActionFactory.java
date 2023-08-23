@@ -142,6 +142,11 @@ public interface ActionFactory extends Factory {
                 params.has(key), "Argument '%s' is required. Run '<action> --help' for help.", key);
     }
 
+    default String getRequiredValue(MultipleParameterTool params, String key) {
+        checkRequiredArgument(params, key);
+        return params.get(key);
+    }
+
     static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {
         Map<String, String> kvs = new HashMap<>();
         for (String kvString : keyValues.split(",")) {

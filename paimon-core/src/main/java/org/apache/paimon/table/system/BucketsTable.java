@@ -44,6 +44,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -79,6 +80,11 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotManager snapshotManager() {
         return wrapped.snapshotManager();
+    }
+
+    @Override
+    public TagManager tagManager() {
+        return wrapped.tagManager();
     }
 
     @Override

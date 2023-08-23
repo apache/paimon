@@ -29,7 +29,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.BeforeAll;
@@ -67,29 +66,23 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.singletonMap(
-                                CatalogOptions.METASTORE.key(), "test-alter-table"),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                                warehouse,
+                                database,
+                                tableName,
+                                Collections.singletonMap(
+                                        CatalogOptions.METASTORE.key(), "test-alter-table"),
+                                mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id");
+        runActionWithDefaultEnv(action);
 
         checkTableSchema(
-                "[{\"id\":0,\"name\":\"pt\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"_id\"},{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"}]");
+                "[{\"id\":0,\"name\":\"pt\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},"
+                        + "{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"_id\"},"
+                        + "{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"}]");
 
         try (Statement statement = getStatement()) {
             testSchemaEvolutionImpl(statement);
@@ -254,27 +247,15 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_multiple");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("_id"),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
+        runActionWithDefaultEnv(action);
 
         checkTableSchema(
-                "[{\"id\":0,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},{\"id\":1,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"},{\"id\":2,\"name\":\"v2\",\"type\":\"INT\",\"description\":\"v2\"},{\"id\":3,\"name\":\"v3\",\"type\":\"VARCHAR(10)\",\"description\":\"v3\"}]");
+                "[{\"id\":0,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},"
+                        + "{\"id\":1,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"},"
+                        + "{\"id\":2,\"name\":\"v2\",\"type\":\"INT\",\"description\":\"v2\"},"
+                        + "{\"id\":3,\"name\":\"v3\",\"type\":\"VARCHAR(10)\",\"description\":\"v3\"}]");
 
         try (Statement statement = getStatement()) {
             testSchemaEvolutionMultipleImpl(statement);
@@ -346,24 +327,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "all_types_table");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id");
+        JobClient client = runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             testAllTypesImpl(statement);
@@ -645,15 +613,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("_id"),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
 
         assertThatThrownBy(() -> action.build(env))
                 .satisfies(
@@ -680,15 +640,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("a"),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                        .withPrimaryKeys("a");
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -703,15 +656,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("pk"),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                        .withPrimaryKeys("pk");
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -727,15 +673,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -760,11 +698,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "test_computed_column");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
         List<String> computedColumnDefs =
                 Arrays.asList(
                         "_year_date=year(_date)",
@@ -787,19 +720,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "_truncate_date=truncate(pk,2)");
 
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("_year_date"),
-                        Arrays.asList("pk", "_year_date"),
-                        computedColumnDefs,
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                        .withPartitionKeys("_year_date")
+                        .withPrimaryKeys("pk", "_year_date")
+                        .withComputedColumnArgs(computedColumnDefs);
+        runActionWithDefaultEnv(action);
 
         if (executeMysql) {
             try (Statement statement = getStatement()) {
@@ -871,74 +796,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME);
-        mySqlConfig.put("table-name", "test_tinyint1_convert");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("pk"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-
-        checkTableSchema(
-                "[{\"id\":0,\"name\":\"pk\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
-                        + "{\"id\":1,\"name\":\"_tinyint1\",\"type\":\"TINYINT\",\"description\":\"\"}]");
-
-        try (Statement statement = getStatement()) {
-            statement.execute("USE " + DATABASE_NAME);
-            statement.executeUpdate("INSERT INTO test_tinyint1_convert VALUES (1, 21), (2, 42)");
-
-            FileStoreTable table = getFileStoreTable();
-            RowType rowType =
-                    RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.TINYINT()},
-                            new String[] {"pk", "_tinyint1"});
-            List<String> expected = Arrays.asList("+I[1, 21]", "+I[2, 42]");
-            waitForResult(expected, table, rowType, Collections.singletonList("pk"));
-
-            // test schema evolution
-            statement.executeUpdate(
-                    "ALTER TABLE test_tinyint1_convert ADD COLUMN _new_tinyint1 TINYINT(1)");
-            statement.executeUpdate(
-                    "INSERT INTO test_tinyint1_convert VALUES (3, 63, 1), (4, 127, -128)");
-
-            rowType =
-                    RowType.of(
-                            new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.TINYINT(), DataTypes.TINYINT()
-                            },
-                            new String[] {"pk", "_tinyint1", "_new_tinyint1"});
-            waitForResult(
-                    Arrays.asList(
-                            "+I[1, 21, NULL]",
-                            "+I[2, 42, NULL]",
-                            "+I[3, 63, 1]",
-                            "+I[4, 127, -128]"),
-                    table,
-                    rowType,
-                    Collections.singletonList("pk"));
-        }
-    }
-
-    @Test
-    @Timeout(60)
     public void testSyncShards() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
 
@@ -949,25 +806,12 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", dbPattern);
         mySqlConfig.put("table-name", tblPattern);
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pk", "pt"),
-                        Collections.singletonList("pt=substring(_date,5)"),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pk", "pt")
+                        .withComputedColumnArgs(Collections.singletonList("pt=substring(_date,5)"));
+        runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             statement.execute("USE shard_1");

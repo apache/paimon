@@ -331,7 +331,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         () ->
                                 sql(
                                         "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist"))
-                .hasRootCauseMessage("Primary key column '[aaa]' is not defined in the schema.");
+                .hasRootCauseMessage(
+                        "Table column [user_id, item_id, behavior, dt, hh] should include all primary key constraint [aaa]");
 
         // primary key in option and DDL.
         assertThatThrownBy(
@@ -362,7 +363,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                         () ->
                                 sql(
                                         "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist"))
-                .hasRootCauseMessage("Partition column '[aaa]' is not defined in the schema.");
+                .hasRootCauseMessage(
+                        "Table column [user_id, item_id, behavior, dt, hh] should include all partition fields [aaa]");
 
         // partition in option and DDL.
         assertThatThrownBy(

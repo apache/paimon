@@ -30,7 +30,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
@@ -80,23 +79,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_sync_database");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withTableConfig(getBasicTableConfig());
+        runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             testSchemaEvolutionImpl(statement);
@@ -217,97 +203,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
-    public void testSchemaEvolutionWithTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_tinyint_schema");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-
-        try (Statement statement = getStatement()) {
-            testSchemaEvolutionImplWithTinyInt1Convert(statement);
-        }
-    }
-
-    private void testSchemaEvolutionImplWithTinyInt1Convert(Statement statement) throws Exception {
-        FileStoreTable table1 = getFileStoreTable("schema_evolution_4");
-        FileStoreTable table2 = getFileStoreTable("schema_evolution_5");
-
-        statement.executeUpdate("USE " + "paimon_sync_database_tinyint_schema");
-
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (1, 'one')");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (2, 'two', 21)");
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (3, 'three')");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (4, 'four', 24)");
-
-        RowType rowType1 =
-                RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
-                        new String[] {"_id", "v1"});
-
-        List<String> primaryKeys1 = Collections.singletonList("_id");
-        List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
-
-        waitForResult(expected, table1, rowType1, primaryKeys1);
-
-        RowType rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2"});
-        List<String> primaryKeys2 = Collections.singletonList("_id");
-        expected = Arrays.asList("+I[2, two, 21]", "+I[4, four, 24]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
-
-        statement.executeUpdate("ALTER TABLE schema_evolution_4 ADD COLUMN v2 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (5, 'five', 42)");
-        statement.executeUpdate("ALTER TABLE schema_evolution_5 ADD COLUMN v3 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (6, 'six', 42, 43)");
-
-        rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2"});
-
-        expected = Arrays.asList("+I[1, one, NULL]", "+I[3, three, NULL]", "+I[5, five, 42]");
-        waitForResult(expected, table1, rowType1, primaryKeys1);
-
-        rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10),
-                            DataTypes.TINYINT(),
-                            DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2", "v3"});
-        expected =
-                Arrays.asList(
-                        "+I[2, two, 21, NULL]", "+I[4, four, 24, NULL]", "+I[6, six, 42, 43]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
-    }
-
-    @Test
     public void testSpecifiedMySqlTable() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_sync_database");
@@ -315,13 +210,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig);
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -338,13 +227,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig);
 
         assertThatThrownBy(() -> action.build(env))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -371,23 +254,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_sync_database_ignore_incompatible");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        true,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .ignoreIncompatible(true);
+        runActionWithDefaultEnv(action);
 
         // validate `compatible` can be synchronized
         try (Statement statement = getStatement()) {
@@ -431,29 +302,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_sync_database_affix");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        true,
-                        "test_prefix_",
-                        "_test_suffix",
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig,
-                        DIVIDED);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withTablePrefix("test_prefix_")
+                        .withTableSuffix("_test_suffix");
+        runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             testTableAffixImpl(statement);
@@ -602,29 +456,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", databaseName);
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        true,
-                        null,
-                        null,
-                        includingTables,
-                        excludingTables,
-                        Collections.emptyMap(),
-                        tableConfig,
-                        DIVIDED);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .includingTables(includingTables)
+                        .excludingTables(excludingTables);
+        runActionWithDefaultEnv(action);
 
         // check paimon tables
         assertTableExists(existedTables);
@@ -637,22 +474,15 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_ignore_CASE");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
-
-        Map<String, String> catalogConfig =
-                Collections.singletonMap(CatalogOptions.METASTORE.key(), "test-case-insensitive");
-
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
-                        mySqlConfig, warehouse, database, false, catalogConfig, tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                                warehouse,
+                                database,
+                                Collections.singletonMap(
+                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"),
+                                mySqlConfig)
+                        .withTableConfig(getBasicTableConfig());
+        runActionWithDefaultEnv(action);
 
         // check table schema
         FileStoreTable table = getFileStoreTable("t");
@@ -734,36 +564,20 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testAddIgnoredTable() throws Exception {
         String mySqlDatabase = "paimon_sync_database_add_ignored_table";
 
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", mySqlDatabase);
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
 
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        true,
-                        null,
-                        null,
-                        "t.+",
-                        ".*a$",
-                        Collections.emptyMap(),
-                        tableConfig,
-                        COMBINED);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .includingTables("t.+")
+                        .excludingTables(".*a$")
+                        .withMode(COMBINED);
+        runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             FileStoreTable table1 = getFileStoreTable("t1");
@@ -1035,12 +849,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", databaseName);
         mySqlConfig.put("scan.incremental.snapshot.chunk.size", "1");
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
 
         Map<String, String> catalogConfig =
                 testSchemaChange
@@ -1049,19 +857,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         : Collections.emptyMap();
 
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        true,
-                        null,
-                        null,
-                        "t.+",
-                        null,
-                        catalogConfig,
-                        tableConfig,
-                        COMBINED);
+                new MySqlSyncDatabaseAction(warehouse, database, catalogConfig, mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .includingTables("t.+")
+                        .withMode(COMBINED);
+        StreamExecutionEnvironment env = getBasicEnv();
         action.build(env);
 
         if (Objects.nonNull(savepointPath)) {
@@ -1072,55 +872,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             return env.executeAsync(streamGraph);
         }
         return env.executeAsync();
-    }
-
-    @Test
-    @Timeout(60)
-    public void testTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_tinyint");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-
-        try (Statement statement = getStatement()) {
-            testTinyInt1Convert(statement);
-        }
-    }
-
-    private void testTinyInt1Convert(Statement statement) throws Exception {
-        FileStoreTable table = getFileStoreTable("t4");
-
-        statement.executeUpdate("USE paimon_sync_database_tinyint");
-
-        statement.executeUpdate("INSERT INTO t4 VALUES (1, '2021-09-15 15:00:10', 21)");
-        statement.executeUpdate("INSERT INTO t4 VALUES (2, '2023-03-23 16:00:20', 42)");
-
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.TIMESTAMP(0), DataTypes.TINYINT()
-                        },
-                        new String[] {"pk", "_datetime", "_tinyint1"});
-        List<String> expected =
-                Arrays.asList("+I[1, 2021-09-15T15:00:10, 21]", "+I[2, 2023-03-23T16:00:20, 42]");
-        waitForResult(expected, table, rowType, Collections.singletonList("pk"));
     }
 
     @Test
@@ -1140,33 +891,16 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", databaseName);
         mySqlConfig.put("scan.incremental.snapshot.chunk.size", "1");
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
 
         Map<String, String> tableConfig = getBasicTableConfig();
         tableConfig.put("sink.parallelism", "1");
         tableConfig.put(CoreOptions.WRITE_BUFFER_SIZE.key(), "4 mb");
 
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        true,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig,
-                        COMBINED);
-        action.build(env);
-
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withTableConfig(tableConfig)
+                        .withMode(COMBINED);
+        runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             statement.executeUpdate("USE " + databaseName);
@@ -1207,30 +941,12 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         ? "database_shard_.*"
                         : "database_shard_1|database_shard_2");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        true,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig,
-                        mode);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withMode(mode);
+        runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             // test insert into t1
@@ -1332,30 +1048,13 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "without_merging_shard_.*");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        false,
-                        false,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig,
-                        mode);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .mergeShards(false)
+                        .withMode(mode);
+        runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
             Thread.sleep(5_000);
@@ -1468,23 +1167,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "monitored_and_excluded_shard_.*");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        mySqlConfig,
-                        warehouse,
-                        database,
-                        true,
-                        true,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        Collections.emptyMap(),
-                        COMBINED);
-        action.build(env);
+                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                        .ignoreIncompatible(true)
+                        .withMode(COMBINED);
+        action.build(StreamExecutionEnvironment.getExecutionEnvironment());
 
         assertThat(action.monitoredTables())
                 .containsOnly(

@@ -48,7 +48,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * An {@link Action} which synchronize the Multiple topics into one Paimon database.
  *
  * <p>You should specify Kafka source topic in {@code kafkaConfig}. See <a
- * href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/">document
+ * href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/">document
  * of flink-connectors</a> for detailed keys and values.
  *
  * <p>For each Kafka topic's table to be synchronized, if the corresponding Paimon table does not

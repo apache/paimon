@@ -26,6 +26,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
@@ -72,6 +73,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link EventParser} for MySQL Debezium JSON. */
@@ -89,7 +91,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     @Nullable private final Pattern excludingPattern;
     private final Set<String> includedTables = new HashSet<>();
     private final Set<String> excludedTables = new HashSet<>();
-    private final boolean convertTinyint1ToBool;
+    private final TypeMapping typeMapping;
 
     private JsonNode root;
     private JsonNode payload;
@@ -101,7 +103,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             ZoneId serverTimeZone,
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
-            boolean convertTinyint1ToBool) {
+            TypeMapping typeMapping) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -110,7 +112,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 ddl -> Optional.empty(),
                 null,
                 null,
-                convertTinyint1ToBool);
+                typeMapping);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -120,7 +122,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            boolean convertTinyint1ToBool) {
+            TypeMapping typeMapping) {
         this(
                 serverTimeZone,
                 caseSensitive,
@@ -129,7 +131,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 schemaBuilder,
                 includingPattern,
                 excludingPattern,
-                convertTinyint1ToBool);
+                typeMapping);
     }
 
     public MySqlDebeziumJsonEventParser(
@@ -140,7 +142,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             NewTableSchemaBuilder<JsonNode> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
-            boolean convertTinyint1ToBool) {
+            TypeMapping typeMapping) {
         this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
@@ -148,7 +150,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         this.schemaBuilder = schemaBuilder;
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
-        this.convertTinyint1ToBool = convertTinyint1ToBool;
+        this.typeMapping = typeMapping;
     }
 
     @Override
@@ -212,11 +214,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                             column.get("typeName").asText(),
                             length == null ? null : length.asInt(),
                             scale == null ? null : scale.asInt(),
-                            convertTinyint1ToBool);
-            if (column.get("optional").asBoolean()) {
-                type = type.nullable();
-            } else {
-                type = type.notNull();
+                            typeMapping);
+
+            if (!typeMapping.containsMode(TO_NULLABLE)) {
+                type = type.copy(column.get("optional").asBoolean());
             }
 
             String fieldName = column.get("name").asText();

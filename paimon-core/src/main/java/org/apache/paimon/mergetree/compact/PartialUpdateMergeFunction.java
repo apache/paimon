@@ -94,11 +94,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 return;
             }
 
-            if (kv.valueKind() == RowKind.UPDATE_BEFORE) {
-                throw new IllegalArgumentException(
-                        "Partial update can not accept update_before records, it is a bug.");
-            }
-
             String msg =
                     String.join(
                             "By default, Partial update can not accept delete records,"

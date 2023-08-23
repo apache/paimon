@@ -86,7 +86,7 @@ To use Hive catalog, Database name, Table name and Field names should be **lower
 
 {{< tab "Flink" >}}
 
-Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Flink Hive connector bundled jar and add it to classpath. See [here](https://nightlies.apache.org/flink/flink-docs-master/docs/connectors/table/hive/overview/#using-bundled-hive-jar) for more info.
+Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Flink Hive connector bundled jar and add it to classpath. See [here](https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/hive/overview/#using-bundled-hive-jar) for more info.
 
 The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs:///path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
@@ -105,6 +105,8 @@ USE CATALOG my_hive;
 ```
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
+
+Also, you can create [FlinkGenericCatalog]({{< ref "engines/flink" >}}).
 
 {{< /tab >}}
 
@@ -129,6 +131,8 @@ After `spark-sql` is started, you can switch to the `default` database of the `p
 ```sql
 USE paimon.default;
 ```
+
+Also, you can create [SparkGenericCatalog]({{< ref "engines/spark3" >}}).
 
 {{< /tab >}}
 

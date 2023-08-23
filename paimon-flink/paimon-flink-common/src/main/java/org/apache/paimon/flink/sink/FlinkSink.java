@@ -46,6 +46,7 @@ import java.util.UUID;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -184,15 +185,24 @@ public abstract class FlinkSink<T> implements Serializable {
             assertStreamingConfiguration(env);
         }
 
+        OneInputStreamOperator<Committable, Committable> committerOperator =
+                new CommitterOperator<>(
+                        streamingCheckpointEnabled,
+                        commitUser,
+                        createCommitterFactory(streamingCheckpointEnabled),
+                        createCommittableStateManager());
+        if (Options.fromMap(table.options()).get(SINK_AUTO_TAG_FOR_SAVEPOINT)) {
+            committerOperator =
+                    new AutoTagForSavepointCommitterOperator<>(
+                            (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
+                            table::snapshotManager,
+                            table::tagManager);
+        }
         SingleOutputStreamOperator<?> committed =
                 written.transform(
                                 GLOBAL_COMMITTER_NAME + " : " + table.name(),
                                 new CommittableTypeInfo(),
-                                new CommitterOperator<>(
-                                        streamingCheckpointEnabled,
-                                        commitUser,
-                                        createCommitterFactory(streamingCheckpointEnabled),
-                                        createCommittableStateManager()))
+                                committerOperator)
                         .setParallelism(1)
                         .setMaxParallelism(1);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);

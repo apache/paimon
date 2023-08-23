@@ -159,7 +159,11 @@ For example:
 
 {{< tab "Flink" >}}
 ```sql
+-- incremental between snapshot ids
 SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
+
+-- incremental between snapshot time mills
+SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp' = '1692169000000,1692169900000') */;
 ```
 {{< /tab >}}
 
@@ -186,10 +190,17 @@ SELECT * FROM paimon_incremental_query('tableName', 12, 20);
 
 {{< tab "Spark-DF" >}}
 
-```java
+```scala
+// incremental between snapshot ids
 spark.read()
   .format("paimon")
   .option("incremental-between", "12,20")
+  .load("path/to/table")
+
+// incremental between snapshot time mills
+spark.read()
+  .format("paimon")
+  .option("incremental-between-timestamp", "1692169000000,1692169900000")
   .load("path/to/table")
 ```
 
@@ -197,9 +208,15 @@ spark.read()
 
 {{< tab "Hive" >}}
 ```sql
+-- incremental between snapshot ids
 SET paimon.incremental-between='12,20';
 SELECT * FROM t;
 SET paimon.incremental-between=null;
+
+-- incremental between snapshot time mills
+SET paimon.incremental-between-timestamp='1692169000000,1692169900000';
+SELECT * FROM t;
+SET paimon.incremental-between-timestamp=null;
 ```
 {{< /tab >}}
 

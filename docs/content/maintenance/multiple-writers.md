@@ -95,6 +95,23 @@ Run the following command to submit a compaction job for the table.
     [--partition <partition-name>] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
 ```
+
+Or run the following command to submit a compaction job for multiple database.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact-database \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    [--including-tables <paimon-table-name|name-regular-expr>] \
+    [--excluding-tables <paimon-table-name|name-regular-expr>] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] 
+```
+
+* `--database` is used to specify which database is to be compacted. In compact mode, you need to specify a database name, in compact-database mode, you could specify multiple database, regular expression is supported.
+* `--including-tables` is used to specify which source tables are to be compacted, you must use '|' to separate multiple tables, the format is `databaseName.tableName`, regular expression is supported. For example, specifying "--including-tables db1.t1|db2.+" means to compact table 'db1.t1' and all tables in the db2 database.
+* `--excluding-tables`  is used to specify which source tables are not to be compacted. The usage is same as "--including-tables". "--excluding-tables" has higher priority than "--including-tables" if you specified both.
 * `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
 
 If you submit a batch job (set `execution.runtime-mode: batch` in Flink's configuration), all current table files will be compacted. If you submit a streaming job (set `execution.runtime-mode: streaming` in Flink's configuration), the job will continuously monitor new changes to the table and perform compactions as needed.
@@ -105,7 +122,7 @@ If you only want to submit the compaction job and don't want to wait until the j
 
 {{< /hint >}}
 
-Example
+Example1: compact table
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -121,12 +138,32 @@ Example
     --catalog-conf s3.secret-key=*****
 ```
 
+Example2: compact database
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact-database \
+    --warehouse s3:///path/to/warehouse \
+    --database test_db \
+    --catalog-conf s3.endpoint=https://****.com \
+    --catalog-conf s3.access-key=***** \
+    --catalog-conf s3.secret-key=*****
+```
+
 For more usage of the compact action, see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact --help
+```
+or
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact-database --help
 ```
 
 {{< /tab >}}

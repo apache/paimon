@@ -44,10 +44,6 @@ small files, and a too small number of buckets leads to poor write performance.
 
 ### Dynamic Bucket
 
-{{< hint info >}}
-This is an experimental feature.
-{{< /hint >}}
-
 Configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic expansion of the number of buckets.
 
 - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
@@ -64,6 +60,10 @@ Bucket mode uses HASH index to maintain mapping from key to bucket, it requires 
 100 million entries in a partition takes up 1 GB more memory, partitions that are no longer active do not take up memory.
 
 **Cross Partitions Update Dynamic Bucket Mode**:
+
+{{< hint info >}}
+This is an experimental feature.
+{{< /hint >}}
 
 When you need cross partition updates (primary keys not contain all partition fields), Dynamic Bucket mode directly
 maintains the mapping of keys to partition and bucket, uses local disks, and initializes indexes by reading all 
@@ -150,6 +150,8 @@ INSERT INTO T VALUES (1, 3, 3, 1, 3, 3, 3);
 
 SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
 ```
+
+For fields.<fieldName>.sequence-group, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
 
 #### Default Value
 If the order of the data cannot be guaranteed and field is written only by overwriting null values,
@@ -241,6 +243,10 @@ For streaming queries, `aggregation` merge engine must be used together with `lo
 
 ### First Row
 
+{{< hint info >}}
+This is an experimental feature.
+{{< /hint >}}
+
 By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the
 `deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog. 
 
@@ -281,10 +287,6 @@ By specifying `'changelog-producer' = 'input'`, Paimon writers rely on their inp
 {{< img src="/img/changelog-producer-input.png">}}
 
 ### Lookup
-
-{{< hint info >}}
-This is an experimental feature.
-{{< /hint >}}
 
 If your input can’t produce a complete changelog but you still want to get rid of the costly normalized operator, you may consider using the `'lookup'` changelog producer.
 

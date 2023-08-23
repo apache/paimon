@@ -18,8 +18,10 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SequenceAutoPadding;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
@@ -41,18 +43,28 @@ import org.apache.paimon.utils.InternalRowUtils;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /** Generate sequence number. */
 public class SequenceGenerator {
+
     private final int index;
+    private final List<SequenceAutoPadding> paddings;
 
     private final Generator generator;
     private final DataType fieldType;
 
     public SequenceGenerator(String field, RowType rowType) {
+        this(field, rowType, Collections.emptyList());
+    }
+
+    public SequenceGenerator(String field, RowType rowType, List<SequenceAutoPadding> paddings) {
         index = rowType.getFieldNames().indexOf(field);
+        this.paddings = paddings;
+
         if (index == -1) {
             throw new RuntimeException(
                     String.format(
@@ -64,11 +76,26 @@ public class SequenceGenerator {
 
     public SequenceGenerator(int index, DataType dataType) {
         this.index = index;
+        this.paddings = Collections.emptyList();
+
         this.fieldType = dataType;
         if (index == -1) {
             throw new RuntimeException(String.format("Index : %s is invalid", index));
         }
         generator = fieldType.accept(new SequenceGeneratorVisitor());
+    }
+
+    public static SequenceGenerator create(TableSchema schema, CoreOptions options) {
+        List<SequenceAutoPadding> sequenceAutoPadding =
+                options.sequenceAutoPadding().stream()
+                        .map(SequenceAutoPadding::fromString)
+                        .collect(Collectors.toList());
+        return options.sequenceField()
+                .map(
+                        field ->
+                                new SequenceGenerator(
+                                        field, schema.logicalRowType(), sequenceAutoPadding))
+                .orElse(null);
     }
 
     public int index() {
@@ -85,11 +112,7 @@ public class SequenceGenerator {
     }
 
     public long generate(InternalRow row) {
-        return generator.generate(row, index);
-    }
-
-    public long generateWithPadding(InternalRow row, List<SequenceAutoPadding> paddings) {
-        long sequence = generate(row);
+        long sequence = generator.generate(row, index);
         for (SequenceAutoPadding padding : paddings) {
             switch (padding) {
                 case ROW_KIND_FLAG:

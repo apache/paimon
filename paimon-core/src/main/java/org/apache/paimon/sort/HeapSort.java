@@ -25,7 +25,6 @@ package org.apache.paimon.sort;
  * additional information regarding copyright ownership.
  */
 public final class HeapSort implements IndexedSorter {
-    public HeapSort() {}
 
     private static void downHeap(final IndexedSortable s, final int b, int i, final int n) {
         for (int idx = i << 1; idx < n; idx = i << 1) {

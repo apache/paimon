@@ -652,15 +652,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Consumer id for recording the offset of consumption in the storage.");
 
-    @Deprecated
-    @ExcludeFromDocumentation("For compatibility with older versions")
-    public static final ConfigOption<Boolean> APPEND_ONLY_ASSERT_DISORDER =
-            key("append-only.assert-disorder")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Should assert disorder files, this just for compatibility with older versions.");
-
     public static final ConfigOption<Integer> FULL_COMPACTION_DELTA_COMMITS =
             key("full-compaction.delta-commits")
                     .intType()
@@ -730,6 +721,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Read incremental changes between start snapshot (exclusive) and end snapshot, "
                                     + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
+
     public static final ConfigOption<String> INCREMENTAL_BETWEEN_TIMESTAMP =
             key("incremental-between-timestamp")
                     .stringType()
@@ -822,6 +814,28 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The maximum number of tags to retain.");
 
+    public static final ConfigOption<Integer> PARQUET_ENABLE_DICTIONARY =
+            key("parquet.enable.dictionary")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription("Turn off the dictionary encoding for all fields in parquet.");
+
+    public static final ConfigOption<Integer> ORC_COLUMN_ENCODING_DIRECT =
+            key("orc.column.encoding.direct")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Comma-separated list of fields for which dictionary encoding is to be skipped in orc.");
+
+    public static final ConfigOption<Integer> ORC_DICTIONARY_KEY_THRESHOLD =
+            key("orc.dictionary.key.threshold")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "If the number of distinct keys in a dictionary is greater than this "
+                                    + "fraction of the total number of non-null rows, turn off "
+                                    + "dictionary encoding in orc.  Use 1 to always use dictionary encoding.");
+
     public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
             key("sink.watermark-time-zone")
                     .stringType()
@@ -832,6 +846,17 @@ public class CoreOptions implements Serializable {
                                     + " If the watermark is defined on TIMESTAMP_LTZ column, the time zone of watermark is user configured time zone,"
                                     + " the value should be the user configured local time zone. The option value is either a full name"
                                     + " such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.");
+
+    public static final ConfigOption<MemorySize> LOCAL_MERGE_BUFFER_SIZE =
+            key("local-merge-buffer-size")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Local merge will buffer and merge input records "
+                                    + "before they're shuffled by bucket and written into sink. "
+                                    + "The buffer will be flushed when it is full.\n"
+                                    + "Mainly to resolve data skew on primary keys. "
+                                    + "We recommend starting with 64 mb when trying out this feature.");
 
     private final Options options;
 
@@ -1237,6 +1262,14 @@ public class CoreOptions implements Serializable {
 
     public int orcWriteBatch() {
         return options.getInteger(ORC_WRITE_BATCH_SIZE.key(), ORC_WRITE_BATCH_SIZE.defaultValue());
+    }
+
+    public boolean localMergeEnabled() {
+        return options.get(LOCAL_MERGE_BUFFER_SIZE) != null;
+    }
+
+    public long localMergeBufferSize() {
+        return options.get(LOCAL_MERGE_BUFFER_SIZE).getBytes();
     }
 
     /** Specifies the merge engine for table with primary key. */

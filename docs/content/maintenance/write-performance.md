@@ -28,7 +28,9 @@ under the License.
 
 Paimon's write performance is closely related to checkpoint, so if you need greater write throughput:
 
-1. Increase the checkpoint interval, or just use batch mode.
+1. Flink Configuration (`'flink-conf.yaml'` or `SET` in SQL): Increase the checkpoint interval
+   (`'execution.checkpointing.interval'`), increase max concurrent checkpoints to 3
+   (`'execution.checkpointing.max-concurrent-checkpoints'`), or just use batch mode.
 2. Increase `write-buffer-size`.
 3. Enable `write-buffer-spillable`.
 4. Rescale bucket number if you are using Fixed-Bucket mode.
@@ -161,6 +163,20 @@ One can easily see that too many sorted runs will result in poor query performan
 
 Compaction will become less frequent when `num-sorted-run.compaction-trigger` becomes larger, thus improving writing performance. However, if this value becomes too large, more memory and CPU time will be needed when querying the table. This is a trade-off between writing and query performance.
 
+## Local Merging
+
+If your job suffers from primary key data skew
+(for example, you want to count the number of views for each page in a website,
+and some particular pages are very popular among the users),
+you can set `'local-merge-buffer-size'` so that input records will be buffered and merged
+before they're shuffled by bucket and written into sink.
+This is particularly useful when the same primary key is updated frequently between snapshots.
+
+The buffer will be flushed when it is full. We recommend starting with `64 mb`
+when you are faced with data skew but don't know where to start adjusting buffer size.
+
+(Currently, Local merging not works for CDC ingestion)
+
 ## File Format
 
 If you want to achieve ultimate compaction performance, you can consider using row storage file format AVRO.
@@ -218,6 +234,9 @@ There are three main places in Paimon writer that takes up memory:
 * Memory consumed when merging several sorted runs for compaction. Can be adjusted by the `num-sorted-run.compaction-trigger` option to change the number of sorted runs to be merged.
 * If the row is very large, reading too many lines of data at once will consume a lot of memory when making a compaction. Reducing the `read.batch-size` option can alleviate the impact of this case.
 * The memory consumed by writing columnar (ORC, Parquet, etc.) file. Decreasing the `orc.write.batch-size` option can reduce the consumption of memory for ORC format.
+* If files are automatically compaction in the write task, dictionaries for certain large columns can significantly consume memory during compaction.
+  * To disable dictionary encoding for all fields in Parquet format, set `'parquet.enable.dictionary'= 'false'`.
+  * To disable dictionary encoding for all fields in ORC format, set `orc.dictionary.key.threshold='0'`. Additionally,set `orc.column.encoding.direct='field1,field2'` to disable dictionary encoding for specific columns.
 
 If your Flink job does not rely on state, please avoid using managed memory, which you can control with the following Flink parameter:
 ```shell

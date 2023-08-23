@@ -85,7 +85,7 @@ ON o.customer_id = c.id;
 ### Retry Lookup
 
 If the records of `Orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
-You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
+You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
 Only for Flink 1.16+.
 
 ```sql

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 
 /**
@@ -31,5 +33,20 @@ import java.io.Serializable;
  */
 public enum DatabaseSyncMode implements Serializable {
     DIVIDED,
-    COMBINED
+    COMBINED;
+
+    public static DatabaseSyncMode fromString(@Nullable String mode) {
+        if (mode == null) {
+            return DIVIDED;
+        }
+
+        switch (mode.toLowerCase()) {
+            case "divided":
+                return DIVIDED;
+            case "combined":
+                return COMBINED;
+            default:
+                throw new UnsupportedOperationException("Unsupported mode: " + mode);
+        }
+    }
 }

@@ -56,6 +56,7 @@ jobs:
         env:
           ASF_USERNAME: ${{ secrets.NEXUS_USER }}
           ASF_PASSWORD: ${{ secrets.NEXUS_PW }}
+          MAVEN_OPTS: -Xmx4096m
         run: |
           tmp_settings="tmp-settings.xml"
           echo "<settings><servers><server>" > $tmp_settings

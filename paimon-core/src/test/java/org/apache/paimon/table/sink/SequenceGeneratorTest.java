@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.paimon.CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO;
@@ -237,7 +239,12 @@ public class SequenceGeneratorTest {
     }
 
     private SequenceGenerator getGenerator(String field) {
-        return new SequenceGenerator(field, ALL_DATA_TYPE);
+        return getGenerator(field, Collections.emptyList());
+    }
+
+    private SequenceGenerator getGenerator(
+            String field, List<CoreOptions.SequenceAutoPadding> paddings) {
+        return new SequenceGenerator(field, ALL_DATA_TYPE, paddings);
     }
 
     private void assertUnsupportedDatatype(String field) {
@@ -246,8 +253,7 @@ public class SequenceGeneratorTest {
     }
 
     private long generateWithPaddingOnSecond(String field) {
-        return getGenerator(field)
-                .generateWithPadding(row, Collections.singletonList(SECOND_TO_MICRO));
+        return getGenerator(field, Collections.singletonList(SECOND_TO_MICRO)).generate(row);
     }
 
     private long getSecondFromGeneratedWithPadding(long generated) {
@@ -255,22 +261,17 @@ public class SequenceGeneratorTest {
     }
 
     private long generateWithPaddingOnMillis(String field) {
-        return getGenerator(field)
-                .generateWithPadding(row, Collections.singletonList(MILLIS_TO_MICRO));
+        return getGenerator(field, Collections.singletonList(MILLIS_TO_MICRO)).generate(row);
     }
 
     private long generateWithPaddingOnRowKind(long sequence, RowKind rowKind) {
-        return getGenerator("_bigint")
-                .generateWithPadding(
-                        GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence),
-                        Collections.singletonList(ROW_KIND_FLAG));
+        return getGenerator("_bigint", Collections.singletonList(ROW_KIND_FLAG))
+                .generate(GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence));
     }
 
     private long generateWithPaddingOnMicrosAndRowKind(long sequence, RowKind rowKind) {
-        return getGenerator("_bigint")
-                .generateWithPadding(
-                        GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence),
-                        Arrays.asList(MILLIS_TO_MICRO, ROW_KIND_FLAG));
+        return getGenerator("_bigint", Arrays.asList(MILLIS_TO_MICRO, ROW_KIND_FLAG))
+                .generate(GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence));
     }
 
     private long getMillisFromGeneratedWithPadding(long generated) {
