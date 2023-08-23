@@ -44,7 +44,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.Bytes;
 import org.apache.paimon.utils.ZOrderByteUtils;
 
 import java.io.Serializable;
@@ -165,7 +164,7 @@ public class ZIndexer implements Serializable {
             return new RowProcessor(
                     (row, reuse) -> {
                         Object o = fieldGetter.getFieldOrNull(row);
-                        Bytes.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+                        ZOrderByteUtils.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
                         reuse.put(0, (byte) ((boolean) o ? -127 : 0));
                         return reuse.array();
                     });

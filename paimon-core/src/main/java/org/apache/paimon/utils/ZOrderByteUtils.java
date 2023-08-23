@@ -65,7 +65,7 @@ public class ZOrderByteUtils {
      * the 0 value so that we don't break our ordering when we cross the new 0 value.
      */
     public static ByteBuffer intToOrderedBytes(int val, ByteBuffer reuse) {
-        ByteBuffer bytes = Bytes.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+        ByteBuffer bytes = reuse(reuse, PRIMITIVE_BUFFER_SIZE);
         bytes.putLong(((long) val) ^ 0x8000000000000000L);
         return bytes;
     }
@@ -75,7 +75,7 @@ public class ZOrderByteUtils {
      * ByteBuffer)}.
      */
     public static ByteBuffer longToOrderedBytes(long val, ByteBuffer reuse) {
-        ByteBuffer bytes = Bytes.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+        ByteBuffer bytes = reuse(reuse, PRIMITIVE_BUFFER_SIZE);
         bytes.putLong(val ^ 0x8000000000000000L);
         return bytes;
     }
@@ -85,7 +85,7 @@ public class ZOrderByteUtils {
      * ByteBuffer)}.
      */
     public static ByteBuffer shortToOrderedBytes(short val, ByteBuffer reuse) {
-        ByteBuffer bytes = Bytes.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+        ByteBuffer bytes = reuse(reuse, PRIMITIVE_BUFFER_SIZE);
         bytes.putLong(((long) val) ^ 0x8000000000000000L);
         return bytes;
     }
@@ -95,7 +95,7 @@ public class ZOrderByteUtils {
      * ByteBuffer)}.
      */
     public static ByteBuffer tinyintToOrderedBytes(byte val, ByteBuffer reuse) {
-        ByteBuffer bytes = Bytes.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+        ByteBuffer bytes = reuse(reuse, PRIMITIVE_BUFFER_SIZE);
         bytes.putLong(((long) val) ^ 0x8000000000000000L);
         return bytes;
     }
@@ -109,7 +109,7 @@ public class ZOrderByteUtils {
      * into lexicographically comparable bytes.
      */
     public static ByteBuffer floatToOrderedBytes(float val, ByteBuffer reuse) {
-        ByteBuffer bytes = Bytes.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+        ByteBuffer bytes = reuse(reuse, PRIMITIVE_BUFFER_SIZE);
         long lval = Double.doubleToLongBits(val);
         lval ^= ((lval >> (Integer.SIZE - 1)) | Long.MIN_VALUE);
         bytes.putLong(lval);
@@ -120,7 +120,7 @@ public class ZOrderByteUtils {
      * Doubles are treated the same as floats in {@link #floatToOrderedBytes(float, ByteBuffer)}.
      */
     public static ByteBuffer doubleToOrderedBytes(double val, ByteBuffer reuse) {
-        ByteBuffer bytes = Bytes.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+        ByteBuffer bytes = reuse(reuse, PRIMITIVE_BUFFER_SIZE);
         long lval = Double.doubleToLongBits(val);
         lval ^= ((lval >> (Integer.SIZE - 1)) | Long.MIN_VALUE);
         bytes.putLong(lval);
@@ -141,7 +141,7 @@ public class ZOrderByteUtils {
             encoderThreadLocal.set(encoder);
         }
 
-        ByteBuffer bytes = Bytes.reuse(reuse, length);
+        ByteBuffer bytes = reuse(reuse, length);
         Arrays.fill(bytes.array(), 0, length, (byte) 0x00);
         if (val != null) {
             CharBuffer inputBuffer = CharBuffer.wrap(val);
@@ -156,7 +156,7 @@ public class ZOrderByteUtils {
      */
     @SuppressWarnings("ByteBufferBackingArray")
     public static ByteBuffer byteTruncateOrFill(byte[] val, int length, ByteBuffer reuse) {
-        ByteBuffer bytes = Bytes.reuse(reuse, length);
+        ByteBuffer bytes = reuse(reuse, length);
         if (val.length < length) {
             bytes.put(val, 0, val.length);
             Arrays.fill(bytes.array(), val.length, length, (byte) 0x00);
@@ -234,5 +234,11 @@ public class ZOrderByteUtils {
             } while (columnsBinary[sourceColumn].length <= sourceByte);
         }
         return interleavedBytes;
+    }
+
+    public static ByteBuffer reuse(ByteBuffer reuse, int length) {
+        reuse.position(0);
+        reuse.limit(length);
+        return reuse;
     }
 }
