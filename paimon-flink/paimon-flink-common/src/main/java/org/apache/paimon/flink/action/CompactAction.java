@@ -119,4 +119,8 @@ public class CompactAction extends TableActionBase {
         build(env);
         execute(env, "Compact job");
     }
+
+    public List<Map<String, String>> getPartitions() {
+        return partitions;
+    }
 }

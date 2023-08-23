@@ -43,7 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Fail.fail;
 
 /** Tests for {@link KafkaLogStoreRegister}. */
-public class KafkaLogStoreRegisterTest extends KafkaTableTestBase {
+public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
     private static final String DATABASE = "mock_db";
 
     private static final String TABLE = "mock_table";
