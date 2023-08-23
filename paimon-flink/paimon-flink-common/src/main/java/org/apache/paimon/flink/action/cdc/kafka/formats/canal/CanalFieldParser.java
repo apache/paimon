@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.canal;
+package org.apache.paimon.flink.action.cdc.kafka.formats.canal;
 
 /** Converts some special types such as enum、set、geometry. */
 public class CanalFieldParser {
