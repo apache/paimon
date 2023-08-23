@@ -35,7 +35,7 @@ import java.util.Map;
 import java.util.Queue;
 
 /**
- * Pre-calculate which splits each task should zvalue according to the weight, and then distribute
+ * Pre-calculate which splits each task should process according to the weight, and then distribute
  * the splits fairly.
  */
 public class PreAssignSplitAssigner implements SplitAssigner {

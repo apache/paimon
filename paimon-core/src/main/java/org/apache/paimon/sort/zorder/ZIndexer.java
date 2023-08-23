@@ -105,8 +105,7 @@ public class ZIndexer implements Serializable {
     public Set<RowProcessor> constructFunctionMap(List<DataField> fields) {
         Set<RowProcessor> zorderFunctionSet = new LinkedHashSet<>();
         // Construct zorderFunctionSet and fill dataTypes, rowFields
-        for (int fieldIndex = 0; fieldIndex < fieldsIndex.length; fieldIndex++) {
-            int index = fieldsIndex[fieldIndex];
+        for (int index : fieldsIndex) {
             DataField field = fields.get(index);
             zorderFunctionSet.add(zmapColumnToCalculator(field, index));
         }

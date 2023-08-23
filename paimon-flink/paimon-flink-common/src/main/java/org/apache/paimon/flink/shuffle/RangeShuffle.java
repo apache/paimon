@@ -200,8 +200,7 @@ public class RangeShuffle {
      *
      * <p>See {@link Sampler}.
      */
-    @Internal
-    public static class GlobalSampleOperator<T> extends TableStreamOperator<List<T>>
+    private static class GlobalSampleOperator<T> extends TableStreamOperator<List<T>>
             implements OneInputStreamOperator<Tuple2<Double, T>, List<T>>, BoundedOneInput {
 
         private static final long serialVersionUID = 1L;
@@ -222,7 +221,6 @@ public class RangeShuffle {
         @Override
         public void open() throws Exception {
             super.open();
-            //noinspection unchecked
             this.sampler = new Sampler<>(numSample, 0L);
             this.collector = new StreamRecordCollector<>(output);
         }
@@ -245,6 +243,7 @@ public class RangeShuffle {
             sampledData.sort(keyComparator);
 
             int boundarySize = rangesNum - 1;
+            @SuppressWarnings("unchecked")
             T[] boundaries = (T[]) new Object[boundarySize];
             if (sampledData.size() > 0) {
                 double avgRange = sampledData.size() / (double) rangesNum;
@@ -262,8 +261,7 @@ public class RangeShuffle {
      * This two-input-operator require a input with RangeBoundaries as broadcast input, and generate
      * Tuple2 which includes range index and record from the other input itself as output.
      */
-    @Internal
-    public static class AssignRangeIndexOperator<T>
+    private static class AssignRangeIndexOperator<T>
             extends TableStreamOperator<Tuple2<Integer, Pair<T, RowData>>>
             implements TwoInputStreamOperator<
                             List<T>, Pair<T, RowData>, Tuple2<Integer, Pair<T, RowData>>>,
@@ -287,12 +285,12 @@ public class RangeShuffle {
         }
 
         @Override
-        public void processElement1(StreamRecord<List<T>> streamRecord) throws Exception {
+        public void processElement1(StreamRecord<List<T>> streamRecord) {
             this.boundaries = streamRecord.getValue();
         }
 
         @Override
-        public void processElement2(StreamRecord<Pair<T, RowData>> streamRecord) throws Exception {
+        public void processElement2(StreamRecord<Pair<T, RowData>> streamRecord) {
             if (boundaries == null) {
                 throw new RuntimeException("There should be one data from the first input.");
             }
@@ -361,8 +359,7 @@ public class RangeShuffle {
     }
 
     /** Remove the range index and return the actual record. */
-    @Internal
-    public static class RemoveRangeIndexOperator<T> extends TableStreamOperator<Pair<T, RowData>>
+    private static class RemoveRangeIndexOperator<T> extends TableStreamOperator<Pair<T, RowData>>
             implements OneInputStreamOperator<Tuple2<Integer, Pair<T, RowData>>, Pair<T, RowData>> {
 
         private static final long serialVersionUID = 1L;
@@ -395,8 +392,7 @@ public class RangeShuffle {
      * href="researcher.ibm.com/files/us-dpwoodru/tw11.pdf">"Optimal Random Sampling from
      * Distributed Streams Revisited"</a>.
      */
-    @Internal
-    public static class Sampler<T> {
+    private static class Sampler<T> {
 
         private final int numSamples;
         private final Random random;

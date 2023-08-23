@@ -67,7 +67,6 @@ public class ZorderSorterUtils {
      * @param inputStream the stream wait to be ordered
      * @param zIndexer generate z-index by the given row
      * @param table the FileStoreTable
-     * @return
      */
     public static DataStream<RowData> sortStreamByZorder(
             DataStream<RowData> inputStream, ZIndexer zIndexer, FileStoreTable table) {
@@ -137,7 +136,7 @@ public class ZorderSorterUtils {
                             private transient KeyProjectedRow keyProjectedRow;
 
                             @Override
-                            public void open(Configuration parameters) throws Exception {
+                            public void open(Configuration parameters) {
                                 int[] map = new int[fieldCount];
                                 for (int i = 0; i < map.length; i++) {
                                     map[i] = i + 1;
@@ -146,7 +145,7 @@ public class ZorderSorterUtils {
                             }
 
                             @Override
-                            public InternalRow map(InternalRow value) throws Exception {
+                            public InternalRow map(InternalRow value) {
                                 return keyProjectedRow.replaceRow(value);
                             }
                         })

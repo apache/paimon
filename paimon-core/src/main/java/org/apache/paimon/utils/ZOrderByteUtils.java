@@ -45,7 +45,8 @@ public class ZOrderByteUtils {
 
     public static final int PRIMITIVE_BUFFER_SIZE = 8;
     public static final byte[] NULL_BYTES = new byte[PRIMITIVE_BUFFER_SIZE];
-    private static ThreadLocal<CharsetEncoder> encoderThreadLocal = new ThreadLocal<>();
+
+    private static final ThreadLocal<CharsetEncoder> ENCODER = new ThreadLocal<>();
 
     static {
         Arrays.fill(NULL_BYTES, (byte) 0x00);
@@ -133,10 +134,10 @@ public class ZOrderByteUtils {
      */
     @SuppressWarnings("ByteBufferBackingArray")
     public static ByteBuffer stringToOrderedBytes(String val, int length, ByteBuffer reuse) {
-        CharsetEncoder encoder = encoderThreadLocal.get();
+        CharsetEncoder encoder = ENCODER.get();
         if (encoder == null) {
             encoder = StandardCharsets.UTF_8.newEncoder();
-            encoderThreadLocal.set(encoder);
+            ENCODER.set(encoder);
         }
 
         ByteBuffer bytes = reuse(reuse, length);
