@@ -262,7 +262,7 @@ The following command will used to compact a table
 
 ## Supported Flink Data Type
 
-See [Flink Data Types](https://nightlies.apache.org/flink/flink-docs-release-1.16/docs/dev/table/types/).
+See [Flink Data Types](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/types/).
 
 All Flink data types are supported, except that
 
