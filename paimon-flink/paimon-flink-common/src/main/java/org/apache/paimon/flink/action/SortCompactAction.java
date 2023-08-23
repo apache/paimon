@@ -26,6 +26,7 @@ import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -80,7 +81,7 @@ public class SortCompactAction extends CompactAction {
         if (!(fileStoreTable instanceof AppendOnlyFileStoreTable)) {
             throw new IllegalArgumentException("Sort Compact only supports append-only table yet");
         }
-        if (fileStoreTable.coreOptions().bucket() != -1) {
+        if (fileStoreTable.bucketMode() != BucketMode.UNAWARE) {
             throw new IllegalArgumentException("Sort Compact only supports bucket=-1 yet.");
         }
         Map<String, String> tableConfig = fileStoreTable.options();
