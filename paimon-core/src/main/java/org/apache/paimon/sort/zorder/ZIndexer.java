@@ -375,7 +375,7 @@ public class ZIndexer implements Serializable {
         }
     }
 
-    /** BaseFunction to convert row field record to devoted bytes. */
+    /** Be used as converting row field record to devoted bytes. */
     public static class RowProcessor implements Serializable {
 
         private transient ByteBuffer reuse;

@@ -63,7 +63,7 @@ import java.util.Random;
  * RangeShuffle Util to shuffle the input stream by the sampling range. See `rangeShuffleBykey`
  * method how to build the topo.
  */
-public class RangeShuffleUtil {
+public class RangeShuffle {
 
     /**
      * The RelNode with range-partition distribution will create the following transformations.

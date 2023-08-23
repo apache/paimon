@@ -23,7 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
-import org.apache.paimon.flink.shuffle.RangeShuffleUtil;
+import org.apache.paimon.flink.shuffle.RangeShuffle;
 import org.apache.paimon.sort.zorder.ZIndexer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -101,7 +101,7 @@ public class ZorderSorterUtils {
                         .setParallelism(parallelism);
 
         // range shuffle by z-index key
-        return RangeShuffleUtil.rangeShuffleByKey(
+        return RangeShuffle.rangeShuffleByKey(
                         inputWithKey,
                         (Comparator<byte[]> & Serializable)
                                 (b1, b2) -> {

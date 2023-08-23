@@ -67,7 +67,7 @@ public class SortCompactAction extends CompactAction {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         build(env);
-        execute(env, "Sort Compact job");
+        execute(env, "Sort Compact Job");
     }
 
     public void build(StreamExecutionEnvironment env) {
