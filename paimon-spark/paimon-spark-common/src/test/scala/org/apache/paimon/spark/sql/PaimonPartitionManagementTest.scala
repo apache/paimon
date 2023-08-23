@@ -101,7 +101,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
               spark.sql("show partitions T "),
               Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133")
                 :: Row("dt=20230816/hh=1134") :: Row("dt=20230817/hh=1132") :: Row(
-                "dt=20230817/hh=1133") :: Row("dt=20230817/hh=1134") :: Nil
+                  "dt=20230817/hh=1133") :: Row("dt=20230817/hh=1134") :: Nil
             )
 
             checkAnswer(
