@@ -164,6 +164,9 @@ public class ZIndexer implements Serializable {
             return new RowProcessor(
                     (row, reuse) -> {
                         Object o = fieldGetter.getFieldOrNull(row);
+                        if (o == null) {
+                            return NULL_BYTES;
+                        }
                         ZOrderByteUtils.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
                         reuse.put(0, (byte) ((boolean) o ? -127 : 0));
                         return reuse.array();
