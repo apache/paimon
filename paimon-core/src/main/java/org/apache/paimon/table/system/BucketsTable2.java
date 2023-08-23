@@ -18,6 +18,9 @@
 
 package org.apache.paimon.table.system;
 
+import static org.apache.paimon.utils.SerializationUtils.newBytesType;
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
+
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -52,9 +55,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
-import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** this is a doc. */
 public class BucketsTable2 implements DataTable, ReadonlyTable {
@@ -146,6 +146,17 @@ public class BucketsTable2 implements DataTable, ReadonlyTable {
     @Override
     public FileIO fileIO() {
         return wrapped.fileIO();
+    }
+
+    public static RowType getRowType() {
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "_SNAPSHOT_ID", new BigIntType(false)));
+        fields.add(new DataField(1, "_PARTITION", newBytesType(false)));
+        fields.add(new DataField(2, "_BUCKET", new IntType(false)));
+        fields.add(new DataField(3, "_FILES", newBytesType(false)));
+        fields.add(new DataField(4, "_DATABASE_NAME", new VarCharType(Integer.MAX_VALUE)));
+        fields.add(new DataField(5, "_TABLE_NAME", new VarCharType(Integer.MAX_VALUE)));
+        return new RowType(fields);
     }
 
     private class BucketsRead2 implements InnerTableRead {
