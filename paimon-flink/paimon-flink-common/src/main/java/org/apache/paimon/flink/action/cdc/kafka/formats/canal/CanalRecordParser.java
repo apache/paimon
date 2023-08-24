@@ -34,7 +34,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeRefe
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -61,8 +60,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  */
 public class CanalRecordParser extends RecordParser {
 
-    private static final Charset CHARSET_ISO_8859_1 = StandardCharsets.ISO_8859_1;
-    private static final String IS_DDL_FIELD = "isDdl";
+    private static final String FIELD_IS_DDL = "isDdl";
     private static final String FIELD_SQL = "sql";
     private static final String FIELD_MYSQL_TYPE = "mysqlType";
     private static final String FIELD_PRIMARY_KEYS = "pkNames";
@@ -101,32 +99,27 @@ public class CanalRecordParser extends RecordParser {
 
         switch (type) {
             case OP_UPDATE:
-                handleUpdateOperation(
+                return handleUpdateOperation(
                         data, mySqlFieldTypes, paimonFieldTypes, primaryKeys, records);
-                break;
             case OP_INSERT:
-                handleDataOperation(
+                return handleDataOperation(
                         data,
                         mySqlFieldTypes,
                         paimonFieldTypes,
                         primaryKeys,
                         records,
                         RowKind.INSERT);
-                break;
             case OP_DELETE:
-                handleDataOperation(
+                return handleDataOperation(
                         data,
                         mySqlFieldTypes,
                         paimonFieldTypes,
                         primaryKeys,
                         records,
                         RowKind.DELETE);
-                break;
             default:
                 throw new UnsupportedOperationException("Unknown record type: " + type);
         }
-
-        return records;
     }
 
     @Override
@@ -137,11 +130,9 @@ public class CanalRecordParser extends RecordParser {
             throw new RuntimeException(e);
         }
         validateFormat();
-
         if (isDdl()) {
             return null;
         }
-
         LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         mySqlFieldTypes.forEach(
@@ -164,6 +155,7 @@ public class CanalRecordParser extends RecordParser {
         checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
         checkNotNull(root.get(FIELD_TYPE), errorMessageTemplate, FIELD_TYPE);
         checkNotNull(root.get(FIELD_DATA), errorMessageTemplate, FIELD_DATA);
+        checkNotNull(root.get(FIELD_IS_DDL), errorMessageTemplate, FIELD_IS_DDL);
 
         if (isDdl()) {
             checkNotNull(root.get(FIELD_SQL), errorMessageTemplate, FIELD_SQL);
@@ -179,10 +171,7 @@ public class CanalRecordParser extends RecordParser {
     }
 
     private boolean isDdl() {
-        JsonNode isDdlNode = root.get(IS_DDL_FIELD);
-        if (isDdlNode == null) {
-            throw new IllegalArgumentException("Expected 'isDdl' field in the JSON but not found.");
-        }
+        JsonNode isDdlNode = root.get(FIELD_IS_DDL);
         return isDdlNode.asBoolean();
     }
 
@@ -194,7 +183,7 @@ public class CanalRecordParser extends RecordParser {
     }
 
     private LinkedHashMap<String, String> extractFieldTypesFromMySqlType() {
-        JsonNode schema = JsonSerdeUtil.getNodeAs(root, FIELD_MYSQL_TYPE, JsonNode.class);
+        JsonNode schema = root.get(FIELD_MYSQL_TYPE);
         LinkedHashMap<String, String> fieldTypes = new LinkedHashMap<>();
 
         schema.fieldNames()
@@ -220,7 +209,6 @@ public class CanalRecordParser extends RecordParser {
             JsonNode record,
             Map<String, String> mySqlFieldTypes,
             LinkedHashMap<String, DataType> paimonFieldTypes) {
-
         Map<String, Object> jsonMap =
                 OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
         if (jsonMap == null) {
@@ -253,28 +241,31 @@ public class CanalRecordParser extends RecordParser {
     }
 
     private String transformValue(String oldValue, String mySqlType) {
-        String newValue = oldValue;
         String shortType = MySqlTypeUtils.getShortType(mySqlType);
 
         if (MySqlTypeUtils.isSetType(shortType)) {
-            newValue = CanalFieldParser.convertSet(newValue, mySqlType);
-        } else if (MySqlTypeUtils.isEnumType(shortType)) {
-            newValue = CanalFieldParser.convertEnum(newValue, mySqlType);
-        } else if (MySqlTypeUtils.isGeoType(shortType)) {
+            return CanalFieldParser.convertSet(oldValue, mySqlType);
+        }
+
+        if (MySqlTypeUtils.isEnumType(shortType)) {
+            return CanalFieldParser.convertEnum(oldValue, mySqlType);
+        }
+
+        if (MySqlTypeUtils.isGeoType(shortType)) {
             try {
                 byte[] wkb =
                         CanalFieldParser.convertGeoType2WkbArray(
-                                oldValue.getBytes(CHARSET_ISO_8859_1));
-                newValue = MySqlTypeUtils.convertWkbArray(wkb);
+                                oldValue.getBytes(StandardCharsets.ISO_8859_1));
+                return MySqlTypeUtils.convertWkbArray(wkb);
             } catch (Exception e) {
                 throw new IllegalArgumentException(
                         String.format("Failed to convert %s to geometry JSON.", oldValue), e);
             }
         }
-        return newValue;
+        return oldValue;
     }
 
-    private void handleDataOperation(
+    private List<RichCdcMultiplexRecord> handleDataOperation(
             ArrayNode data,
             Map<String, String> mySqlFieldTypes,
             LinkedHashMap<String, DataType> paimonFieldTypes,
@@ -294,9 +285,10 @@ public class CanalRecordParser extends RecordParser {
                             primaryKeys,
                             new CdcRecord(kind, rowData)));
         }
+        return records;
     }
 
-    private void handleUpdateOperation(
+    private List<RichCdcMultiplexRecord> handleUpdateOperation(
             ArrayNode data,
             Map<String, String> mySqlFieldTypes,
             LinkedHashMap<String, DataType> paimonFieldTypes,
@@ -337,6 +329,7 @@ public class CanalRecordParser extends RecordParser {
                             primaryKeys,
                             new CdcRecord(RowKind.INSERT, after)));
         }
+        return records;
     }
 
     private LinkedHashMap<String, DataType> convertToPaimonFieldTypes(
