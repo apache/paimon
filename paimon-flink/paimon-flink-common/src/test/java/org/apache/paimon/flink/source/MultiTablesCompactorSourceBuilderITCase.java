@@ -51,7 +51,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -73,11 +72,9 @@ import java.util.regex.Pattern;
 public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         implements Serializable {
     private String warehouse;
-    private transient Catalog catalog;
     private Options catalogOptions;
 
     private String commitUser;
-    private SnapshotManager snapshotManager;
 
     private static final String[] DATABASE_NAMES = new String[] {"db1", "db2"};
     private static final String[] TABLE_NAMES = new String[] {"t1", "t2"};
@@ -105,15 +102,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
     public void before() throws IOException {
         warehouse = getTempDirPath();
         catalogOptions = new Options();
-        catalog = catalog();
         commitUser = UUID.randomUUID().toString();
-    }
-
-    @AfterEach
-    public void after() throws Exception {
-        if (catalog != null) {
-            catalog.close();
-        }
     }
 
     @ParameterizedTest(name = "defaultOptions = {0}")
@@ -139,7 +128,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
                 tables.add(table);
-                snapshotManager = table.snapshotManager();
+                SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 StreamTableWrite write = streamWriteBuilder.newWrite();
@@ -497,8 +486,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         assertThat(actual)
                 .hasSameElementsAs(
                         Arrays.asList(
-                                "+I 1|20221209|15|0|1|db3|t1",
-                                "+I 1|20221208|16|0|1|db3|t1"));
+                                "+I 1|20221209|15|0|1|db3|t1", "+I 1|20221208|16|0|1|db3|t1"));
         it.close();
     }
 
@@ -510,6 +498,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
+        Catalog catalog = catalogLoader().load();
         Identifier identifier = Identifier.create(databaseName, tableName);
         catalog.createDatabase(databaseName, true);
         catalog.createTable(

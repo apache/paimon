@@ -18,14 +18,9 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.flink.VersionedSerializerWrapper;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
-import org.apache.paimon.manifest.WrappedManifestCommittable;
-import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.utils.SerializableFunction;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -41,93 +36,49 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.flink.VersionedSerializerWrapper;
+import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.manifest.WrappedManifestCommittable;
+import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.SerializableFunction;
 
 import java.io.Serializable;
 import java.util.UUID;
 
-import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
-import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** this is a doc. */
-public class CompactorSinkForDb implements Serializable {
+public class MultiTablesCompactorSink implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private static final String WRITER_NAME = "Writer";
     private static final String WRITER_WRITE_ONLY_NAME = "Writer(write-only)";
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
-    //    protected final FileStoreTable table;
-    //    protected final List<FileStoreTable> tables;
     private final Catalog.Loader catalogLoader;
     private final boolean ignorePreviousFiles;
 
-    private Options options;
     private CoreOptions coreOptions;
+    private Options options;
 
-    public CompactorSinkForDb(
-            Catalog.Loader catalogLoader, Options options, CoreOptions coreOptions) {
+    // this class use the parameters below:
+    // coreOptions.writeOnly()
+    // options.get(SINK_USE_MANAGED_MEMORY)
+    // options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY)
+
+    public MultiTablesCompactorSink(Catalog.Loader catalogLoader, Options options) {
         this.catalogLoader = catalogLoader;
         this.ignorePreviousFiles = false;
         this.options = options;
-        this.coreOptions = coreOptions;
+        this.coreOptions = new CoreOptions(options);
     }
 
-    private StoreSinkWrite.Provider createWriteProvider(
-            CheckpointConfig checkpointConfig, boolean isStreaming) {
-        boolean waitCompaction;
-        if (coreOptions.writeOnly()) {
-            waitCompaction = false;
-        } else {
-            Options options = coreOptions.toConfiguration();
-            CoreOptions.ChangelogProducer changelogProducer = coreOptions.changelogProducer();
-            waitCompaction =
-                    changelogProducer == CoreOptions.ChangelogProducer.LOOKUP
-                            && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
-
-            int deltaCommits = -1;
-            if (options.contains(FULL_COMPACTION_DELTA_COMMITS)) {
-                deltaCommits = options.get(FULL_COMPACTION_DELTA_COMMITS);
-            } else if (options.contains(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL)) {
-                long fullCompactionThresholdMs =
-                        options.get(CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL).toMillis();
-                deltaCommits =
-                        (int)
-                                (fullCompactionThresholdMs
-                                        / checkpointConfig.getCheckpointInterval());
-            }
-
-            if (changelogProducer == CoreOptions.ChangelogProducer.FULL_COMPACTION
-                    || deltaCommits >= 0) {
-                int finalDeltaCommits = Math.max(deltaCommits, 1);
-                // 这个 lamda 表达式代表接口 Provider 的具体实现
-                return (table, commitUser, state, ioManager, memoryPool) ->
-                        new GlobalFullCompactionSinkWrite(
-                                table,
-                                commitUser,
-                                state,
-                                ioManager,
-                                ignorePreviousFiles,
-                                waitCompaction,
-                                finalDeltaCommits,
-                                isStreaming,
-                                memoryPool);
-            }
-        }
-
-        return (table, commitUser, state, ioManager, memoryPool) ->
-                new StoreSinkWriteImpl(
-                        table,
-                        commitUser,
-                        state,
-                        ioManager,
-                        ignorePreviousFiles,
-                        waitCompaction,
-                        isStreaming,
-                        memoryPool);
+    public MultiTablesCompactorSink(Catalog.Loader catalogLoader) {
+        this.catalogLoader = catalogLoader;
+        this.ignorePreviousFiles = false;
+        this.options = new Options();
+        this.coreOptions = new CoreOptions(options);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<RowData> input) {
@@ -163,15 +114,13 @@ public class CompactorSinkForDb implements Serializable {
                                 (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME),
                                 new MultiTableCommittableTypeInfo(),
                                 createWriteOperator(
-                                        createWriteProvider(env.getCheckpointConfig(), isStreaming),
-                                        commitUser))
+                                        env.getCheckpointConfig(), isStreaming, commitUser))
                         .setParallelism(parallelism == null ? input.getParallelism() : parallelism);
 
         if (!isStreaming) {
             assertBatchConfiguration(env, written.getParallelism());
         }
 
-        //        Options options = Options.fromMap(tables.get(0).options());
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
             MemorySize memorySize = options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY);
             written.getTransformation()
@@ -233,14 +182,20 @@ public class CompactorSinkForDb implements Serializable {
     }
 
     protected OneInputStreamOperator<RowData, MultiTableCommittable> createWriteOperator(
-            StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new StoreCompactOperatorForDb(catalogLoader, writeProvider, commitUser, options);
+            CheckpointConfig checkpointConfig, boolean isStreaming, String commitUser) {
+        return new MultiTablesStoreCompactOperator(
+                catalogLoader,
+                commitUser,
+                checkpointConfig,
+                isStreaming,
+                ignorePreviousFiles,
+                new Options());
     }
 
     protected SerializableFunction<
                     String, Committer<MultiTableCommittable, WrappedManifestCommittable>>
             createCommitterFactory(boolean streamingCheckpointEnabled) {
-        return user -> new StoreMultiCommitter(user, catalogLoader);
+        return user -> new StoreMultiCommitter(user, catalogLoader, true);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
