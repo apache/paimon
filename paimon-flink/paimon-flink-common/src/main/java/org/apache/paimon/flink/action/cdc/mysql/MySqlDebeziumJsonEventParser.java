@@ -36,6 +36,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -74,6 +75,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link EventParser} for MySQL Debezium JSON. */
@@ -349,10 +351,20 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String oldValue = objectValue.toString();
             String newValue = oldValue;
 
-            // pay attention to the temporal types
-            // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
-            if (("bytes".equals(mySqlType) && className == null)
-                    || Bits.LOGICAL_NAME.equals(className)) {
+            if (Bits.LOGICAL_NAME.equals(className)) {
+                // transform little-endian form to normal order
+                // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-data-types
+                byte[] littleEndian = Base64.getDecoder().decode(oldValue);
+                byte[] bigEndian = new byte[littleEndian.length];
+                for (int i = 0; i < littleEndian.length; i++) {
+                    bigEndian[i] = littleEndian[littleEndian.length - 1 - i];
+                }
+                if (typeMapping.containsMode(TO_STRING)) {
+                    newValue = StringUtils.bytesToBinaryString(bigEndian);
+                } else {
+                    newValue = Base64.getEncoder().encodeToString(bigEndian);
+                }
+            } else if (("bytes".equals(mySqlType) && className == null)) {
                 // MySQL binary, varbinary, blob
                 newValue = new String(Base64.getDecoder().decode(oldValue));
             } else if ("bytes".equals(mySqlType) && Decimal.LOGICAL_NAME.equals(className)) {
@@ -369,7 +381,10 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                     + "' to 'numeric'",
                             e);
                 }
-            } else if (Date.SCHEMA_NAME.equals(className)) {
+            }
+            // pay attention to the temporal types
+            // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-temporal-types
+            else if (Date.SCHEMA_NAME.equals(className)) {
                 // MySQL date
                 newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();
             } else if (Timestamp.SCHEMA_NAME.equals(className)) {

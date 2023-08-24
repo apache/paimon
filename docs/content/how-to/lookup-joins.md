@@ -85,7 +85,7 @@ ON o.customer_id = c.id;
 ### Retry Lookup
 
 If the records of `Orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
-You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
+You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
 Only for Flink 1.16+.
 
 ```sql
@@ -113,6 +113,12 @@ JOIN customers /*+ OPTIONS('lookup.async'='true', 'lookup.async-thread-number'='
 FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
+
+{{< hint info >}}
+If the main table (`Orders`) is CDC stream, `allow_unordered` will be ignored by Flink SQL (only supports append stream),
+your streaming job may be blocked. You can try to use `audit_log` system table feature of Paimon to walk around
+(convert CDC stream to append stream).
+{{< /hint >}}
 
 ### Performance
 

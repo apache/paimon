@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
@@ -41,9 +40,10 @@ public class CompactorSink extends FlinkSink<RowData> {
     }
 
     @Override
-    protected SerializableFunction<String, Committer<Committable, ManifestCommittable>>
-            createCommitterFactory(boolean streamingCheckpointEnabled) {
-        return user -> new StoreCommitter(table.newCommit(user));
+    protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory(
+            boolean streamingCheckpointEnabled) {
+        return (user, metricGroup) ->
+                new StoreCommitter(table.newCommit(user), new CommitterMetrics(metricGroup));
     }
 
     @Override

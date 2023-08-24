@@ -53,7 +53,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .mergeShards(
                         !params.has("merge-shards")
                                 || Boolean.parseBoolean(params.get("merge-shards")))
-                .withTablePrefix(params.get("table-suffix"))
+                .withTablePrefix(params.get("table-prefix"))
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
