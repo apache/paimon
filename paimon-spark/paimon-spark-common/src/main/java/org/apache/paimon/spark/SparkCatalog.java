@@ -25,6 +25,10 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.spark.analysis.NoSuchProcedureException;
+import org.apache.paimon.spark.catalog.ProcedureCatalog;
+import org.apache.paimon.spark.procedure.Procedure;
+import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
@@ -58,7 +62,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 
 /** Spark {@link TableCatalog} for paimon. */
-public class SparkCatalog implements TableCatalog, SupportsNamespaces {
+public class SparkCatalog implements TableCatalog, ProcedureCatalog, SupportsNamespaces {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
@@ -313,6 +317,17 @@ public class SparkCatalog implements TableCatalog, SupportsNamespaces {
         } catch (Catalog.TableNotExistException | NoSuchTableException e) {
             return false;
         }
+    }
+
+    @Override
+    public Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException {
+        if (isValidateNamespace(identifier.namespace())) {
+            ProcedureBuilder builder = SparkProcedures.newBuilder(name);
+            if (builder != null) {
+                return builder.withTableCatalog(this).build();
+            }
+        }
+        throw new NoSuchProcedureException(identifier);
     }
 
     private SchemaChange toSchemaChange(TableChange change) {
