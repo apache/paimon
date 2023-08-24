@@ -102,4 +102,8 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     protected String toFieldName(String rawName) {
         return StringUtils.caseSensitiveConversion(rawName, caseSensitive);
     }
+
+    protected Map<String, String> adjustCase(Map<String, String> map) {
+        return caseSensitive ? map : keyCaseInsensitive(map);
+    }
 }
