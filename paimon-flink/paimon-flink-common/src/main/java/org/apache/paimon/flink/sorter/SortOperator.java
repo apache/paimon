@@ -101,6 +101,12 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     }
 
     @Override
+    public void close() throws Exception {
+        super.close();
+        buffer.clear();
+    }
+
+    @Override
     public void processElement(StreamRecord<InternalRow> element) throws Exception {
         buffer.write(element.getValue());
     }
