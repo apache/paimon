@@ -70,7 +70,6 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
 
     @Test
     public void testAllBasicTypeWorksWithZorder() throws Exception {
-        new CompactActionFactory().printHelp();
         prepareData(300, 1);
         // All the basic types should support zorder
         Assertions.assertThatCode(
@@ -112,7 +111,6 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
                         .plan()
                         .files();
         Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
-        System.out.println("before: " + files.size() + " after: " + filesFilter.size());
     }
 
     private void zorder(List<String> columns) throws Exception {

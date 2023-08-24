@@ -114,11 +114,11 @@ public class ZIndexer implements Serializable {
 
     public static RowProcessor zmapColumnToCalculator(DataField field, int index) {
         DataType type = field.type();
-        return type.accept(new TypeVisitor(index));
+        return new RowProcessor(type.accept(new TypeVisitor(index)));
     }
 
     /** Type Visitor to generate function map from row column to z-index. */
-    public static class TypeVisitor implements DataTypeVisitor<RowProcessor> {
+    public static class TypeVisitor implements DataTypeVisitor<ZProcessFunction>, Serializable {
 
         private final int fieldIndex;
 
@@ -127,249 +127,194 @@ public class ZIndexer implements Serializable {
         }
 
         @Override
-        public RowProcessor visit(CharType charType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(charType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.stringToOrderedBytes(
-                                                o.toString(), PRIMITIVE_BUFFER_SIZE, reuse)
-                                        .array();
-                    });
+        public ZProcessFunction visit(CharType charType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.stringToOrderedBytes(
+                                            row.getString(fieldIndex).toString(),
+                                            PRIMITIVE_BUFFER_SIZE,
+                                            reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(VarCharType varCharType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(varCharType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.stringToOrderedBytes(
-                                                o.toString(), PRIMITIVE_BUFFER_SIZE, reuse)
-                                        .array();
-                    });
+        public ZProcessFunction visit(VarCharType varCharType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.stringToOrderedBytes(
+                                            row.getString(fieldIndex).toString(),
+                                            PRIMITIVE_BUFFER_SIZE,
+                                            reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(BooleanType booleanType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(booleanType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        if (o == null) {
-                            return NULL_BYTES;
-                        }
-                        ZOrderByteUtils.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
-                        reuse.put(0, (byte) ((boolean) o ? -127 : 0));
-                        return reuse.array();
-                    });
+        public ZProcessFunction visit(BooleanType booleanType) {
+            return (row, reuse) -> {
+                if (row.isNullAt(fieldIndex)) {
+                    return NULL_BYTES;
+                }
+                ZOrderByteUtils.reuse(reuse, PRIMITIVE_BUFFER_SIZE);
+                reuse.put(0, (byte) (row.getBoolean(fieldIndex) ? -127 : 0));
+                return reuse.array();
+            };
         }
 
         @Override
-        public RowProcessor visit(BinaryType binaryType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(binaryType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.byteTruncateOrFill(
-                                                (byte[]) o, PRIMITIVE_BUFFER_SIZE, reuse)
-                                        .array();
-                    });
+        public ZProcessFunction visit(BinaryType binaryType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.byteTruncateOrFill(
+                                            row.getBinary(fieldIndex), PRIMITIVE_BUFFER_SIZE, reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(VarBinaryType varBinaryType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(varBinaryType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.byteTruncateOrFill(
-                                                (byte[]) o, PRIMITIVE_BUFFER_SIZE, reuse)
-                                        .array();
-                    });
+        public ZProcessFunction visit(VarBinaryType varBinaryType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.byteTruncateOrFill(
+                                            row.getBinary(fieldIndex), PRIMITIVE_BUFFER_SIZE, reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(DecimalType decimalType) {
+        public ZProcessFunction visit(DecimalType decimalType) {
             final InternalRow.FieldGetter fieldGetter =
                     InternalRow.createFieldGetter(decimalType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.byteTruncateOrFill(
-                                                ((Decimal) o).toUnscaledBytes(),
-                                                PRIMITIVE_BUFFER_SIZE,
-                                                reuse)
-                                        .array();
-                    });
+            return (row, reuse) -> {
+                Object o = fieldGetter.getFieldOrNull(row);
+                return o == null
+                        ? NULL_BYTES
+                        : ZOrderByteUtils.byteTruncateOrFill(
+                                        ((Decimal) o).toUnscaledBytes(),
+                                        PRIMITIVE_BUFFER_SIZE,
+                                        reuse)
+                                .array();
+            };
         }
 
         @Override
-        public RowProcessor visit(TinyIntType tinyIntType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(tinyIntType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.tinyintToOrderedBytes((byte) o, reuse).array();
-                    });
+        public ZProcessFunction visit(TinyIntType tinyIntType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.tinyintToOrderedBytes(row.getByte(fieldIndex), reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(SmallIntType smallIntType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(smallIntType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.shortToOrderedBytes((short) o, reuse).array();
-                    });
+        public ZProcessFunction visit(SmallIntType smallIntType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.shortToOrderedBytes(row.getShort(fieldIndex), reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(IntType intType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(intType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.intToOrderedBytes((int) o, reuse).array();
-                    });
+        public ZProcessFunction visit(IntType intType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.intToOrderedBytes(row.getInt(fieldIndex), reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(BigIntType bigIntType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(bigIntType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.longToOrderedBytes((long) o, reuse).array();
-                    });
+        public ZProcessFunction visit(BigIntType bigIntType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.longToOrderedBytes(row.getLong(fieldIndex), reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(FloatType floatType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(floatType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.floatToOrderedBytes((float) o, reuse).array();
-                    });
+        public ZProcessFunction visit(FloatType floatType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.floatToOrderedBytes(row.getFloat(fieldIndex), reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(DoubleType doubleType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(doubleType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.doubleToOrderedBytes((double) o, reuse).array();
-                    });
+        public ZProcessFunction visit(DoubleType doubleType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.doubleToOrderedBytes(row.getDouble(fieldIndex), reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(DateType dateType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(dateType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.intToOrderedBytes((int) o, reuse).array();
-                    });
+        public ZProcessFunction visit(DateType dateType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.intToOrderedBytes(row.getInt(fieldIndex), reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(TimeType timeType) {
-            final InternalRow.FieldGetter fieldGetter =
-                    InternalRow.createFieldGetter(timeType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.intToOrderedBytes((int) o, reuse).array();
-                    });
+        public ZProcessFunction visit(TimeType timeType) {
+            return (row, reuse) ->
+                    row.isNullAt(fieldIndex)
+                            ? NULL_BYTES
+                            : ZOrderByteUtils.intToOrderedBytes(row.getInt(fieldIndex), reuse)
+                                    .array();
         }
 
         @Override
-        public RowProcessor visit(TimestampType timestampType) {
+        public ZProcessFunction visit(TimestampType timestampType) {
             final InternalRow.FieldGetter fieldGetter =
                     InternalRow.createFieldGetter(timestampType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.longToOrderedBytes(
-                                                ((Timestamp) o).getMillisecond(), reuse)
-                                        .array();
-                    });
+            return (row, reuse) -> {
+                Object o = fieldGetter.getFieldOrNull(row);
+                return o == null
+                        ? NULL_BYTES
+                        : ZOrderByteUtils.longToOrderedBytes(
+                                        ((Timestamp) o).getMillisecond(), reuse)
+                                .array();
+            };
         }
 
         @Override
-        public RowProcessor visit(LocalZonedTimestampType localZonedTimestampType) {
+        public ZProcessFunction visit(LocalZonedTimestampType localZonedTimestampType) {
             final InternalRow.FieldGetter fieldGetter =
                     InternalRow.createFieldGetter(localZonedTimestampType, fieldIndex);
-            return new RowProcessor(
-                    (row, reuse) -> {
-                        Object o = fieldGetter.getFieldOrNull(row);
-                        return o == null
-                                ? NULL_BYTES
-                                : ZOrderByteUtils.longToOrderedBytes(
-                                                ((Timestamp) o).getMillisecond(), reuse)
-                                        .array();
-                    });
+            return (row, reuse) -> {
+                Object o = fieldGetter.getFieldOrNull(row);
+                return o == null
+                        ? NULL_BYTES
+                        : ZOrderByteUtils.longToOrderedBytes(
+                                        ((Timestamp) o).getMillisecond(), reuse)
+                                .array();
+            };
         }
 
         @Override
-        public RowProcessor visit(ArrayType arrayType) {
+        public ZProcessFunction visit(ArrayType arrayType) {
             throw new RuntimeException("Unsupported type");
         }
 
         @Override
-        public RowProcessor visit(MultisetType multisetType) {
+        public ZProcessFunction visit(MultisetType multisetType) {
             throw new RuntimeException("Unsupported type");
         }
 
         @Override
-        public RowProcessor visit(MapType mapType) {
+        public ZProcessFunction visit(MapType mapType) {
             throw new RuntimeException("Unsupported type");
         }
 
         @Override
-        public RowProcessor visit(RowType rowType) {
+        public ZProcessFunction visit(RowType rowType) {
             throw new RuntimeException("Unsupported type");
         }
     }

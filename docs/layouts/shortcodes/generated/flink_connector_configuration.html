@@ -135,16 +135,16 @@ under the License.
             <td>Defines a custom parallelism for the sink. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration.</td>
         </tr>
         <tr>
-            <td><h5>sink.use-managed-memory-allocator</h5></td>
-            <td style="word-wrap: break-word;">false</td>
-            <td>Boolean</td>
-            <td>If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.</td>
-        </tr>
-        <tr>
             <td><h5>sink.savepoint.auto-tag</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If true, a tag will be automatically created for the snapshot created by flink savepoint.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.use-managed-memory-allocator</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.</td>
         </tr>
         <tr>
             <td><h5>source.checkpoint-align.enabled</h5></td>
