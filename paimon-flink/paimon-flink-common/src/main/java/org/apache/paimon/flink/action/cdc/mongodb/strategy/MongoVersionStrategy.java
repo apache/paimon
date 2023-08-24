@@ -37,7 +37,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.FIELD_NAME;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.PARSER_PATH;
@@ -107,7 +107,7 @@ public interface MongoVersionStrategy {
         switch (mode) {
             case SPECIFIED:
                 Map<String, String> specifiedRow =
-                        getSpecifiedRow(
+                        parseFieldsFromJsonRecord(
                                 document.toString(),
                                 mongodbConfig.getString(PARSER_PATH),
                                 mongodbConfig.getString(FIELD_NAME),
@@ -115,40 +115,51 @@ public interface MongoVersionStrategy {
                 return caseSensitive ? specifiedRow : keyCaseInsensitive(specifiedRow);
             case DYNAMIC:
                 Map<String, String> dynamicRow =
-                        getDynamicRow(document.toString(), paimonFieldTypes);
+                        parseAndTypeJsonRow(document.toString(), paimonFieldTypes);
                 return caseSensitive ? dynamicRow : keyCaseInsensitive(dynamicRow);
             default:
                 throw new RuntimeException("Unsupported extraction mode: " + mode);
         }
     }
 
-    default Map<String, String> getDynamicRow(
+    /**
+     * Parses a JSON string into a map and updates the data type mapping for each key.
+     *
+     * @param evaluate The JSON string to be parsed.
+     * @param paimonFieldTypes A map to store the data types of the keys.
+     * @return A map containing the parsed key-value pairs from the JSON string.
+     */
+    default Map<String, String> parseAndTypeJsonRow(
             String evaluate, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        Map<String, String> linkedHashMap = JsonSerdeUtil.parseJsonMap(evaluate, String.class);
-        Set<String> keySet = linkedHashMap.keySet();
-        String[] columns = keySet.toArray(new String[0]);
-        for (String column : columns) {
+        Map<String, String> parsedMap = JsonSerdeUtil.parseJsonMap(evaluate, String.class);
+        for (String column : parsedMap.keySet()) {
             paimonFieldTypes.put(column, DataTypes.STRING());
         }
         return extractRow(evaluate);
     }
 
-    static Map<String, String> getSpecifiedRow(
+    /**
+     * Parses specified fields from a JSON record.
+     *
+     * @param record The JSON record to be parsed.
+     * @param fieldPaths The paths of the fields to be parsed from the JSON record.
+     * @param fieldNames The names of the fields to be returned in the result map.
+     * @param paimonFieldTypes A map to store the data types of the fields.
+     * @return A map containing the parsed fields and their values.
+     */
+    static Map<String, String> parseFieldsFromJsonRecord(
             String record,
-            String parsePath,
-            String fileName,
+            String fieldPaths,
+            String fieldNames,
             LinkedHashMap<String, DataType> paimonFieldTypes) {
         Map<String, String> resultMap = new HashMap<>();
-        String[] columnNames = fileName.split(",");
-        String[] parseNames = parsePath.split(",");
+        String[] columnNames = fieldNames.split(",");
+        String[] parseNames = fieldPaths.split(",");
+
         for (int i = 0; i < parseNames.length; i++) {
             paimonFieldTypes.put(columnNames[i], DataTypes.STRING());
             String evaluate = JsonPath.read(record, parseNames[i]);
-            if (evaluate == null) {
-                resultMap.put(columnNames[i], "{}");
-            } else {
-                resultMap.put(columnNames[i], evaluate);
-            }
+            resultMap.put(columnNames[i], Optional.ofNullable(evaluate).orElse("{}"));
         }
         return resultMap;
     }

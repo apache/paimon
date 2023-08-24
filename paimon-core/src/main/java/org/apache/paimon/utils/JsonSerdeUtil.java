@@ -56,9 +56,6 @@ public class JsonSerdeUtil {
         OBJECT_MAPPER_INSTANCE.registerModule(createPaimonJacksonModule());
     }
 
-    private static final TypeReference<LinkedHashMap<String, ?>> GENERIC_MAP_TYPE =
-            new TypeReference<LinkedHashMap<String, ?>>() {};
-
     public static <V> LinkedHashMap<String, V> parseJsonMap(String jsonString, Class<V> valueType) {
         try {
             LinkedHashMap<String, Object> originalMap =

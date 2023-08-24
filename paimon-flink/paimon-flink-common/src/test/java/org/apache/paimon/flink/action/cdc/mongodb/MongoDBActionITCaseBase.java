@@ -38,7 +38,6 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
@@ -92,13 +91,6 @@ public abstract class MongoDBActionITCaseBase extends ActionITCaseBase {
                                 new ConnectionString(MONGODB_CONTAINER.getConnectionString()))
                         .build();
         client = MongoClients.create(settings);
-    }
-
-    @AfterAll
-    public static void stopContainers() {
-        LOG.info("Stopping containers...");
-        MONGODB_CONTAINER.stop();
-        LOG.info("Containers are stopped.");
     }
 
     protected Map<String, String> getBasicMongoDBConfig() {
