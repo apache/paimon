@@ -139,6 +139,20 @@ public class CoreOptions implements Serializable {
                             "Default file compression format, can be overridden by "
                                     + FILE_COMPRESSION_PER_LEVEL.key());
 
+    public static final ConfigOption<FileFormatType> CHANGELOG_FORMAT =
+            key("changelog.format")
+                    .enumType(FileFormatType.class)
+                    .defaultValue(FileFormatType.ORC)
+                    .withDescription(
+                            "Specify the message format of changelog files, currently orc, parquet and avro are supported.");
+
+    public static final ConfigOption<String> CHANGELOG_COMPRESSION =
+            key("changelog.compression")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Default changelog file compression format.");
+
     public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
                     .enumType(FileFormatType.class)
@@ -904,6 +918,10 @@ public class CoreOptions implements Serializable {
         return createFileFormat(options, FILE_FORMAT);
     }
 
+    public FileFormat changelogFormat() {
+        return createFileFormat(options, CHANGELOG_FORMAT);
+    }
+
     public FileFormat manifestFormat() {
         return createFileFormat(options, MANIFEST_FORMAT);
     }
@@ -944,6 +962,10 @@ public class CoreOptions implements Serializable {
 
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
+    }
+
+    public String changelogCompression() {
+        return options.get(CHANGELOG_COMPRESSION);
     }
 
     public int snapshotNumRetainMin() {

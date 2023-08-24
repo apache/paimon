@@ -27,14 +27,12 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
-
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -83,32 +81,42 @@ public class KeyValueFileWriterFactory {
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(int level) {
         return new RollingFileWriter<>(
-                () -> createDataFileWriter(formatContext.pathFactory(level).newPath(), level),
+                () -> {
+                    KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
+                    return new KeyValueDataFileWriter(
+                            fileIO,
+                            formatContext.writerFactory(level),
+                            formatContext.pathFactory(level).newPath(),
+                            kvSerializer::toRow,
+                            keyType,
+                            valueType,
+                            formatContext.extractor(level),
+                            schemaId,
+                            level,
+                            formatContext.compression(level),
+                            options);
+                },
                 suggestedFileSize);
     }
 
     public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
         return new RollingFileWriter<>(
-                () ->
-                        createDataFileWriter(
-                                formatContext.pathFactory(level).newChangelogPath(), level),
+                () -> {
+                    KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
+                    return new KeyValueDataFileWriter(
+                            fileIO,
+                            formatContext.changelogWriterFactory(),
+                            formatContext.changelogPathFactory().newChangelogPath(),
+                            kvSerializer::toRow,
+                            keyType,
+                            valueType,
+                            formatContext.changelogExtractor(),
+                            schemaId,
+                            level,
+                            formatContext.changelogCompression(),
+                            options);
+                },
                 suggestedFileSize);
-    }
-
-    private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {
-        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
-        return new KeyValueDataFileWriter(
-                fileIO,
-                formatContext.writerFactory(level),
-                path,
-                kvSerializer::toRow,
-                keyType,
-                valueType,
-                formatContext.extractor(level),
-                schemaId,
-                level,
-                formatContext.compression(level),
-                options);
     }
 
     public void deleteFile(String filename, int level) {
@@ -179,12 +187,20 @@ public class KeyValueFileWriterFactory {
 
     private static class WriteFormatContext {
 
-        private final Function<Integer, String> level2Format;
-        private final Function<Integer, String> level2Compress;
+        // data files format
+        private Function<Integer, String> level2Format;
+        private Function<Integer, String> level2Compress;
 
-        private final Map<String, Optional<TableStatsExtractor>> format2Extractor;
-        private final Map<String, DataFilePathFactory> format2PathFactory;
-        private final Map<String, FormatWriterFactory> format2WriterFactory;
+        private Map<String, Optional<TableStatsExtractor>> format2Extractor;
+        private Map<String, DataFilePathFactory> format2PathFactory;
+        private Map<String, FormatWriterFactory> format2WriterFactory;
+
+        // changelog format
+        private FileFormat changelogFormat;
+        private FormatWriterFactory changelogFormatWriterFactory;
+        private DataFilePathFactory changelogFormatPathFactory;
+        private Optional<TableStatsExtractor> changelogFormatStatsExtractor;
+        private String changelogCompression;
 
         private WriteFormatContext(
                 BinaryRow partition,
@@ -193,12 +209,35 @@ public class KeyValueFileWriterFactory {
                 FileFormat defaultFormat,
                 Map<String, FileStorePathFactory> parentFactories,
                 CoreOptions options) {
+            FieldStatsCollector.Factory[] statsCollectorFactories =
+                    StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
+            // data file format
+            initDataFileFormat(
+                    partition,
+                    bucket,
+                    rowType,
+                    defaultFormat,
+                    parentFactories,
+                    options,
+                    statsCollectorFactories);
+            // changelog file format
+            initChangelogFormat(
+                    partition, bucket, rowType, parentFactories, options, statsCollectorFactories);
+        }
+
+        private void initDataFileFormat(
+                BinaryRow partition,
+                int bucket,
+                RowType rowType,
+                FileFormat defaultFormat,
+                Map<String, FileStorePathFactory> parentFactories,
+                CoreOptions options,
+                FieldStatsCollector.Factory[] statsCollectorFactories) {
             Map<Integer, String> fileFormatPerLevel = options.fileFormatPerLevel();
             this.level2Format =
                     level ->
                             fileFormatPerLevel.getOrDefault(
                                     level, defaultFormat.getFormatIdentifier());
-
             String defaultCompress = options.fileCompression();
             Map<Integer, String> fileCompressionPerLevel = options.fileCompressionPerLevel();
             this.level2Compress =
@@ -207,8 +246,7 @@ public class KeyValueFileWriterFactory {
             this.format2Extractor = new HashMap<>();
             this.format2PathFactory = new HashMap<>();
             this.format2WriterFactory = new HashMap<>();
-            FieldStatsCollector.Factory[] statsCollectorFactories =
-                    StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
+
             for (String format : parentFactories.keySet()) {
                 format2PathFactory.put(
                         format,
@@ -219,6 +257,25 @@ public class KeyValueFileWriterFactory {
                         format, fileFormat.createStatsExtractor(rowType, statsCollectorFactories));
                 format2WriterFactory.put(format, fileFormat.createWriterFactory(rowType));
             }
+        }
+
+        private void initChangelogFormat(
+                BinaryRow partition,
+                int bucket,
+                RowType rowType,
+                Map<String, FileStorePathFactory> parentFactories,
+                CoreOptions options,
+                FieldStatsCollector.Factory[] statsCollectorFactories) {
+            this.changelogFormat = options.changelogFormat();
+            this.changelogFormatPathFactory =
+                    parentFactories
+                            .get(changelogFormat)
+                            .createDataFilePathFactory(partition, bucket);
+            this.changelogFormatStatsExtractor =
+                    this.changelogFormat.createStatsExtractor(rowType, statsCollectorFactories);
+            this.changelogFormatWriterFactory = this.changelogFormat.createWriterFactory(rowType);
+            // compress config
+            this.changelogCompression = options.changelogCompression() != null ? options.changelogCompression() : options.fileCompression();
         }
 
         @Nullable
@@ -236,6 +293,23 @@ public class KeyValueFileWriterFactory {
 
         private String compression(int level) {
             return level2Compress.apply(level);
+        }
+
+        @Nullable
+        private TableStatsExtractor changelogExtractor() {
+            return changelogFormatStatsExtractor.orElse(null);
+        }
+
+        private DataFilePathFactory changelogPathFactory() {
+            return changelogFormatPathFactory;
+        }
+
+        private FormatWriterFactory changelogWriterFactory() {
+            return this.changelogFormatWriterFactory;
+        }
+
+        private String changelogCompression() {
+            return this.changelogCompression;
         }
     }
 }

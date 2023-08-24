@@ -283,6 +283,29 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
 
     @Test
     @Timeout(1200)
+    public void testInputChangelogProducerBatchRandom() throws Exception {
+        TableEnvironment bEnv = createBatchTableEnvironment();
+        testInputChangelogProducerRandom(bEnv, 1, false);
+    }
+
+    @Test
+    @Timeout(1200)
+    public void testInputChangelogProducerStreamingRandom() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        testInputChangelogProducerRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
+    }
+
+    @Test
+    @Timeout(1200)
+    public void testStandAloneInputJobRandom() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        TableEnvironment sEnv = createStreamingTableEnvironment(random.nextInt(900) + 100);
+        testStandAloneInputJobRandom(sEnv, random.nextInt(1, 3), random.nextBoolean());
+    }
+
+    @Test
+    @Timeout(1200)
     public void testFullCompactionChangelogProducerBatchRandom() throws Exception {
         TableEnvironment bEnv = createBatchTableEnvironment();
         testFullCompactionChangelogProducerRandom(bEnv, 1, false);
@@ -384,6 +407,27 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         checkChangelogTestResult(numProducers);
     }
 
+    private void testInputChangelogProducerRandom(
+            TableEnvironment tEnv, int numProducers, boolean enableFailure) throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        testRandom(
+                tEnv,
+                numProducers,
+                enableFailure,
+                "'bucket' = '4',"
+                        + String.format(
+                                "'write-buffer-size' = '%s',",
+                                random.nextBoolean() ? "512kb" : "1mb")
+                        + "'changelog-producer' = 'input'");
+
+        // sleep for a random amount of time to check
+        // if we can first read complete records then read incremental records correctly
+        Thread.sleep(random.nextInt(5000));
+
+        checkChangelogTestResult(numProducers);
+    }
+
     private void testStandAloneFullCompactJobRandom(
             TableEnvironment tEnv, int numProducers, boolean enableConflicts) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -432,6 +476,40 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'lookup',"
+                        + "'write-only' = 'true'");
+
+        // sleep for a random amount of time to check
+        // if dedicated compactor job can find first snapshot to compact correctly
+        Thread.sleep(random.nextInt(2500));
+
+        for (int i = enableConflicts ? 2 : 1; i > 0; i--) {
+            StreamExecutionEnvironment env =
+                    createStreamExecutionEnvironment(random.nextInt(1900) + 100);
+            env.setParallelism(2);
+            new CompactAction(path, "default", "T").build(env);
+            env.executeAsync();
+        }
+
+        // sleep for a random amount of time to check
+        // if we can first read complete records then read incremental records correctly
+        Thread.sleep(random.nextInt(2500));
+
+        checkChangelogTestResult(numProducers);
+    }
+
+    private void testStandAloneInputJobRandom(
+            TableEnvironment tEnv, int numProducers, boolean enableConflicts) throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        testRandom(
+                tEnv,
+                numProducers,
+                false,
+                "'bucket' = '4',"
+                        + String.format(
+                                "'write-buffer-size' = '%s',",
+                                random.nextBoolean() ? "512kb" : "1mb")
+                        + "'changelog-producer' = 'input',"
                         + "'write-only' = 'true'");
 
         // sleep for a random amount of time to check
