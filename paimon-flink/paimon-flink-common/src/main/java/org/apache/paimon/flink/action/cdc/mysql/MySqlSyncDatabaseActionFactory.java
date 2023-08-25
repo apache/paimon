@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
@@ -40,26 +41,30 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
     public Optional<Action> create(MultipleParameterTool params) {
         checkRequiredArgument(params, "mysql-conf");
 
-        MySqlSyncDatabaseAction mySqlSyncDatabaseAction =
+        MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
                         getRequiredValue(params, "warehouse"),
                         getRequiredValue(params, "database"),
                         optionalConfigMap(params, "catalog-conf"),
                         optionalConfigMap(params, "mysql-conf"));
 
-        mySqlSyncDatabaseAction
-                .withTableConfig(optionalConfigMap(params, "table-conf"))
+        action.withTableConfig(optionalConfigMap(params, "table-conf"))
                 .ignoreIncompatible(Boolean.parseBoolean(params.get("ignore-incompatible")))
                 .mergeShards(
                         !params.has("merge-shards")
                                 || Boolean.parseBoolean(params.get("merge-shards")))
-                .withTablePrefix(params.get("table-suffix"))
+                .withTablePrefix(params.get("table-prefix"))
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
                 .withMode(DatabaseSyncMode.fromString(params.get("mode")));
 
-        return Optional.of(mySqlSyncDatabaseAction);
+        if (params.has("type-mapping")) {
+            String[] options = params.get("type-mapping").split(",");
+            action.withTypeMapping(TypeMapping.parse(options));
+        }
+
+        return Optional.of(action);
     }
 
     @Override
@@ -82,6 +87,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--including-tables <mysql-table-name|name-regular-expr>] "
                         + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
                         + "[--mode <sync-mode>] "
+                        + "[--type-mapping <option1,option2...>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -123,6 +129,10 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "start a sink for each table, the synchronization of the new table requires restarting the job;");
         System.out.println(
                 "  2. 'combined': start a single combined sink for all tables, the new table will be automatically synchronized.");
+        System.out.println();
+
+        System.out.println(
+                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

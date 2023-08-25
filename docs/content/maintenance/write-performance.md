@@ -166,7 +166,7 @@ Compaction will become less frequent when `num-sorted-run.compaction-trigger` be
 ## Local Merging
 
 If your job suffers from primary key data skew
-(for example, you want to count the number of views for each pages in a website,
+(for example, you want to count the number of views for each page in a website,
 and some particular pages are very popular among the users),
 you can set `'local-merge-buffer-size'` so that input records will be buffered and merged
 before they're shuffled by bucket and written into sink.
@@ -174,6 +174,8 @@ This is particularly useful when the same primary key is updated frequently betw
 
 The buffer will be flushed when it is full. We recommend starting with `64 mb`
 when you are faced with data skew but don't know where to start adjusting buffer size.
+
+(Currently, Local merging not works for CDC ingestion)
 
 ## File Format
 

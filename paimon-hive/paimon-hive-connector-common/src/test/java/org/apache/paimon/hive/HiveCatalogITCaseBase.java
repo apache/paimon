@@ -343,6 +343,22 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testHiveCreateAndFlinkInsertRead() throws Exception {
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+        hiveShell.execute(
+                "CREATE TABLE hive_test_table ( a INT, b STRING ) "
+                        + "STORED BY '"
+                        + PaimonStorageHandler.class.getName()
+                        + "'"
+                        + "TBLPROPERTIES ("
+                        + "  'primary-key'='a'"
+                        + ")");
+        tEnv.executeSql("INSERT INTO hive_test_table VALUES (1, 'Apache'), (2, 'Paimon')");
+        List<Row> actual = collect("SELECT * FROM hive_test_table");
+        assertThat(actual).contains(Row.of(1, "Apache"), Row.of(2, "Paimon"));
+    }
+
+    @Test
     public void testCreateTableAs() throws Exception {
         tEnv.executeSql("CREATE TABLE t (a INT)").await();
         tEnv.executeSql("INSERT INTO t VALUES(1)").await();
@@ -446,7 +462,8 @@ public abstract class HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist")
                                         .await())
-                .hasRootCauseMessage("Primary key column '[aaa]' is not defined in the schema.");
+                .hasRootCauseMessage(
+                        "Table column [user_id, item_id, behavior, dt, hh] should include all primary key constraint [aaa]");
 
         // primary key in option and DDL.
         assertThatThrownBy(
@@ -480,7 +497,8 @@ public abstract class HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist")
                                         .await())
-                .hasRootCauseMessage("Partition column '[aaa]' is not defined in the schema.");
+                .hasRootCauseMessage(
+                        "Table column [user_id, item_id, behavior, dt, hh] should include all partition fields [aaa]");
 
         // partition in option and DDL.
         assertThatThrownBy(

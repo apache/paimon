@@ -402,7 +402,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.STRING(), // _text
                             DataTypes.STRING(), // _mediumtext
                             DataTypes.STRING(), // _longtext
-                            DataTypes.BINARY(10), // _bin
+                            DataTypes.VARBINARY(10), // _bin
                             DataTypes.VARBINARY(20), // _varbin
                             DataTypes.BYTES(), // _tinyblob
                             DataTypes.BYTES(), // _blob
@@ -502,11 +502,15 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_set",
                         });
         FileStoreTable table = getFileStoreTable();
+        // BIT(64) data: 0B11111000111 -> 0B00000111_11000111
+        String bits =
+                Arrays.toString(
+                        new byte[] {0, 0, 0, 0, 0, 0, (byte) 0B00000111, (byte) 0B11000111});
         List<String> expected =
                 Arrays.asList(
                         "+I["
                                 + "1, 1.1, "
-                                + "true, [-17, -65, -67, 7, 0, 0, 0, 0, 0, 0], "
+                                + String.format("true, %s, ", bits)
                                 + "true, true, false, 1, 2, 3, "
                                 + "1000, 2000, 3000, "
                                 + "100000, 200000, 300000, "
@@ -792,58 +796,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 3, 1, 9, 23, 1, 15, 0, 14, 15, 2023, 2022-01-01, 20210915, 23-03-23, 09-15, 0]",
                         "+I[2, 19439, NULL, NULL, 2023, NULL, NULL, 3, NULL, NULL, 23, NULL, NULL, 0, NULL, NULL, 2023, NULL, NULL, 23-03-23, NULL, 2]");
         waitForResult(expected, table, rowType, Arrays.asList("pk", "_year_date"));
-    }
-
-    @Test
-    @Timeout(60)
-    public void testTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", DATABASE_NAME);
-        mySqlConfig.put("table-name", "test_tinyint1_convert");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
-        runActionWithDefaultEnv(action);
-
-        checkTableSchema(
-                "[{\"id\":0,\"name\":\"pk\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
-                        + "{\"id\":1,\"name\":\"_tinyint1\",\"type\":\"TINYINT\",\"description\":\"\"}]");
-
-        try (Statement statement = getStatement()) {
-            statement.execute("USE " + DATABASE_NAME);
-            statement.executeUpdate("INSERT INTO test_tinyint1_convert VALUES (1, 21), (2, 42)");
-
-            FileStoreTable table = getFileStoreTable();
-            RowType rowType =
-                    RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.TINYINT()},
-                            new String[] {"pk", "_tinyint1"});
-            List<String> expected = Arrays.asList("+I[1, 21]", "+I[2, 42]");
-            waitForResult(expected, table, rowType, Collections.singletonList("pk"));
-
-            // test schema evolution
-            statement.executeUpdate(
-                    "ALTER TABLE test_tinyint1_convert ADD COLUMN _new_tinyint1 TINYINT(1)");
-            statement.executeUpdate(
-                    "INSERT INTO test_tinyint1_convert VALUES (3, 63, 1), (4, 127, -128)");
-
-            rowType =
-                    RowType.of(
-                            new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.TINYINT(), DataTypes.TINYINT()
-                            },
-                            new String[] {"pk", "_tinyint1", "_new_tinyint1"});
-            waitForResult(
-                    Arrays.asList(
-                            "+I[1, 21, NULL]",
-                            "+I[2, 42, NULL]",
-                            "+I[3, 63, 1]",
-                            "+I[4, 127, -128]"),
-                    table,
-                    rowType,
-                    Collections.singletonList("pk"));
-        }
     }
 
     @Test

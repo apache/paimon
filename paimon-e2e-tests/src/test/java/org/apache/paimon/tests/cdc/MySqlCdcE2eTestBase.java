@@ -34,7 +34,7 @@ import org.testcontainers.containers.Container;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 
-import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -114,6 +114,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                 ACTION_SYNC_TABLE,
                 "pt",
                 "pt,_id",
+                null,
                 ImmutableMap.of(),
                 ImmutableMap.of(
                         "database-name", "paimon_sync_table", "table-name", "schema_evolution_.+"),
@@ -196,9 +197,9 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
 
     @Test
     public void testSyncDatabase() throws Exception {
-
         runAction(
                 ACTION_SYNC_DATABASE,
+                null,
                 null,
                 null,
                 ImmutableMap.of(),
@@ -267,147 +268,6 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
         cancelJob(jobId);
     }
 
-    @Test
-    public void testSyncTableWithTinyConvert() throws Exception {
-        runAction(
-                ACTION_SYNC_TABLE,
-                "pt",
-                "pt,_id",
-                ImmutableMap.of(),
-                ImmutableMap.of(
-                        "database-name",
-                        "paimon_sync_table",
-                        "table-name",
-                        "tinyint_schema_evolution_.+",
-                        "mysql.converter.tinyint1-to-bool",
-                        "false"),
-                ImmutableMap.of("bucket", "2"));
-
-        try (Connection conn = getMySqlConnection();
-                Statement statement = conn.createStatement()) {
-            testSyncTableImplWithTinyConvert(statement);
-        }
-    }
-
-    private void testSyncTableImplWithTinyConvert(Statement statement) throws Exception {
-        statement.executeUpdate("USE paimon_sync_table");
-
-        statement.executeUpdate("INSERT INTO tinyint_schema_evolution_1 VALUES (1, 1, 11)");
-        statement.executeUpdate(
-                "INSERT INTO tinyint_schema_evolution_2 VALUES (1, 2, 12), (2, 4, 24)");
-
-        String jobId =
-                runSql(
-                        "INSERT INTO result1 SELECT * FROM ts_table;",
-                        catalogDdl,
-                        useCatalogCmd,
-                        "",
-                        createResultSink("result1", "pt INT, _id INT, _tinyint1 TINYINT"));
-        checkResult("1, 1, 11", "1, 2, 12", "2, 4, 24");
-        clearCurrentResults();
-        cancelJob(jobId);
-
-        statement.executeUpdate("ALTER TABLE tinyint_schema_evolution_1 ADD COLUMN v1 TINYINT(1)");
-        statement.executeUpdate(
-                "INSERT INTO tinyint_schema_evolution_1 VALUES (2, 3, 23, 30), (1, 5, 15, 50)");
-        statement.executeUpdate("ALTER TABLE tinyint_schema_evolution_2 ADD COLUMN v1 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO tinyint_schema_evolution_2 VALUES (1, 6, 16, 60)");
-
-        jobId =
-                runSql(
-                        "INSERT INTO result2 SELECT * FROM ts_table;",
-                        catalogDdl,
-                        useCatalogCmd,
-                        "",
-                        createResultSink(
-                                "result2", "pt INT, _id INT, _tinyint1 TINYINT, v1 TINYINT"));
-        checkResult(
-                "1, 1, 11, null",
-                "1, 2, 12, null",
-                "2, 3, 23, 30",
-                "2, 4, 24, null",
-                "1, 5, 15, 50",
-                "1, 6, 16, 60");
-        clearCurrentResults();
-        cancelJob(jobId);
-    }
-
-    @Test
-    public void testSyncDatabaseWithTinyConvert() throws Exception {
-        runAction(
-                ACTION_SYNC_DATABASE,
-                null,
-                null,
-                ImmutableMap.of(),
-                ImmutableMap.of(
-                        "database-name",
-                        "paimon_sync_database_tinyint",
-                        "mysql.converter.tinyint1-to-bool",
-                        "false"),
-                ImmutableMap.of("bucket", "2"));
-
-        try (Connection conn = getMySqlConnection();
-                Statement statement = conn.createStatement()) {
-            testSyncDatabaseImplWithTinyConvert(statement);
-        }
-    }
-
-    private void testSyncDatabaseImplWithTinyConvert(Statement statement) throws Exception {
-        statement.executeUpdate("USE paimon_sync_database_tinyint");
-
-        statement.executeUpdate("INSERT INTO t1 VALUES (1, 10)");
-        statement.executeUpdate("INSERT INTO t2 VALUES (2, 'two', 20)");
-
-        String jobId =
-                runSql(
-                        "INSERT INTO result1 SELECT * FROM t1;",
-                        catalogDdl,
-                        useCatalogCmd,
-                        "",
-                        createResultSink("result1", "k INT, v INT"));
-        checkResult("1, 10");
-        clearCurrentResults();
-        cancelJob(jobId);
-
-        jobId =
-                runSql(
-                        "INSERT INTO result2 SELECT * FROM t2;",
-                        catalogDdl,
-                        useCatalogCmd,
-                        "",
-                        createResultSink("result2", "k1 INT, k2 VARCHAR(10), v1 INT"));
-        checkResult("2, two, 20");
-        clearCurrentResults();
-        cancelJob(jobId);
-
-        statement.executeUpdate("ALTER TABLE t1 ADD COLUMN v1 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO t1 VALUES (3, 30, 42)");
-        statement.executeUpdate("ALTER TABLE t2 ADD COLUMN v2 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO t2 VALUES (4, 'four', 40, 40)");
-
-        jobId =
-                runSql(
-                        "INSERT INTO result3 SELECT * FROM t1;",
-                        catalogDdl,
-                        useCatalogCmd,
-                        "",
-                        createResultSink("result3", "k INT, v INT, v1 TINYINT"));
-        checkResult("1, 10, null", "3, 30, 42");
-        clearCurrentResults();
-        cancelJob(jobId);
-
-        jobId =
-                runSql(
-                        "INSERT INTO result4 SELECT * FROM t2;",
-                        catalogDdl,
-                        useCatalogCmd,
-                        "",
-                        createResultSink("result4", "k1 INT, k2 VARCHAR(10), v1 INT, v2 TINYINT"));
-        checkResult("2, two, 20, null", "4, four, 40, 40");
-        clearCurrentResults();
-        cancelJob(jobId);
-    }
-
     protected Connection getMySqlConnection() throws Exception {
         return DriverManager.getConnection(
                 String.format(
@@ -426,18 +286,23 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
     }
 
     protected void runAction(
-            @Nonnull String action,
-            String partitionKeys,
-            String primaryKeys,
-            @Nonnull Map<String, String> computedColumn,
-            @Nonnull Map<String, String> mysqlConf,
-            @Nonnull Map<String, String> tableConf)
+            String action,
+            @Nullable String partitionKeys,
+            @Nullable String primaryKeys,
+            @Nullable String typeMappingOptions,
+            Map<String, String> computedColumn,
+            Map<String, String> mysqlConf,
+            Map<String, String> tableConf)
             throws Exception {
 
         String partitionKeysStr =
                 StringUtils.isBlank(partitionKeys) ? "" : "--partition-keys " + partitionKeys;
         String primaryKeysStr =
                 StringUtils.isBlank(primaryKeys) ? "" : "--primary-keys " + primaryKeys;
+        String typeMappingStr =
+                StringUtils.isBlank(typeMappingOptions)
+                        ? ""
+                        : "--type-mapping " + typeMappingOptions;
         String tableStr = action.equals(ACTION_SYNC_TABLE) ? "--table ts_table" : "";
 
         List<String> computedColumns =
@@ -475,6 +340,7 @@ public abstract class MySqlCdcE2eTestBase extends E2eTestBase {
                         tableStr,
                         partitionKeysStr,
                         primaryKeysStr,
+                        typeMappingStr,
                         "--mysql-conf",
                         "hostname=mysql-1",
                         "--mysql-conf",

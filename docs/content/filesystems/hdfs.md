@@ -86,7 +86,7 @@ For Alluxio support add the following entry into the core-site.xml file:
 
 {{< tab "Flink" >}}
 
-It is recommended to use [Flink Kerberos Keytab](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/deployment/security/security-kerberos/).
+It is recommended to use [Flink Kerberos Keytab](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/security/security-kerberos/).
 
 {{< /tab >}}
 

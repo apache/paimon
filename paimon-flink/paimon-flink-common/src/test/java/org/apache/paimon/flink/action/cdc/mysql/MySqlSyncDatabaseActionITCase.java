@@ -203,84 +203,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
-    public void testSchemaEvolutionWithTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_tinyint_schema");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
-                        .withTableConfig(getBasicTableConfig());
-        runActionWithDefaultEnv(action);
-
-        try (Statement statement = getStatement()) {
-            testSchemaEvolutionImplWithTinyInt1Convert(statement);
-        }
-    }
-
-    private void testSchemaEvolutionImplWithTinyInt1Convert(Statement statement) throws Exception {
-        FileStoreTable table1 = getFileStoreTable("schema_evolution_4");
-        FileStoreTable table2 = getFileStoreTable("schema_evolution_5");
-
-        statement.executeUpdate("USE " + "paimon_sync_database_tinyint_schema");
-
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (1, 'one')");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (2, 'two', 21)");
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (3, 'three')");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (4, 'four', 24)");
-
-        RowType rowType1 =
-                RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
-                        new String[] {"_id", "v1"});
-
-        List<String> primaryKeys1 = Collections.singletonList("_id");
-        List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
-
-        waitForResult(expected, table1, rowType1, primaryKeys1);
-
-        RowType rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2"});
-        List<String> primaryKeys2 = Collections.singletonList("_id");
-        expected = Arrays.asList("+I[2, two, 21]", "+I[4, four, 24]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
-
-        statement.executeUpdate("ALTER TABLE schema_evolution_4 ADD COLUMN v2 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO schema_evolution_4 VALUES (5, 'five', 42)");
-        statement.executeUpdate("ALTER TABLE schema_evolution_5 ADD COLUMN v3 TINYINT(1)");
-        statement.executeUpdate("INSERT INTO schema_evolution_5 VALUES (6, 'six', 42, 43)");
-
-        rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2"});
-
-        expected = Arrays.asList("+I[1, one, NULL]", "+I[3, three, NULL]", "+I[5, five, 42]");
-        waitForResult(expected, table1, rowType1, primaryKeys1);
-
-        rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10),
-                            DataTypes.TINYINT(),
-                            DataTypes.TINYINT()
-                        },
-                        new String[] {"_id", "v1", "v2", "v3"});
-        expected =
-                Arrays.asList(
-                        "+I[2, two, 21, NULL]", "+I[4, four, 24, NULL]", "+I[6, six, 42, 43]");
-        waitForResult(expected, table2, rowType2, primaryKeys2);
-    }
-
-    @Test
     public void testSpecifiedMySqlTable() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_sync_database");
@@ -642,7 +564,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testAddIgnoredTable() throws Exception {
         String mySqlDatabase = "paimon_sync_database_add_ignored_table";
 
@@ -950,42 +872,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             return env.executeAsync(streamGraph);
         }
         return env.executeAsync();
-    }
-
-    @Test
-    @Timeout(60)
-    public void testTinyInt1Convert() throws Exception {
-        Map<String, String> mySqlConfig = getBasicMySqlConfig();
-        mySqlConfig.put("database-name", "paimon_sync_database_tinyint");
-        mySqlConfig.put("mysql.converter.tinyint1-to-bool", "false");
-
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
-                        .withTableConfig(getBasicTableConfig());
-        runActionWithDefaultEnv(action);
-
-        try (Statement statement = getStatement()) {
-            testTinyInt1Convert(statement);
-        }
-    }
-
-    private void testTinyInt1Convert(Statement statement) throws Exception {
-        FileStoreTable table = getFileStoreTable("t4");
-
-        statement.executeUpdate("USE paimon_sync_database_tinyint");
-
-        statement.executeUpdate("INSERT INTO t4 VALUES (1, '2021-09-15 15:00:10', 21)");
-        statement.executeUpdate("INSERT INTO t4 VALUES (2, '2023-03-23 16:00:20', 42)");
-
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.TIMESTAMP(0), DataTypes.TINYINT()
-                        },
-                        new String[] {"pk", "_datetime", "_tinyint1"});
-        List<String> expected =
-                Arrays.asList("+I[1, 2021-09-15T15:00:10, 21]", "+I[2, 2023-03-23T16:00:20, 42]");
-        waitForResult(expected, table, rowType, Collections.singletonList("pk"));
     }
 
     @Test

@@ -43,7 +43,7 @@ Download [paimon-oss-{{< version >}}.jar](https://repository.apache.org/snapshot
 {{< tab "Flink" >}}
 
 {{< hint info >}}
-If you have already configured [oss access through Flink](https://nightlies.apache.org/flink/flink-docs-release-1.17/docs/deployment/filesystems/oss/) (Via Flink FileSystem),
+If you have already configured [oss access through Flink](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/filesystems/oss/) (Via Flink FileSystem),
 here you can skip the following configuration.
 {{< /hint >}}
 

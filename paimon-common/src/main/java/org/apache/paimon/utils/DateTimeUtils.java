@@ -154,7 +154,7 @@ public class DateTimeUtils {
         String nano = fraction.substring(0, precision);
 
         if (nano.length() > 0) {
-            ymdhms.append(".").append(fraction);
+            ymdhms.append(".").append(nano);
         }
 
         return ymdhms.toString();

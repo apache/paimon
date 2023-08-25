@@ -115,9 +115,8 @@ public class FlinkConnectorOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "If it is false, parallelism of source are set by "
-                                    + SCAN_PARALLELISM.key()
-                                    + ". Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).");
+                            "If it is false, parallelism of source are set by global parallelism."
+                                    + " Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).");
 
     @Deprecated
     @ExcludeFromDocumentation("Deprecated")
@@ -249,6 +248,13 @@ public class FlinkConnectorOptions {
                     .intType()
                     .defaultValue(16)
                     .withDescription("The thread number for lookup async.");
+
+    public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
+            ConfigOptions.key("sink.savepoint.auto-tag")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, a tag will be automatically created for the snapshot created by flink savepoint.");
 
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();

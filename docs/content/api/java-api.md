@@ -70,6 +70,7 @@ public class CreateCatalog {
         options.set("metastore", "hive");
         options.set("uri", "...");
         options.set("hive-conf-dir", "...");
+        options.set("hadoop-conf-dir", "...");
         CatalogContext context = CatalogContext.create(options);
         Catalog catalog = CatalogFactory.createCatalog(context);
     }

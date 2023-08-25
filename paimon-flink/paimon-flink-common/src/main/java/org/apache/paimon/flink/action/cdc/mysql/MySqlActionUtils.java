@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchema;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
@@ -60,6 +61,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for MySQL Action. * */
@@ -73,30 +75,17 @@ public class MySqlActionUtils {
                     .withDescription(
                             "Whether capture the scan the newly added tables or not, by default is true.");
 
-    public static final ConfigOption<Boolean> MYSQL_CONVERTER_TINYINT1_BOOL =
-            ConfigOptions.key("mysql.converter.tinyint1-to-bool")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Mysql tinyint type will be converted to boolean type by default, if you want to convert to tinyint type, "
-                                    + "you can set this option to false.");
-
-    static Connection getConnection(Configuration mySqlConfig) throws Exception {
+    static Connection getConnection(Configuration mySqlConfig, boolean tinyint1NotBool)
+            throws Exception {
         String url =
                 String.format(
-                        "jdbc:mysql://%s:%d",
+                        "jdbc:mysql://%s:%d%s",
                         mySqlConfig.get(MySqlSourceOptions.HOSTNAME),
-                        mySqlConfig.get(MySqlSourceOptions.PORT));
-
-        // we need to add the `tinyInt1isBit` parameter to the connection url to make sure the
-        // tinyint(1) in MySQL is converted to bits or not. Refer to
-        // https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-connp-props-result-sets.html#cj-conn-prop_tinyInt1isBit
-        if (mySqlConfig.contains(MYSQL_CONVERTER_TINYINT1_BOOL)) {
-            url =
-                    String.format(
-                            "%s?tinyInt1isBit=%s",
-                            url, mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
-        }
+                        mySqlConfig.get(MySqlSourceOptions.PORT),
+                        // we need to add the `tinyInt1isBit` parameter to the connection url to
+                        // make sure the tinyint(1) in MySQL is converted to bits or not. Refer to
+                        // https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-connp-props-result-sets.html#cj-conn-prop_tinyInt1isBit
+                        tinyint1NotBool ? "?tinyInt1isBit=false" : "");
 
         return DriverManager.getConnection(
                 url,
@@ -107,12 +96,15 @@ public class MySqlActionUtils {
     static MySqlSchemasInfo getMySqlTableInfos(
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
-            List<Identifier> excludedTables)
+            List<Identifier> excludedTables,
+            TypeMapping typeMapping)
             throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
         MySqlSchemasInfo mySqlSchemasInfo = new MySqlSchemasInfo();
-        try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig)) {
+        try (Connection conn =
+                MySqlActionUtils.getConnection(
+                        mySqlConfig, typeMapping.containsMode(TINYINT1_NOT_BOOL))) {
             DatabaseMetaData metaData = conn.getMetaData();
             try (ResultSet schemas = metaData.getCatalogs()) {
                 while (schemas.next()) {
@@ -124,10 +116,7 @@ public class MySqlActionUtils {
                                 String tableName = tables.getString("TABLE_NAME");
                                 MySqlSchema mySqlSchema =
                                         MySqlSchema.buildSchema(
-                                                metaData,
-                                                databaseName,
-                                                tableName,
-                                                mySqlConfig.get(MYSQL_CONVERTER_TINYINT1_BOOL));
+                                                metaData, databaseName, tableName, typeMapping);
                                 Identifier identifier = Identifier.create(databaseName, tableName);
                                 if (monitorTablePredication.test(tableName)) {
                                     mySqlSchemasInfo.addSchema(identifier, mySqlSchema);

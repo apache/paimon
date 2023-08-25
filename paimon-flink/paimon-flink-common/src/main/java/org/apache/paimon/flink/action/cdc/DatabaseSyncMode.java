@@ -46,7 +46,7 @@ public enum DatabaseSyncMode implements Serializable {
             case "combined":
                 return COMBINED;
             default:
-                throw new UnsupportedOperationException("Unsupported sink mode: " + mode);
+                throw new UnsupportedOperationException("Unsupported mode: " + mode);
         }
     }
 }

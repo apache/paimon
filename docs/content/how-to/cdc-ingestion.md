@@ -64,6 +64,7 @@ To use this feature through `flink run`, run the following shell command.
     --table <table-name> \
     [--partition-keys <partition-keys>] \
     [--primary-keys <primary-keys>] \
+    [--type-mapping <option1,option2...>] \
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
@@ -148,6 +149,7 @@ To use this feature through `flink run`, run the following shell command.
     [--including-tables <mysql-table-name|name-regular-expr>] \
     [--excluding-tables <mysql-table-name|name-regular-expr>] \
     [--mode <sync-mode>] \
+    [--type-mapping <option1,option2...>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -283,23 +285,27 @@ If a message in a Kafka topic is a change event captured from another database u
     </thead>
     <tbody>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/canal/">Canal CDC</a></td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/canal/">Canal CDC</a></td>
           <td>True</td>
         </tr>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/debezium/">Debezium CDC</a></td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/debezium/">Debezium CDC</a></td>
          <td>False</td>
         </tr>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/maxwell/ >}}">Maxwell CDC</a></td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/maxwell/ >}}">Maxwell CDC</a></td>
         <td>False</td>
         </tr>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/ogg/">OGG CDC</a></td>
-        <td>False</td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/ogg/">OGG CDC</a></td>
+        <td>True</td>
         </tr>
     </tbody>
 </table>
+
+{{< hint info >}}
+In Oracle GoldenGate, the data format synchronized to Kafka does not include field data type information. As a result, Paimon sets the data type for all fields to "String" by default.
+{{< /hint >}}
 
 ### Synchronizing Tables
 
@@ -596,11 +602,15 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 
 {{< generated/compute_column >}}
 
-## Special Data Type Conversions
-1. MySQL TINYINT(1) type will be converted to Boolean by default. If you want to store number (-128~127) in it like MySQL, 
-you can specify that `--mysql-conf mysql.converter.tinyint1-to-bool=false`, then the column will be mapped to TINYINT in Paimon table.
-2. MySQL BIT(1) type will be converted to Boolean.
-3. When using Hive catalog, MySQL TIME type will be converted to STRING.
+## Special Data Type Mapping
+1. MySQL TINYINT(1) type will be mapped to Boolean by default. If you want to store number (-128~127) in it like MySQL, 
+you can specify type mapping option `tinyint1-not-bool`, then the column will be mapped to TINYINT in Paimon table.
+2. You can use type mapping option `to-nullable` to ignore all NOT NULL constraints (except primary keys).
+3. You can use type mapping option `to-string` to map all MySQL data type to STRING.
+4. MySQL BIT(1) type will be mapped to Boolean.
+5. When using Hive catalog, MySQL TIME type will be mapped to STRING.
+6. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it 
+should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
 
 ## FAQ
 1. Chinese characters in records ingested from MySQL are garbled.

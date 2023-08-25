@@ -117,7 +117,7 @@ SELECT window_start, window_end, COUNT(`user`) FROM TABLE(
  TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
 ```
 
-You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
+You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
 which will make sure no sources/splits/shards/partitions increase their watermarks too far ahead of the rest:
 
 <table class="configuration table table-bordered">
@@ -226,6 +226,27 @@ behavior is exactly the same as [Append For Qeueue]({{< ref "#compaction" >}}). 
 
 The auto compaction is only supported in Flink engine streaming mode. You can also start a compaction job in flink by flink action in paimon
 and disable all the other compaction by set `write-only`.
+
+### Sort Compact
+
+The data in a per-partition out of order will lead a slow select, compaction may slow down the inserting. It is a good choice for you to set 
+write-only for inserting job, and after per-partition data done, trigger a partition `Sort Compact` action. 
+
+You can trigger action by shell script:
+```shell
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-0.5-SNAPSHOT.jar \
+    compact \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table <tableName> \
+    --order-strategy <orderType> \
+    --order-by <col1,col2,...>
+```
+
+{{< generated/sort-compact >}}
+
+Other config is the same as [Compact Table]({{< ref "concepts/file-operations#compact-table" >}})
 
 ### Streaming Source
 
