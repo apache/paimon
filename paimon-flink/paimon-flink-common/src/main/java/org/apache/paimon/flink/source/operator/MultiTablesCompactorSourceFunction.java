@@ -24,7 +24,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.system.BucketsTable2;
+import org.apache.paimon.table.system.BucketsMultiTable;
 
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
@@ -70,7 +70,7 @@ public abstract class MultiTablesCompactorSourceFunction
     protected final long monitorInterval;
 
     protected transient Catalog catalog;
-    protected transient Map<Identifier, BucketsTable2> tablesMap;
+    protected transient Map<Identifier, BucketsMultiTable> tablesMap;
     protected transient Map<Identifier, StreamTableScan> scansMap;
 
     public MultiTablesCompactorSourceFunction(
@@ -219,8 +219,8 @@ public abstract class MultiTablesCompactorSourceFunction
                             continue;
                         }
 
-                        BucketsTable2 bucketsTable =
-                                new BucketsTable2(
+                        BucketsMultiTable bucketsTable =
+                                new BucketsMultiTable(
                                                 (FileStoreTable) table,
                                                 isStreaming,
                                                 identifier.getDatabaseName(),

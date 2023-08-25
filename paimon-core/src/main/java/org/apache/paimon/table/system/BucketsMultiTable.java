@@ -57,17 +57,17 @@ import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** this is a doc. */
-public class BucketsTable2 implements DataTable, ReadonlyTable {
+public class BucketsMultiTable implements DataTable, ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
     private final FileStoreTable wrapped;
     private final boolean isContinuous;
 
-    private String databaseName;
-    private String tableName;
+    private final String databaseName;
+    private final String tableName;
 
-    public BucketsTable2(
+    public BucketsMultiTable(
             FileStoreTable wrapped, boolean isContinuous, String databaseName, String tableName) {
         this.wrapped = wrapped;
         this.isContinuous = isContinuous;
@@ -134,12 +134,12 @@ public class BucketsTable2 implements DataTable, ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new BucketsTable2.BucketsRead2();
+        return new BucketsMultiTable.BucketsRead2();
     }
 
     @Override
-    public BucketsTable2 copy(Map<String, String> dynamicOptions) {
-        return new BucketsTable2(
+    public BucketsMultiTable copy(Map<String, String> dynamicOptions) {
+        return new BucketsMultiTable(
                 wrapped.copy(dynamicOptions), isContinuous, databaseName, tableName);
     }
 

@@ -27,7 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.system.BucketsTable2;
+import org.apache.paimon.table.system.BucketsMultiTable;
 import org.apache.paimon.utils.CloseableIterator;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -71,7 +71,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
 
     private transient Catalog catalog;
     private transient IOManagerImpl ioManager;
-    private transient Map<Identifier, BucketsTable2> tablesMap;
+    private transient Map<Identifier, BucketsMultiTable> tablesMap;
     private transient Map<Identifier, TableRead> readsMap;
     private transient StreamRecord<RowData> reuseRecord;
     private transient FlinkRowData reuseRow;
@@ -127,8 +127,8 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
                             continue;
                         }
 
-                        BucketsTable2 bucketsTable =
-                                new BucketsTable2(
+                        BucketsMultiTable bucketsTable =
+                                new BucketsMultiTable(
                                                 (FileStoreTable) table,
                                                 isStreaming,
                                                 identifier.getDatabaseName(),
@@ -145,7 +145,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     }
 
     private TableRead getTableRead(Identifier tableId) {
-        BucketsTable2 table = tablesMap.get(tableId);
+        BucketsMultiTable table = tablesMap.get(tableId);
         if (table == null) {
             try {
                 Table newTable = catalog.getTable(tableId);
@@ -156,7 +156,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
                                     newTable.getClass().getName()));
                 } else {
                     table =
-                            new BucketsTable2(
+                            new BucketsMultiTable(
                                             (FileStoreTable) newTable,
                                             isStreaming,
                                             tableId.getDatabaseName(),
