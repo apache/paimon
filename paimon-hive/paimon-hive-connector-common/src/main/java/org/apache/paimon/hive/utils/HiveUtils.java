@@ -82,20 +82,16 @@ public class HiveUtils {
                 String value = entry.getValue();
                 if (name.startsWith(PAIMON_PREFIX) && !"NULL".equalsIgnoreCase(value)) {
                     name = name.substring(PAIMON_PREFIX.length());
-                    if (!name.endsWith(TAG_SUFFIX)) {
+                    if (!name.endsWith(TAG_SUFFIX) || name.equals(TAG_SUFFIX)) {
                         configMap.put(name, value);
                     } else {
-                        if (name.equals(TAG_SUFFIX)) {
+                        String tableName = name.substring(0, name.indexOf(TAG_SUFFIX) - 1);
+                        String paimonLocation =
+                                LocationKeyExtractor.getPaimonLocation(new JobConf(hiveConf));
+                        String realTableName = CatalogUtils.table(paimonLocation);
+                        if (tableName.equalsIgnoreCase(realTableName)) {
+                            name = name.substring(tableName.length() + 1);
                             configMap.put(name, value);
-                        } else {
-                            String tableName = name.substring(0, name.indexOf(TAG_SUFFIX) - 1);
-                            String paimonLocation =
-                                    LocationKeyExtractor.getPaimonLocation(new JobConf(hiveConf));
-                            String trueTable = CatalogUtils.table(paimonLocation);
-                            if (tableName.equalsIgnoreCase(trueTable)) {
-                                name = name.substring(tableName.length() + 1);
-                                configMap.put(name, value);
-                            }
                         }
                     }
                 }
