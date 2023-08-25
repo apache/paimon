@@ -53,7 +53,8 @@ public class SparkTable
         implements org.apache.spark.sql.connector.catalog.Table,
                 SupportsRead,
                 SupportsWrite,
-                SupportsDelete {
+                SupportsDelete,
+                PaimonPartitionManagement {
 
     private final Table table;
 
