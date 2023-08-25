@@ -27,7 +27,6 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
@@ -164,7 +163,7 @@ public class OggRecordParser extends RecordParser {
     }
 
     private void extractDatabaseAndTableNames() {
-        JsonNode tableNode = JsonSerdeUtil.getNodeAs(root, FIELD_TABLE, JsonNode.class);
+        JsonNode tableNode = root.get(FIELD_TABLE);
         if (tableNode != null) {
             String[] dbt = tableNode.asText().split("\\.", 2); // Limit split to 2 parts
             if (dbt.length == 2) {
@@ -176,7 +175,7 @@ public class OggRecordParser extends RecordParser {
 
     private LinkedHashMap<String, DataType> extractFieldTypesFromOracleType() {
         LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
-        JsonNode record = JsonSerdeUtil.getNodeAs(root, FIELD_AFTER, JsonNode.class);
+        JsonNode record = root.get(FIELD_AFTER);
         Map<String, Object> linkedHashMap =
                 OBJECT_MAPPER.convertValue(
                         record, new TypeReference<LinkedHashMap<String, Object>>() {});

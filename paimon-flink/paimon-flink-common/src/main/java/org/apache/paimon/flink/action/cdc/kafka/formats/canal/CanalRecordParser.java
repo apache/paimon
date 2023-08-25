@@ -36,6 +36,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Arra
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,7 +62,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class CanalRecordParser extends RecordParser {
 
     private static final String FIELD_IS_DDL = "isDdl";
-    private static final String FIELD_SQL = "sql";
     private static final String FIELD_MYSQL_TYPE = "mysqlType";
     private static final String FIELD_PRIMARY_KEYS = "pkNames";
     private static final String FIELD_TYPE = "type";
@@ -83,10 +83,8 @@ public class CanalRecordParser extends RecordParser {
 
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
-        List<RichCdcMultiplexRecord> records = new ArrayList<>();
-
         if (isDdl()) {
-            return records;
+            return Collections.emptyList();
         }
 
         List<String> primaryKeys = extractPrimaryKeys();
@@ -99,24 +97,13 @@ public class CanalRecordParser extends RecordParser {
 
         switch (type) {
             case OP_UPDATE:
-                return handleUpdateOperation(
-                        data, mySqlFieldTypes, paimonFieldTypes, primaryKeys, records);
+                return handleUpdateOperation(data, mySqlFieldTypes, paimonFieldTypes, primaryKeys);
             case OP_INSERT:
                 return handleDataOperation(
-                        data,
-                        mySqlFieldTypes,
-                        paimonFieldTypes,
-                        primaryKeys,
-                        records,
-                        RowKind.INSERT);
+                        data, mySqlFieldTypes, paimonFieldTypes, primaryKeys, RowKind.INSERT);
             case OP_DELETE:
                 return handleDataOperation(
-                        data,
-                        mySqlFieldTypes,
-                        paimonFieldTypes,
-                        primaryKeys,
-                        records,
-                        RowKind.DELETE);
+                        data, mySqlFieldTypes, paimonFieldTypes, primaryKeys, RowKind.DELETE);
             default:
                 throw new UnsupportedOperationException("Unknown record type: " + type);
         }
@@ -157,9 +144,7 @@ public class CanalRecordParser extends RecordParser {
         checkNotNull(root.get(FIELD_DATA), errorMessageTemplate, FIELD_DATA);
         checkNotNull(root.get(FIELD_IS_DDL), errorMessageTemplate, FIELD_IS_DDL);
 
-        if (isDdl()) {
-            checkNotNull(root.get(FIELD_SQL), errorMessageTemplate, FIELD_SQL);
-        } else {
+        if (!isDdl()) {
             checkNotNull(root.get(FIELD_MYSQL_TYPE), errorMessageTemplate, FIELD_MYSQL_TYPE);
             checkNotNull(root.get(FIELD_PRIMARY_KEYS), errorMessageTemplate, FIELD_PRIMARY_KEYS);
         }
@@ -171,8 +156,7 @@ public class CanalRecordParser extends RecordParser {
     }
 
     private boolean isDdl() {
-        JsonNode isDdlNode = root.get(FIELD_IS_DDL);
-        return isDdlNode.asBoolean();
+        return root.get(FIELD_IS_DDL).asBoolean();
     }
 
     private List<String> extractPrimaryKeys() {
@@ -217,10 +201,7 @@ public class CanalRecordParser extends RecordParser {
 
         Map<String, String> resultMap =
                 mySqlFieldTypes.entrySet().stream()
-                        .filter(
-                                entry ->
-                                        jsonMap.containsKey(entry.getKey())
-                                                && jsonMap.get(entry.getKey()) != null)
+                        .filter(entry -> jsonMap.get(entry.getKey()) != null)
                         .collect(
                                 Collectors.toMap(
                                         Map.Entry::getKey,
@@ -270,8 +251,8 @@ public class CanalRecordParser extends RecordParser {
             Map<String, String> mySqlFieldTypes,
             LinkedHashMap<String, DataType> paimonFieldTypes,
             List<String> primaryKeys,
-            List<RichCdcMultiplexRecord> records,
             RowKind kind) {
+        List<RichCdcMultiplexRecord> records = new ArrayList<>();
         for (JsonNode datum : data) {
             Map<String, String> rowData =
                     extractRowFromJson(datum, mySqlFieldTypes, paimonFieldTypes);
@@ -292,8 +273,8 @@ public class CanalRecordParser extends RecordParser {
             ArrayNode data,
             Map<String, String> mySqlFieldTypes,
             LinkedHashMap<String, DataType> paimonFieldTypes,
-            List<String> primaryKeys,
-            List<RichCdcMultiplexRecord> records) {
+            List<String> primaryKeys) {
+        List<RichCdcMultiplexRecord> records = new ArrayList<>();
         ArrayNode old = JsonSerdeUtil.getNodeAs(root, FIELD_OLD, ArrayNode.class);
         for (int i = 0; i < data.size(); i++) {
             Map<String, String> after =
