@@ -23,11 +23,16 @@ import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
 
+import static org.apache.paimon.catalog.CatalogOptionsManager.validateCatalogOptions;
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -82,10 +87,26 @@ public interface CatalogFactory extends Factory {
             } else {
                 fileIO.mkdirs(warehousePath);
             }
+
+            // persist immutable catalog options
+            CatalogOptionsManager catalogOptionsManager = new CatalogOptionsManager(fileIO, new Path(warehouse));
+            Map<String, String> immutableOptions = immutableOptions(context, CatalogOptionsManager.IMMUTABLE_CATALOG_OPTION_KEYS);
+            if (fileIO.exists(catalogOptionsManager.getCatalogOptionPath())) {
+                Map<String, String> originImmutableOptions = catalogOptionsManager.immutableOptions();
+                validateCatalogOptions(Options.fromMap(originImmutableOptions), Options.fromMap(immutableOptions));
+            } else {
+                catalogOptionsManager.saveImmutableOptions(immutableOptions);
+            }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
 
         return catalogFactory.create(fileIO, warehousePath, context);
+    }
+
+    static Map<String, String> immutableOptions(CatalogContext context, Set<String> immutableCatalogOptionKeys) {
+        Map<String, String> immutableOptions = new HashMap<>();
+        context.options().keySet().stream().filter(key -> immutableCatalogOptionKeys.contains(key)).forEach(key -> immutableOptions.put(key, context.options().get(key)));
+        return immutableOptions;
     }
 }
