@@ -142,6 +142,17 @@ SET paimon.scan.timestamp-millis=null;
 set paimon.scan.tag-name=my-tag;
 SELECT * FROM t;
 set paimon.scan.tag-name=null;
+or 
+set paimon.t.scan.tag-name=my-tag;
+SELECT * FROM t;
+set paimon.t.scan.tag-name=null;
+-- -- read multiple tables using tag
+set paimon.left_table.scan.tag-name=my-tag1;
+set paimon.right_table.scan.tag-name=my-tag2;
+SELECT * FROM left_table l INNER JOIN right_table r on l.col1=r.col2;
+set paimon.left_table.scan.tag-name=null;
+set paimon.right_table.scan.tag-name=null;
+
 ```
 {{< /tab >}}
 

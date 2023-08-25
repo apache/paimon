@@ -20,13 +20,12 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
-import org.apache.paimon.data.GenericMap;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.data.*;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
@@ -49,24 +48,15 @@ import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
-import org.junit.After;
-import org.junit.Before;
-import org.junit.BeforeClass;
-import org.junit.ClassRule;
-import org.junit.Test;
+import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
+import org.junit.*;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.hive.FileStoreTestUtils.DATABASE_NAME;
@@ -128,6 +118,169 @@ public class PaimonStorageHandlerITCase {
     @After
     public void after() {
         hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
+    }
+
+    @Test
+    public void testReadFromTag() throws Exception {
+
+        String tableName = "hive_test_table_output";
+
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + warehouse);
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + tableName + " (",
+                                "a "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The a field',",
+                                "b "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The b field',",
+                                "c "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The c field',",
+                                "d "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The d field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'"));
+        hiveShell.execute(hiveSql);
+        Identifier identifier = Identifier.create("test_db", tableName);
+        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Table table = catalog.getTable(identifier);
+        hiveShell.execute("insert into " + tableName + " values (1,2,3,'Hello')");
+        hiveShell.execute("insert into " + tableName + " values (4,5,6,'Fine')");
+        hiveShell.execute("insert into " + tableName + " values (7,8,9,'Hello'),(5,7,7,'Fine')");
+        table.createTag("my-tag", 2);
+        hiveShell.execute("set paimon.scan.tag-name=my-tag;\n");
+        List<String> actual = hiveShell.executeQuery("SELECT * FROM " + tableName);
+        List<String> expected = Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine");
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testReadFromTableTag() throws Exception {
+
+        String tableName = "hive_test_table_output";
+
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + warehouse);
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + tableName + " (",
+                                "a "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The a field',",
+                                "b "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The b field',",
+                                "c "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The c field',",
+                                "d "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The d field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'"));
+        hiveShell.execute(hiveSql);
+        Identifier identifier = Identifier.create("test_db", tableName);
+        Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Table table = catalog.getTable(identifier);
+        hiveShell.execute("insert into " + tableName + " values (1,2,3,'Hello')");
+        hiveShell.execute("insert into " + tableName + " values (4,5,6,'Fine')");
+        hiveShell.execute("insert into " + tableName + " values (7,8,9,'Hello'),(5,7,7,'Fine')");
+        table.createTag("my-tag", 2);
+        hiveShell.execute("set paimon." + tableName + ".scan.tag-name=my-tag;\n");
+        List<String> actual = hiveShell.executeQuery("SELECT * FROM " + tableName);
+        List<String> expected = Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine");
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    @Test
+    public void testReadFromMultiTableTag() throws Exception {
+
+        String leftTableName = "hive_left";
+        String rightTableName = "hive_right";
+
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + warehouse);
+        String leftHiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + leftTableName + " (",
+                                "a "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The a field',",
+                                "b "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The b field',",
+                                "c "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The c field',",
+                                "d "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The d field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'"));
+        hiveShell.execute(leftHiveSql);
+        String rightHiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + rightTableName + " (",
+                                "d "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The a field',",
+                                "e "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The b field',",
+                                "f "
+                                        + TypeInfoFactory.intTypeInfo.getTypeName()
+                                        + " COMMENT 'The c field',",
+                                "g "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The d field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'"));
+        hiveShell.execute(rightHiveSql);
+
+        Table leftTable = getFileStoreTable("test_db", leftTableName);
+        Table rightTable = getFileStoreTable("test_db", rightTableName);
+        hiveShell.execute("insert into " + leftTableName + " values (1,2,3,'Hello')");
+        hiveShell.execute("insert into " + leftTableName + " values (4,5,6,'Fine')");
+        hiveShell.execute(
+                "insert into " + leftTableName + " values (7,8,9,'Hello'),(5,7,7,'Fine')");
+        hiveShell.execute("insert into " + rightTableName + " values (9,8,7,'Hello')");
+        hiveShell.execute("insert into " + rightTableName + " values (1,2,3,'Fine')");
+
+        leftTable.createTag("my-tag-l", 2);
+        rightTable.createTag("my-tag-r", 1);
+        hiveShell.execute("set paimon." + leftTableName + ".scan.tag-name=my-tag-l;\n");
+        hiveShell.execute("set paimon." + rightTableName + ".scan.tag-name=my-tag-r;\n");
+        List<String> actual =
+                hiveShell.executeQuery(
+                        "SELECT * FROM "
+                                + leftTableName
+                                + " l INNER JOIN "
+                                + rightTableName
+                                + " r ON l.d=r.g");
+        List<String> expected = Arrays.asList("1\t2\t3\tHello\t9\t8\t7\tHello");
+        assertThat(actual).isEqualTo(expected);
+
+        hiveShell.execute("set paimon." + leftTableName + ".scan.tag-name=null;\n");
+        hiveShell.execute("set paimon." + rightTableName + ".scan.tag-name=null;\n");
+        hiveShell.execute("set paimon." + leftTableName + ".scan.tag-name=my-tag-l;\n");
+        actual =
+                hiveShell.executeQuery(
+                        "SELECT * FROM "
+                                + leftTableName
+                                + " l INNER JOIN "
+                                + rightTableName
+                                + " r ON l.d=r.g");
+        expected = Arrays.asList("4\t5\t6\tFine\t1\t2\t3\tFine", "1\t2\t3\tHello\t9\t8\t7\tHello");
+        assertThat(actual).isEqualTo(expected);
     }
 
     @Test
@@ -1130,5 +1283,14 @@ public class PaimonStorageHandlerITCase {
                                 "CREATE EXTERNAL TABLE " + externalTable + " ",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + tablePath + "'")));
+    }
+
+    protected FileStoreTable getFileStoreTable(String database, String tableName) throws Exception {
+        Identifier identifier = Identifier.create(database, tableName);
+        return (FileStoreTable) catalog().getTable(identifier);
+    }
+
+    protected Catalog catalog() {
+        return CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
     }
 }

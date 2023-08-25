@@ -59,6 +59,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.hive.LocationKeyExtractor.INTERNAL_LOCATION;
+
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
 
@@ -185,6 +187,7 @@ public class HiveSchema {
             return Optional.empty();
         }
         Path path = new Path(location);
+        configuration.set(INTERNAL_LOCATION, location);
         Options options = HiveUtils.extractCatalogConfig(configuration);
         options.set(CoreOptions.PATH, location);
         CatalogContext context = CatalogContext.create(options, configuration);

@@ -20,6 +20,7 @@ package org.apache.paimon.hive.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.hive.LocationKeyExtractor;
 import org.apache.paimon.hive.SearchArgumentToPredicateConverter;
 import org.apache.paimon.options.Options;
@@ -44,6 +45,7 @@ import java.util.stream.Collectors;
 public class HiveUtils {
 
     private static final String PAIMON_PREFIX = "paimon.";
+    private static final String TAG_SUFFIX = "scan.tag-name";
 
     public static FileStoreTable createFileStoreTable(JobConf jobConf) {
         Options options = extractCatalogConfig(jobConf);
@@ -80,7 +82,22 @@ public class HiveUtils {
                 String value = entry.getValue();
                 if (name.startsWith(PAIMON_PREFIX) && !"NULL".equalsIgnoreCase(value)) {
                     name = name.substring(PAIMON_PREFIX.length());
-                    configMap.put(name, value);
+                    if (!name.endsWith(TAG_SUFFIX)) {
+                        configMap.put(name, value);
+                    } else {
+                        if (name.equals(TAG_SUFFIX)) {
+                            configMap.put(name, value);
+                        } else {
+                            String tableName = name.substring(0, name.indexOf(TAG_SUFFIX) - 1);
+                            String paimonLocation =
+                                    LocationKeyExtractor.getPaimonLocation(new JobConf(hiveConf));
+                            String trueTable = CatalogUtils.table(paimonLocation);
+                            if (tableName.equalsIgnoreCase(trueTable)) {
+                                name = name.substring(tableName.length() + 1);
+                                configMap.put(name, value);
+                            }
+                        }
+                    }
                 }
             }
         }
