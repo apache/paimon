@@ -35,9 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
-/**
- * Tests for {@link CatalogOptionsManager}.
- * */
+/** Tests for {@link CatalogOptionsManager}. */
 public class CatalogOptionsManagerTest {
     @TempDir static java.nio.file.Path tempDir;
     private static Options withImmutableOptions = new Options();
@@ -47,6 +45,7 @@ public class CatalogOptionsManagerTest {
     private static CatalogContext catalogContext;
 
     private static FileIO fileIO;
+
     @BeforeAll
     public static void beforeAll() throws IOException {
         withImmutableOptions.set(TABLE_LINEAGE, true);
@@ -66,62 +65,99 @@ public class CatalogOptionsManagerTest {
     public void testSaveImmutableCatalogOptions() throws IOException {
         String warehouse = tempDir.toString();
 
-        CatalogOptionsManager catalogOptionsManager = new CatalogOptionsManager(fileIO, new Path(warehouse));
+        CatalogOptionsManager catalogOptionsManager =
+                new CatalogOptionsManager(fileIO, new Path(warehouse));
         CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions));
         assertThat(fileIO.exists(catalogOptionsManager.getCatalogOptionPath()));
-        assertThat(withImmutableOptions.toMap()).containsAllEntriesOf(catalogOptionsManager.immutableOptions());
+        assertThat(withImmutableOptions.toMap())
+                .containsAllEntriesOf(catalogOptionsManager.immutableOptions());
     }
 
     @Test
     public void testCatalogOptionsValidate() {
         Options newImmutableCatalogOptions = new Options();
-        assertDoesNotThrow(() -> CatalogOptionsManager.validateCatalogOptions(null, newImmutableCatalogOptions));
+        assertDoesNotThrow(
+                () ->
+                        CatalogOptionsManager.validateCatalogOptions(
+                                null, newImmutableCatalogOptions));
         newImmutableCatalogOptions.set(TABLE_LINEAGE, true);
-        assertDoesNotThrow(() -> CatalogOptionsManager.validateCatalogOptions(null, newImmutableCatalogOptions));
+        assertDoesNotThrow(
+                () ->
+                        CatalogOptionsManager.validateCatalogOptions(
+                                null, newImmutableCatalogOptions));
         newImmutableCatalogOptions.set(DATA_LINEAGE, true);
-        assertDoesNotThrow(() -> CatalogOptionsManager.validateCatalogOptions(null, newImmutableCatalogOptions));
+        assertDoesNotThrow(
+                () ->
+                        CatalogOptionsManager.validateCatalogOptions(
+                                null, newImmutableCatalogOptions));
         newImmutableCatalogOptions.set(TABLE_LINEAGE, false);
-        assertThatThrownBy(() -> CatalogOptionsManager.validateCatalogOptions(null, newImmutableCatalogOptions))
+        assertThatThrownBy(
+                        () ->
+                                CatalogOptionsManager.validateCatalogOptions(
+                                        null, newImmutableCatalogOptions))
                 .isInstanceOf(UnsupportedOperationException.class);
         newImmutableCatalogOptions.set(TABLE_LINEAGE, true);
 
         Options originImmutableCatalogOptions = new Options();
-        assertThatThrownBy(() -> CatalogOptionsManager.validateCatalogOptions(originImmutableCatalogOptions, newImmutableCatalogOptions))
+        assertThatThrownBy(
+                        () ->
+                                CatalogOptionsManager.validateCatalogOptions(
+                                        originImmutableCatalogOptions, newImmutableCatalogOptions))
                 .isInstanceOf(IllegalStateException.class);
         originImmutableCatalogOptions.set(TABLE_LINEAGE, true);
-        assertThatThrownBy(() -> CatalogOptionsManager.validateCatalogOptions(originImmutableCatalogOptions, newImmutableCatalogOptions))
+        assertThatThrownBy(
+                        () ->
+                                CatalogOptionsManager.validateCatalogOptions(
+                                        originImmutableCatalogOptions, newImmutableCatalogOptions))
                 .isInstanceOf(IllegalStateException.class);
         originImmutableCatalogOptions.set(DATA_LINEAGE, true);
-        assertDoesNotThrow(() -> CatalogOptionsManager.validateCatalogOptions(originImmutableCatalogOptions, newImmutableCatalogOptions));
+        assertDoesNotThrow(
+                () ->
+                        CatalogOptionsManager.validateCatalogOptions(
+                                originImmutableCatalogOptions, newImmutableCatalogOptions));
     }
 
     @Test
     public void testCreatingCatalogWithConflictOptions() throws IOException {
-        // session1: without immutable options, session2: with immutable options, throw IllegalStateException
+        // session1: without immutable options, session2: with immutable options, throw
+        // IllegalStateException
         CatalogFactory.createCatalog(CatalogContext.create(withoutImmutableOptions));
-        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions)))
+        assertThatThrownBy(
+                        () ->
+                                CatalogFactory.createCatalog(
+                                        CatalogContext.create(withImmutableOptions)))
                 .isInstanceOf(IllegalStateException.class);
         cleanCatalogDir();
 
         // session1: without immutable options, session2: without immutable options, succeeded
         CatalogFactory.createCatalog(CatalogContext.create(withoutImmutableOptions));
-        assertDoesNotThrow(() -> CatalogFactory.createCatalog(CatalogContext.create(withoutImmutableOptions)));
+        assertDoesNotThrow(
+                () -> CatalogFactory.createCatalog(CatalogContext.create(withoutImmutableOptions)));
         cleanCatalogDir();
 
         // session1: with immutable options, session2: with the same immutable options, succeeded
         CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions));
-        assertDoesNotThrow(() -> CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions)));
+        assertDoesNotThrow(
+                () -> CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions)));
         cleanCatalogDir();
 
-        // session1: with immutable options, session2: with different immutable options, throw IllegalStateException
+        // session1: with immutable options, session2: with different immutable options, throw
+        // IllegalStateException
         CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions));
-        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogContext.create(withPartOfImmutableOptions)))
+        assertThatThrownBy(
+                        () ->
+                                CatalogFactory.createCatalog(
+                                        CatalogContext.create(withPartOfImmutableOptions)))
                 .isInstanceOf(IllegalStateException.class);
         cleanCatalogDir();
 
-        // session1: with immutable options, session2: without immutable options, throw IllegalStateException
+        // session1: with immutable options, session2: without immutable options, throw
+        // IllegalStateException
         CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions));
-        assertThatThrownBy(() -> CatalogFactory.createCatalog(CatalogContext.create(withoutImmutableOptions)))
+        assertThatThrownBy(
+                        () ->
+                                CatalogFactory.createCatalog(
+                                        CatalogContext.create(withoutImmutableOptions)))
                 .isInstanceOf(IllegalStateException.class);
         cleanCatalogDir();
     }

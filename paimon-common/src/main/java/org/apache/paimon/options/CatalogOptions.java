@@ -105,12 +105,14 @@ public class CatalogOptions {
             key("table-lineage")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether save the table lineage information or not, by default is false.");
+                    .withDescription(
+                            "Whether save the table lineage information or not, by default is false.");
 
     @Documentation.Immutable
     public static final ConfigOption<Boolean> DATA_LINEAGE =
             key("data-lineage")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether save the data lineage information or not, by default is false.");
+                    .withDescription(
+                            "Whether save the data lineage information or not, by default is false.");
 }

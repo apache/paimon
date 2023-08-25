@@ -89,11 +89,15 @@ public interface CatalogFactory extends Factory {
             }
 
             // persist immutable catalog options
-            CatalogOptionsManager catalogOptionsManager = new CatalogOptionsManager(fileIO, new Path(warehouse));
-            Map<String, String> immutableOptions = immutableOptions(context, CatalogOptionsManager.IMMUTABLE_CATALOG_OPTION_KEYS);
+            CatalogOptionsManager catalogOptionsManager =
+                    new CatalogOptionsManager(fileIO, new Path(warehouse));
+            Map<String, String> immutableOptions =
+                    immutableOptions(context, CatalogOptionsManager.IMMUTABLE_CATALOG_OPTION_KEYS);
             if (fileIO.exists(catalogOptionsManager.getCatalogOptionPath())) {
-                Map<String, String> originImmutableOptions = catalogOptionsManager.immutableOptions();
-                validateCatalogOptions(Options.fromMap(originImmutableOptions), Options.fromMap(immutableOptions));
+                Map<String, String> originImmutableOptions =
+                        catalogOptionsManager.immutableOptions();
+                validateCatalogOptions(
+                        Options.fromMap(originImmutableOptions), Options.fromMap(immutableOptions));
             } else {
                 catalogOptionsManager.saveImmutableOptions(immutableOptions);
             }
@@ -104,9 +108,12 @@ public interface CatalogFactory extends Factory {
         return catalogFactory.create(fileIO, warehousePath, context);
     }
 
-    static Map<String, String> immutableOptions(CatalogContext context, Set<String> immutableCatalogOptionKeys) {
+    static Map<String, String> immutableOptions(
+            CatalogContext context, Set<String> immutableCatalogOptionKeys) {
         Map<String, String> immutableOptions = new HashMap<>();
-        context.options().keySet().stream().filter(key -> immutableCatalogOptionKeys.contains(key)).forEach(key -> immutableOptions.put(key, context.options().get(key)));
+        context.options().keySet().stream()
+                .filter(key -> immutableCatalogOptionKeys.contains(key))
+                .forEach(key -> immutableOptions.put(key, context.options().get(key)));
         return immutableOptions;
     }
 }

@@ -35,12 +35,12 @@ import static org.apache.paimon.options.CatalogOptions.DATA_LINEAGE;
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.TABLE_LINEAGE;
 
-/**
- * Manage read and write of immutable {@link org.apache.paimon.options.CatalogOptions}.
- * */
+/** Manage read and write of immutable {@link org.apache.paimon.options.CatalogOptions}. */
 public class CatalogOptionsManager {
     private static final String OPTIONS = "options";
-    public static final Set<String> IMMUTABLE_CATALOG_OPTION_KEYS = new HashSet<>(Arrays.asList(LINEAGE_META.key(), TABLE_LINEAGE.key(), DATA_LINEAGE.key()));
+    public static final Set<String> IMMUTABLE_CATALOG_OPTION_KEYS =
+            new HashSet<>(
+                    Arrays.asList(LINEAGE_META.key(), TABLE_LINEAGE.key(), DATA_LINEAGE.key()));
     private final FileIO fileIO;
     private final Path warehouse;
 
@@ -73,22 +73,25 @@ public class CatalogOptionsManager {
      * @param originImmutableOptions the origin persisted immutable catalog options
      * @param newImmutableOptions the new immutable catalog options
      */
-    public static void validateCatalogOptions(Options originImmutableOptions, Options newImmutableOptions) {
-        // Only open data-lineage without open table-lineage is not supported, data-lineage is depend on table-lineage.
+    public static void validateCatalogOptions(
+            Options originImmutableOptions, Options newImmutableOptions) {
+        // Only open data-lineage without open table-lineage is not supported, data-lineage is
+        // depend on table-lineage.
         if (newImmutableOptions.get(DATA_LINEAGE) && !newImmutableOptions.get(TABLE_LINEAGE)) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Can not open %s without %s opened, please set both of them to TRUE or remove %s.",
-                            CatalogOptions.DATA_LINEAGE.key(), CatalogOptions.TABLE_LINEAGE.key(), CatalogOptions.DATA_LINEAGE.key()));
+                            CatalogOptions.DATA_LINEAGE.key(),
+                            CatalogOptions.TABLE_LINEAGE.key(),
+                            CatalogOptions.DATA_LINEAGE.key()));
         }
 
         // check immutable catalog options
         if (originImmutableOptions != null && !originImmutableOptions.equals(newImmutableOptions)) {
             throw new IllegalStateException(
                     String.format(
-                            "The immutable catalog options changed, origin options are %s, new options are %s.", originImmutableOptions, newImmutableOptions
-                    )
-            );
+                            "The immutable catalog options changed, origin options are %s, new options are %s.",
+                            originImmutableOptions, newImmutableOptions));
         }
     }
 }
