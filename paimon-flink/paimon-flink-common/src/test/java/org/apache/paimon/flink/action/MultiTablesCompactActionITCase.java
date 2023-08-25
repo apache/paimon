@@ -69,7 +69,7 @@ public class MultiTablesCompactActionITCase extends CompactActionITCaseBase {
                     new String[] {"k", "v", "hh", "dt"});
 
     @Test
-    public void testBatchRead() throws Exception {
+    public void testBatchCompact() throws Exception {
         Map<String, String> compactOptions = new HashMap<>();
         compactOptions.put(CoreOptions.WRITE_ONLY.key(), "true");
 
@@ -402,15 +402,14 @@ public class MultiTablesCompactActionITCase extends CompactActionITCaseBase {
                     60_000);
 
             // assert dedicated compact job will expire snapshots
-            //            CommonTestUtils.waitUtil(
-            //                    () ->
-            //                            snapshotManager.latestSnapshotId() - 2
-            //                                    == snapshotManager.earliestSnapshotId(),
-            //                    Duration.ofSeconds(60_000),
-            //                    Duration.ofSeconds(100),
-            //                    String.format(
-            //                            "Cannot validate snapshot expiration in %s milliseconds.",
-            // 60_000));
+            CommonTestUtils.waitUtil(
+                    () ->
+                            snapshotManager.latestSnapshotId() - 2
+                                    == snapshotManager.earliestSnapshotId(),
+                    Duration.ofSeconds(60_000),
+                    Duration.ofSeconds(100),
+                    String.format(
+                            "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
         }
 
         client.cancel();
