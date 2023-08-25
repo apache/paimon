@@ -177,13 +177,6 @@ under the License.
             <td>Read incremental changes between start timestamp (exclusive) and end timestamp, for example, 't1,t2' means changes between timestamp t1 and timestamp t2.</td>
         </tr>
         <tr>
-            <td><h5>local-merge-buffer-size</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>MemorySize</td>
-            <td>Local merge will buffer and merge input records before they're shuffled by bucket and written into sink. The buffer will be flushed when it is full.
-Mainly to resolve data skew on primary keys. We recommend starting with 64 mb when trying out this feature.</td>
-        </tr>
-        <tr>
             <td><h5>local-sort.max-num-file-handles</h5></td>
             <td style="word-wrap: break-word;">128</td>
             <td>Integer</td>
@@ -318,18 +311,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Define the default false positive probability for bloom filters.</td>
         </tr>
         <tr>
-            <td><h5>orc.column.encoding.direct</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Comma-separated list of fields for which dictionary encoding is to be skipped in orc.</td>
-        </tr>
-        <tr>
-            <td><h5>orc.dictionary.key.threshold</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>If the number of distinct keys in a dictionary is greater than this fraction of the total number of non-null rows, turn off dictionary encoding in orc.  Use 1 to always use dictionary encoding.</td>
-        </tr>
-        <tr>
             <td><h5>orc.write.batch-size</h5></td>
             <td style="word-wrap: break-word;">1024</td>
             <td>Integer</td>
@@ -340,12 +321,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
             <td>Memory page size.</td>
-        </tr>
-        <tr>
-            <td><h5>parquet.enable.dictionary</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Turn off the dictionary encoding for all fields in parquet.</td>
         </tr>
         <tr>
             <td><h5>partial-update.ignore-delete</h5></td>
