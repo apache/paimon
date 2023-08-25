@@ -22,6 +22,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -39,8 +40,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
             throws IOException;
 
     /** Commits the given {@link GlobalCommitT}. */
-    void commit(List<GlobalCommitT> globalCommittables, OperatorIOMetricGroup metricGroup)
-            throws IOException, InterruptedException;
+    void commit(List<GlobalCommitT> globalCommittables) throws IOException, InterruptedException;
 
     /**
      * Filter out all {@link GlobalCommitT} which have committed, and commit the remaining {@link
@@ -49,4 +49,11 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
     int filterAndCommit(List<GlobalCommitT> globalCommittables) throws IOException;
 
     Map<Long, List<CommitT>> groupByCheckpoint(Collection<CommitT> committables);
+
+    /** Factory to create {@link Committer}. */
+    interface Factory<CommitT, GlobalCommitT> extends Serializable {
+
+        Committer<CommitT, GlobalCommitT> create(
+                String commitUser, OperatorIOMetricGroup metricGroup);
+    }
 }

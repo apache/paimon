@@ -232,8 +232,15 @@ paimon-common/src/main/java/org/apache/paimon/types/DataType.java
 paimon-common/src/main/java/org/apache/paimon/options/ConfigOption.java
 from http://flink.apache.org/ version 1.17.0
 
-paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/SparkGenericCatalog.java
+paimon-core/src/main/java/org/apache/paimon/utils/ZOrderByteUtils.java
+paimon-core/src/test/java/org/apache/paimon/utils/TestZOrderByteUtil.java
 paimon-hive/paimon-hive-common/src/test/java/org/apache/paimon/hive/TestHiveMetastore.java
+paimon-spark/paimon-spark-common/src/main/antlr4/org.apache.spark.sql.catalyst.parser.extensions/PaimonSqlExtensions.g4
+paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/SparkGenericCatalog.java
+paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/analysis/CoerceArguments.scala
+paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/analysis/ResolveProcedures.scala
+paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/parser/extensions/PaimonSparkSqlExtensionsParser.scala
+paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/parser/extensions/PaimonSqlExtensionsAstBuilder.scala
 from http://iceberg.apache.org/ version 1.3.0
 
 paimon-hive/paimon-hive-common/src/test/resources/hive-schema-3.1.0.derby.sql

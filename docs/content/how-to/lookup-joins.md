@@ -114,6 +114,12 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
+{{< hint info >}}
+If the main table (`Orders`) is CDC stream, `allow_unordered` will be ignored by Flink SQL (only supports append stream),
+your streaming job may be blocked. You can try to use `audit_log` system table feature of Paimon to walk around
+(convert CDC stream to append stream).
+{{< /hint >}}
+
 ### Performance
 
 The lookup join operator will maintain a RocksDB cache locally and pull the latest updates of the table in real time. Lookup join operator will only pull the necessary data, so your filter conditions are very important for performance.

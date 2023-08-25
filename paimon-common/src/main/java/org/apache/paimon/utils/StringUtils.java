@@ -143,6 +143,21 @@ public class StringUtils {
     }
 
     /**
+     * Given an array of bytes it will convert the bytes to a binary (0-1) string representation of
+     * the bytes.
+     *
+     * @param bytes the bytes to be converted
+     * @return binary string representation of the byte array
+     */
+    public static String bytesToBinaryString(final byte[] bytes) {
+        StringBuilder result = new StringBuilder();
+        for (byte b : bytes) {
+            result.append(String.format("%8s", Integer.toBinaryString(b & 0xFF)).replace(' ', '0'));
+        }
+        return result.toString();
+    }
+
+    /**
      * Creates a random string with a length within the given interval. The string contains only
      * characters that can be represented as a single code point.
      *

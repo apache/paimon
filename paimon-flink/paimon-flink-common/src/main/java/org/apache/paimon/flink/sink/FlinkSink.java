@@ -24,7 +24,6 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -235,8 +234,8 @@ public abstract class FlinkSink<T> implements Serializable {
     protected abstract OneInputStreamOperator<T, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser);
 
-    protected abstract SerializableFunction<String, Committer<Committable, ManifestCommittable>>
-            createCommitterFactory(boolean streamingCheckpointEnabled);
+    protected abstract Committer.Factory<Committable, ManifestCommittable> createCommitterFactory(
+            boolean streamingCheckpointEnabled);
 
     protected abstract CommittableStateManager<ManifestCommittable> createCommittableStateManager();
 }

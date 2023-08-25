@@ -26,7 +26,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -46,14 +47,19 @@ public class StoreMultiCommitter
 
     private final Catalog catalog;
     private final String commitUser;
+    @Nullable private final CommitterMetrics metrics;
+
     // To make the commit behavior consistent with that of Committer,
     //    StoreMultiCommitter manages multiple committers which are
     //    referenced by table id.
     private final Map<Identifier, StoreCommitter> tableCommitters;
 
-    public StoreMultiCommitter(String commitUser, Catalog.Loader catalogLoader) {
+    public StoreMultiCommitter(
+            Catalog.Loader catalogLoader, String commitUser, @Nullable CommitterMetrics metrics) {
         this.catalog = catalogLoader.load();
         this.commitUser = commitUser;
+        this.metrics = metrics;
+
         this.tableCommitters = new HashMap<>();
     }
 
@@ -85,8 +91,7 @@ public class StoreMultiCommitter
     }
 
     @Override
-    public void commit(
-            List<WrappedManifestCommittable> committables, OperatorIOMetricGroup metricGroup)
+    public void commit(List<WrappedManifestCommittable> committables)
             throws IOException, InterruptedException {
 
         // key by table id
@@ -96,7 +101,7 @@ public class StoreMultiCommitter
             Identifier tableId = entry.getKey();
             List<ManifestCommittable> committableList = entry.getValue();
             StoreCommitter committer = getStoreCommitter(tableId);
-            committer.commit(committableList, metricGroup);
+            committer.commit(committableList);
         }
     }
 
@@ -149,7 +154,9 @@ public class StoreMultiCommitter
                                 "Failed to get committer for table %s", tableId.getFullName()),
                         e);
             }
-            committer = new StoreCommitter(table.newCommit(commitUser).ignoreEmptyCommit(false));
+            committer =
+                    new StoreCommitter(
+                            table.newCommit(commitUser).ignoreEmptyCommit(false), metrics);
             tableCommitters.put(tableId, committer);
         }
 

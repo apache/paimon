@@ -270,6 +270,7 @@ All Flink data types are supported, except that
 * `MAP` is not supported as primary keys.
 
 ## Use Flink Managed Memory
+
 Paimon tasks can create memory pools based on executor memory which will be managed by Flink executor, such as managed memory in Flink task manager. It will improve the stability and performance of sinks by managing writer buffers for multiple tasks through executor.
 
 The following properties can be set if using Flink managed memory:
