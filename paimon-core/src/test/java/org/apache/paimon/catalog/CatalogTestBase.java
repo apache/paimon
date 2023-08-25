@@ -103,7 +103,7 @@ public abstract class CatalogTestBase {
         catalog.createDatabase("db3", false);
 
         List<String> databases = catalog.listDatabases();
-            assertThat(databases).contains("db1", "db2", "db3");
+        assertThat(databases).contains("db1", "db2", "db3");
     }
 
     @Test
