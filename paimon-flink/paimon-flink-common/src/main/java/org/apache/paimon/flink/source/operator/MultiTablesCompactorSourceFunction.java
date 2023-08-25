@@ -18,8 +18,13 @@
 
 package org.apache.paimon.flink.source.operator;
 
-import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
-import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactionTable;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.system.BucketsTable2;
 
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
@@ -33,13 +38,6 @@ import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
 import org.apache.flink.util.Preconditions;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.system.BucketsTable2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,6 +49,9 @@ import java.util.NavigableMap;
 import java.util.OptionalLong;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
+
+import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
+import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactionTable;
 
 /** this is a doc. */
 public abstract class MultiTablesCompactorSourceFunction

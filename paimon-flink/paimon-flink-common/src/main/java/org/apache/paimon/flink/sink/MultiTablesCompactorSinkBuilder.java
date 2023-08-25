@@ -18,10 +18,8 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.BucketMode;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -37,9 +35,7 @@ public class MultiTablesCompactorSinkBuilder {
 
     private DataStream<RowData> input;
 
-    public MultiTablesCompactorSinkBuilder(
-            Catalog.Loader catalogLoader,
-            Options options) {
+    public MultiTablesCompactorSinkBuilder(Catalog.Loader catalogLoader, Options options) {
         this.catalogLoader = catalogLoader;
         this.options = options;
     }

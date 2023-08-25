@@ -31,8 +31,7 @@ import java.util.regex.Pattern;
 /** this is a doc. */
 public class MultiTablesCompactorUtil {
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(MultiTablesCompactorUtil.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MultiTablesCompactorUtil.class);
 
     public static Map<String, String> compactOptions(boolean isStreaming) {
         if (isStreaming) {

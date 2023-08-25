@@ -18,12 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.CheckpointingMode;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
@@ -44,6 +38,11 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -53,6 +52,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** this is a doc. */
 public class MultiTablesCompactActionITCase extends CompactActionITCaseBase {

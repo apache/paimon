@@ -18,14 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
-
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.configuration.ExecutionOptions;
-import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.data.RowData;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.MultiTablesCompactorSinkBuilder;
@@ -33,15 +25,24 @@ import org.apache.paimon.flink.source.MultiTablesCompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
+
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.configuration.ExecutionOptions;
+import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /** this is a doc. */
 public class MultiTablesCompactAction extends ActionBase {

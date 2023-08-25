@@ -18,16 +18,17 @@
 
 package org.apache.paimon.flink.source;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.source.operator.MultiTablesBatchCompactorSourceFunction;
 import org.apache.paimon.flink.source.operator.MultiTablesStreamingCompactorSourceFunction;
 import org.apache.paimon.table.system.BucketsTable2;
 import org.apache.paimon.types.RowType;
+
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import java.util.regex.Pattern;
 

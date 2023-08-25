@@ -18,14 +18,6 @@
 
 package org.apache.paimon.flink.source.operator;
 
-import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
-import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactionTable;
-
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
-import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.data.RowData;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
@@ -38,10 +30,19 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.BucketsTable2;
 import org.apache.paimon.utils.CloseableIterator;
 
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.table.data.RowData;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+
+import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
+import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactionTable;
 
 /** this is a doc. */
 public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>

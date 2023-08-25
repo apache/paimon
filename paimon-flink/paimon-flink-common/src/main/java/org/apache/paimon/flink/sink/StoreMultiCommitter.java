@@ -70,10 +70,10 @@ public class StoreMultiCommitter
     }
 
     public StoreMultiCommitter(
-            String commitUser, Catalog.Loader catalogLoader, boolean isCompactJob) {
+            Catalog.Loader catalogLoader, String commitUser, @Nullable CommitterMetrics metrics, boolean isCompactJob) {
         this.catalog = catalogLoader.load();
         this.commitUser = commitUser;
-        this.metrics = null;
+        this.metrics = metrics;
         this.tableCommitters = new HashMap<>();
         this.isCompactJob = isCompactJob;
     }

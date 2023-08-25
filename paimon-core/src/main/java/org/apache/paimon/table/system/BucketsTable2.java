@@ -18,9 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
-import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
-
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -55,6 +52,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+
+import static org.apache.paimon.utils.SerializationUtils.newBytesType;
+import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** this is a doc. */
 public class BucketsTable2 implements DataTable, ReadonlyTable {

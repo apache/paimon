@@ -18,14 +18,6 @@
 
 package org.apache.paimon.flink.source;
 
-import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
-import static org.assertj.core.api.Assertions.assertThat;
-
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.util.CloseableIterator;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
@@ -51,6 +43,12 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.data.RowData;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -67,6 +65,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
+
+import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** this is a doc. */
 public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
