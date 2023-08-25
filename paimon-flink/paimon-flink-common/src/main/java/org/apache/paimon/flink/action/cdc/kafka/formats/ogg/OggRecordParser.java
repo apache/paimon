@@ -93,7 +93,7 @@ public class OggRecordParser extends RecordParser {
             JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         Map<String, String> rowData = extractRow(jsonNode, paimonFieldTypes);
-        rowData = caseSensitive ? rowData : keyCaseInsensitive(rowData);
+        rowData = adjustCase(rowData);
         records.add(createRecord(rowKind, rowData, paimonFieldTypes));
     }
 
@@ -175,7 +175,6 @@ public class OggRecordParser extends RecordParser {
 
     private LinkedHashMap<String, DataType> extractFieldTypesFromOracleType() {
         LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
-
         JsonNode record = root.get(FIELD_AFTER);
         Map<String, Object> linkedHashMap =
                 OBJECT_MAPPER.convertValue(

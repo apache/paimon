@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.paimon.commands
+package org.apache.spark.sql.catalyst.plans.logical
 
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.DynamicOverWrite
@@ -24,7 +24,6 @@ import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.analysis.NamedRelation
-import org.apache.spark.sql.catalyst.plans.logical.{Command, LogicalPlan, V2WriteCommand}
 import org.apache.spark.sql.execution.command.RunnableCommand
 
 import scala.collection.convert.ImplicitConversions._

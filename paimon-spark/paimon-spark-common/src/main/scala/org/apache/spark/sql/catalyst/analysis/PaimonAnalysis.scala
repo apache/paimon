@@ -15,15 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark
+package org.apache.spark.sql.catalyst.analysis
 
+import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, OverwritePartitionsDynamic}
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, OverwritePartitionsDynamic, PaimonDynamicPartitionOverwriteCommand, PaimonTableValuedFunctions, PaimonTableValueFunction}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
-import org.apache.spark.sql.paimon.commands.PaimonDynamicPartitionOverwriteCommand
 
 class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
@@ -32,12 +32,12 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
     case func: PaimonTableValueFunction if func.args.forall(_.resolved) =>
       PaimonTableValuedFunctions.resolvePaimonTableValuedFunction(session, func)
 
-    case o @ OverwritePartitionsDynamicPaimon(r, d) if o.resolved =>
+    case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
       PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
   }
 }
 
-object OverwritePartitionsDynamicPaimon {
+object PaimonDynamicPartitionOverwrite {
   def unapply(o: OverwritePartitionsDynamic): Option[(DataSourceV2Relation, FileStoreTable)] = {
     if (o.query.resolved) {
       o.table match {

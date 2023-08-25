@@ -15,21 +15,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark
+package org.apache.spark.sql.catalyst.plans.logical
 
-import org.apache.spark.sql.SparkSessionExtensions
+import org.apache.paimon.spark.procedure.Procedure
 
-class PaimonSparkSessionExtension extends (SparkSessionExtensions => Unit) {
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.util.truncatedString
 
-  override def apply(extensions: SparkSessionExtensions): Unit = {
+/** A CALL command that resolves stored procedure from SQL. */
+case class CallCommand(procedure: Procedure, args: Seq[Expression]) extends LeafCommand {
 
-    extensions.injectResolutionRule(sparkSession => new PaimonAnalysis(sparkSession))
+  override lazy val output: Seq[Attribute] = procedure.outputType.toAttributes
 
-    PaimonTableValuedFunctions.supportedFnNames.foreach {
-      fnName =>
-        extensions.injectTableFunction(
-          PaimonTableValuedFunctions.getTableValueFunctionInjection(fnName))
-    }
+  override def simpleString(maxFields: Int): String = {
+    s"Call${truncatedString(output, "[", ", ", "]", maxFields)} ${procedure.description}"
   }
-
 }
