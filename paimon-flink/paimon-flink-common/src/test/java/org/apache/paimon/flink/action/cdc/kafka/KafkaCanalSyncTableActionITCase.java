@@ -1069,7 +1069,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         String topic = "computed_column";
         createTestTopic(topic, 1, 1);
 
-        List<String> lines = readLines("kafka.canal/table/computedcolumn/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/computedcolumn/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {

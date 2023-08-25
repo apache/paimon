@@ -28,6 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationContext;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Module;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializerProvider;
@@ -37,6 +38,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ser.std.S
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Optional;
 
 /** A utility class that provide abilities for JSON serialization and deserialization. */
 public class JsonSerdeUtil {
@@ -50,6 +52,31 @@ public class JsonSerdeUtil {
     static {
         OBJECT_MAPPER_INSTANCE = new ObjectMapper();
         OBJECT_MAPPER_INSTANCE.registerModule(createPaimonJacksonModule());
+    }
+
+    /**
+     * Retrieves a specific node from the given root node and casts it to the specified type.
+     *
+     * @param <T> The type of the node to be returned.
+     * @param root The root node from which the specific node is to be retrieved.
+     * @param fieldName The name of the field to retrieve.
+     * @param clazz The class of the node to be returned.
+     * @return The node casted to the specified type.
+     * @throws IllegalArgumentException if the node is not present or if it's not of the expected
+     *     type.
+     */
+    public static <T extends JsonNode> T getNodeAs(
+            JsonNode root, String fieldName, Class<T> clazz) {
+        return Optional.ofNullable(root)
+                .map(r -> r.get(fieldName))
+                .filter(clazz::isInstance)
+                .map(clazz::cast)
+                .orElseThrow(
+                        () ->
+                                new IllegalArgumentException(
+                                        String.format(
+                                                "Expected node '%s' to be of type %s but was either not found or of a different type.",
+                                                fieldName, clazz.getName())));
     }
 
     public static <T> T fromJson(String json, Class<T> clazz) {

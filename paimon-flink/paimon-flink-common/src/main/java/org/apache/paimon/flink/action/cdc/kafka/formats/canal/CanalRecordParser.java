@@ -27,27 +27,40 @@ import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.NullNode;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Convert canal-json format string to list of {@link RichCdcMultiplexRecord}s. */
+/**
+ * The {@code CanalRecordParser} class is responsible for parsing records from the Canal-JSON
+ * format. Canal is a database binlog multi-platform consumer, which is used to synchronize data
+ * across databases. This parser extracts relevant information from the Canal-JSON format and
+ * transforms it into a list of {@link RichCdcMultiplexRecord} objects, which represent the changes
+ * captured in the database.
+ *
+ * <p>The class handles different types of database operations such as INSERT, UPDATE, and DELETE,
+ * and generates corresponding {@link RichCdcMultiplexRecord} objects for each operation.
+ *
+ * <p>Additionally, the parser supports schema extraction, which can be used to understand the
+ * structure of the incoming data and its corresponding field types.
+ */
 public class CanalRecordParser extends RecordParser {
 
+    private static final String FIELD_IS_DDL = "isDdl";
     private static final String FIELD_SQL = "sql";
     private static final String FIELD_MYSQL_TYPE = "mysqlType";
     private static final String FIELD_PRIMARY_KEYS = "pkNames";
@@ -70,83 +83,43 @@ public class CanalRecordParser extends RecordParser {
 
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
+        List<RichCdcMultiplexRecord> records = new ArrayList<>();
+
         if (isDdl()) {
-            return Collections.emptyList();
+            return records;
         }
 
         List<String> primaryKeys = extractPrimaryKeys();
-
-        // extract field types
         LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
-        mySqlFieldTypes.forEach(
-                (name, type) -> paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type)));
+        LinkedHashMap<String, DataType> paimonFieldTypes =
+                convertToPaimonFieldTypes(mySqlFieldTypes);
 
-        // extract row kind and field values
-        List<RichCdcMultiplexRecord> records = new ArrayList<>();
         String type = extractString(FIELD_TYPE);
-        ArrayNode data = (ArrayNode) root.get(FIELD_DATA);
+        ArrayNode data = JsonSerdeUtil.getNodeAs(root, FIELD_DATA, ArrayNode.class);
+
         switch (type) {
             case OP_UPDATE:
-                ArrayNode old =
-                        root.get(FIELD_OLD) instanceof NullNode
-                                ? null
-                                : (ArrayNode) root.get(FIELD_OLD);
-                for (int i = 0; i < data.size(); i++) {
-                    Map<String, String> after =
-                            extractRow(data.get(i), mySqlFieldTypes, paimonFieldTypes);
-                    if (old != null) {
-                        Map<String, String> before =
-                                extractRow(old.get(i), mySqlFieldTypes, paimonFieldTypes);
-                        // fields in "old" (before) means the fields are changed
-                        // fields not in "old" (before) means the fields are not changed,
-                        // so we just copy the not changed fields into before
-                        for (Map.Entry<String, String> entry : after.entrySet()) {
-                            if (!before.containsKey(entry.getKey())) {
-                                before.put(entry.getKey(), entry.getValue());
-                            }
-                        }
-                        before = caseSensitive ? before : keyCaseInsensitive(before);
-                        records.add(
-                                new RichCdcMultiplexRecord(
-                                        databaseName,
-                                        tableName,
-                                        paimonFieldTypes,
-                                        primaryKeys,
-                                        new CdcRecord(RowKind.DELETE, before)));
-                    }
-                    after = caseSensitive ? after : keyCaseInsensitive(after);
-                    records.add(
-                            new RichCdcMultiplexRecord(
-                                    databaseName,
-                                    tableName,
-                                    paimonFieldTypes,
-                                    primaryKeys,
-                                    new CdcRecord(RowKind.INSERT, after)));
-                }
-                break;
+                return handleUpdateOperation(
+                        data, mySqlFieldTypes, paimonFieldTypes, primaryKeys, records);
             case OP_INSERT:
-                // fall through
+                return handleDataOperation(
+                        data,
+                        mySqlFieldTypes,
+                        paimonFieldTypes,
+                        primaryKeys,
+                        records,
+                        RowKind.INSERT);
             case OP_DELETE:
-                for (JsonNode datum : data) {
-                    Map<String, String> after =
-                            extractRow(datum, mySqlFieldTypes, paimonFieldTypes);
-                    after = caseSensitive ? after : keyCaseInsensitive(after);
-                    RowKind kind = type.equals(OP_INSERT) ? RowKind.INSERT : RowKind.DELETE;
-                    records.add(
-                            new RichCdcMultiplexRecord(
-                                    databaseName,
-                                    tableName,
-                                    paimonFieldTypes,
-                                    primaryKeys,
-                                    new CdcRecord(kind, after)));
-                }
-                break;
+                return handleDataOperation(
+                        data,
+                        mySqlFieldTypes,
+                        paimonFieldTypes,
+                        primaryKeys,
+                        records,
+                        RowKind.DELETE);
             default:
                 throw new UnsupportedOperationException("Unknown record type: " + type);
         }
-
-        return records;
     }
 
     @Override
@@ -157,11 +130,9 @@ public class CanalRecordParser extends RecordParser {
             throw new RuntimeException(e);
         }
         validateFormat();
-
         if (isDdl()) {
             return null;
         }
-
         LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         mySqlFieldTypes.forEach(
@@ -184,6 +155,7 @@ public class CanalRecordParser extends RecordParser {
         checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
         checkNotNull(root.get(FIELD_TYPE), errorMessageTemplate, FIELD_TYPE);
         checkNotNull(root.get(FIELD_DATA), errorMessageTemplate, FIELD_DATA);
+        checkNotNull(root.get(FIELD_IS_DDL), errorMessageTemplate, FIELD_IS_DDL);
 
         if (isDdl()) {
             checkNotNull(root.get(FIELD_SQL), errorMessageTemplate, FIELD_SQL);
@@ -199,31 +171,41 @@ public class CanalRecordParser extends RecordParser {
     }
 
     private boolean isDdl() {
-        return root.get("isDdl") != null && root.get("isDdl").asBoolean();
+        JsonNode isDdlNode = root.get(FIELD_IS_DDL);
+        return isDdlNode.asBoolean();
     }
 
     private List<String> extractPrimaryKeys() {
-        List<String> primaryKeys = new ArrayList<>();
-        ArrayNode pkNames = (ArrayNode) root.get(FIELD_PRIMARY_KEYS);
-        pkNames.iterator().forEachRemaining(pk -> primaryKeys.add(toFieldName(pk.asText())));
-        return primaryKeys;
+        ArrayNode pkNames = JsonSerdeUtil.getNodeAs(root, FIELD_PRIMARY_KEYS, ArrayNode.class);
+        return StreamSupport.stream(pkNames.spliterator(), false)
+                .map(pk -> toFieldName(pk.asText()))
+                .collect(Collectors.toList());
     }
 
     private LinkedHashMap<String, String> extractFieldTypesFromMySqlType() {
+        JsonNode schema = root.get(FIELD_MYSQL_TYPE);
         LinkedHashMap<String, String> fieldTypes = new LinkedHashMap<>();
 
-        JsonNode schema = root.get(FIELD_MYSQL_TYPE);
-        Iterator<String> iterator = schema.fieldNames();
-        while (iterator.hasNext()) {
-            String fieldName = iterator.next();
-            String fieldType = schema.get(fieldName).asText();
-            fieldTypes.put(toFieldName(fieldName), fieldType);
-        }
+        schema.fieldNames()
+                .forEachRemaining(
+                        fieldName -> {
+                            String fieldType = schema.get(fieldName).asText();
+                            fieldTypes.put(toFieldName(fieldName), fieldType);
+                        });
 
         return fieldTypes;
     }
 
-    private Map<String, String> extractRow(
+    /**
+     * Extracts data from a given JSON node and transforms it based on provided MySQL and Paimon
+     * field types.
+     *
+     * @param record The JSON node containing the data.
+     * @param mySqlFieldTypes A map of MySQL field types.
+     * @param paimonFieldTypes A map of Paimon field types.
+     * @return A map of extracted and transformed data.
+     */
+    private Map<String, String> extractRowFromJson(
             JsonNode record,
             Map<String, String> mySqlFieldTypes,
             LinkedHashMap<String, DataType> paimonFieldTypes) {
@@ -233,35 +215,19 @@ public class CanalRecordParser extends RecordParser {
             return new HashMap<>();
         }
 
-        Map<String, String> resultMap = new HashMap<>();
-        for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
-            String fieldName = field.getKey();
-            String mySqlType = field.getValue();
-            Object objectValue = jsonMap.get(fieldName);
-            if (objectValue == null) {
-                continue;
-            }
-
-            String oldValue = objectValue.toString();
-            String newValue = oldValue;
-
-            if (MySqlTypeUtils.isSetType(MySqlTypeUtils.getShortType(mySqlType))) {
-                newValue = CanalFieldParser.convertSet(newValue, mySqlType);
-            } else if (MySqlTypeUtils.isEnumType(MySqlTypeUtils.getShortType(mySqlType))) {
-                newValue = CanalFieldParser.convertEnum(newValue, mySqlType);
-            } else if (MySqlTypeUtils.isGeoType(MySqlTypeUtils.getShortType(mySqlType))) {
-                try {
-                    byte[] wkb =
-                            CanalFieldParser.convertGeoType2WkbArray(
-                                    oldValue.getBytes(StandardCharsets.ISO_8859_1));
-                    newValue = MySqlTypeUtils.convertWkbArray(wkb);
-                } catch (Exception e) {
-                    throw new IllegalArgumentException(
-                            String.format("Failed to convert %s to geometry JSON.", oldValue), e);
-                }
-            }
-            resultMap.put(fieldName, newValue);
-        }
+        Map<String, String> resultMap =
+                mySqlFieldTypes.entrySet().stream()
+                        .filter(
+                                entry ->
+                                        jsonMap.containsKey(entry.getKey())
+                                                && jsonMap.get(entry.getKey()) != null)
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry ->
+                                                transformValue(
+                                                        jsonMap.get(entry.getKey()).toString(),
+                                                        entry.getValue())));
 
         // generate values for computed columns
         for (ComputedColumn computedColumn : computedColumns) {
@@ -272,5 +238,105 @@ public class CanalRecordParser extends RecordParser {
         }
 
         return resultMap;
+    }
+
+    private String transformValue(String oldValue, String mySqlType) {
+        String shortType = MySqlTypeUtils.getShortType(mySqlType);
+
+        if (MySqlTypeUtils.isSetType(shortType)) {
+            return CanalFieldParser.convertSet(oldValue, mySqlType);
+        }
+
+        if (MySqlTypeUtils.isEnumType(shortType)) {
+            return CanalFieldParser.convertEnum(oldValue, mySqlType);
+        }
+
+        if (MySqlTypeUtils.isGeoType(shortType)) {
+            try {
+                byte[] wkb =
+                        CanalFieldParser.convertGeoType2WkbArray(
+                                oldValue.getBytes(StandardCharsets.ISO_8859_1));
+                return MySqlTypeUtils.convertWkbArray(wkb);
+            } catch (Exception e) {
+                throw new IllegalArgumentException(
+                        String.format("Failed to convert %s to geometry JSON.", oldValue), e);
+            }
+        }
+        return oldValue;
+    }
+
+    private List<RichCdcMultiplexRecord> handleDataOperation(
+            ArrayNode data,
+            Map<String, String> mySqlFieldTypes,
+            LinkedHashMap<String, DataType> paimonFieldTypes,
+            List<String> primaryKeys,
+            List<RichCdcMultiplexRecord> records,
+            RowKind kind) {
+        for (JsonNode datum : data) {
+            Map<String, String> rowData =
+                    extractRowFromJson(datum, mySqlFieldTypes, paimonFieldTypes);
+            rowData = adjustCase(rowData);
+
+            records.add(
+                    new RichCdcMultiplexRecord(
+                            databaseName,
+                            tableName,
+                            paimonFieldTypes,
+                            primaryKeys,
+                            new CdcRecord(kind, rowData)));
+        }
+        return records;
+    }
+
+    private List<RichCdcMultiplexRecord> handleUpdateOperation(
+            ArrayNode data,
+            Map<String, String> mySqlFieldTypes,
+            LinkedHashMap<String, DataType> paimonFieldTypes,
+            List<String> primaryKeys,
+            List<RichCdcMultiplexRecord> records) {
+        ArrayNode old = JsonSerdeUtil.getNodeAs(root, FIELD_OLD, ArrayNode.class);
+        for (int i = 0; i < data.size(); i++) {
+            Map<String, String> after =
+                    extractRowFromJson(data.get(i), mySqlFieldTypes, paimonFieldTypes);
+
+            if (old != null && i < old.size()) {
+                Map<String, String> before =
+                        extractRowFromJson(old.get(i), mySqlFieldTypes, paimonFieldTypes);
+
+                // Fields in "old" (before) means the fields are changed.
+                // Fields not in "old" (before) means the fields are not changed,
+                // so we just copy the not changed fields into before.
+                for (Map.Entry<String, String> entry : after.entrySet()) {
+                    before.putIfAbsent(entry.getKey(), entry.getValue());
+                }
+
+                before = adjustCase(before);
+                records.add(
+                        new RichCdcMultiplexRecord(
+                                databaseName,
+                                tableName,
+                                paimonFieldTypes,
+                                primaryKeys,
+                                new CdcRecord(RowKind.DELETE, before)));
+            }
+
+            after = adjustCase(after);
+            records.add(
+                    new RichCdcMultiplexRecord(
+                            databaseName,
+                            tableName,
+                            paimonFieldTypes,
+                            primaryKeys,
+                            new CdcRecord(RowKind.INSERT, after)));
+        }
+        return records;
+    }
+
+    private LinkedHashMap<String, DataType> convertToPaimonFieldTypes(
+            Map<String, String> mySqlFieldTypes) {
+        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
+        mySqlFieldTypes.forEach(
+                (name, type) -> paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type)));
+        return paimonFieldTypes;
     }
 }
