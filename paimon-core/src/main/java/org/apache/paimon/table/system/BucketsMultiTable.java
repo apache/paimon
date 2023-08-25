@@ -46,6 +46,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -115,6 +116,11 @@ public class BucketsMultiTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotReader newSnapshotReader() {
         return wrapped.newSnapshotReader();
+    }
+
+    @Override
+    public TagManager tagManager() {
+        return wrapped.tagManager();
     }
 
     @Override
