@@ -27,9 +27,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -37,11 +35,9 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -82,19 +78,13 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
-                        kafkaConfig, warehouse, database, Collections.emptyMap(), tableConfig);
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        Collections.emptyMap(),
+                        getBasicTableConfig());
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -134,18 +124,13 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
-                        kafkaConfig, warehouse, database, Collections.emptyMap(), tableConfig);
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        Collections.emptyMap(),
+                        getBasicTableConfig());
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -276,11 +261,9 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     public void testTopicIsEmpty() {
-
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
                         kafkaConfig,
@@ -340,16 +323,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
                         kafkaConfig,
@@ -360,7 +333,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         null,
                         null,
                         Collections.emptyMap(),
-                        tableConfig);
+                        getBasicTableConfig());
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -411,16 +384,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
                         kafkaConfig,
@@ -431,7 +394,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         null,
                         null,
                         Collections.emptyMap(),
-                        tableConfig);
+                        getBasicTableConfig());
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
@@ -602,16 +565,6 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
                         kafkaConfig,
@@ -622,7 +575,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         includingTables,
                         excludingTables,
                         Collections.emptyMap(),
-                        tableConfig);
+                        getBasicTableConfig());
         action.build(env);
         JobClient client = env.executeAsync();
         waitJobRunning(client);
