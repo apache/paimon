@@ -84,7 +84,7 @@ public class JsonSerdeUtil {
      * @param root The root node from which the specific node is to be retrieved.
      * @param fieldName The name of the field to retrieve.
      * @param clazz The class of the node to be returned.
-     * @return The node casted to the specified type.
+     * @return The node cast to the specified type.
      * @throws IllegalArgumentException if the node is not present or if it's not of the expected
      *     type.
      */
