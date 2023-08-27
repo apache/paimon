@@ -127,6 +127,14 @@ public class CreateTag {
 
 {{< /tab >}}
 
+{{< tab "Spark" >}}
+Run the following sql:
+```sql
+CALL create_tag(table => 'test.T', tag => 'test_tag', snapshot => 2);
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ## Delete Tags
@@ -164,6 +172,16 @@ public class DeleteTag {
         table.deleteTag("my-tag");
     }
 }
+```
+
+{{< /tab >}}
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+Run the following sql:
+```sql
+CALL delete_tag(table => 'test.T', tag => 'test_tag');
 ```
 
 {{< /tab >}}
@@ -215,6 +233,16 @@ public class RollbackTo {
         // snapshot-3 -> tag3
     }
 }
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+
+Run the following sql:
+
+```sql
+CALL rollback(table => 'test.T', version => '2');
 ```
 
 {{< /tab >}}

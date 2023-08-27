@@ -322,7 +322,7 @@ public class SparkCatalog implements TableCatalog, ProcedureCatalog, SupportsNam
     @Override
     public Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException {
         if (isValidateNamespace(identifier.namespace())) {
-            ProcedureBuilder builder = SparkProcedures.newBuilder(name);
+            ProcedureBuilder builder = SparkProcedures.newBuilder(identifier.name());
             if (builder != null) {
                 return builder.withTableCatalog(this).build();
             }
