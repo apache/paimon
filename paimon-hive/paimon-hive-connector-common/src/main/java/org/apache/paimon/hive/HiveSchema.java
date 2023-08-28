@@ -187,7 +187,9 @@ public class HiveSchema {
             return Optional.empty();
         }
         Path path = new Path(location);
-        configuration.set(INTERNAL_LOCATION, location);
+        if (configuration != null) {
+            configuration.set(INTERNAL_LOCATION, location);
+        }
         Options options = HiveUtils.extractCatalogConfig(configuration);
         options.set(CoreOptions.PATH, location);
         CatalogContext context = CatalogContext.create(options, configuration);
