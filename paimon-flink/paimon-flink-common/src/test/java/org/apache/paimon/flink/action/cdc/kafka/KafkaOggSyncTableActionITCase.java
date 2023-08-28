@@ -516,4 +516,49 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
                                 "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
+
+    @Test
+    @Timeout(60)
+    public void testComputedColumn() throws Exception {
+        String topic = "computed_column";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines = readLines("kafka/ogg/table/computedcolumn/ogg-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "ogg-json");
+        kafkaConfig.put("topic", topic);
+        KafkaSyncTableAction action =
+                new KafkaSyncTableAction(
+                        kafkaConfig,
+                        warehouse,
+                        database,
+                        tableName,
+                        Collections.singletonList("_year"),
+                        Arrays.asList("_id", "_year"),
+                        Collections.singletonList("_year=year(_date)"),
+                        Collections.emptyMap(),
+                        getBasicTableConfig());
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT().notNull()
+                        },
+                        new String[] {"_id", "_date", "_year"});
+        waitForResult(
+                Collections.singletonList("+I[101, 2023-03-23, 2023]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Arrays.asList("_id", "_year"));
+    }
 }
