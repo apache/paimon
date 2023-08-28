@@ -33,11 +33,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.flink.api.common.JobStatus;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -117,18 +113,8 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
                             // test run
                             .withEnv("KAFKA_LOG_RETENTION_MS", "-1");
 
-    protected StreamExecutionEnvironment env;
-    protected StreamTableEnvironment tEnv;
-
     @BeforeEach
     public void setup() {
-        env = StreamExecutionEnvironment.getExecutionEnvironment();
-        tEnv = StreamTableEnvironment.create(env);
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
-        tEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false);
-
         // Probe Kafka broker status per 30 seconds
         scheduleTimeoutLogger(
                 Duration.ofSeconds(30),

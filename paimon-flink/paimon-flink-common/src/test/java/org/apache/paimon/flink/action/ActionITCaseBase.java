@@ -37,14 +37,20 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** {@link Action} test base. */
 public abstract class ActionITCaseBase extends AbstractTestBase {
@@ -53,11 +59,11 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     protected String database;
     protected String tableName;
     protected String commitUser;
-
     protected SnapshotManager snapshotManager;
     protected StreamTableWrite write;
     protected StreamTableCommit commit;
-
+    protected StreamExecutionEnvironment env;
+    protected StreamTableEnvironment tEnv;
     private long incrementalIdentifier;
 
     @BeforeEach
@@ -67,6 +73,15 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         tableName = "test_table_" + UUID.randomUUID();
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
+        env = StreamExecutionEnvironment.getExecutionEnvironment();
+        tEnv = StreamTableEnvironment.create(env);
+        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+        tEnv.getConfig()
+                .getConfiguration()
+                .set(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false);
     }
 
     @AfterEach
@@ -114,6 +129,14 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         recordReader.forEachRemaining(
                 row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
         return result;
+    }
+
+    protected Map<String, String> getBasicTableConfig() {
+        Map<String, String> config = new HashMap<>();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        config.put("bucket", String.valueOf(random.nextInt(3) + 1));
+        config.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
+        return config;
     }
 
     protected Catalog catalog() {

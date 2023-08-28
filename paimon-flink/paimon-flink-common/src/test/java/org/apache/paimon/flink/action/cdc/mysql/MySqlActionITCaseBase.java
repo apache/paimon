@@ -48,7 +48,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -148,14 +147,6 @@ public class MySqlActionITCaseBase extends ActionITCaseBase {
         config.put("password", PASSWORD);
         // see mysql/my.cnf in test resources
         config.put("server-time-zone", ZoneId.of("America/New_York").toString());
-        return config;
-    }
-
-    protected Map<String, String> getBasicTableConfig() {
-        Map<String, String> config = new HashMap<>();
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        config.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        config.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         return config;
     }
 
