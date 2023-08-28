@@ -28,7 +28,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import java.lang.reflect.Field;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
@@ -114,5 +117,67 @@ public class HiveCatalogTest extends CatalogTestBase {
     private void cleanUpHiveConfDir() {
         // reset back to default value
         HiveConf.setHiveSiteLocation(HiveConf.class.getClassLoader().getResource("hive-site.xml"));
+    }
+
+    @Test
+    public void testHadoopConfDirFromEnv() {
+        Map<String, String> newEnv = new HashMap<>(System.getenv());
+        newEnv.put("HADOOP_CONF_DIR", HADOOP_CONF_DIR);
+        // add HADOOP_CONF_DIR to system environment
+        setEnv(newEnv, false);
+
+        HiveConf hiveConf = HiveCatalog.createHiveConf(null, null);
+        assertThat(hiveConf.get("fs.defaultFS")).isEqualTo("dummy-fs");
+    }
+
+    @Test
+    public void testHiveConfDirFromEnv() {
+        try {
+            testHiveConfDirFromEnvImpl();
+        } finally {
+            cleanUpHiveConfDir();
+        }
+    }
+
+    private void testHiveConfDirFromEnvImpl() {
+        Map<String, String> newEnv = new HashMap<>(System.getenv());
+        newEnv.put("HIVE_CONF_DIR", HIVE_CONF_DIR);
+        // add HIVE_CONF_DIR to system environment
+        setEnv(newEnv, false);
+
+        HiveConf hiveConf = HiveCatalog.createHiveConf(null, null);
+        assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
+    }
+
+    public static void setEnv(Map<String, String> newenv, boolean clearExisting) {
+        try {
+            Map<String, String> env = System.getenv();
+            Class<?> clazz = env.getClass();
+            Field field = clazz.getDeclaredField("m");
+            field.setAccessible(true);
+            Map<String, String> map = (Map<String, String>) field.get(env);
+            if (clearExisting) {
+                map.clear();
+            }
+            map.putAll(newenv);
+
+            // only for Windows
+            Class<?> processEnvironmentClass = Class.forName("java.lang.ProcessEnvironment");
+            try {
+                Field theCaseInsensitiveEnvironmentField =
+                        processEnvironmentClass.getDeclaredField("theCaseInsensitiveEnvironment");
+                theCaseInsensitiveEnvironmentField.setAccessible(true);
+                Map<String, String> cienv =
+                        (Map<String, String>) theCaseInsensitiveEnvironmentField.get(null);
+                if (clearExisting) {
+                    cienv.clear();
+                }
+                cienv.putAll(newenv);
+            } catch (NoSuchFieldException ignored) {
+            }
+
+        } catch (Exception e1) {
+            throw new RuntimeException(e1);
+        }
     }
 }

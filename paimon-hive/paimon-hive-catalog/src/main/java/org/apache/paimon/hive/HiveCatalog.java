@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -78,7 +79,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
-import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
+import static org.apache.paimon.hive.HiveCatalogOptions.*;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -640,6 +641,14 @@ public class HiveCatalog extends AbstractCatalog {
 
     public static HiveConf createHiveConf(
             @Nullable String hiveConfDir, @Nullable String hadoopConfDir) {
+        // try to load from system env.
+        if (isNullOrWhitespaceOnly(hiveConfDir)) {
+            hiveConfDir = possibleHiveConfPath();
+        }
+        if (isNullOrWhitespaceOnly(hadoopConfDir)) {
+            hadoopConfDir = possibleHadoopConfPath();
+        }
+
         // create HiveConf from hadoop configuration with hadoop conf directory configured.
         Configuration hadoopConf = null;
         if (!isNullOrWhitespaceOnly(hadoopConfDir)) {
@@ -730,5 +739,25 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
         return null;
+    }
+
+    public static String possibleHadoopConfPath() {
+        String possiblePath = null;
+        if (System.getenv("HADOOP_CONF_DIR") != null) {
+            possiblePath = System.getenv("HADOOP_CONF_DIR");
+        } else if (System.getenv("HADOOP_HOME") != null) {
+            String possiblePath1 = System.getenv("HADOOP_HOME") + "/conf";
+            String possiblePath2 = System.getenv("HADOOP_HOME") + "/etc/hadoop";
+            if (new File(possiblePath1).exists()) {
+                possiblePath = possiblePath1;
+            } else if (new File(possiblePath2).exists()) {
+                possiblePath = possiblePath2;
+            }
+        }
+        return possiblePath;
+    }
+
+    public static String possibleHiveConfPath() {
+        return System.getenv("HIVE_CONF_DIR");
     }
 }
