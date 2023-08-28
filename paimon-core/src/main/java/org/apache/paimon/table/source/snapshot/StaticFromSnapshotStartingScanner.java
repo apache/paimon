@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
 /**
@@ -40,6 +40,6 @@ public class StaticFromSnapshotStartingScanner implements StartingScanner {
             return new NoSnapshot();
         }
         return StartingScanner.fromPlan(
-                snapshotReader.withKind(ScanKind.ALL).withSnapshot(snapshotId).read());
+                snapshotReader.withMode(ScanMode.ALL).withSnapshot(snapshotId).read());
     }
 }

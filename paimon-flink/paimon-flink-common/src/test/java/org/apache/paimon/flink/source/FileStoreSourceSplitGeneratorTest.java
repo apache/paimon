@@ -25,6 +25,7 @@ import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 
@@ -57,6 +58,11 @@ public class FileStoreSourceSplitGeneratorTest {
                     @Override
                     public Long snapshotId() {
                         return 1L;
+                    }
+
+                    @Override
+                    public ScanMode scanMode() {
+                        return ScanMode.ALL;
                     }
 
                     @Override
