@@ -608,7 +608,7 @@ under the License.
                             <goal>shade</goal>
                         </goals>
                         <configuration>
-                            <shadeTestJar>true</shadeTestJar>
+                            <shadeTestJar>false</shadeTestJar>
                             <shadedArtifactAttached>false</shadedArtifactAttached>
                             <createDependencyReducedPom>true</createDependencyReducedPom>
                             <!-- Filters MUST be appended; merging filters does not work properly, see MSHADE-305 -->
