@@ -49,13 +49,6 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
         mongodbConfig.put("database", inventory);
         mongodbConfig.put("collection", "products");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         MongoDBSyncTableAction action =
                 new MongoDBSyncTableAction(
                         mongodbConfig,
@@ -64,7 +57,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                         tableName,
                         Collections.emptyList(),
                         Collections.emptyMap(),
-                        tableConfig);
+                        getBasicTableConfig());
         action.build(env);
         JobClient client = env.executeAsync();
 

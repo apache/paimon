@@ -33,13 +33,8 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import org.apache.flink.api.common.JobStatus;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
@@ -52,7 +47,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,18 +60,6 @@ public abstract class MongoDBActionITCaseBase extends ActionITCaseBase {
             new MongoDBContainer("mongo:6.0.6")
                     .withSharding()
                     .withLogConsumer(new Slf4jLogConsumer(LOG));
-    protected StreamExecutionEnvironment env;
-    protected StreamTableEnvironment tEnv;
-
-    @BeforeEach
-    public void setup() {
-        env = StreamExecutionEnvironment.getExecutionEnvironment();
-        tEnv = StreamTableEnvironment.create(env);
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
-        tEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false);
-    }
 
     @BeforeAll
     public static void startContainers() {
@@ -167,14 +149,6 @@ public abstract class MongoDBActionITCaseBase extends ActionITCaseBase {
     protected FileStoreTable getFileStoreTable(String tableName) throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
         return (FileStoreTable) catalog().getTable(identifier);
-    }
-
-    protected Map<String, String> getBasicTableConfig() {
-        Map<String, String> config = new HashMap<>();
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        config.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        config.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
-        return config;
     }
 
     protected void waitTablesCreated(String... tables) throws Exception {

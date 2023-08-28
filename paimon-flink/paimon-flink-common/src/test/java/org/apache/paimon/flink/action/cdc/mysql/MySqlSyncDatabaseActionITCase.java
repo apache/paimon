@@ -35,7 +35,6 @@ import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -208,7 +207,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "paimon_sync_database");
         mySqlConfig.put("table-name", "my_table");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig);
 
@@ -225,7 +223,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "invalid");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig);
 
@@ -861,7 +858,6 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .includingTables("t.+")
                         .withMode(COMBINED);
-        StreamExecutionEnvironment env = getBasicEnv();
         action.build(env);
 
         if (Objects.nonNull(savepointPath)) {
@@ -1171,7 +1167,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
                         .ignoreIncompatible(true)
                         .withMode(COMBINED);
-        action.build(StreamExecutionEnvironment.getExecutionEnvironment());
+        action.build(env);
 
         assertThat(action.monitoredTables())
                 .containsOnly(

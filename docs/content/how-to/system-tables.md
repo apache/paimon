@@ -280,3 +280,19 @@ SELECT * FROM sys.all_table_options;
 */
 ```
 
+### Catalog Options Table
+You can query the catalog's option information through catalog options table. The options not shown will be the default value. You can take reference to [Configuration]({{< ref "maintenance/configurations#coreoptions" >}}).
+
+```sql
+SELECT * FROM sys.catalog_options;
+
+/*
++-----------+---------------------------+
+|       key |                     value |
++-----------+---------------------------+
+| warehouse | hdfs:///path/to/warehouse |
++-----------+---------------------------+
+1 rows in set
+*/
+```
+

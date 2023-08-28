@@ -30,7 +30,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -615,7 +614,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "incompatible_field_\\d+");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
 
@@ -642,7 +640,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 Collections.singletonList("a"),
                 new HashMap<>());
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
                         .withPrimaryKeys("a");
@@ -658,7 +655,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
                         .withPrimaryKeys("pk");
@@ -675,7 +671,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "incompatible_pk_\\d+");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
 
