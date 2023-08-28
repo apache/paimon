@@ -178,7 +178,7 @@ WITH (
     changelog_producer = 'input'
 )
 
-ALTER TABLE paimon.test_db.orders ADD COLUMN "shipping_address varchar;
+ALTER TABLE paimon.test_db.orders ADD COLUMN shipping_address varchar;
 ```
 
 ## Query
