@@ -38,6 +38,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
+import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CatalogOptionsTable}. */
@@ -57,7 +59,8 @@ public class CatalogOptionsTableTest extends TableTestBase {
         catalogOptions.set(CatalogOptions.WAREHOUSE, tempDir.toUri().toString());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
         catalogOptionsTable =
-                (CatalogOptionsTable) catalog.getTable(new Identifier("sys", "catalog_options"));
+                (CatalogOptionsTable)
+                        catalog.getTable(new Identifier(SYSTEM_DATABASE_NAME, CATALOG_OPTIONS));
     }
 
     @Test

@@ -133,9 +133,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         sql("USE " + Catalog.SYSTEM_DATABASE_NAME);
         assertThat(sql("SHOW TABLES"))
                 .containsExactly(
-                        Row.of(
-                                AllTableOptionsTable.ALL_TABLE_OPTIONS,
-                                CatalogOptionsTable.CATALOG_OPTIONS));
+                        Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS),
+                        Row.of(CatalogOptionsTable.CATALOG_OPTIONS));
     }
 
     @Test
