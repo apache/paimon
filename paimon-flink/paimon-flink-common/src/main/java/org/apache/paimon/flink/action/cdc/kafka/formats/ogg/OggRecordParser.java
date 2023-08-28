@@ -213,7 +213,7 @@ public class OggRecordParser extends RecordParser {
                     resultMap.put(
                             computedColumn.columnName(),
                             computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
-                    paimonFieldTypes.put(computedColumn.columnName(), STRING_DATA_TYPE);
+                    paimonFieldTypes.put(computedColumn.columnName(), computedColumn.columnType());
                 });
 
         return resultMap;
