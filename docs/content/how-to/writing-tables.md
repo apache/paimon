@@ -224,19 +224,28 @@ INSERT OVERWRITE MyTable SELECT ...
 
 {{< /tabs >}}
 
-## Purging tables
+## Truncate tables
 
-You can use `INSERT OVERWRITE` to purge tables by inserting empty value.
-
-{{< tabs "purge-tables-syntax" >}}
+{{< tabs "truncate-tables-syntax" >}}
 
 {{< tab "Flink" >}}
+
+You can use `INSERT OVERWRITE` to purge tables by inserting empty value.
 
 ```sql
 INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ SELECT * FROM MyTable WHERE false;
 ```
 
 {{< /tab >}}
+
+{{< tab "Spark" >}}
+
+```sql
+TRUNCATE TABLE MyTable;
+```
+
+{{< /tab >}}
+
 
 {{< /tabs >}}
 

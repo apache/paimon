@@ -53,13 +53,18 @@ Configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic e
 Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition.
 {{< /hint >}}
 
-**Normal Dynamic Bucket Mode**:
+#### Normal Dynamic Bucket Mode
 
 When your updates do not cross partitions (no partitions, or primary keys contain all partition fields), Dynamic
-Bucket mode uses HASH index to maintain mapping from key to bucket, it requires more memory than fixed bucket mode,
-100 million entries in a partition takes up 1 GB more memory, partitions that are no longer active do not take up memory.
+Bucket mode uses HASH index to maintain mapping from key to bucket, it requires more memory than fixed bucket mode.
 
-**Cross Partitions Update Dynamic Bucket Mode**:
+Performance:
+
+1. Generally speaking, there is no performance loss, but there will be some additional memory consumption, **100 million**
+   entries in a partition takes up **1 GB** more memory, partitions that are no longer active do not take up memory.
+2. For tables with low update rates, this mode is recommended to significantly improve performance.
+
+#### Cross Partitions Update Dynamic Bucket Mode
 
 {{< hint info >}}
 This is an experimental feature.
@@ -68,9 +73,13 @@ This is an experimental feature.
 When you need cross partition updates (primary keys not contain all partition fields), Dynamic Bucket mode directly
 maintains the mapping of keys to partition and bucket, uses local disks, and initializes indexes by reading all 
 existing keys in the table when starting stream write job. Different merge engines have different behaviors:
+
 1. Deduplicate: Delete data from the old partition and insert new data into the new partition.
 2. PartialUpdate & Aggregation: Insert new data into the old partition.
 3. FirstRow: Ignore new data if there is old value.
+
+Performance: For tables with a large amount of data, there will be a significant loss in performance. Moreover,
+initialization takes a long time.
 
 ## Merge Engines
 
