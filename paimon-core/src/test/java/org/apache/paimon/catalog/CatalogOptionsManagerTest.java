@@ -22,6 +22,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -59,6 +60,11 @@ public class CatalogOptionsManagerTest {
 
         catalogContext = CatalogContext.create(withoutImmutableOptions);
         fileIO = FileIO.get(new Path(tempDir.toString()), catalogContext);
+    }
+
+    @AfterEach
+    public void afterEach() throws IOException {
+        cleanCatalog();
     }
 
     @Test
@@ -127,19 +133,19 @@ public class CatalogOptionsManagerTest {
                                 CatalogFactory.createCatalog(
                                         CatalogContext.create(withImmutableOptions)))
                 .isInstanceOf(IllegalStateException.class);
-        cleanCatalogDir();
+        cleanCatalog();
 
         // session1: without immutable options, session2: without immutable options, succeeded
         CatalogFactory.createCatalog(CatalogContext.create(withoutImmutableOptions));
         assertDoesNotThrow(
                 () -> CatalogFactory.createCatalog(CatalogContext.create(withoutImmutableOptions)));
-        cleanCatalogDir();
+        cleanCatalog();
 
         // session1: with immutable options, session2: with the same immutable options, succeeded
         CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions));
         assertDoesNotThrow(
                 () -> CatalogFactory.createCatalog(CatalogContext.create(withImmutableOptions)));
-        cleanCatalogDir();
+        cleanCatalog();
 
         // session1: with immutable options, session2: with different immutable options, throw
         // IllegalStateException
@@ -149,7 +155,7 @@ public class CatalogOptionsManagerTest {
                                 CatalogFactory.createCatalog(
                                         CatalogContext.create(withPartOfImmutableOptions)))
                 .isInstanceOf(IllegalStateException.class);
-        cleanCatalogDir();
+        cleanCatalog();
 
         // session1: with immutable options, session2: without immutable options, throw
         // IllegalStateException
@@ -159,10 +165,10 @@ public class CatalogOptionsManagerTest {
                                 CatalogFactory.createCatalog(
                                         CatalogContext.create(withoutImmutableOptions)))
                 .isInstanceOf(IllegalStateException.class);
-        cleanCatalogDir();
+        cleanCatalog();
     }
 
-    private static void cleanCatalogDir() throws IOException {
+    private static void cleanCatalog() throws IOException {
         fileIO.delete(new Path(tempDir.toString()), true);
     }
 }

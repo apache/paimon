@@ -91,7 +91,7 @@ public class CatalogOptionsManager {
             throw new IllegalStateException(
                     String.format(
                             "The immutable catalog options changed, origin options are %s, new options are %s.",
-                            originImmutableOptions, newImmutableOptions));
+                            originImmutableOptions.toMap(), newImmutableOptions.toMap()));
         }
     }
 }
