@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.shuffle;
 
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SerializableSupplier;
 
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.functions.Partitioner;
@@ -81,20 +81,21 @@ public class RangeShuffle {
      * <p>The streams except the sample and histogram process stream will been blocked, so the the
      * sample and histogram process stream does not care about requiredExchangeMode.
      */
-    public static <T> DataStream<Pair<T, RowData>> rangeShuffleByKey(
-            DataStream<Pair<T, RowData>> inputDataStream,
-            Comparator<T> keyComparator,
-            Class<T> keyClass,
+    public static <T> DataStream<Tuple2<T, RowData>> rangeShuffleByKey(
+            DataStream<Tuple2<T, RowData>> inputDataStream,
+            SerializableSupplier<Comparator<T>> keyComparator,
+            TypeInformation<T> keyTypeInformation,
             int sampleSize,
-            int rangeNum) {
-        Transformation<Pair<T, RowData>> input = inputDataStream.getTransformation();
+            int rangeNum,
+            int outParallelism) {
+        Transformation<Tuple2<T, RowData>> input = inputDataStream.getTransformation();
 
-        OneInputTransformation<Pair<T, RowData>, T> keyInput =
+        OneInputTransformation<Tuple2<T, RowData>, T> keyInput =
                 new OneInputTransformation<>(
                         input,
                         "ABSTRACT KEY",
-                        new StreamMap<>(Pair::getLeft),
-                        TypeInformation.of(keyClass),
+                        new StreamMap<>(a -> a.f0),
+                        keyTypeInformation,
                         input.getParallelism());
 
         // 1. Fixed size sample in each partitions.
@@ -103,8 +104,7 @@ public class RangeShuffle {
                         keyInput,
                         "LOCAL SAMPLE",
                         new LocalSampleOperator<>(sampleSize),
-                        new TupleTypeInfo<>(
-                                BasicTypeInfo.DOUBLE_TYPE_INFO, TypeInformation.of(keyClass)),
+                        new TupleTypeInfo<>(BasicTypeInfo.DOUBLE_TYPE_INFO, keyTypeInformation),
                         keyInput.getParallelism());
 
         // 2. Collect all the samples and gather them into a sorted key range.
@@ -113,14 +113,14 @@ public class RangeShuffle {
                         localSample,
                         "GLOBAL SAMPLE",
                         new GlobalSampleOperator<>(sampleSize, keyComparator, rangeNum),
-                        new ListTypeInfo<>(TypeInformation.of(keyClass)),
+                        new ListTypeInfo<>(keyTypeInformation),
                         1);
 
         // 3. Take range boundaries as broadcast input and take the tuple of partition id and
         // record as output.
         // The shuffle mode of input edge must be BATCH to avoid dead lock. See
         // DeadlockBreakupProcessor.
-        TwoInputTransformation<List<T>, Pair<T, RowData>, Tuple2<Integer, Pair<T, RowData>>>
+        TwoInputTransformation<List<T>, Tuple2<T, RowData>, Tuple2<Integer, Tuple2<T, RowData>>>
                 preparePartition =
                         new TwoInputTransformation<>(
                                 new PartitionTransformation<>(
@@ -150,7 +150,7 @@ public class RangeShuffle {
                         "REMOVE KEY",
                         new RemoveRangeIndexOperator<>(),
                         input.getOutputType(),
-                        input.getParallelism()));
+                        outParallelism));
     }
 
     /**
@@ -207,20 +207,25 @@ public class RangeShuffle {
 
         private final int numSample;
         private final int rangesNum;
-        private final Comparator<T> keyComparator;
+        private final SerializableSupplier<Comparator<T>> comparatorSupplier;
 
+        private transient Comparator<T> keyComparator;
         private transient Collector<List<T>> collector;
         private transient Sampler<T> sampler;
 
-        public GlobalSampleOperator(int numSample, Comparator<T> comparator, int rangesNum) {
+        public GlobalSampleOperator(
+                int numSample,
+                SerializableSupplier<Comparator<T>> comparatorSupplier,
+                int rangesNum) {
             this.numSample = numSample;
-            this.keyComparator = comparator;
+            this.comparatorSupplier = comparatorSupplier;
             this.rangesNum = rangesNum;
         }
 
         @Override
         public void open() throws Exception {
             super.open();
+            this.keyComparator = comparatorSupplier.get();
             this.sampler = new Sampler<>(numSample, 0L);
             this.collector = new StreamRecordCollector<>(output);
         }
@@ -262,25 +267,27 @@ public class RangeShuffle {
      * Tuple2 which includes range index and record from the other input itself as output.
      */
     private static class AssignRangeIndexOperator<T>
-            extends TableStreamOperator<Tuple2<Integer, Pair<T, RowData>>>
+            extends TableStreamOperator<Tuple2<Integer, Tuple2<T, RowData>>>
             implements TwoInputStreamOperator<
-                            List<T>, Pair<T, RowData>, Tuple2<Integer, Pair<T, RowData>>>,
+                            List<T>, Tuple2<T, RowData>, Tuple2<Integer, Tuple2<T, RowData>>>,
                     InputSelectable {
 
         private static final long serialVersionUID = 1L;
 
+        private final SerializableSupplier<Comparator<T>> keyComparatorSupplier;
+
         private transient List<T> boundaries;
-        private transient Collector<Tuple2<Integer, Pair<T, RowData>>> collector;
+        private transient Collector<Tuple2<Integer, Tuple2<T, RowData>>> collector;
+        private transient Comparator<T> keyComparator;
 
-        private final Comparator<T> keyComparator;
-
-        public AssignRangeIndexOperator(Comparator<T> comparator) {
-            this.keyComparator = comparator;
+        public AssignRangeIndexOperator(SerializableSupplier<Comparator<T>> keyComparatorSupplier) {
+            this.keyComparatorSupplier = keyComparatorSupplier;
         }
 
         @Override
         public void open() throws Exception {
             super.open();
+            this.keyComparator = keyComparatorSupplier.get();
             this.collector = new StreamRecordCollector<>(output);
         }
 
@@ -290,12 +297,12 @@ public class RangeShuffle {
         }
 
         @Override
-        public void processElement2(StreamRecord<Pair<T, RowData>> streamRecord) {
+        public void processElement2(StreamRecord<Tuple2<T, RowData>> streamRecord) {
             if (boundaries == null) {
                 throw new RuntimeException("There should be one data from the first input.");
             }
-            Pair<T, RowData> row = streamRecord.getValue();
-            collector.collect(new Tuple2<>(binarySearch(row.getLeft()), row));
+            Tuple2<T, RowData> row = streamRecord.getValue();
+            collector.collect(new Tuple2<>(binarySearch(row.f0), row));
         }
 
         @Override
@@ -326,12 +333,12 @@ public class RangeShuffle {
 
         /** A {@link KeySelector} to select by f0 of tuple2. */
         public static class Tuple2KeySelector<T>
-                implements KeySelector<Tuple2<Integer, Pair<T, RowData>>, Integer> {
+                implements KeySelector<Tuple2<Integer, Tuple2<T, RowData>>, Integer> {
 
             private static final long serialVersionUID = 1L;
 
             @Override
-            public Integer getKey(Tuple2<Integer, Pair<T, RowData>> tuple2) throws Exception {
+            public Integer getKey(Tuple2<Integer, Tuple2<T, RowData>> tuple2) throws Exception {
                 return tuple2.f0;
             }
         }
@@ -359,12 +366,13 @@ public class RangeShuffle {
     }
 
     /** Remove the range index and return the actual record. */
-    private static class RemoveRangeIndexOperator<T> extends TableStreamOperator<Pair<T, RowData>>
-            implements OneInputStreamOperator<Tuple2<Integer, Pair<T, RowData>>, Pair<T, RowData>> {
+    private static class RemoveRangeIndexOperator<T> extends TableStreamOperator<Tuple2<T, RowData>>
+            implements OneInputStreamOperator<
+                    Tuple2<Integer, Tuple2<T, RowData>>, Tuple2<T, RowData>> {
 
         private static final long serialVersionUID = 1L;
 
-        private transient Collector<Pair<T, RowData>> collector;
+        private transient Collector<Tuple2<T, RowData>> collector;
 
         @Override
         public void open() throws Exception {
@@ -373,7 +381,7 @@ public class RangeShuffle {
         }
 
         @Override
-        public void processElement(StreamRecord<Tuple2<Integer, Pair<T, RowData>>> streamRecord)
+        public void processElement(StreamRecord<Tuple2<Integer, Tuple2<T, RowData>>> streamRecord)
                 throws Exception {
             collector.collect(streamRecord.getValue().f1);
         }

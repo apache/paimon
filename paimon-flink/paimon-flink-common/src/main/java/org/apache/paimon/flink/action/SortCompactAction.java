@@ -66,6 +66,13 @@ public class SortCompactAction extends CompactAction {
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+
+        // we enable object reuse, we copy the un-reusable object ourselves.
+        env.getConfig().enableObjectReuse();
+
+        // kryo serializer is not good
+        env.getConfig().disableGenericTypes();
+
         build(env);
         execute(env, "Sort Compact Job");
     }
@@ -102,7 +109,7 @@ public class SortCompactAction extends CompactAction {
             sourceBuilder.withPredicate(partitionPredicate);
         }
 
-        String scanParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
+        String scanParallelism = tableConfig.get(FlinkConnectorOptions.SCAN_PARALLELISM.key());
         if (scanParallelism != null) {
             sourceBuilder.withParallelism(Integer.parseInt(scanParallelism));
         }
