@@ -274,7 +274,9 @@ However, these merged changes cannot form a complete changelog, because we can't
 
 Consider a consumer which calculates the sum on some grouping keys (might not be equal to the primary keys). If the consumer only sees a new value `5`, it cannot determine what values should be added to the summing result. For example, if the old value is `4`, it should add `1` to the result. But if the old value is `6`, it should in turn subtract `1` from the result. Old values are important for these types of consumers.
 
-To conclude, `none` changelog producers are best suited for consumers such as a database system. Flink also has a built-in "normalize" operator which persists the values of each key in states. As one can easily tell, this operator will be very costly and should be avoided.
+To conclude, `none` changelog producers are best suited for consumers such as a database system. Flink also has a 
+built-in "normalize" operator which persists the values of each key in states. As one can easily tell, this operator
+will be very costly and should be avoided. (You can force removing "normalize" operator via `'scan.remove-normalize'`.)
 
 {{< img src="/img/changelog-producer-none.png">}}
 
