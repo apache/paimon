@@ -95,7 +95,8 @@ public class MultiTablesBatchCompactorSourceFunction extends MultiTablesCompacto
                 }
             }
             if (isEmpty) {
-                Thread.sleep(monitorInterval);
+                throw new Exception(
+                        "No splits were collected. Please ensure there are tables detected after pattern matching");
             }
         }
     }

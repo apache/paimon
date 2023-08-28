@@ -19,11 +19,9 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.MultiTablesCompactorSinkBuilder;
 import org.apache.paimon.flink.source.MultiTablesCompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
-import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -37,12 +35,8 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.util.Map;
 import java.util.regex.Pattern;
-
-import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /** this is a doc. */
 public class MultiTablesCompactAction extends ActionBase {
@@ -100,29 +94,6 @@ public class MultiTablesCompactAction extends ActionBase {
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
 
         sinkBuilder.withInput(source).build();
-    }
-
-    private String toString(RowData rowData) {
-        int numFiles;
-        DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
-        try {
-            numFiles = dataFileMetaSerializer.deserializeList(rowData.getBinary(3)).size();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-
-        BinaryRow partition = deserializeBinaryRow(rowData.getBinary(1));
-
-        return String.format(
-                "%s %d|%s|%d|%d|%d|%s|%s",
-                rowData.getRowKind().shortString(),
-                rowData.getLong(0),
-                partition.getString(0),
-                partition.getInt(1),
-                rowData.getInt(2),
-                numFiles,
-                rowData.getString(4),
-                rowData.getString(5));
     }
 
     @Override

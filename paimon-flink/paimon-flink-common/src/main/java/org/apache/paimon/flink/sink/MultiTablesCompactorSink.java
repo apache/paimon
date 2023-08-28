@@ -53,7 +53,6 @@ public class MultiTablesCompactorSink implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private static final String WRITER_NAME = "Writer";
-    private static final String WRITER_WRITE_ONLY_NAME = "Writer(write-only)";
     private static final String GLOBAL_COMMITTER_NAME = "Global Committer";
 
     private final Catalog.Loader catalogLoader;
@@ -71,13 +70,6 @@ public class MultiTablesCompactorSink implements Serializable {
         this.catalogLoader = catalogLoader;
         this.ignorePreviousFiles = false;
         this.options = options;
-        this.coreOptions = new CoreOptions(options);
-    }
-
-    public MultiTablesCompactorSink(Catalog.Loader catalogLoader) {
-        this.catalogLoader = catalogLoader;
-        this.ignorePreviousFiles = false;
-        this.options = new Options();
         this.coreOptions = new CoreOptions(options);
     }
 
@@ -108,10 +100,9 @@ public class MultiTablesCompactorSink implements Serializable {
                                 .get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
 
-        Boolean writeOnly = coreOptions.writeOnly();
         SingleOutputStreamOperator<MultiTableCommittable> written =
                 input.transform(
-                                (writeOnly ? WRITER_WRITE_ONLY_NAME : WRITER_NAME),
+                                WRITER_NAME,
                                 new MultiTableCommittableTypeInfo(),
                                 createWriteOperator(
                                         env.getCheckpointConfig(), isStreaming, commitUser))
@@ -189,7 +180,7 @@ public class MultiTablesCompactorSink implements Serializable {
                 checkpointConfig,
                 isStreaming,
                 ignorePreviousFiles,
-                new Options());
+                options);
     }
 
     protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>

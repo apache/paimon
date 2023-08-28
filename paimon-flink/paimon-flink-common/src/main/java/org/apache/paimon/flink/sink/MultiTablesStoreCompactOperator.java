@@ -78,30 +78,6 @@ public class MultiTablesStoreCompactOperator
             boolean ignorePreviousFiles,
             Options options) {
         super(options);
-        // should guarantee table.coreOptions().writeOnly() = false!!
-        //                Preconditions.checkArgument(
-        //                        !table.coreOptions().writeOnly(),
-        //                        CoreOptions.WRITE_ONLY.key() + " should not be true for
-        //         StoreCompactOperator.");
-        this.catalogLoader = catalogLoader;
-        this.initialCommitUser = initialCommitUser;
-        this.checkpointConfig = checkpointConfig;
-        this.isStreaming = isStreaming;
-        this.ignorePreviousFiles = ignorePreviousFiles;
-    }
-
-    public MultiTablesStoreCompactOperator(
-            Catalog.Loader catalogLoader,
-            String initialCommitUser,
-            CheckpointConfig checkpointConfig,
-            boolean isStreaming,
-            boolean ignorePreviousFiles) {
-        super(new Options());
-        // should guarantee table.coreOptions().writeOnly() = false!!
-        //                Preconditions.checkArgument(
-        //                        !table.coreOptions().writeOnly(),
-        //                        CoreOptions.WRITE_ONLY.key() + " should not be true for
-        //         StoreCompactOperator.");
         this.catalogLoader = catalogLoader;
         this.initialCommitUser = initialCommitUser;
         this.checkpointConfig = checkpointConfig;
@@ -156,6 +132,12 @@ public class MultiTablesStoreCompactOperator
 
         Identifier tableId = Identifier.create(databaseName, tableName);
         FileStoreTable table = getTable(tableId);
+
+        Preconditions.checkArgument(
+                !table.coreOptions().writeOnly(),
+                CoreOptions.WRITE_ONLY.key()
+                        + " should not be true for MultiTablesStoreCompactOperator.");
+
         storeSinkWriteProvider =
                 createWriteProvider(table, checkpointConfig, isStreaming, ignorePreviousFiles);
 
