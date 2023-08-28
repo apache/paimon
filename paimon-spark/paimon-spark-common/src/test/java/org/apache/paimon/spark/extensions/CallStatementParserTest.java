@@ -51,6 +51,8 @@ public class CallStatementParserTest {
 
     @BeforeEach
     public void startSparkSession() {
+        // Stops and clears active session to avoid loading previous non-stopped session.
+        SparkSession.getActiveSession().orElse(SparkSession::getDefaultSession).get().stop();
         SparkSession.clearActiveSession();
         spark =
                 SparkSession.builder()
