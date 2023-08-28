@@ -1,0 +1,95 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">Function</th>
+        <th class="text-left" style="width: 70%">Description</th>
+        <th class="text-left" style="width: 15%">Output type</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>min()</h5></td>
+        <td>Provides the min value of an array of numbers.</td>
+        <td>Double</td>
+    </tr>
+    <tr>
+        <td><h5>max()</h5></td>
+        <td>Provides the max value of an array of numbers.</td>
+        <td>Double</td>
+    </tr>
+    <tr>
+        <td><h5>avg()</h5></td>
+        <td>Provides the average value of an array of numbers.</td>
+        <td>Double</td>
+    </tr>
+    <tr>
+        <td><h5>stddev()</h5></td>
+        <td>Provides the standard deviation value of an array of numbers</td>
+        <td>Double</td>
+    </tr>
+    <tr>
+        <td><h5>length()</h5></td>
+        <td>Provides the length of an array</td>
+        <td>Integer</td>
+    </tr>
+    <tr>
+        <td><h5>sum()</h5></td>
+        <td>Provides the sum value of an array of numbers.</td>
+        <td>Double</td>
+    </tr>
+    <tr>
+        <td><h5>keys()</h5></td>
+        <td>Provides the property keys (An alternative for terminal tilde ~)</td>
+        <td>Set</td>
+    </tr>
+    <tr>
+        <td><h5>concat(X)</h5></td>
+        <td>Provides a concatinated version of the path output with a new item.</td>
+        <td>like input</td>
+    </tr>
+    <tr>
+        <td><h5>append(X)</h5></td>
+        <td>add an item to the json path output array</td>
+        <td>like input</td>
+    </tr>
+    <tr>
+        <td><h5>append(X)</h5></td>
+        <td>add an item to the json path output array</td>
+        <td>like input</td>
+    </tr>
+    <tr>
+        <td><h5>first()</h5></td>
+        <td>Provides the first item of an array</td>
+        <td>Depends on the array</td>
+    </tr>
+    <tr>
+        <td><h5>last()</h5></td>
+        <td>Provides the last item of an array</td>
+        <td>Depends on the array</td>
+    </tr>
+    <tr>
+        <td><h5>index(X)</h5></td>
+        <td>Provides the item of an array of index: X, if the X is negative, take from backwards</td>
+        <td>Depends on the array</td>
+    </tr>
+    </tbody>
+</table>

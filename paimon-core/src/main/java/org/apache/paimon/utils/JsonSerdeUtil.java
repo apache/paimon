@@ -27,6 +27,7 @@ import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonParser;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationContext;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Module;
@@ -38,7 +39,10 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ser.std.S
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 /** A utility class that provide abilities for JSON serialization and deserialization. */
 public class JsonSerdeUtil {
@@ -54,6 +58,25 @@ public class JsonSerdeUtil {
         OBJECT_MAPPER_INSTANCE.registerModule(createPaimonJacksonModule());
     }
 
+    public static <V> LinkedHashMap<String, V> parseJsonMap(String jsonString, Class<V> valueType) {
+        try {
+            LinkedHashMap<String, Object> originalMap =
+                    OBJECT_MAPPER_INSTANCE.readValue(
+                            jsonString, new TypeReference<LinkedHashMap<String, Object>>() {});
+            return originalMap.entrySet().stream()
+                    .collect(
+                            Collectors.toMap(
+                                    Map.Entry::getKey,
+                                    entry ->
+                                            OBJECT_MAPPER_INSTANCE.convertValue(
+                                                    entry.getValue(), valueType),
+                                    (oldValue, newValue) -> oldValue,
+                                    LinkedHashMap::new));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Error parsing JSON string", e);
+        }
+    }
+
     /**
      * Retrieves a specific node from the given root node and casts it to the specified type.
      *
@@ -61,7 +84,7 @@ public class JsonSerdeUtil {
      * @param root The root node from which the specific node is to be retrieved.
      * @param fieldName The name of the field to retrieve.
      * @param clazz The class of the node to be returned.
-     * @return The node casted to the specified type.
+     * @return The node cast to the specified type.
      * @throws IllegalArgumentException if the node is not present or if it's not of the expected
      *     type.
      */

@@ -135,7 +135,7 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
         mongodbConfig.put("database", inventory);
         mongodbConfig.put("collection", "products");
         mongodbConfig.put("field.name", "_id,name,description");
-        mongodbConfig.put("parser.path", "_id,name,description");
+        mongodbConfig.put("parser.path", "$._id,$.name,$.description");
         mongodbConfig.put("schema.start.mode", "specified");
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);

@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
@@ -47,27 +46,23 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An {@link Action} which synchronize the whole MongoDB database into one Paimon database.
+ * An action class responsible for synchronizing MongoDB databases with a target system.
  *
- * <p>You should specify MongoDB source database in {@code mongodbConfig}. See <a
- * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mongodb-cdc.html#connector-options">document
- * of flink-cdc-connectors</a> for detailed keys and values.
+ * <p>This class provides functionality to read data from a MongoDB source, process it, and then
+ * synchronize it with a target system. It supports various configurations, including table
+ * prefixes, suffixes, and inclusion/exclusion patterns.
  *
- * <p>For each MongoDB collections to be synchronized, if the corresponding Paimon table does not
- * exist, this action will automatically create the table. Its schema will be derived from all
- * specified MongoDB collections. If the Paimon table already exists, its schema will be compared
- * against the schema of all specified MongoDB collections.
- *
- * <p>This action supports a limited number of schema changes. Currently, the framework can not drop
- * columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently
- * supported schema changes includes:
+ * <p>Key features include:
  *
  * <ul>
- *   <li>Adding columns.
+ *   <li>Support for case-sensitive and case-insensitive database and table names.
+ *   <li>Configurable table name conversion with prefixes and suffixes.
+ *   <li>Ability to include or exclude specific tables using regular expressions.
+ *   <li>Integration with Flink's streaming environment for data processing.
  * </ul>
  *
- * <p>To automatically synchronize new table, This action creates a single sink for all Paimon
- * tables to be written. See {@link DatabaseSyncMode#COMBINED}.
+ * <p>Note: This action is primarily intended for use in Flink streaming applications that
+ * synchronize MongoDB data with other systems.
  */
 public class MongoDBSyncDatabaseAction extends ActionBase {
 

@@ -48,10 +48,6 @@ public class MongoDBContainer extends org.testcontainers.containers.MongoDBConta
 
     public static final int MONGODB_PORT = 27017;
 
-    public static final String FLINK_USER = "flinkuser";
-
-    public static final String FLINK_USER_PASSWORD = "a1?~!@#$%^&*(){}[]<>.,+_-=/|:;";
-
     public MongoDBContainer(String imageName) {
         super(imageName);
     }
@@ -142,12 +138,6 @@ public class MongoDBContainer extends org.testcontainers.containers.MongoDBConta
         }
     }
 
-    /** Executes a mongo command in separate database. */
-    public String executeCommandInSeparateDatabase(String command, String baseName) {
-        return executeCommandInDatabase(
-                command, baseName + "_" + Integer.toUnsignedString(new Random().nextInt(), 36));
-    }
-
     /** Executes a mongo command file in separate database. */
     public String executeCommandFileInSeparateDatabase(
             String fileNameIgnoreSuffix, String content) {
@@ -171,7 +161,6 @@ public class MongoDBContainer extends org.testcontainers.containers.MongoDBConta
         assertNotNull("Cannot locate " + ddlFile, ddlTestFile);
 
         try {
-            // use database;
             String command0 = String.format("db = db.getSiblingDB('%s');\n", dbName);
             String command1 =
                     Files.readAllLines(Paths.get(ddlTestFile.toURI())).stream()

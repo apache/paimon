@@ -36,7 +36,7 @@ import java.util.Map;
 public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
     @Test
-    @Timeout(120)
+    @Timeout(60)
     public void testSchemaEvolution() throws Exception {
         writeRecordsToMongoDB("test-data-1", database, "database");
         writeRecordsToMongoDB("test-data-2", database, "database");
