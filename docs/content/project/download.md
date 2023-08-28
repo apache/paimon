@@ -59,6 +59,7 @@ This documentation is a guide for downloading Paimon Jars.
 | Trino 370        | [paimon-trino-370-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-370/{{< version >}}/)                                   |
 | Trino 388        | [paimon-trino-388-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-388/{{< version >}}/)                                   |
 | Trino 393        | [paimon-trino-393-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-393/{{< version >}}/)                                   |
+| Trino 422        | [paimon-trino-422-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/)                                   |
 
 {{< /unstable >}}
 
@@ -91,6 +92,7 @@ This documentation is a guide for downloading Paimon Jars.
 | Trino 370        | [paimon-trino-370-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-370/{{< version >}}/paimon-trino-370-{{< version >}}.jar)                                                    |
 | Trino 388        | [paimon-trino-388-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-388/{{< version >}}/paimon-trino-388-{{< version >}}.jar)                                                    |
 | Trino 393        | [paimon-trino-393-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-393/{{< version >}}/paimon-trino-393-{{< version >}}.jar)                                                    |
+| Trino 422        | [paimon-trino-422-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-422/{{< version >}}/paimon-trino-422-{{< version >}}.jar)                                                    |
 
 {{< /stable >}}
 
