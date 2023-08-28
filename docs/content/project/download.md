@@ -133,3 +133,28 @@ This documentation is a guide for downloading Paimon Jars.
 | paimon-bundle | [paimon-bundle-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-bundle/{{< version >}}/paimon-bundle-{{< version >}}.jar) |
 
 {{< /stable >}}
+
+{{< unstable >}}
+
+## MANIFEST.MF
+
+For unstable version, you can find git commit id in jar:
+
+```shell
+Manifest-Version: 1.0
+Implementation-Title: Paimon : Common
+Implementation-Version: 0.5-SNAPSHOT
+Specification-Vendor: The Apache Software Foundation
+Specification-Title: Paimon : Common
+Implementation-Vendor-Id: org.apache.paimon
+SCM-Branch: master
+Implementation-Vendor: The Apache Software Foundation
+SCM-Revision: c8b4772f3cb4b25b25537e1ab0775441c627bf1c
+Created-By: Apache Maven 3.2.5
+Build-Jdk: 1.8.0_301
+Specification-Version: 0.5-SNAPSHOT
+```
+
+The `SCM-Revision` git commit id.
+
+{{< /unstable >}}
