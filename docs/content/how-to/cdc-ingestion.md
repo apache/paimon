@@ -460,7 +460,7 @@ In "specified" mode, synchronization takes place according to specified criteria
 This can be done by configuring "field.name" to specify the synchronization fields and "parser.path" to specify the JSON parsing path for those fields.
 The difference between the two is that the "specify" mode requires the user to explicitly identify the fields to be used and create a mapping table based on those fields.
 Dynamic mode, on the other hand, ensures that Paimon and MongoDB always keep the top-level fields consistent, eliminating the need to focus on specific fields.
-Further processing of the data table is required when using values from nested fields.
+Further processing of the data table is required when using values from nested fields testxxx.
 
 {{< generated/mongodb_operator >}}
 
