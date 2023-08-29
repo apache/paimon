@@ -35,6 +35,8 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -45,6 +47,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact with sort action. */
 public class SortCompactAction extends CompactAction {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SortCompactAction.class);
 
     private String sortStrategy;
     private List<String> orderColumns;
@@ -64,15 +68,6 @@ public class SortCompactAction extends CompactAction {
 
     @Override
     public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-
-        // we enable object reuse, we copy the un-reusable object ourselves.
-        env.getConfig().enableObjectReuse();
-
-        // kryo serializer is not good
-        env.getConfig().disableGenericTypes();
-
         build(env);
         execute(env, "Sort Compact Job");
     }
@@ -81,8 +76,9 @@ public class SortCompactAction extends CompactAction {
         // only support batch sort yet
         if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                 != RuntimeExecutionMode.BATCH) {
-            throw new IllegalArgumentException(
-                    "Only support batch mode yet, please set -Dexecution.runtime-mode=BATCH");
+            LOG.warn(
+                    "Sort Compact only support batch mode yet. Please add -Dexecution.runtime-mode=BATCH. The action this time will shift to batch mode forcely.");
+            env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         }
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         if (!(fileStoreTable instanceof AppendOnlyFileStoreTable)) {
