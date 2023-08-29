@@ -20,7 +20,7 @@ on: [push, pull_request]
 jobs:
   build:
     name: Build Hugo Documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
@@ -33,7 +33,7 @@ jobs:
         with:
           hugo-version: '0.68.3'  # Use the version that matches your project
           extended: true
-          
+
       - name: Build Hugo Docs
         run: hugo -b ""
         working-directory: ./docs
