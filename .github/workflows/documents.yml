@@ -39,7 +39,7 @@ jobs:
 
       - name: Run Hugo
         run: |
-          hugo -b ""
+          hugo -D
         working-directory: ./docs
 
       - name: Check for Warnings or Errors
