@@ -19,26 +19,24 @@ on: [push, pull_request]
 
 jobs:
   build:
+    name: Build Hugo Documentation
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        hugo-version:
-          - 'latest'
-          - '0.68.3'
 
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          submodules: recursive  # Ensure submodules are checked out
 
       - name: Setup Hugo
         uses: peaceiris/actions-hugo@v2
         with:
-          hugo-version: ${{ matrix.hugo-version }}
+          hugo-version: '0.68.3'  # Use the version that matches your project
           extended: true
-
+          
       - name: Build Hugo Docs
         run: hugo -b ""
         working-directory: ./docs
-
 
 
 
