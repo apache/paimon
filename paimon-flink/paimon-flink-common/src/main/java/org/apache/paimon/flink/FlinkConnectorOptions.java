@@ -203,6 +203,16 @@ public class FlinkConnectorOptions {
                             "If true, flink sink will use managed memory for merge tree; otherwise, "
                                     + "it will create an independent memory allocator.");
 
+    public static final ConfigOption<Boolean> SCAN_REMOVE_NORMALIZE =
+            key("scan.remove-normalize")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDeprecatedKeys("log.scan.remove-normalize")
+                    .withDescription(
+                            "Whether to force the removal of the normalize node when streaming read."
+                                    + " Note: This is dangerous and is likely to cause data errors if downstream"
+                                    + " is used to calculate aggregation and the input is not complete changelog.");
+
     /**
      * Weight of writer buffer in managed memory, Flink will compute the memory size for writer
      * according to the weight, the actual memory used depends on the running environment.

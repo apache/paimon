@@ -284,10 +284,6 @@ SELECT * FROM t /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' 
 
 ### Consumer ID
 
-{{< hint info >}}
-This is an experimental feature.
-{{< /hint >}}
-
 You can specify the `consumer-id` when streaming read table:
 ```sql
 SELECT * FROM t /*+ OPTIONS('consumer-id' = 'myid') */;
