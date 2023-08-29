@@ -23,15 +23,20 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
+import org.apache.paimon.flink.sink.MultiTablesCompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
+import org.apache.paimon.flink.source.MultiTablesCompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
@@ -53,19 +58,35 @@ public class CompactDatabaseAction extends ActionBase {
 
     private final Pattern includingPattern;
     private final Pattern excludingPattern;
-    private final String database;
-    private final Map<String, Table> tableMap = new HashMap<>();
+    private final Pattern databasePattern;
+
+    private DatabaseCompactMode databaseCompactMode = DatabaseCompactMode.DIVIDED;
+
+    private Map<String, Table> tableMap = new HashMap<>();
+
+    @Nullable private Options compactOptions = null;
 
     public CompactDatabaseAction(
             String warehouse,
-            String database,
+            @Nullable String includingDatabases,
             @Nullable String includingTables,
             @Nullable String excludingTables,
             Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
-        this.database = database;
+        this.databasePattern =
+                Pattern.compile(includingDatabases == null ? ".*" : includingDatabases);
         this.includingPattern = Pattern.compile(includingTables == null ? ".*" : includingTables);
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
+    }
+
+    public CompactDatabaseAction withDatabaseCompactMode(String mode) {
+        this.databaseCompactMode = DatabaseCompactMode.fromString(mode);
+        return this;
+    }
+
+    public CompactDatabaseAction withCompactOptions(Map<String, String> compactOptions) {
+        this.compactOptions = Options.fromMap(compactOptions);
+        return this;
     }
 
     private boolean shouldCompactionTable(String paimonFullTableName) {
@@ -82,8 +103,15 @@ public class CompactDatabaseAction extends ActionBase {
 
     @Override
     public void build(StreamExecutionEnvironment env) {
+        if (databaseCompactMode == DatabaseCompactMode.DIVIDED) {
+            buildForDividedMode(env);
+        } else {
+            buildForCombinedMode(env);
+        }
+    }
+
+    private void buildForDividedMode(StreamExecutionEnvironment env) {
         try {
-            Pattern databasePattern = Pattern.compile(database);
             List<String> databases = catalog.listDatabases();
             for (String databaseName : databases) {
                 Matcher databaseMatcher = databasePattern.matcher(databaseName);
@@ -116,6 +144,10 @@ public class CompactDatabaseAction extends ActionBase {
             throw new RuntimeException(e);
         }
 
+        Preconditions.checkState(
+                !tableMap.isEmpty(),
+                "no tables to be compacted. possible cause is that there are no tables detected after pattern matching");
+
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
@@ -140,6 +172,31 @@ public class CompactDatabaseAction extends ActionBase {
                     }
             }
         }
+    }
+
+    private void buildForCombinedMode(StreamExecutionEnvironment env) {
+        Preconditions.checkArgument(
+                compactOptions != null, "in combined mode, compact options need to be set.");
+
+        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        boolean isStreaming =
+                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
+        // Currently, multi-tables compaction do not support tables which bucketmode is UNWARE.
+        MultiTablesCompactorSourceBuilder sourceBuilder =
+                new MultiTablesCompactorSourceBuilder(
+                        catalogLoader(),
+                        databasePattern,
+                        includingPattern,
+                        excludingPattern,
+                        compactOptions.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis());
+
+        MultiTablesCompactorSinkBuilder sinkBuilder =
+                new MultiTablesCompactorSinkBuilder(catalogLoader(), compactOptions);
+
+        DataStream<RowData> source =
+                sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
+
+        sinkBuilder.withInput(source).build();
     }
 
     private void buildForTraditionalCompaction(
