@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source.operator;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
@@ -218,10 +219,18 @@ public abstract class MultiTablesCompactorSourceFunction
                                             table.getClass().getName()));
                             continue;
                         }
-
+                        FileStoreTable fileStoreTable = (FileStoreTable) table;
+                        if (fileStoreTable.bucketMode() == BucketMode.UNAWARE) {
+                            LOG.info(
+                                    String.format(
+                                                    "the bucket mode of %s is unware. ",
+                                                    identifier.getFullName())
+                                            + "currently, the table with unware bucket mode is not support in combined mode.");
+                            continue;
+                        }
                         BucketsMultiTable bucketsTable =
                                 new BucketsMultiTable(
-                                                (FileStoreTable) table,
+                                                fileStoreTable,
                                                 isStreaming,
                                                 identifier.getDatabaseName(),
                                                 identifier.getObjectName())
