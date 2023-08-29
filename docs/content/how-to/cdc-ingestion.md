@@ -322,6 +322,7 @@ To use this feature through `flink run`, run the following shell command.
     --table <table-name> \
     [--partition-keys <partition-keys>] \
     [--primary-keys <primary-keys>] \
+    [--type-mapping to-string] \
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
@@ -370,6 +371,7 @@ To use this feature through `flink run`, run the following shell command.
     [--table-suffix <paimon-table-suffix>] \
     [--including-tables <table-name|name-regular-expr>] \
     [--excluding-tables <table-name|name-regular-expr>] \
+    [--type-mapping to-string] \
     [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]

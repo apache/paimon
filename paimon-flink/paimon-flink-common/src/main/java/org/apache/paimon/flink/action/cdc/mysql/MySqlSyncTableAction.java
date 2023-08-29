@@ -90,8 +90,8 @@ public class MySqlSyncTableAction extends ActionBase {
     private final String table;
     private final Configuration mySqlConfig;
 
-    private final List<String> partitionKeys = new ArrayList<>();
-    private final List<String> primaryKeys = new ArrayList<>();
+    private List<String> partitionKeys = new ArrayList<>();
+    private List<String> primaryKeys = new ArrayList<>();
 
     private Map<String, String> tableConfig = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
@@ -114,7 +114,7 @@ public class MySqlSyncTableAction extends ActionBase {
     }
 
     public MySqlSyncTableAction withPartitionKeys(List<String> partitionKeys) {
-        this.partitionKeys.addAll(partitionKeys);
+        this.partitionKeys = partitionKeys;
         return this;
     }
 
@@ -123,7 +123,7 @@ public class MySqlSyncTableAction extends ActionBase {
     }
 
     public MySqlSyncTableAction withPrimaryKeys(List<String> primaryKeys) {
-        this.primaryKeys.addAll(primaryKeys);
+        this.primaryKeys = primaryKeys;
         return this;
     }
 

@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -909,6 +910,39 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 getFileStoreTable(tableName),
                 rowType,
                 Arrays.asList("_id", "_year"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testTypeMappingToString() throws Exception {
+        final String topic = "map-to-string";
+        createTestTopic(topic, 1, 1);
+
+        // ---------- Write the Canal json into Kafka -------------------
+        writeRecordsToKafka(topic, readLines("kafka/canal/table/tostring/canal-data-1.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withTypeMappingModes(TO_STRING.configString())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                        },
+                        new String[] {"k1", "v0", "v1"});
+        waitForResult(
+                Arrays.asList("+I[5, five, 50]", "+I[7, seven, 70]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("k1"));
     }
 
     @Test

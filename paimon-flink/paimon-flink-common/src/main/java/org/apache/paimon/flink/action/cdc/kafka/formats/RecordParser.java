@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.action.cdc.kafka.formats;
 
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSchema;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.utils.StringUtils;
@@ -50,11 +52,15 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     protected static final String FIELD_TABLE = "table";
     protected static final String FIELD_DATABASE = "database";
     protected static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     protected final TableNameConverter tableNameConverter;
+    protected final boolean caseSensitive;
+    protected final TypeMapping typeMapping;
+    protected final List<ComputedColumn> computedColumns;
+
     protected JsonNode root;
     protected String databaseName;
     protected String tableName;
-    protected boolean caseSensitive;
 
     protected abstract List<RichCdcMultiplexRecord> extractRecords();
 
@@ -64,9 +70,15 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
 
     public abstract KafkaSchema getKafkaSchema(String record);
 
-    public RecordParser(TableNameConverter tableNameConverter, boolean caseSensitive) {
-        this.tableNameConverter = tableNameConverter;
+    public RecordParser(
+            boolean caseSensitive,
+            TypeMapping typeMapping,
+            TableNameConverter tableNameConverter,
+            List<ComputedColumn> computedColumns) {
         this.caseSensitive = caseSensitive;
+        this.typeMapping = typeMapping;
+        this.tableNameConverter = tableNameConverter;
+        this.computedColumns = computedColumns;
     }
 
     @Override
