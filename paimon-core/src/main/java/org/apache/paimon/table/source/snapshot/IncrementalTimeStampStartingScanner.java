@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
 /** {@link StartingScanner} for incremental changes by timestamp. */
@@ -26,10 +27,13 @@ public class IncrementalTimeStampStartingScanner implements StartingScanner {
 
     private final long startTimestamp;
     private final long endTimestamp;
+    private final ScanMode scanMode;
 
-    public IncrementalTimeStampStartingScanner(long startTimestamp, long endTimestamp) {
+    public IncrementalTimeStampStartingScanner(
+            long startTimestamp, long endTimestamp, ScanMode scanMode) {
         this.startTimestamp = startTimestamp;
         this.endTimestamp = endTimestamp;
+        this.scanMode = scanMode;
     }
 
     @Override
@@ -41,12 +45,12 @@ public class IncrementalTimeStampStartingScanner implements StartingScanner {
             return new NoSnapshot();
         }
         Snapshot startSnapshot = manager.earlierOrEqualTimeMills(startTimestamp);
-        Long startSnapshotId =
+        long startSnapshotId =
                 (startSnapshot == null) ? earliestSnapshot.id() - 1 : startSnapshot.id();
         Snapshot endSnapshot = manager.earlierOrEqualTimeMills(endTimestamp);
-        Long endSnapshotId = (endSnapshot == null) ? latestSnapshot.id() : endSnapshot.id();
+        long endSnapshotId = (endSnapshot == null) ? latestSnapshot.id() : endSnapshot.id();
         IncrementalStartingScanner incrementalStartingScanner =
-                new IncrementalStartingScanner(startSnapshotId, endSnapshotId);
+                new IncrementalStartingScanner(startSnapshotId, endSnapshotId, scanMode);
         return incrementalStartingScanner.scan(manager, reader);
     }
 }

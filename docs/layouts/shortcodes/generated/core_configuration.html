@@ -171,6 +171,12 @@ under the License.
             <td>Read incremental changes between start snapshot (exclusive) and end snapshot, for example, '5,10' means changes between snapshot 5 and snapshot 10.</td>
         </tr>
         <tr>
+            <td><h5>incremental-between-scan-mode</h5></td>
+            <td style="word-wrap: break-word;">delta</td>
+            <td><p>Enum</p></td>
+            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot, 'delta' for scan newly changed files of a snapshot 'changelog' scan changelog files of a snapshot.<br /><br />Possible values:<ul><li>"delta": Scan newly changed files of a snapshot.</li><li>"changelog": Scan changelog files of a snapshot.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>incremental-between-timestamp</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

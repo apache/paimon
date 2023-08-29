@@ -143,11 +143,26 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
             case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
                 Pair<String, String> incrementalBetween = options.incrementalBetween();
+                CoreOptions.IncrementalBetweenScanMode scanType =
+                        options.incrementalBetweenScanMode();
+                ScanMode scanMode;
+                switch (scanType) {
+                    case DELATA:
+                        scanMode = ScanMode.DELTA;
+                        break;
+                    case CHANGELOG:
+                        scanMode = ScanMode.CHANGELOG;
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unknown incremental scan type " + scanType.name());
+                }
                 if (options.toMap().get(CoreOptions.INCREMENTAL_BETWEEN.key()) != null) {
                     try {
                         return new IncrementalStartingScanner(
                                 Long.parseLong(incrementalBetween.getLeft()),
-                                Long.parseLong(incrementalBetween.getRight()));
+                                Long.parseLong(incrementalBetween.getRight()),
+                                scanMode);
                     } catch (NumberFormatException e) {
                         return new IncrementalTagStartingScanner(
                                 incrementalBetween.getLeft(), incrementalBetween.getRight());
@@ -155,7 +170,8 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 } else {
                     return new IncrementalTimeStampStartingScanner(
                             Long.parseLong(incrementalBetween.getLeft()),
-                            Long.parseLong(incrementalBetween.getRight()));
+                            Long.parseLong(incrementalBetween.getRight()),
+                            scanMode);
                 }
             default:
                 throw new UnsupportedOperationException(

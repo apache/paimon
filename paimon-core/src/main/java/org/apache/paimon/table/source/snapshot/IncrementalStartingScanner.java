@@ -40,9 +40,12 @@ public class IncrementalStartingScanner implements StartingScanner {
     private long start;
     private long end;
 
-    public IncrementalStartingScanner(long start, long end) {
+    private ScanMode scanMode;
+
+    public IncrementalStartingScanner(long start, long end, ScanMode scanMode) {
         this.start = start;
         this.end = end;
+        this.scanMode = scanMode;
     }
 
     @Override
@@ -54,7 +57,7 @@ public class IncrementalStartingScanner implements StartingScanner {
 
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new HashMap<>();
         for (long i = start + 1; i < end + 1; i++) {
-            List<DataSplit> splits = readDeltaSplits(reader, manager.snapshot(i));
+            List<DataSplit> splits = readSplits(reader, manager.snapshot(i));
             for (DataSplit split : splits) {
                 grouped.computeIfAbsent(
                                 Pair.of(split.partition(), split.bucket()), k -> new ArrayList<>())
@@ -103,6 +106,17 @@ public class IncrementalStartingScanner implements StartingScanner {
                 });
     }
 
+    private List<DataSplit> readSplits(SnapshotReader reader, Snapshot s) {
+        switch (scanMode) {
+            case CHANGELOG:
+                return readChangeLogSplits(reader, s);
+            case DELTA:
+                return readDeltaSplits(reader, s);
+            default:
+                throw new UnsupportedOperationException("Unsupported scan kind: " + scanMode);
+        }
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private List<DataSplit> readDeltaSplits(SnapshotReader reader, Snapshot s) {
         if (s.commitKind() != CommitKind.APPEND) {
@@ -110,5 +124,14 @@ public class IncrementalStartingScanner implements StartingScanner {
             return Collections.emptyList();
         }
         return (List) reader.withSnapshot(s).withMode(ScanMode.DELTA).read().splits();
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private List<DataSplit> readChangeLogSplits(SnapshotReader reader, Snapshot s) {
+        if (s.commitKind() != CommitKind.COMPACT) {
+            // ignore COMPACT and OVERWRITE
+            return Collections.emptyList();
+        }
+        return (List) reader.withSnapshot(s).withMode(ScanMode.CHANGELOG).read().splits();
     }
 }
