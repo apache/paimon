@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.NormalizedKeyComputer;
 import org.apache.paimon.codegen.RecordComparator;
@@ -61,7 +62,11 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     @Override
     public void open() throws Exception {
         super.open();
+        initBuffer();
+    }
 
+    @VisibleForTesting
+    void initBuffer() {
         InternalRowSerializer serializer = InternalSerializers.create(rowType);
         NormalizedKeyComputer normalizedKeyComputer =
                 CodeGenUtils.newNormalizedKeyComputer(
@@ -109,5 +114,11 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     @Override
     public void processElement(StreamRecord<InternalRow> element) throws Exception {
         buffer.write(element.getValue());
+    }
+
+    @VisibleForTesting
+    protected Configuration jobConfiguration() {
+        // unit test will override this method to set configurations
+        return getContainingTask().getJobConfiguration();
     }
 }
