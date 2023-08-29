@@ -20,7 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -40,6 +40,6 @@ public class StaticFromTagStartingScanner implements StartingScanner {
         Snapshot snapshot = tagManager.taggedSnapshot(tagName);
 
         return StartingScanner.fromPlan(
-                snapshotReader.withKind(ScanKind.ALL).withSnapshot(snapshot).read());
+                snapshotReader.withMode(ScanMode.ALL).withSnapshot(snapshot).read());
     }
 }

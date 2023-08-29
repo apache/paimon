@@ -19,7 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
 /**
@@ -41,6 +41,6 @@ public class ContinuousFromSnapshotFullStartingScanner implements StartingScanne
         }
         long ceiledSnapshotId = Math.max(snapshotId, earliestSnapshotId);
         return StartingScanner.fromPlan(
-                snapshotReader.withKind(ScanKind.ALL).withSnapshot(ceiledSnapshotId).read());
+                snapshotReader.withMode(ScanMode.ALL).withSnapshot(ceiledSnapshotId).read());
     }
 }

@@ -28,7 +28,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -48,6 +47,7 @@ import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
@@ -253,7 +253,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits =
-                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
+                toSplits(table.newSnapshotReader().withMode(ScanMode.DELTA).read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -273,7 +273,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
 
         List<Split> splits =
-                toSplits(table.newSnapshotReader().withKind(ScanKind.DELTA).read().dataSplits());
+                toSplits(table.newSnapshotReader().withMode(ScanMode.DELTA).read().dataSplits());
         TableRead read = table.newRead().withProjection(PROJECTION);
 
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_PROJECTED_ROW_TO_STRING))
@@ -292,7 +292,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<Split> splits =
                 toSplits(
                         table.newSnapshotReader()
-                                .withKind(ScanKind.DELTA)
+                                .withMode(ScanMode.DELTA)
                                 .withFilter(predicate)
                                 .read()
                                 .dataSplits());
@@ -328,7 +328,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotReader().withKind(ScanKind.CHANGELOG).read().dataSplits());
+                        table.newSnapshotReader().withMode(ScanMode.CHANGELOG).read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
@@ -377,7 +377,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         List<Split> splits =
                 toSplits(
-                        table.newSnapshotReader().withKind(ScanKind.CHANGELOG).read().dataSplits());
+                        table.newSnapshotReader().withMode(ScanMode.CHANGELOG).read().dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
@@ -400,7 +400,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         splits =
                 toSplits(
-                        table.newSnapshotReader().withKind(ScanKind.CHANGELOG).read().dataSplits());
+                        table.newSnapshotReader().withMode(ScanMode.CHANGELOG).read().dataSplits());
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder("+I 1|30|130|binary|varbinary|mapKey:mapVal|multiset");
         assertThat(getResult(read, splits, binaryRow(2), 0, CHANGELOG_ROW_TO_STRING))
@@ -426,7 +426,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         splits =
                 toSplits(
-                        table.newSnapshotReader().withKind(ScanKind.CHANGELOG).read().dataSplits());
+                        table.newSnapshotReader().withMode(ScanMode.CHANGELOG).read().dataSplits());
         assertThat(getResult(read, splits, binaryRow(1), 0, CHANGELOG_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
                         "-D 1|20|120|binary|varbinary|mapKey:mapVal|multiset",
@@ -709,7 +709,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(1, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
 
-        SnapshotReader snapshotReader = table.newSnapshotReader().withKind(ScanKind.DELTA);
+        SnapshotReader snapshotReader = table.newSnapshotReader().withMode(ScanMode.DELTA);
         List<DataSplit> splits0 = snapshotReader.read().dataSplits();
         assertThat(splits0).hasSize(1);
         assertThat(splits0.get(0).dataFiles()).hasSize(1);

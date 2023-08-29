@@ -18,38 +18,30 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.annotation.Public;
+
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-import java.util.List;
+/**
+ * Rich Plan of scan.
+ *
+ * @since 0.6.0
+ */
+@Public
+public interface RichPlan extends TableScan.Plan {
 
-/** This is used to distinguish the case where the snapshot does not exist and the plan is empty. */
-public class SnapshotNotExistPlan implements RichPlan {
-    public static final SnapshotNotExistPlan INSTANCE = new SnapshotNotExistPlan();
-
-    private SnapshotNotExistPlan() {
-        // private
-    }
-
-    @Override
-    public List<Split> splits() {
-        return Collections.emptyList();
-    }
-
+    /** Current watermark for consumed snapshot. */
     @Nullable
-    @Override
-    public Long watermark() {
-        return null;
-    }
+    Long watermark();
 
+    /**
+     * Snapshot id of this plan.
+     *
+     * @return null if the table is empty.
+     */
     @Nullable
-    @Override
-    public Long snapshotId() {
-        return null;
-    }
+    Long snapshotId();
 
-    @Override
-    public ScanMode scanMode() {
-        throw new UnsupportedOperationException();
-    }
+    /** Scan which part of the snapshot. */
+    ScanMode scanMode();
 }

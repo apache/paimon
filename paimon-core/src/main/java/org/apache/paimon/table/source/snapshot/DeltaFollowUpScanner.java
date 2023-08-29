@@ -20,7 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.table.source.ScanMode;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +45,6 @@ public class DeltaFollowUpScanner implements FollowUpScanner {
 
     @Override
     public SnapshotReader.Plan scan(long snapshotId, SnapshotReader snapshotReader) {
-        return snapshotReader.withKind(ScanKind.DELTA).withSnapshot(snapshotId).read();
+        return snapshotReader.withMode(ScanMode.DELTA).withSnapshot(snapshotId).read();
     }
 }

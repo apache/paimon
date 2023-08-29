@@ -20,7 +20,7 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.operation.ScanKind;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -49,7 +49,7 @@ public class CompactedStartingScanner implements StartingScanner {
         }
 
         return StartingScanner.fromPlan(
-                snapshotReader.withKind(ScanKind.ALL).withSnapshot(startingSnapshotId).read());
+                snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId).read());
     }
 
     @Nullable

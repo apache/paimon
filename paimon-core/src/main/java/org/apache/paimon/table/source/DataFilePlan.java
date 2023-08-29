@@ -38,10 +38,9 @@ public class DataFilePlan implements TableScan.Plan {
         return new ArrayList<>(splits);
     }
 
-    public static DataFilePlan fromResult(StartingScanner.Result result) {
-        return new DataFilePlan(
-                result instanceof StartingScanner.ScannedResult
-                        ? ((StartingScanner.ScannedResult) result).splits()
-                        : Collections.emptyList());
+    public static TableScan.Plan fromResult(StartingScanner.Result result) {
+        return result instanceof StartingScanner.ScannedResult
+                ? ((StartingScanner.ScannedResult) result).plan()
+                : new DataFilePlan(Collections.emptyList());
     }
 }

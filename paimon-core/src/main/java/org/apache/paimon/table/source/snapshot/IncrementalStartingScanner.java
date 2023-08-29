@@ -22,8 +22,9 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -77,7 +78,29 @@ public class IncrementalStartingScanner implements StartingScanner {
             }
         }
 
-        return new ScannedResult(end, null, result);
+        return StartingScanner.fromPlan(
+                new SnapshotReader.Plan() {
+                    @Override
+                    public Long watermark() {
+                        return null;
+                    }
+
+                    @Override
+                    public Long snapshotId() {
+                        return end;
+                    }
+
+                    @Override
+                    public ScanMode scanMode() {
+                        // TODO introduce a new mode
+                        throw new UnsupportedOperationException();
+                    }
+
+                    @Override
+                    public List<Split> splits() {
+                        return (List) result;
+                    }
+                });
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -86,6 +109,6 @@ public class IncrementalStartingScanner implements StartingScanner {
             // ignore COMPACT and OVERWRITE
             return Collections.emptyList();
         }
-        return (List) reader.withSnapshot(s).withKind(ScanKind.DELTA).read().splits();
+        return (List) reader.withSnapshot(s).withMode(ScanMode.DELTA).read().splits();
     }
 }

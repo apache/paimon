@@ -20,10 +20,10 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.WriteMode;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
@@ -153,7 +153,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
                     // filter with "b" = 15 in schema0
@@ -174,7 +174,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
 
@@ -212,7 +212,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
                     // filter with "kt" = 116 in schema0
@@ -230,7 +230,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
 
