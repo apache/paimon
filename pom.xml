@@ -479,7 +479,6 @@ under the License.
                             <excludes>
                                 <exclude>${test.unit.pattern}</exclude>
                             </excludes>
-                            <reuseForks>false</reuseForks>
                         </configuration>
                     </execution>
                 </executions>
