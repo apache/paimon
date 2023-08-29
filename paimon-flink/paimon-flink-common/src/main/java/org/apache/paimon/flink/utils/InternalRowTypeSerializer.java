@@ -24,11 +24,7 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataType;
 
-import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.TypeSerializerSchemaCompatibility;
-import org.apache.flink.api.common.typeutils.TypeSerializerSnapshot;
-import org.apache.flink.api.java.typeutils.runtime.kryo.KryoSerializer;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
 
@@ -108,69 +104,5 @@ public class InternalRowTypeSerializer extends InternalTypeSerializer<InternalRo
     @Override
     public int hashCode() {
         return Objects.hash(internalRowSerializer);
-    }
-
-    @Override
-    public TypeSerializerSnapshot<InternalRow> snapshotConfiguration() {
-        return new InternalRowTypeSerializerSnapshot(internalRowSerializer.fieldTypes());
-    }
-
-    /**
-     * {@link TypeSerializerSnapshot} for {@link InternalRow}. It checks the compatibility by
-     * checking type.
-     */
-    public static class InternalRowTypeSerializerSnapshot
-            implements TypeSerializerSnapshot<InternalRow> {
-
-        private DataType[] dataTypes;
-        private KryoSerializer<DataType[]> serializer =
-                new KryoSerializer<>(DataType[].class, new ExecutionConfig());
-
-        private InternalRowTypeSerializerSnapshot(DataType... dataTypes) {
-            this.dataTypes = dataTypes;
-        }
-
-        @Override
-        public int getCurrentVersion() {
-            return 0;
-        }
-
-        @Override
-        public void writeSnapshot(DataOutputView out) throws IOException {
-            serializer.serialize(dataTypes, out);
-        }
-
-        @Override
-        public void readSnapshot(int readVersion, DataInputView in, ClassLoader userCodeClassLoader)
-                throws IOException {
-            this.dataTypes = serializer.deserialize(in);
-        }
-
-        @Override
-        public TypeSerializer<InternalRow> restoreSerializer() {
-            return new InternalRowTypeSerializer(dataTypes);
-        }
-
-        @Override
-        public TypeSerializerSchemaCompatibility<InternalRow> resolveSchemaCompatibility(
-                TypeSerializer<InternalRow> newSerializer) {
-            if (!(newSerializer instanceof InternalRowTypeSerializer)) {
-                return TypeSerializerSchemaCompatibility.incompatible();
-            }
-
-            InternalRowTypeSerializer other = (InternalRowTypeSerializer) newSerializer;
-
-            int numFields = dataTypes.length;
-            if (numFields == other.internalRowSerializer.getArity()) {
-                for (int i = 0; i < numFields; i++) {
-                    if (!dataTypes[i].equals(other.internalRowSerializer.fieldTypes()[i])) {
-                        return TypeSerializerSchemaCompatibility.incompatible();
-                    }
-                }
-                return TypeSerializerSchemaCompatibility.compatibleAsIs();
-            } else {
-                return TypeSerializerSchemaCompatibility.incompatible();
-            }
-        }
     }
 }
