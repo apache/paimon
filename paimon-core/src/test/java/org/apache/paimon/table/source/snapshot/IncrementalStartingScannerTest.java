@@ -33,7 +33,7 @@ import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link CompactionChangelogFollowUpScanner}. */
+/** Tests for {@link IncrementalStartingScanner}. */
 public class IncrementalStartingScannerTest extends ScannerTestBase {
 
     @Test
