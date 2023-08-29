@@ -435,6 +435,7 @@ under the License.
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.0.0-M5</version>
                 <configuration>
+                    <useSystemClassLoader>false</useSystemClassLoader>
                     <forkCount>${flink.forkCount}</forkCount>
                     <reuseForks>${flink.reuseForks}</reuseForks>
                     <trimStackTrace>false</trimStackTrace>
@@ -460,7 +461,6 @@ under the License.
                             <goal>test</goal>
                         </goals>
                         <configuration>
-                            <forkCount>0</forkCount>
                             <includes>
                                 <include>${test.unit.pattern}</include>
                             </includes>
@@ -474,7 +474,6 @@ under the License.
                             <goal>test</goal>
                         </goals>
                         <configuration>
-                            <forkCount>0</forkCount>
                             <includes>
                                 <include>**/*.*</include>
                             </includes>
