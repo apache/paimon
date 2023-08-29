@@ -24,7 +24,7 @@ jobs:
       matrix:
         hugo-version:
           - 'latest'
-          - '0.68.0'
+          - '0.68.3'
 
     steps:
       - uses: actions/checkout@v2
