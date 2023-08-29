@@ -36,19 +36,12 @@ import java.io.IOException;
 import java.util.Objects;
 
 /** A TypeSerializer for {@link InternalRow}. */
-public class InternalRowTypeSerializer extends TypeSerializer<InternalRow> {
-
-    private static final long serialVersionUID = 1L;
+public class InternalRowTypeSerializer extends InternalTypeSerializer<InternalRow> {
 
     private final InternalRowSerializer internalRowSerializer;
 
     public InternalRowTypeSerializer(DataType... types) {
         internalRowSerializer = new InternalRowSerializer(types);
-    }
-
-    @Override
-    public boolean isImmutableType() {
-        return false;
     }
 
     @Override
@@ -69,11 +62,6 @@ public class InternalRowTypeSerializer extends TypeSerializer<InternalRow> {
     @Override
     public InternalRow copy(InternalRow from, InternalRow reuse) {
         return internalRowSerializer.copyRowData(from, reuse);
-    }
-
-    @Override
-    public int getLength() {
-        return -1;
     }
 
     @Override
@@ -137,8 +125,6 @@ public class InternalRowTypeSerializer extends TypeSerializer<InternalRow> {
         private DataType[] dataTypes;
         private KryoSerializer<DataType[]> serializer =
                 new KryoSerializer<>(DataType[].class, new ExecutionConfig());
-
-        public InternalRowTypeSerializerSnapshot() {}
 
         private InternalRowTypeSerializerSnapshot(DataType... dataTypes) {
             this.dataTypes = dataTypes;

@@ -24,7 +24,8 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.shuffle.RangeShuffle;
-import org.apache.paimon.flink.utils.InternalRowType;
+import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
+import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -112,8 +113,10 @@ public class SortUtils {
         fields.addAll(keyFields);
         fields.addAll(dataFields);
         final RowType longRowType = new RowType(fields);
-        final InternalRowType internalRowType =
-                new InternalRowType(longRowType.getFieldTypes().toArray(new DataType[0]));
+        final InternalTypeInfo<InternalRow> internalRowType =
+                new InternalTypeInfo<>(
+                        new InternalRowTypeSerializer(
+                                longRowType.getFieldTypes().toArray(new DataType[0])));
 
         // generate the KEY as the key of Pair.
         DataStream<Tuple2<KEY, RowData>> inputWithKey =
@@ -169,7 +172,9 @@ public class SortUtils {
                                 return keyProjectedRow.replaceRow(value);
                             }
                         },
-                        new InternalRowType(valueRowType.getFieldTypes().toArray(new DataType[0])))
+                        new InternalTypeInfo<>(
+                                new InternalRowTypeSerializer(
+                                        valueRowType.getFieldTypes().toArray(new DataType[0]))))
                 .setParallelism(sinkParallelism)
                 .map(FlinkRowData::new, inputStream.getType())
                 .setParallelism(sinkParallelism);

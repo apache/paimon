@@ -21,7 +21,8 @@ package org.apache.paimon.flink.sorter;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
-import org.apache.paimon.flink.utils.InternalRowType;
+import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
+import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -58,7 +59,9 @@ public class OrderSorter extends TableSorter {
                 origin,
                 table,
                 keyRowType,
-                new InternalRowType(keyRowType.getFieldTypes().toArray(new DataType[0])),
+                new InternalTypeInfo<>(
+                        new InternalRowTypeSerializer(
+                                keyRowType.getFieldTypes().toArray(new DataType[0]))),
                 new KeyComparatorSupplier(keyRowType),
                 new SortUtils.KeyAbstract<InternalRow>() {
 
