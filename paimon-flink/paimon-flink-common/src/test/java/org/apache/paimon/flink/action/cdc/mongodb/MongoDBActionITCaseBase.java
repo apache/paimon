@@ -18,21 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.ActionITCaseBase;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CommonTestUtils;
+import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
@@ -40,19 +32,15 @@ import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 /** Base test class for {@link org.apache.paimon.flink.action.Action}s related to MongoDB. */
-public abstract class MongoDBActionITCaseBase extends ActionITCaseBase {
+public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(MongoDBActionITCaseBase.class);
     protected static MongoClient client;
@@ -89,80 +77,123 @@ public abstract class MongoDBActionITCaseBase extends ActionITCaseBase {
         return MONGODB_CONTAINER.executeCommandFileInSeparateDatabase(fileName, dbName, content);
     }
 
-    protected void waitJobRunning(JobClient client) throws Exception {
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
+    protected void runActionWithDefaultEnv(MongoDBSyncTableAction action) throws Exception {
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+    }
+
+    protected void runActionWithDefaultEnv(MongoDBSyncDatabaseAction action) throws Exception {
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+    }
+
+    protected MongoDBSyncTableActionBuilder syncTableActionBuilder(
+            Map<String, String> mongodbConfig) {
+        return new MongoDBSyncTableActionBuilder(mongodbConfig);
+    }
+
+    protected MongoDBSyncDatabaseActionBuilder syncDatabaseActionBuilder(
+            Map<String, String> mongodbConfig) {
+        return new MongoDBSyncDatabaseActionBuilder(mongodbConfig);
+    }
+
+    /** Builder to build {@link MongoDBSyncTableAction} from action arguments. */
+    protected class MongoDBSyncTableActionBuilder
+            extends SyncTableActionBuilder<MongoDBSyncTableAction> {
+
+        public MongoDBSyncTableActionBuilder(Map<String, String> mongodbConfig) {
+            super(mongodbConfig);
+        }
+
+        public MongoDBSyncTableActionBuilder withPrimaryKeys(String... primaryKeys) {
+            throw new UnsupportedOperationException();
+        }
+
+        public MongoDBSyncTableActionBuilder withComputedColumnArgs(String... computedColumnArgs) {
+            throw new UnsupportedOperationException();
+        }
+
+        public MongoDBSyncTableActionBuilder withComputedColumnArgs(
+                List<String> computedColumnArgs) {
+            throw new UnsupportedOperationException();
+        }
+
+        public MongoDBSyncTableActionBuilder withTypeMappingModes(String... typeMappingModes) {
+            throw new UnsupportedOperationException();
+        }
+
+        public MongoDBSyncTableAction build() {
+            List<String> args =
+                    new ArrayList<>(
+                            Arrays.asList(
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database,
+                                    "--table",
+                                    tableName));
+
+            args.addAll(mapToArgs("--mongodb-conf", sourceConfig));
+            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
+            args.addAll(mapToArgs("--table-conf", tableConfig));
+
+            args.addAll(listToArgs("--partition-keys", partitionKeys));
+
+            MultipleParameterTool params =
+                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            return (MongoDBSyncTableAction)
+                    new MongoDBSyncTableActionFactory()
+                            .create(params)
+                            .orElseThrow(RuntimeException::new);
         }
     }
 
-    protected void waitForResult(
-            List<String> expected, FileStoreTable table, RowType rowType, List<String> primaryKeys)
-            throws Exception {
-        assertThat(table.schema().primaryKeys()).isEqualTo(primaryKeys);
+    /** Builder to build {@link MongoDBSyncDatabaseAction} from action arguments. */
+    protected class MongoDBSyncDatabaseActionBuilder
+            extends SyncDatabaseActionBuilder<MongoDBSyncDatabaseAction> {
 
-        // wait for table schema to become our expected schema
-        while (true) {
-            if (rowType.getFieldCount() == table.schema().fields().size()) {
-                int cnt = 0;
-                for (int i = 0; i < table.schema().fields().size(); i++) {
-                    DataField field = table.schema().fields().get(i);
-                    boolean sameName = field.name().equals(rowType.getFieldNames().get(i));
-                    boolean sameType = field.type().equals(rowType.getFieldTypes().get(i));
-                    if (sameName && sameType) {
-                        cnt++;
-                    }
-                }
-                if (cnt == rowType.getFieldCount()) {
-                    break;
-                }
-            }
-            table = table.copyWithLatestSchema();
-            Thread.sleep(1000);
+        public MongoDBSyncDatabaseActionBuilder(Map<String, String> mongodbConfig) {
+            super(mongodbConfig);
         }
 
-        // wait for data to become expected
-        List<String> sortedExpected = new ArrayList<>(expected);
-        Collections.sort(sortedExpected);
-        while (true) {
-            ReadBuilder readBuilder = table.newReadBuilder();
-            TableScan.Plan plan = readBuilder.newScan().plan();
-            List<String> result =
-                    getResult(
-                            readBuilder.newRead(),
-                            plan == null ? Collections.emptyList() : plan.splits(),
-                            rowType);
-            List<String> sortedActual = new ArrayList<>(result);
-            Collections.sort(sortedActual);
-            LOG.info("Expected sortedExpected is:{}", sortedExpected);
-            LOG.info("Actual sortedActual is:{}", sortedExpected);
-            if (sortedExpected.equals(sortedActual)) {
-                break;
-            }
-            Thread.sleep(1000);
+        public MongoDBSyncDatabaseActionBuilder ignoreIncompatible(boolean ignoreIncompatible) {
+            throw new UnsupportedOperationException();
         }
-    }
 
-    protected FileStoreTable getFileStoreTable(String tableName) throws Exception {
-        Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog().getTable(identifier);
-    }
+        public MongoDBSyncDatabaseActionBuilder mergeShards(boolean mergeShards) {
+            throw new UnsupportedOperationException();
+        }
 
-    protected void waitTablesCreated(String... tables) throws Exception {
-        CommonTestUtils.waitUtil(
-                () -> {
-                    try {
-                        List<String> existed = catalog().listTables(database);
-                        return existed.containsAll(Arrays.asList(tables));
-                    } catch (Catalog.DatabaseNotExistException e) {
-                        throw new RuntimeException(e);
-                    }
-                },
-                Duration.ofMinutes(5),
-                Duration.ofMillis(100),
-                "Failed to wait tables to be created in 5 seconds.");
+        public MongoDBSyncDatabaseActionBuilder withMode(String mode) {
+            throw new UnsupportedOperationException();
+        }
+
+        public MongoDBSyncDatabaseActionBuilder withTypeMappingModes(String... typeMappingModes) {
+            throw new UnsupportedOperationException();
+        }
+
+        public MongoDBSyncDatabaseAction build() {
+            List<String> args =
+                    new ArrayList<>(
+                            Arrays.asList("--warehouse", warehouse, "--database", database));
+
+            args.addAll(mapToArgs("--mongodb-conf", sourceConfig));
+            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
+            args.addAll(mapToArgs("--table-conf", tableConfig));
+
+            args.addAll(nullableToArgs("--table-prefix", tablePrefix));
+            args.addAll(nullableToArgs("--table-suffix", tableSuffix));
+            args.addAll(nullableToArgs("--including-tables", includingTables));
+            args.addAll(nullableToArgs("--excluding-tables", excludingTables));
+
+            MultipleParameterTool params =
+                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            return (MongoDBSyncDatabaseAction)
+                    new MongoDBSyncDatabaseActionFactory()
+                            .create(params)
+                            .orElseThrow(RuntimeException::new);
+        }
     }
 }

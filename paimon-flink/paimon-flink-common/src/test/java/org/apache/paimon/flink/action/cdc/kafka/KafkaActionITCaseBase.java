@@ -18,21 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.ActionITCaseBase;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.TableScan;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CommonTestUtils;
+import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.apache.flink.api.common.JobStatus;
+import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -79,7 +71,7 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link org.apache.paimon.flink.action.Action}s related to MySQL. */
-public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
+public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -130,7 +122,8 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
     }
 
     @AfterEach
-    public void after() throws ExecutionException, InterruptedException {
+    public void after() throws Exception {
+        super.after();
         // Cancel timer for debug logging
         cancelTimeoutLogger();
         // Delete topics for avoid reusing topics of Kafka cluster
@@ -208,51 +201,6 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
                                 endOffsets.get(partition)));
     }
 
-    protected void waitForResult(
-            List<String> expected, FileStoreTable table, RowType rowType, List<String> primaryKeys)
-            throws Exception {
-        assertThat(table.schema().primaryKeys()).isEqualTo(primaryKeys);
-
-        // wait for table schema to become our expected schema
-        while (true) {
-            if (rowType.getFieldCount() == table.schema().fields().size()) {
-                int cnt = 0;
-                for (int i = 0; i < table.schema().fields().size(); i++) {
-                    DataField field = table.schema().fields().get(i);
-                    boolean sameName = field.name().equals(rowType.getFieldNames().get(i));
-                    boolean sameType = field.type().equals(rowType.getFieldTypes().get(i));
-                    if (sameName && sameType) {
-                        cnt++;
-                    }
-                }
-                if (cnt == rowType.getFieldCount()) {
-                    break;
-                }
-            }
-            table = table.copyWithLatestSchema();
-            Thread.sleep(1000);
-        }
-
-        // wait for data to become expected
-        List<String> sortedExpected = new ArrayList<>(expected);
-        Collections.sort(sortedExpected);
-        while (true) {
-            ReadBuilder readBuilder = table.newReadBuilder();
-            TableScan.Plan plan = readBuilder.newScan().plan();
-            List<String> result =
-                    getResult(
-                            readBuilder.newRead(),
-                            plan == null ? Collections.emptyList() : plan.splits(),
-                            rowType);
-            List<String> sortedActual = new ArrayList<>(result);
-            Collections.sort(sortedActual);
-            if (sortedExpected.equals(sortedActual)) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
-    }
-
     public static Properties getStandardProps() {
         Properties standardProps = new Properties();
         standardProps.put("bootstrap.servers", KAFKA_CONTAINER.getBootstrapServers());
@@ -276,6 +224,117 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
         config.put("properties.enable.auto.commit", "false");
         config.put("properties.auto.offset.reset", "earliest");
         return config;
+    }
+
+    protected JobClient runActionWithDefaultEnv(KafkaSyncTableAction action) throws Exception {
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+        return client;
+    }
+
+    protected JobClient runActionWithDefaultEnv(KafkaSyncDatabaseAction action) throws Exception {
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+        return client;
+    }
+
+    protected KafkaSyncTableActionBuilder syncTableActionBuilder(Map<String, String> kafkaConfig) {
+        return new KafkaSyncTableActionBuilder(kafkaConfig);
+    }
+
+    protected KafkaSyncDatabaseActionBuilder syncDatabaseActionBuilder(
+            Map<String, String> kafkaConfig) {
+        return new KafkaSyncDatabaseActionBuilder(kafkaConfig);
+    }
+
+    /** Builder to build {@link KafkaSyncTableAction} from action arguments. */
+    protected class KafkaSyncTableActionBuilder
+            extends SyncTableActionBuilder<KafkaSyncTableAction> {
+
+        public KafkaSyncTableActionBuilder(Map<String, String> kafkaConfig) {
+            super(kafkaConfig);
+        }
+
+        public KafkaSyncTableActionBuilder withTypeMappingModes(String... typeMappingModes) {
+            throw new UnsupportedOperationException();
+        }
+
+        public KafkaSyncTableAction build() {
+            List<String> args =
+                    new ArrayList<>(
+                            Arrays.asList(
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database,
+                                    "--table",
+                                    tableName));
+
+            args.addAll(mapToArgs("--kafka-conf", sourceConfig));
+            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
+            args.addAll(mapToArgs("--table-conf", tableConfig));
+
+            args.addAll(listToArgs("--partition-keys", partitionKeys));
+            args.addAll(listToArgs("--primary-keys", primaryKeys));
+
+            args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
+
+            MultipleParameterTool params =
+                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            return (KafkaSyncTableAction)
+                    new KafkaSyncTableActionFactory()
+                            .create(params)
+                            .orElseThrow(RuntimeException::new);
+        }
+    }
+
+    /** Builder to build {@link KafkaSyncDatabaseAction} from action arguments. */
+    protected class KafkaSyncDatabaseActionBuilder
+            extends SyncDatabaseActionBuilder<KafkaSyncDatabaseAction> {
+
+        public KafkaSyncDatabaseActionBuilder(Map<String, String> kafkaConfig) {
+            super(kafkaConfig);
+        }
+
+        public KafkaSyncDatabaseActionBuilder ignoreIncompatible(boolean ignoreIncompatible) {
+            throw new UnsupportedOperationException();
+        }
+
+        public KafkaSyncDatabaseActionBuilder mergeShards(boolean mergeShards) {
+            throw new UnsupportedOperationException();
+        }
+
+        public KafkaSyncDatabaseActionBuilder withMode(String mode) {
+            throw new UnsupportedOperationException();
+        }
+
+        public KafkaSyncDatabaseActionBuilder withTypeMappingModes(String... typeMappingModes) {
+            throw new UnsupportedOperationException();
+        }
+
+        public KafkaSyncDatabaseAction build() {
+            List<String> args =
+                    new ArrayList<>(
+                            Arrays.asList("--warehouse", warehouse, "--database", database));
+
+            args.addAll(mapToArgs("--kafka-conf", sourceConfig));
+            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
+            args.addAll(mapToArgs("--table-conf", tableConfig));
+
+            args.addAll(nullableToArgs("--table-prefix", tablePrefix));
+            args.addAll(nullableToArgs("--table-suffix", tableSuffix));
+            args.addAll(nullableToArgs("--including-tables", includingTables));
+            args.addAll(nullableToArgs("--excluding-tables", excludingTables));
+
+            MultipleParameterTool params =
+                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            return (KafkaSyncDatabaseAction)
+                    new KafkaSyncDatabaseActionFactory()
+                            .create(params)
+                            .orElseThrow(RuntimeException::new);
+        }
     }
 
     public void createTestTopic(String topic, int numPartitions, int replicationFactor) {
@@ -334,46 +393,13 @@ public abstract class KafkaActionITCaseBase extends ActionITCaseBase {
         }
 
         @Override
-        public void beforeAll(ExtensionContext extensionContext) throws Exception {
+        public void beforeAll(ExtensionContext extensionContext) {
             this.doStart();
         }
 
         @Override
-        public void afterAll(ExtensionContext extensionContext) throws Exception {
+        public void afterAll(ExtensionContext extensionContext) {
             this.close();
         }
-    }
-
-    protected void waitJobRunning(JobClient client) throws Exception {
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
-    }
-
-    protected FileStoreTable getFileStoreTable(String tableName) throws Exception {
-        Identifier identifier = Identifier.create(database, tableName);
-        return (FileStoreTable) catalog().getTable(identifier);
-    }
-
-    protected void waitTablesCreated(String... tables) throws Exception {
-        final int timeoutSeconds = 50;
-        CommonTestUtils.waitUtil(
-                () -> {
-                    try {
-                        List<String> existedTables = catalog().listTables(database);
-                        return Arrays.stream(tables).allMatch(existedTables::contains);
-                    } catch (Catalog.DatabaseNotExistException e) {
-                        throw new RuntimeException("Database does not exist: " + database, e);
-                    }
-                },
-                Duration.ofSeconds(timeoutSeconds),
-                Duration.ofMillis(100),
-                String.format(
-                        "Failed to wait for tables to be created within %d seconds.",
-                        timeoutSeconds));
     }
 }

@@ -49,4 +49,8 @@ public enum DatabaseSyncMode implements Serializable {
                 throw new UnsupportedOperationException("Unsupported mode: " + mode);
         }
     }
+
+    public String configString() {
+        return name().toLowerCase().replace("_", "-");
+    }
 }

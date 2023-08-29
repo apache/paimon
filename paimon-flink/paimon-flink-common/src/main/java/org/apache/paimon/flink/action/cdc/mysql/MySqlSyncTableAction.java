@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -41,7 +42,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -96,11 +96,6 @@ public class MySqlSyncTableAction extends ActionBase {
     private Map<String, String> tableConfig = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
-
-    public MySqlSyncTableAction(
-            String warehouse, String database, String table, Map<String, String> mySqlConfig) {
-        this(warehouse, database, table, Collections.emptyMap(), mySqlConfig);
-    }
 
     public MySqlSyncTableAction(
             String warehouse,
@@ -276,6 +271,16 @@ public class MySqlSyncTableAction extends ActionBase {
                     Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME));
             return tableNamePattern.matcher(tableName).matches();
         };
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

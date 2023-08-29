@@ -68,7 +68,7 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
 
         Map<String, String> kafkaConfig = optionalConfigMap(params, "kafka-conf");
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        Map<String, String> paimonConfig = optionalConfigMap(params, "paimon-conf");
+        Map<String, String> paimonConfig = optionalConfigMap(params, "table-conf");
 
         return Optional.of(
                 new KafkaSyncTableAction(
