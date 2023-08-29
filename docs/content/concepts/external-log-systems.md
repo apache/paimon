@@ -77,3 +77,11 @@ WITH (
 Table Properties for Kafka are listed as follows.
 
 {{< generated/kafka_log_configuration >}}
+
+## Automatically Register
+
+{{< hint info >}}
+Currently only Flink supports automatic registration.
+{{< /hint >}}
+
+If `'log.system.auto-register' = 'true'` is set, paimon will automatically create and delete the topic in log system for the table. Otherwise, user needs to manually manage the topic in the log system. More related table properties can refer [here]({{< ref "/maintenance/configurations#flinkcatalogoptions" >}}).
