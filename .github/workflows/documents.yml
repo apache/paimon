@@ -15,12 +15,15 @@
 
 name: Hugo Docs Build
 
-on: [push, pull_request]
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
 
 jobs:
   build:
     name: Build Hugo Documentation
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -34,9 +37,17 @@ jobs:
           hugo-version: '0.68.3'  # Use the version that matches your project
           extended: true
 
-      - name: Build Hugo Docs
-        run: hugo -b ""
+      - name: Run Hugo
+        run: |
+          hugo -b ""
         working-directory: ./docs
 
-
+      - name: Check for Warnings or Errors
+        run: |
+          output=$(hugo -b "" 2>&1)
+          echo "$output"
+          if echo "$output" | grep -E "WARNING|ERROR"; then
+            exit 1
+          fi
+        working-directory: ./docs
 
