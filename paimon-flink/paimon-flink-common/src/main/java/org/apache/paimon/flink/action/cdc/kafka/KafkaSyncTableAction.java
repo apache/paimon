@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -40,7 +41,6 @@ import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -88,28 +88,7 @@ public class KafkaSyncTableAction extends ActionBase {
 
     private final List<String> computedColumnArgs;
 
-    private final Map<String, String> paimonConfig;
-
-    public KafkaSyncTableAction(
-            Map<String, String> kafkaConfig,
-            String warehouse,
-            String database,
-            String table,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            Map<String, String> catalogConfig,
-            Map<String, String> paimonConfig) {
-        this(
-                kafkaConfig,
-                warehouse,
-                database,
-                table,
-                partitionKeys,
-                primaryKeys,
-                Collections.emptyList(),
-                catalogConfig,
-                paimonConfig);
-    }
+    private final Map<String, String> tableConfig;
 
     public KafkaSyncTableAction(
             Map<String, String> kafkaConfig,
@@ -120,7 +99,7 @@ public class KafkaSyncTableAction extends ActionBase {
             List<String> primaryKeys,
             List<String> computedColumnArgs,
             Map<String, String> catalogConfig,
-            Map<String, String> paimonConfig) {
+            Map<String, String> tableConfig) {
         super(warehouse, catalogConfig);
         this.kafkaConfig = Configuration.fromMap(kafkaConfig);
         this.database = database;
@@ -128,7 +107,7 @@ public class KafkaSyncTableAction extends ActionBase {
         this.partitionKeys = partitionKeys;
         this.primaryKeys = primaryKeys;
         this.computedColumnArgs = computedColumnArgs;
-        this.paimonConfig = paimonConfig;
+        this.tableConfig = tableConfig;
     }
 
     public void build(StreamExecutionEnvironment env) throws Exception {
@@ -149,7 +128,7 @@ public class KafkaSyncTableAction extends ActionBase {
                         partitionKeys,
                         primaryKeys,
                         computedColumns,
-                        paimonConfig,
+                        tableConfig,
                         caseSensitive);
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
@@ -177,11 +156,21 @@ public class KafkaSyncTableAction extends ActionBase {
                         .withTable(table)
                         .withIdentifier(identifier)
                         .withCatalogLoader(catalogLoader());
-        String sinkParallelism = paimonConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
+        String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
         }
         sinkBuilder.build();
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

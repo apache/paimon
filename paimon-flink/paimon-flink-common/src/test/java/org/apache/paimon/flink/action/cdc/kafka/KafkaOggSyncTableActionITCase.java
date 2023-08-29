@@ -18,15 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -35,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaOggSyncTableActionITCase}. */
@@ -61,20 +58,11 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", topic);
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testSchemaEvolutionImpl(topic, sourceDir);
     }
@@ -167,20 +155,16 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "togg-json");
         kafkaConfig.put("topic", topic);
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("This format: togg-json is not supported.");
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "This format: togg-json is not supported."));
     }
 
     @Test
@@ -200,34 +184,27 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
 
         // create an incompatible table
-        Catalog catalog = catalog();
-        catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, tableName);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("k", DataTypes.STRING())
-                        .column("v1", DataTypes.STRING())
-                        .primaryKey("k")
-                        .build();
-        catalog.createTable(identifier, schema, false);
-        KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v1"}),
+                Collections.emptyList(),
+                Collections.singletonList("k"),
+                Collections.emptyMap());
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Paimon schema and Kafka schema are not compatible.\n"
-                                + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
-                                + "Kafka fields are: [`id` STRING NOT NULL, `name` STRING, `description` STRING, `weight` STRING]");
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Paimon schema and Kafka schema are not compatible.\n"
+                                        + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
+                                        + "Kafka fields are: [`id` STRING NOT NULL, `name` STRING, `description` STRING, `weight` STRING]"));
     }
 
     @Test
@@ -248,20 +225,11 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("scan.startup.mode", "specific-offsets");
         kafkaConfig.put("scan.startup.specific-offsets", "partition:0,offset:1");
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         FileStoreTable table = getFileStoreTable(tableName);
 
@@ -299,21 +267,12 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "latest-offset");
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
-        action.build(env);
-        JobClient client = env.executeAsync();
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
-        waitJobRunning(client);
-        waitTablesCreated(tableName);
         Thread.sleep(5000);
         FileStoreTable table = getFileStoreTable(tableName);
         try {
@@ -359,20 +318,11 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put(
                 "scan.startup.timestamp-millis", String.valueOf(System.currentTimeMillis()));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/ogg/table/startupmode/ogg-data-2.txt"));
@@ -416,20 +366,11 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "earliest-offset");
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/ogg/table/startupmode/ogg-data-2.txt"));
@@ -475,20 +416,11 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "group-offsets");
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/ogg/table/startupmode/ogg-data-2.txt"));
@@ -533,19 +465,13 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", topic);
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("_year"),
-                        Arrays.asList("_id", "_year"),
-                        Collections.singletonList("_year=year(_date)"),
-                        Collections.emptyMap(),
-                        getBasicTableConfig());
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("_id", "_year")
+                        .withComputedColumnArgs("_year=year(_date)")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         RowType rowType =
                 RowType.of(

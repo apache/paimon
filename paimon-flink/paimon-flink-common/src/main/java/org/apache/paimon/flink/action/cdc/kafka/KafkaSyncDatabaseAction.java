@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
@@ -88,15 +89,6 @@ public class KafkaSyncDatabaseAction extends ActionBase {
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final Map<String, String> tableConfig;
-
-    public KafkaSyncDatabaseAction(
-            Map<String, String> kafkaConfig,
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
-        this(kafkaConfig, warehouse, database, null, null, null, null, catalogConfig, tableConfig);
-    }
 
     public KafkaSyncDatabaseAction(
             Map<String, String> kafkaConfig,
@@ -178,6 +170,16 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                 String.format(
                         "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
                         tableSuffix));
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

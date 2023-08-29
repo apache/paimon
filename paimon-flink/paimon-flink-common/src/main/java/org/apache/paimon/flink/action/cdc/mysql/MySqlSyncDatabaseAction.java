@@ -118,11 +118,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private final List<Identifier> excludedTables = new ArrayList<>();
 
     public MySqlSyncDatabaseAction(
-            String warehouse, String database, Map<String, String> mySqlConfig) {
-        this(warehouse, database, Collections.emptyMap(), mySqlConfig);
-    }
-
-    public MySqlSyncDatabaseAction(
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
@@ -375,6 +370,16 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     @VisibleForTesting
     public List<Identifier> excludedTables() {
         return excludedTables;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
     }
 
     /**

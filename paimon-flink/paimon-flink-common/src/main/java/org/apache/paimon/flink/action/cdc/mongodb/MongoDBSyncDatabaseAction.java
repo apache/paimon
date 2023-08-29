@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
@@ -74,24 +75,6 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     @Nullable private final String includingTables;
-
-    public MongoDBSyncDatabaseAction(
-            Map<String, String> mongodbConfig,
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
-        this(
-                mongodbConfig,
-                warehouse,
-                database,
-                null,
-                null,
-                null,
-                null,
-                catalogConfig,
-                tableConfig);
-    }
 
     public MongoDBSyncDatabaseAction(
             Map<String, String> kafkaConfig,
@@ -216,6 +199,16 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                         .collect(Collectors.joining("|"));
         excludingPattern = "?!" + excludingPattern;
         return String.format("(%s)(%s)", excludingPattern, includingPattern);
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

@@ -34,7 +34,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
 import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
-import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test if the table list in {@link MySqlSyncDatabaseAction} is correct. */
 public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
@@ -57,27 +56,26 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
 
         DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                syncDatabaseActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
                         .mergeShards(false)
-                        .withMode(mode)
+                        .withMode(mode.configString())
                         .includingTables("t.+|s.+")
-                        .excludingTables("ta|sa");
-
+                        .excludingTables("ta|sa")
+                        .build();
         runActionWithDefaultEnv(action);
 
-        assertThat(catalog().listTables(database))
-                .containsExactlyInAnyOrder(
-                        "shard_1_t11",
-                        "shard_1_t2",
-                        "shard_1_t3",
-                        "shard_1_taa",
-                        "shard_1_s2",
-                        "shard_2_t1",
-                        "shard_2_t22",
-                        "shard_2_t3",
-                        "shard_2_tb",
-                        "x_shard_1_t1");
+        assertExactlyExistTables(
+                "shard_1_t11",
+                "shard_1_t2",
+                "shard_1_t3",
+                "shard_1_taa",
+                "shard_1_s2",
+                "shard_2_t1",
+                "shard_2_t22",
+                "shard_2_t3",
+                "shard_2_tb",
+                "x_shard_1_t1");
 
         // test newly created tables
         if (mode == COMBINED) {

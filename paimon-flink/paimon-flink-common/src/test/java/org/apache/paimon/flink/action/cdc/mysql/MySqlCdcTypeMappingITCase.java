@@ -59,10 +59,11 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "tinyint1_not_bool_test");
 
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                syncDatabaseActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
-                        .withMode(COMBINED)
-                        .withTypeMapping(new TypeMapping(Collections.singleton(TINYINT1_NOT_BOOL)));
+                        .withMode(COMBINED.configString())
+                        .withTypeMappingModes(TINYINT1_NOT_BOOL.configString())
+                        .build();
         runActionWithDefaultEnv(action);
 
         // read old data
@@ -119,10 +120,11 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("table-name", "all_types_table");
 
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                syncTableActionBuilder(mySqlConfig)
                         .withPartitionKeys("pt")
                         .withPrimaryKeys("pt", "_id")
-                        .withTypeMapping(new TypeMapping(Collections.singleton(TO_STRING)));
+                        .withTypeMappingModes(TO_STRING.configString())
+                        .build();
         runActionWithDefaultEnv(action);
 
         int allTypeNums = 77;
@@ -304,10 +306,11 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "all_to_string_test");
 
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
+                syncDatabaseActionBuilder(mySqlConfig)
                         .excludingTables("all_types_table")
-                        .withMode(COMBINED)
-                        .withTypeMapping(new TypeMapping(Collections.singleton(TO_STRING)));
+                        .withMode(COMBINED.configString())
+                        .withTypeMappingModes(TO_STRING.configString())
+                        .build();
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -380,9 +383,10 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "ignore_not_null_test");
 
         MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(warehouse, database, mySqlConfig)
-                        .withMode(COMBINED)
-                        .withTypeMapping(new TypeMapping(Collections.singleton(TO_NULLABLE)));
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withMode(COMBINED.configString())
+                        .withTypeMappingModes(TO_NULLABLE.configString())
+                        .build();
         runActionWithDefaultEnv(action);
 
         FileStoreTable table = getFileStoreTable("t1");
@@ -405,17 +409,17 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
             statement.executeUpdate("ALTER TABLE t1 ADD COLUMN v2 INT NOT NULL DEFAULT 100");
             statement.executeUpdate("INSERT INTO t1 VALUES (2, 'B', 10)");
 
-            while (table.rowType().getFieldCount() != 3) {
-                table = table.copyWithLatestSchema();
-                Thread.sleep(1_000);
-            }
-            assertThat(table.rowType().getTypeAt(2).isNullable()).isTrue();
-
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            },
+                            new String[] {"pk", "v1", "v2"});
             // Currently we haven't handle default value
             waitForResult(
                     Arrays.asList("+I[1, A, NULL]", "+I[2, B, 10]"),
                     table,
-                    table.rowType(),
+                    rowType,
                     Collections.singletonList("pk"));
 
             // test newly created table
