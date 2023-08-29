@@ -18,8 +18,11 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.CreateTagProcedure;
+import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
+import org.apache.paimon.spark.procedure.RollbackProcedure;
 
 import org.apache.hadoop.shaded.com.google.common.collect.ImmutableMap;
 
@@ -42,6 +45,9 @@ public class SparkProcedures {
     private static Map<String, Supplier<ProcedureBuilder>> initProcedureBuilders() {
         ImmutableMap.Builder<String, Supplier<ProcedureBuilder>> procedureBuilders =
                 ImmutableMap.builder();
+        procedureBuilders.put("rollback", RollbackProcedure::builder);
+        procedureBuilders.put("create_tag", CreateTagProcedure::builder);
+        procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
         return procedureBuilders.build();
     }
 }

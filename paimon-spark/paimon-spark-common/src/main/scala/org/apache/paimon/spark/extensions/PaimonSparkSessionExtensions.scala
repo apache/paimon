@@ -21,6 +21,7 @@ import org.apache.spark.sql.SparkSessionExtensions
 import org.apache.spark.sql.catalyst.analysis.{CoerceArguments, PaimonAnalysis, ResolveProcedures}
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsParser
 import org.apache.spark.sql.catalyst.plans.logical.PaimonTableValuedFunctions
+import org.apache.spark.sql.execution.datasources.v2.ExtendedDataSourceV2Strategy
 
 /** Spark session extension to extends the syntax and adds the rules. */
 class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
@@ -40,5 +41,8 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
         extensions.injectTableFunction(
           PaimonTableValuedFunctions.getTableValueFunctionInjection(fnName))
     }
+
+    // planner extensions
+    extensions.injectPlannerStrategy(spark => ExtendedDataSourceV2Strategy(spark))
   }
 }
