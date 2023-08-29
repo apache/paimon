@@ -36,7 +36,7 @@ jobs:
           extended: true
 
       - name: Build Hugo Docs
-        run: hugo --minify
+        run: hugo -b ""
         working-directory: ./docs
 
 
