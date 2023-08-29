@@ -53,13 +53,18 @@ Configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic e
 Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition.
 {{< /hint >}}
 
-**Normal Dynamic Bucket Mode**:
+#### Normal Dynamic Bucket Mode
 
 When your updates do not cross partitions (no partitions, or primary keys contain all partition fields), Dynamic
-Bucket mode uses HASH index to maintain mapping from key to bucket, it requires more memory than fixed bucket mode,
-100 million entries in a partition takes up 1 GB more memory, partitions that are no longer active do not take up memory.
+Bucket mode uses HASH index to maintain mapping from key to bucket, it requires more memory than fixed bucket mode.
 
-**Cross Partitions Update Dynamic Bucket Mode**:
+Performance:
+
+1. Generally speaking, there is no performance loss, but there will be some additional memory consumption, **100 million**
+   entries in a partition takes up **1 GB** more memory, partitions that are no longer active do not take up memory.
+2. For tables with low update rates, this mode is recommended to significantly improve performance.
+
+#### Cross Partitions Update Dynamic Bucket Mode
 
 {{< hint info >}}
 This is an experimental feature.
@@ -68,9 +73,13 @@ This is an experimental feature.
 When you need cross partition updates (primary keys not contain all partition fields), Dynamic Bucket mode directly
 maintains the mapping of keys to partition and bucket, uses local disks, and initializes indexes by reading all 
 existing keys in the table when starting stream write job. Different merge engines have different behaviors:
+
 1. Deduplicate: Delete data from the old partition and insert new data into the new partition.
 2. PartialUpdate & Aggregation: Insert new data into the old partition.
 3. FirstRow: Ignore new data if there is old value.
+
+Performance: For tables with a large amount of data, there will be a significant loss in performance. Moreover,
+initialization takes a long time.
 
 ## Merge Engines
 
@@ -150,6 +159,8 @@ INSERT INTO T VALUES (1, 3, 3, 1, 3, 3, 3);
 
 SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
 ```
+
+For fields.<fieldName>.sequence-group, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
 
 #### Default Value
 If the order of the data cannot be guaranteed and field is written only by overwriting null values,
@@ -272,7 +283,9 @@ However, these merged changes cannot form a complete changelog, because we can't
 
 Consider a consumer which calculates the sum on some grouping keys (might not be equal to the primary keys). If the consumer only sees a new value `5`, it cannot determine what values should be added to the summing result. For example, if the old value is `4`, it should add `1` to the result. But if the old value is `6`, it should in turn subtract `1` from the result. Old values are important for these types of consumers.
 
-To conclude, `none` changelog producers are best suited for consumers such as a database system. Flink also has a built-in "normalize" operator which persists the values of each key in states. As one can easily tell, this operator will be very costly and should be avoided.
+To conclude, `none` changelog producers are best suited for consumers such as a database system. Flink also has a 
+built-in "normalize" operator which persists the values of each key in states. As one can easily tell, this operator
+will be very costly and should be avoided. (You can force removing "normalize" operator via `'scan.remove-normalize'`.)
 
 {{< img src="/img/changelog-producer-none.png">}}
 

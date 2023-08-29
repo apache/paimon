@@ -68,7 +68,7 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
 
         Map<String, String> kafkaConfig = optionalConfigMap(params, "kafka-conf");
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        Map<String, String> paimonConfig = optionalConfigMap(params, "paimon-conf");
+        Map<String, String> paimonConfig = optionalConfigMap(params, "table-conf");
 
         return Optional.of(
                 new KafkaSyncTableAction(
@@ -124,7 +124,7 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
                         + "are required configurations, others are optional.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/");
+                        + "see https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/");
         System.out.println();
 
         System.out.println("Paimon catalog and table sink conf syntax:");

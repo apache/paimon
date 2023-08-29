@@ -18,7 +18,6 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
@@ -49,7 +48,6 @@ import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 import org.junit.runners.model.Statement;
 
-import java.io.File;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -345,6 +343,22 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testHiveCreateAndFlinkInsertRead() throws Exception {
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+        hiveShell.execute(
+                "CREATE TABLE hive_test_table ( a INT, b STRING ) "
+                        + "STORED BY '"
+                        + PaimonStorageHandler.class.getName()
+                        + "'"
+                        + "TBLPROPERTIES ("
+                        + "  'primary-key'='a'"
+                        + ")");
+        tEnv.executeSql("INSERT INTO hive_test_table VALUES (1, 'Apache'), (2, 'Paimon')");
+        List<Row> actual = collect("SELECT * FROM hive_test_table");
+        assertThat(actual).contains(Row.of(1, "Apache"), Row.of(2, "Paimon"));
+    }
+
+    @Test
     public void testCreateTableAs() throws Exception {
         tEnv.executeSql("CREATE TABLE t (a INT)").await();
         tEnv.executeSql("INSERT INTO t VALUES(1)").await();
@@ -448,7 +462,8 @@ public abstract class HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_pk_not_exist_as WITH ('primary-key' = 'aaa') AS SELECT * FROM t_pk_not_exist")
                                         .await())
-                .hasRootCauseMessage("Primary key column '[aaa]' is not defined in the schema.");
+                .hasRootCauseMessage(
+                        "Table column [user_id, item_id, behavior, dt, hh] should include all primary key constraint [aaa]");
 
         // primary key in option and DDL.
         assertThatThrownBy(
@@ -482,7 +497,8 @@ public abstract class HiveCatalogITCaseBase {
                                 tEnv.executeSql(
                                                 "CREATE TABLE t_partition_not_exist_as WITH ('partition' = 'aaa') AS SELECT * FROM t_partition_not_exist")
                                         .await())
-                .hasRootCauseMessage("Partition column '[aaa]' is not defined in the schema.");
+                .hasRootCauseMessage(
+                        "Table column [user_id, item_id, behavior, dt, hh] should include all partition fields [aaa]");
 
         // partition in option and DDL.
         assertThatThrownBy(
@@ -504,7 +520,7 @@ public abstract class HiveCatalogITCaseBase {
     public void testRenameTable() throws Exception {
         tEnv.executeSql("CREATE TABLE t1 (a INT)").await();
         tEnv.executeSql("CREATE TABLE t2 (a INT)").await();
-        tEnv.executeSql("INSERT INTO t1 SELECT 1");
+        tEnv.executeSql("INSERT INTO t1 SELECT 1").await();
         // the source table do not exist.
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t3 RENAME TO t4"))
                 .hasMessage(
@@ -521,21 +537,21 @@ public abstract class HiveCatalogITCaseBase {
                         "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1");
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
+
+        // hive read
         List<String> tables = hiveShell.executeQuery("SHOW TABLES");
         assertThat(tables.contains("t3")).isTrue();
         assertThat(tables.contains("t1")).isFalse();
+        List<String> data = hiveShell.executeQuery("SELECT * FROM t3");
+        assertThat(data).containsExactlyInAnyOrder("1");
 
-        Identifier identifier = new Identifier("test_db", "t3");
-        Catalog catalog =
-                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        org.apache.paimon.fs.Path tablePath =
-                ((AbstractCatalog) catalog).getDataTableLocation(identifier);
-        assertThat(tablePath.toString()).isEqualTo(path + "test_db.db" + File.separator + "t3");
+        // flink read
+        List<Row> tablesFromFlink = collect("SHOW TABLES");
+        assertThat(tablesFromFlink).contains(Row.of("t3"));
+        assertThat(tablesFromFlink).doesNotContain(Row.of("t1"));
 
-        // TODO: the hiverunner (4.0) has a bug ,it can not rename the table path correctly ,
-        // we should upgrade it to the 6.0 later ,and  update the test case for query.
-        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM t3"))
-                .hasMessageContaining("SQL validation failed. There is no paimond in");
+        List<Row> dataFromFlink = collect("SELECT * FROM t3");
+        assertThat(dataFromFlink).contains(Row.of(1));
     }
 
     @Test

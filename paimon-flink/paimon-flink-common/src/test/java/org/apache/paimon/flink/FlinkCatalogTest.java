@@ -212,12 +212,7 @@ public class FlinkCatalogTest {
 
         assertThatThrownBy(() -> catalog.createTable(this.path1, newTable, false))
                 .isInstanceOf(CatalogException.class)
-                .hasMessageContaining(
-                        "Paimon Catalog only supports paimon tables ,"
-                                + " and you don't need to specify  'connector'= '"
-                                + FlinkCatalogFactory.IDENTIFIER
-                                + "' when using Paimon Catalog\n"
-                                + " You can create TEMPORARY table instead if you want to create the table of other connector.");
+                .hasMessageContaining("Paimon Catalog only supports paimon tables");
     }
 
     @ParameterizedTest

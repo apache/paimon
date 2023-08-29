@@ -64,6 +64,7 @@ To use this feature through `flink run`, run the following shell command.
     --table <table-name> \
     [--partition-keys <partition-keys>] \
     [--primary-keys <primary-keys>] \
+    [--type-mapping <option1,option2...>] \
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
@@ -148,6 +149,7 @@ To use this feature through `flink run`, run the following shell command.
     [--including-tables <mysql-table-name|name-regular-expr>] \
     [--excluding-tables <mysql-table-name|name-regular-expr>] \
     [--mode <sync-mode>] \
+    [--type-mapping <option1,option2...>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -283,23 +285,27 @@ If a message in a Kafka topic is a change event captured from another database u
     </thead>
     <tbody>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/canal/">Canal CDC</a></td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/canal/">Canal CDC</a></td>
           <td>True</td>
         </tr>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/debezium/">Debezium CDC</a></td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/debezium/">Debezium CDC</a></td>
          <td>False</td>
         </tr>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/maxwell/ >}}">Maxwell CDC</a></td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/maxwell/ >}}">Maxwell CDC</a></td>
         <td>False</td>
         </tr>
         <tr>
-         <td><a href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/formats/ogg/">OGG CDC</a></td>
-        <td>False</td>
+         <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/ogg/">OGG CDC</a></td>
+        <td>True</td>
         </tr>
     </tbody>
 </table>
+
+{{< hint info >}}
+In Oracle GoldenGate, the data format synchronized to Kafka does not include field data type information. As a result, Paimon sets the data type for all fields to "String" by default.
+{{< /hint >}}
 
 ### Synchronizing Tables
 
@@ -443,6 +449,9 @@ To use this feature through `flink run`, run the following shell command.
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
+
+{{< generated/mongodb_sync_table >}}
+
 Here are a few points to take note of:
 
 1. The "mongodb-conf" introduces the "schema.start.mode" parameter on top of the MongoDB CDC source configuration."schema.start.mode" provides two modes: "dynamic" (default) and "specified".
@@ -452,6 +461,56 @@ This can be done by configuring "field.name" to specify the synchronization fiel
 The difference between the two is that the "specify" mode requires the user to explicitly identify the fields to be used and create a mapping table based on those fields.
 Dynamic mode, on the other hand, ensures that Paimon and MongoDB always keep the top-level fields consistent, eliminating the need to focus on specific fields.
 Further processing of the data table is required when using values from nested fields.
+
+{{< generated/mongodb_operator >}}
+
+
+Functions can be invoked at the tail end of a path - the input to a function is the output of the path expression. The function output is dictated by the function itself.
+
+{{< generated/mongodb_functions >}}
+
+Path Examples
+```json
+{
+    "store": {
+        "book": [
+            {
+                "category": "reference",
+                "author": "Nigel Rees",
+                "title": "Sayings of the Century",
+                "price": 8.95
+            },
+            {
+                "category": "fiction",
+                "author": "Evelyn Waugh",
+                "title": "Sword of Honour",
+                "price": 12.99
+            },
+            {
+                "category": "fiction",
+                "author": "Herman Melville",
+                "title": "Moby Dick",
+                "isbn": "0-553-21311-3",
+                "price": 8.99
+            },
+            {
+                "category": "fiction",
+                "author": "J. R. R. Tolkien",
+                "title": "The Lord of the Rings",
+                "isbn": "0-395-19395-8",
+                "price": 22.99
+            }
+        ],
+        "bicycle": {
+            "color": "red",
+            "price": 19.95
+        }
+    },
+    "expensive": 10
+}
+```
+
+{{< generated/mongodb_path_example >}}
 
 2. The synchronized table is required to have its primary key set as `_id`. 
 This is because MongoDB's change events are recorded before updates in messages. 
@@ -503,7 +562,7 @@ Example 2: Synchronize collection into a Paimon table according to the specified
     --mongodb-conf collection=source_table1 \
     --mongodb-conf schema.start.mode=specified \
     --mongodb-conf field.name=_id,name,description \
-    --mongodb-conf parser.path=_id,name,description \
+    --mongodb-conf parser.path=$._id,$.name,$.description \
     --catalog-conf metastore=hive \
     --catalog-conf uri=thrift://hive-metastore:9083 \
     --table-conf bucket=4 \
@@ -531,6 +590,8 @@ To use this feature through `flink run`, run the following shell command.
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
+
+{{< generated/mongodb_sync_database >}}
 
 All collections to be synchronized need to set _id as the primary key.
 For each MongoDB collection to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table. 
@@ -596,11 +657,16 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 
 {{< generated/compute_column >}}
 
-## Special Data Type Conversions
-1. MySQL TINYINT(1) type will be converted to Boolean by default. If you want to store number (-128~127) in it like MySQL, 
-you can specify that `--mysql-conf mysql.converter.tinyint1-to-bool=false`, then the column will be mapped to TINYINT in Paimon table.
-2. MySQL BIT(1) type will be converted to Boolean.
-3. When using Hive catalog, MySQL TIME type will be converted to STRING.
+## Special Data Type Mapping
+
+1. MySQL TINYINT(1) type will be mapped to Boolean by default. If you want to store number (-128~127) in it like MySQL, 
+you can specify type mapping option `tinyint1-not-bool` (Use `--type-mapping`), then the column will be mapped to TINYINT in Paimon table.
+2. You can use type mapping option `to-nullable` (Use `--type-mapping`) to ignore all NOT NULL constraints (except primary keys).
+3. You can use type mapping option `to-string` (Use `--type-mapping`) to map all MySQL data type to STRING.
+4. MySQL BIT(1) type will be mapped to Boolean.
+5. When using Hive catalog, MySQL TIME type will be mapped to STRING.
+6. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it 
+should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
 
 ## FAQ
 1. Chinese characters in records ingested from MySQL are garbled.

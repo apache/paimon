@@ -18,12 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
-import org.apache.paimon.flink.action.cdc.kafka.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
+import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -34,10 +36,10 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -47,7 +49,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * An {@link Action} which synchronize the Multiple topics into one Paimon database.
  *
  * <p>You should specify Kafka source topic in {@code kafkaConfig}. See <a
- * href="https://nightlies.apache.org/flink/flink-docs-release-1.16/zh/docs/connectors/table/kafka/">document
+ * href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/">document
  * of flink-connectors</a> for detailed keys and values.
  *
  * <p>For each Kafka topic's table to be synchronized, if the corresponding Paimon table does not
@@ -92,15 +94,6 @@ public class KafkaSyncDatabaseAction extends ActionBase {
             Map<String, String> kafkaConfig,
             String warehouse,
             String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
-        this(kafkaConfig, warehouse, database, null, null, null, null, catalogConfig, tableConfig);
-    }
-
-    public KafkaSyncDatabaseAction(
-            Map<String, String> kafkaConfig,
-            String warehouse,
-            String database,
             @Nullable String tablePrefix,
             @Nullable String tableSuffix,
             @Nullable String includingTables,
@@ -130,20 +123,17 @@ public class KafkaSyncDatabaseAction extends ActionBase {
 
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
 
-        EventParser.Factory<RichCdcMultiplexRecord> parserFactory;
-        String format = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
-        if ("canal-json".equals(format)) {
-            RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
-                    new RichCdcMultiplexRecordSchemaBuilder(tableConfig);
-            Pattern includingPattern = this.includingPattern;
-            Pattern excludingPattern = this.excludingPattern;
-            parserFactory =
-                    () ->
-                            new RichCdcMultiplexRecordEventParser(
-                                    schemaBuilder, includingPattern, excludingPattern);
-        } else {
-            throw new UnsupportedOperationException("This format: " + format + " is not support.");
-        }
+        DataFormat format = DataFormat.getDataFormat(kafkaConfig);
+        RecordParser recordParser =
+                format.createParser(caseSensitive, tableNameConverter, Collections.emptyList());
+        RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
+                new RichCdcMultiplexRecordSchemaBuilder(tableConfig);
+        Pattern includingPattern = this.includingPattern;
+        Pattern excludingPattern = this.excludingPattern;
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
+                () ->
+                        new RichCdcMultiplexRecordEventParser(
+                                schemaBuilder, includingPattern, excludingPattern);
 
         FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
@@ -152,9 +142,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                                                 source,
                                                 WatermarkStrategy.noWatermarks(),
                                                 "Kafka Source")
-                                        .flatMap(
-                                                new CanalRecordParser(
-                                                        caseSensitive, tableNameConverter)))
+                                        .flatMap(recordParser))
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)
@@ -182,6 +170,16 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                 String.format(
                         "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
                         tableSuffix));
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

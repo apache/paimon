@@ -23,9 +23,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -33,6 +30,8 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link MongoDBSyncTableActionITCase}. */
 public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
@@ -49,32 +48,16 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
         mongodbConfig.put("database", inventory);
         mongodbConfig.put("collection", "products");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        Map<String, String> tableConfig = getBasicTableConfig();
         MongoDBSyncTableAction action =
-                new MongoDBSyncTableAction(
-                        mongodbConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testSchemaEvolutionImpl(inventory);
     }
 
     private void testSchemaEvolutionImpl(String dbName) throws Exception {
-        waitTablesCreated(tableName);
         FileStoreTable table = getFileStoreTable(tableName);
         List<String> primaryKeys = Collections.singletonList("_id");
 
@@ -142,28 +125,14 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
         mongodbConfig.put("database", inventory);
         mongodbConfig.put("collection", "products");
         mongodbConfig.put("field.name", "_id,name,description");
-        mongodbConfig.put("parser.path", "_id,name,description");
+        mongodbConfig.put("parser.path", "$._id,$.name,$.description");
         mongodbConfig.put("schema.start.mode", "specified");
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
 
-        Map<String, String> tableConfig = getBasicTableConfig();
         MongoDBSyncTableAction action =
-                new MongoDBSyncTableAction(
-                        mongodbConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
-        waitTablesCreated(tableName);
+                syncTableActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
         FileStoreTable table = getFileStoreTable(tableName);
 
         RowType rowType =
@@ -179,5 +148,19 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                         "+I[100000000000000000000102, car battery, 12V car battery]",
                         "+I[100000000000000000000103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3]");
         waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    public void testCatalogAndTableConfig() {
+        MongoDBSyncTableAction action =
+                syncTableActionBuilder(getBasicMongoDBConfig())
+                        .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
+                        .withTableConfig(Collections.singletonMap("table-key", "table-value"))
+                        .build();
+
+        assertThat(action.catalogConfig())
+                .containsExactlyEntriesOf(Collections.singletonMap("catalog-key", "catalog-value"));
+        assertThat(action.tableConfig())
+                .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }
 }

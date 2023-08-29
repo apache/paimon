@@ -23,7 +23,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.types.BinaryType;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.TimestampType;
@@ -45,7 +45,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils.MYSQL_CONVERTER_TINYINT1_BOOL;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
 /** Converts from MySQL type to {@link DataType}. */
 public class MySqlTypeUtils {
@@ -142,14 +143,26 @@ public class MySqlTypeUtils {
                 MySqlTypeUtils.getShortType(mysqlType),
                 MySqlTypeUtils.getPrecision(mysqlType),
                 MySqlTypeUtils.getScale(mysqlType),
-                MYSQL_CONVERTER_TINYINT1_BOOL.defaultValue());
+                false);
     }
 
     public static DataType toDataType(
             String type,
             @Nullable Integer length,
             @Nullable Integer scale,
-            Boolean tinyInt1ToBool) {
+            TypeMapping typeMapping) {
+        if (typeMapping.containsMode(TO_STRING)) {
+            return DataTypes.STRING();
+        } else {
+            return toDataType(type, length, scale, typeMapping.containsMode(TINYINT1_NOT_BOOL));
+        }
+    }
+
+    private static DataType toDataType(
+            String type,
+            @Nullable Integer length,
+            @Nullable Integer scale,
+            boolean tinyInt1NotBool) {
         switch (type.toUpperCase()) {
             case BIT:
                 if (length == null || length == 1) {
@@ -161,15 +174,13 @@ public class MySqlTypeUtils {
             case BOOL:
                 return DataTypes.BOOLEAN();
             case TINYINT:
-                // MySQL haven't boolean type, it uses tinyint(1) to represents boolean type
-                // user should not use tinyint(1) to store number although jdbc url parameter
+                // MySQL haven't boolean type, it uses tinyint(1) to represents boolean type.
+                // User should not use tinyint(1) to store number although jdbc url parameter
                 // tinyInt1isBit=false can help change the return value, it's not a general way.
-                // mybatis and mysql-connector-java map tinyint(1) to boolean by default, we behave
-                // the same way by default. To store number (-128~127), we can set the parameter
-                // tinyInt1ToByte (option 'mysql.converter.tinyint1-to-bool') to false, then
-                // tinyint(1)
-                // will be mapped to TinyInt.
-                return length != null && length == 1 && tinyInt1ToBool
+                // Mybatis and mysql-connector-java map tinyint(1) to boolean by default, we behave
+                // the same way by default. To store number (-128~127), user can set the type
+                // mapping option 'tinyint1-not-bool' then tinyint(1) will be mapped to tinyint.
+                return length != null && length == 1 && !tinyInt1NotBool
                         ? DataTypes.BOOLEAN()
                         : DataTypes.TINYINT();
             case TINYINT_UNSIGNED:
@@ -267,10 +278,9 @@ public class MySqlTypeUtils {
             case MULTIPOLYGON:
             case GEOMETRYCOLLECTION:
                 return DataTypes.STRING();
+                // MySQL BINARY and VARBINARY are stored as bytes in JSON. We convert them to
+                // DataTypes.VARBINARY to retain the length information
             case BINARY:
-                return length == null || length == 0
-                        ? DataTypes.BINARY(BinaryType.DEFAULT_LENGTH)
-                        : DataTypes.BINARY(length);
             case VARBINARY:
                 return length == null || length == 0
                         ? DataTypes.VARBINARY(VarBinaryType.DEFAULT_LENGTH)

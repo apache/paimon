@@ -305,8 +305,7 @@ public class AppendOnlyWriterTest {
                                 compactBefore.isEmpty()
                                         ? Collections.emptyList()
                                         : Collections.singletonList(
-                                                generateCompactAfter(compactBefore)),
-                        false);
+                                                generateCompactAfter(compactBefore)));
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),

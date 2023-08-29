@@ -32,6 +32,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
 
@@ -50,10 +51,12 @@ public abstract class AbstractCatalog implements Catalog {
     public static final String DB_SUFFIX = ".db";
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
     protected static final List<String> GLOBAL_TABLES =
-            Arrays.asList(AllTableOptionsTable.ALL_TABLE_OPTIONS);
+            Arrays.asList(
+                    AllTableOptionsTable.ALL_TABLE_OPTIONS, CatalogOptionsTable.CATALOG_OPTIONS);
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
+    protected final Map<String, String> catalogOptions;
 
     @Nullable protected final LineageMeta lineageMeta;
 
@@ -61,6 +64,7 @@ public abstract class AbstractCatalog implements Catalog {
         this.fileIO = fileIO;
         this.lineageMeta = null;
         this.tableDefaultOptions = new HashMap<>();
+        this.catalogOptions = new HashMap<>();
     }
 
     protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
@@ -69,6 +73,7 @@ public abstract class AbstractCatalog implements Catalog {
                 findAndCreateLineageMeta(
                         Options.fromMap(options), AbstractCatalog.class.getClassLoader());
         this.tableDefaultOptions = new HashMap<>();
+        this.catalogOptions = options;
 
         options.keySet().stream()
                 .filter(key -> key.startsWith(TABLE_DEFAULT_OPTION_PREFIX))
@@ -94,7 +99,9 @@ public abstract class AbstractCatalog implements Catalog {
     public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemDatabase(identifier.getDatabaseName())) {
             String tableName = identifier.getObjectName();
-            Table table = SystemTableLoader.loadGlobal(tableName, fileIO, allTablePaths());
+            Table table =
+                    SystemTableLoader.loadGlobal(
+                            tableName, fileIO, allTablePaths(), catalogOptions);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }

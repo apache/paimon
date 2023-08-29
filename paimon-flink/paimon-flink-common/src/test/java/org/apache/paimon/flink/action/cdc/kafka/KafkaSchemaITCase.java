@@ -39,7 +39,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         final String topic = "test_kafka_schema";
         createTestTopic(topic, 1, 1);
         // ---------- Write the Canal json into Kafka -------------------
-        List<String> lines = readLines("kafka.canal/table/schemaevolution/canal-data-1.txt");
+        List<String> lines = readLines("kafka/canal/table/schemaevolution/canal-data-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {

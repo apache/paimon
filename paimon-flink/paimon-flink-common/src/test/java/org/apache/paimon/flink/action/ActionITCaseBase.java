@@ -37,6 +37,8 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -53,11 +55,11 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     protected String database;
     protected String tableName;
     protected String commitUser;
-
     protected SnapshotManager snapshotManager;
     protected StreamTableWrite write;
     protected StreamTableCommit commit;
-
+    protected StreamExecutionEnvironment env;
+    protected Catalog catalog;
     private long incrementalIdentifier;
 
     @BeforeEach
@@ -67,6 +69,12 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         tableName = "test_table_" + UUID.randomUUID();
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
+        env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+        env.setParallelism(2);
+        env.enableCheckpointing(1000);
+        env.setRestartStrategy(RestartStrategies.noRestart());
+        catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
     }
 
     @AfterEach
@@ -77,6 +85,8 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         if (commit != null) {
             commit.close();
         }
+        env.close();
+        catalog.close();
     }
 
     protected FileStoreTable createFileStoreTable(
@@ -85,7 +95,16 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
-        Catalog catalog = catalog();
+        return createFileStoreTable(tableName, rowType, partitionKeys, primaryKeys, options);
+    }
+
+    protected FileStoreTable createFileStoreTable(
+            String tableName,
+            RowType rowType,
+            List<String> partitionKeys,
+            List<String> primaryKeys,
+            Map<String, String> options)
+            throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
         catalog.createDatabase(database, true);
         catalog.createTable(
@@ -109,14 +128,11 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
 
     protected List<String> getResult(TableRead read, List<Split> splits, RowType rowType)
             throws Exception {
-        RecordReader<InternalRow> recordReader = read.createReader(splits);
-        List<String> result = new ArrayList<>();
-        recordReader.forEachRemaining(
-                row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
-        return result;
-    }
-
-    protected Catalog catalog() {
-        return CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
+            List<String> result = new ArrayList<>();
+            recordReader.forEachRemaining(
+                    row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
+            return result;
+        }
     }
 }

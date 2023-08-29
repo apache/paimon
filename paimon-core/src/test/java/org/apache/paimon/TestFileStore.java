@@ -39,7 +39,6 @@ import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
@@ -47,6 +46,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -339,8 +339,8 @@ public class TestFileStore extends KeyValueFileStore {
                             .withKind(
                                     options.changelogProducer()
                                                     == CoreOptions.ChangelogProducer.NONE
-                                            ? ScanKind.DELTA
-                                            : ScanKind.CHANGELOG)
+                                            ? ScanMode.DELTA
+                                            : ScanMode.CHANGELOG)
                             .withSnapshot(snapshotId)
                             .plan()
                             .files();

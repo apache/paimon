@@ -54,12 +54,8 @@ public class UpdatedDataFieldsProcessFunction
     public void processElement(
             List<DataField> updatedDataFields, Context context, Collector<Void> collector)
             throws Exception {
-        for (SchemaChange schemaChange : extractSchemaChanges(updatedDataFields)) {
+        for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, updatedDataFields)) {
             applySchemaChange(schemaManager, schemaChange, identifier);
         }
-    }
-
-    private List<SchemaChange> extractSchemaChanges(List<DataField> updatedDataFields) {
-        return getSchemaChanges(updatedDataFields, schemaManager);
     }
 }

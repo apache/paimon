@@ -21,32 +21,50 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeCasts;
 
 import org.apache.flink.configuration.PipelineOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.types.logical.LogicalType;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /** Abstract base of {@link Action} for table. */
 public abstract class ActionBase implements Action {
 
     private final Options catalogOptions;
 
+    protected final Map<String, String> catalogConfig;
     protected final Catalog catalog;
     protected final FlinkCatalog flinkCatalog;
     protected final String catalogName = "paimon-" + UUID.randomUUID();
+    protected final StreamExecutionEnvironment env;
+    protected final StreamTableEnvironment batchTEnv;
 
     public ActionBase(String warehouse, Map<String, String> catalogConfig) {
+        this.catalogConfig = catalogConfig;
         catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
 
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
+        env = StreamExecutionEnvironment.getExecutionEnvironment();
+        batchTEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+
+        // register flink catalog to table environment
+        batchTEnv.registerCatalog(flinkCatalog.getName(), flinkCatalog);
+        batchTEnv.useCatalog(flinkCatalog.getName());
     }
 
     protected void execute(StreamExecutionEnvironment env, String defaultName) throws Exception {
@@ -59,5 +77,35 @@ public abstract class ActionBase implements Action {
         // to make the action workflow serializable
         Options catalogOptions = this.catalogOptions;
         return () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+    }
+
+    /**
+     * Extract {@link LogicalType}s from Flink {@link org.apache.flink.table.types.DataType}s and
+     * convert to Paimon {@link DataType}s.
+     */
+    protected List<DataType> toPaimonTypes(
+            List<org.apache.flink.table.types.DataType> flinkDataTypes) {
+        return flinkDataTypes.stream()
+                .map(org.apache.flink.table.types.DataType::getLogicalType)
+                .map(LogicalTypeConversion::toDataType)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Check whether each {@link DataType} of actualTypes is compatible with that of expectedTypes
+     * respectively.
+     */
+    protected boolean compatibleCheck(List<DataType> actualTypes, List<DataType> expectedTypes) {
+        if (actualTypes.size() != expectedTypes.size()) {
+            return false;
+        }
+
+        for (int i = 0; i < actualTypes.size(); i++) {
+            if (!DataTypeCasts.supportsCompatibleCast(actualTypes.get(i), expectedTypes.get(i))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

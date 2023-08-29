@@ -30,19 +30,38 @@ import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
 
-/** Convert MongoDB Debezium JSON string to list of {@link RichCdcMultiplexRecord}s. */
+/**
+ * A parser for MongoDB Debezium JSON strings, converting them into a list of {@link
+ * RichCdcMultiplexRecord}s.
+ *
+ * <p>This parser is designed to process and transform incoming MongoDB Debezium JSON records into a
+ * more structured format suitable for further processing. It takes into account the version of
+ * MongoDB and applies the appropriate strategy for extracting records.
+ *
+ * <p>Key features include:
+ *
+ * <ul>
+ *   <li>Support for case-sensitive and case-insensitive field names.
+ *   <li>Integration with a configurable table name converter.
+ *   <li>Ability to work with different MongoDB version strategies (e.g., Mongo4, Mongo6).
+ * </ul>
+ *
+ * <p>Note: This parser is primarily intended for use in Flink streaming applications that process
+ * MongoDB CDC data.
+ */
 public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
 
     private static final String FIELD_DATABASE = "db";
     private static final String FIELD_TABLE = "coll";
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private static final String FIELD_NAMESPACE = "ns";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
     private final Configuration mongodbConfig;
     private JsonNode root;
 
     public MongoDBRecordParser(boolean caseSensitive, Configuration mongodbConfig) {
-
         this(caseSensitive, new TableNameConverter(caseSensitive), mongodbConfig);
     }
 
@@ -57,26 +76,31 @@ public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMulti
 
     @Override
     public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) throws Exception {
-        root = objectMapper.readValue(value, JsonNode.class);
+        root = OBJECT_MAPPER.readValue(value, JsonNode.class);
         String databaseName = extractString(FIELD_DATABASE);
         String collection = tableNameConverter.convert(extractString(FIELD_TABLE));
         MongoVersionStrategy versionStrategy =
-                new Mongo4VersionStrategy(databaseName, collection, caseSensitive, mongodbConfig);
-
-        // TODO:Upgrade mongodb cdc to 2.5 and enable scanFullChangelog capability
-        // [Full Changelog]
-        // https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mongodb-cdc.html
-        //        if (mongodbVersion >= 6) {
-        //            versionStrategy = new Mongo6VersionStrategy(databaseName, collection,
-        // caseSensitive);
-        //        } else {
-        //            versionStrategy = new Mongo4VersionStrategy(databaseName, collection,
-        // caseSensitive);
-        //        }
+                VersionStrategyFactory.create(
+                        databaseName, collection, caseSensitive, mongodbConfig);
         versionStrategy.extractRecords(root).forEach(out::collect);
     }
 
     private String extractString(String key) {
-        return root.get("ns").get(key).asText();
+        return root.get(FIELD_NAMESPACE).get(key).asText();
+    }
+
+    private static class VersionStrategyFactory {
+        static MongoVersionStrategy create(
+                String databaseName,
+                String collection,
+                boolean caseSensitive,
+                Configuration mongodbConfig) {
+            // TODO: When MongoDB CDC is upgraded to 2.5, uncomment the version check logic
+            // if (mongodbVersion >= 6) {
+            //     return new Mongo6VersionStrategy(databaseName, collection, caseSensitive);
+            // }
+            return new Mongo4VersionStrategy(
+                    databaseName, collection, caseSensitive, mongodbConfig);
+        }
     }
 }

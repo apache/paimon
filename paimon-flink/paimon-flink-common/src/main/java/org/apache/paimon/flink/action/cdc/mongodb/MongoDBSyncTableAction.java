@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -41,29 +41,31 @@ import java.util.Map;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An {@link Action} which synchronize one MongoDB collection into one Paimon table.
+ * Represents an action to synchronize a specific MongoDB table with a target system.
  *
- * <p>You should specify MongodbDB source topic in {@code mongodbConfig}. See <a
- * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mongodb-cdc.html#connector-options">document
- * of flink-connectors</a> for detailed keys and values.
- *
- * <p>If the specified Paimon table does not exist, this action will automatically create the table.
- * Its schema will be derived from all specified MonodbDB collection. If the Paimon table already
- * exists, its schema will be compared against the schema of all specified MonodbDB collection.
- *
- * <p>This action supports a limited number of schema changes. Unsupported schema changes will be
- * ignored. Currently supported schema changes includes:
+ * <p>This action is responsible for:
  *
  * <ul>
- *   <li>Adding columns.
+ *   <li>Validating the provided MongoDB configuration.
+ *   <li>Checking and ensuring the existence of the target database and table.
+ *   <li>Setting up the necessary Flink streaming environment for data synchronization.
+ *   <li>Handling case sensitivity considerations for database and table names.
  * </ul>
+ *
+ * <p>Usage:
+ *
+ * <pre>
+ * MongoDBSyncTableAction action = new MongoDBSyncTableAction(...);
+ * action.run();
+ * </pre>
  */
 public class MongoDBSyncTableAction extends ActionBase {
-    public final Configuration mongodbConfig;
-    public final String database;
-    public final String table;
-    public final List<String> partitionKeys;
-    public final Map<String, String> tableConfig;
+
+    private final Configuration mongodbConfig;
+    private final String database;
+    private final String table;
+    private final List<String> partitionKeys;
+    private final Map<String, String> tableConfig;
 
     public MongoDBSyncTableAction(
             Map<String, String> mongodbConfig,
@@ -106,17 +108,20 @@ public class MongoDBSyncTableAction extends ActionBase {
 
         Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
-        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
-                RichCdcMultiplexRecordEventParser::new;
-        Schema fromMongodb =
-                MongoDBActionUtils.buildPaimonSchema(
-                        mongodbSchema, partitionKeys, tableConfig, caseSensitive);
-        try {
+
+        // Check if table exists before trying to get or create it
+        if (catalog.tableExists(identifier)) {
             table = (FileStoreTable) catalog.getTable(identifier);
-        } catch (Exception e) {
+        } else {
+            Schema fromMongodb =
+                    MongoDBActionUtils.buildPaimonSchema(
+                            mongodbSchema, partitionKeys, tableConfig, caseSensitive);
             catalog.createTable(identifier, fromMongodb, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
+
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
+                RichCdcMultiplexRecordEventParser::new;
 
         CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new CdcSinkBuilder<RichCdcMultiplexRecord>()
@@ -157,6 +162,16 @@ public class MongoDBSyncTableAction extends ActionBase {
                             "Partition keys [%s] cannot contain upper case in case-insensitive catalog.",
                             partitionKeys));
         }
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

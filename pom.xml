@@ -126,6 +126,7 @@ under the License.
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
         <scala-maven-plugin.version>3.2.2</scala-maven-plugin.version>
+        <antlr4-maven-plugin.version>4.8</antlr4-maven-plugin.version>
         <jsoup.version>1.15.3</jsoup.version>
     </properties>
 
@@ -305,11 +306,32 @@ under the License.
                 <version>2.4</version><!--$NO-MVN-MAN-VER$-->
                 <configuration>
                     <archive>
+                        <manifestEntries>
+                            <SCM-Revision>${git.commit.id}</SCM-Revision>
+                            <SCM-Branch>${git.branch}</SCM-Branch>
+                        </manifestEntries>
                         <manifest>
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
                             <addDefaultSpecificationEntries>true</addDefaultSpecificationEntries>
                         </manifest>
                     </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>pl.project13.maven</groupId>
+                <artifactId>git-commit-id-plugin</artifactId>
+                <version>4.0.0</version>
+                <executions>
+                    <execution>
+                        <id>get-the-git-infos</id>
+                        <goals>
+                            <goal>revision</goal>
+                        </goals>
+                        <phase>validate</phase>
+                    </execution>
+                </executions>
+                <configuration>
+                    <dotGitDirectory>${project.basedir}/.git</dotGitDirectory>
                 </configuration>
             </plugin>
 

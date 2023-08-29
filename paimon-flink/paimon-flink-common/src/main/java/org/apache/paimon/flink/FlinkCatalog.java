@@ -26,6 +26,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
@@ -113,8 +114,6 @@ public class FlinkCatalog extends AbstractCatalog {
 
     private final Duration logStoreAutoRegisterTimeout;
 
-    private final Options options;
-
     public FlinkCatalog(
             Catalog catalog,
             String name,
@@ -124,7 +123,6 @@ public class FlinkCatalog extends AbstractCatalog {
         super(name, defaultDatabase);
         this.catalog = catalog;
         this.classLoader = classLoader;
-        this.options = options;
         this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);
         this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
         try {
@@ -255,11 +253,14 @@ public class FlinkCatalog extends AbstractCatalog {
         }
         CatalogTable catalogTable = (CatalogTable) table;
         Map<String, String> options = table.getOptions();
-        if (options.containsKey(CONNECTOR.key())) {
+        String connector = options.get(CONNECTOR.key());
+        options.remove(CONNECTOR.key());
+        if (!StringUtils.isNullOrWhitespaceOnly(connector)
+                && !FlinkCatalogFactory.IDENTIFIER.equals(connector)) {
             throw new CatalogException(
-                    "Paimon Catalog only supports paimon tables ,"
-                            + " and you don't need to specify  'connector'= '"
-                            + FlinkCatalogFactory.IDENTIFIER
+                    "Paimon Catalog only supports paimon tables,"
+                            + " but you specify  'connector'= '"
+                            + connector
                             + "' when using Paimon Catalog\n"
                             + " You can create TEMPORARY table instead if you want to create the table of other connector.");
         }

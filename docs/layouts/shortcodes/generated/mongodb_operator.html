@@ -1,0 +1,65 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">Operator</th>
+        <th class="text-left" style="width: 85%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>$</h5></td>
+        <td>The root element to query. This starts all path expressions.</td>
+    </tr>
+    <tr>
+        <td><h5>@</h5></td>
+        <td>The current node being processed by a filter predicate.</td>
+    </tr>
+    <tr>
+        <td><h5>*</h5></td>
+        <td>Wildcard. Available anywhere a name or numeric are required.</td>
+    </tr>
+    <tr>
+        <td><h5>..</h5></td>
+        <td>Deep scan. Available anywhere a name is required.</td>
+    </tr>
+    <tr>
+        <td><h5>.</h5></td>
+        <td>Dot-notated child.</td>
+    </tr>
+    <tr>
+        <td><h5>['{name}' (, '{name}')]</h5></td>
+        <td>Bracket-notated child or children.</td>
+    </tr>
+    <tr>
+        <td><h5>[{number} (, {number})]</h5></td>
+        <td>Bracket-notated child or children.</td>
+    </tr>
+    <tr>
+        <td><h5>[start:end]</h5></td>
+        <td>Array index or indexes.</td>
+    </tr>
+    <tr>
+        <td><h5>[?({expression})]</h5></td>
+        <td>Filter expression. Expression must evaluate to a boolean value.</td>
+    </tr>
+    </tbody>
+</table>

@@ -18,31 +18,22 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.CommonTestUtils;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
-import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -53,17 +44,13 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-
         final String topic1 = "schema_evolution_0";
         final String topic2 = "schema_evolution_1";
         final String topic3 = "schema_evolution_2";
         boolean writeOne = false;
         int fileCount = 3;
         List<String> topics = Arrays.asList(topic1, topic2, topic3);
-        topics.forEach(
-                topic -> {
-                    createTestTopic(topic, 1, 1);
-                });
+        topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
         // ---------- Write the Canal json into Kafka -------------------
 
@@ -72,7 +59,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 writeRecordsToKafka(
                         topics.get(i),
                         readLines(
-                                "kafka.canal/database/schemaevolution/topic"
+                                "kafka/canal/database/schemaevolution/topic"
                                         + i
                                         + "/canal-data-1.txt"));
             } catch (Exception e) {
@@ -83,22 +70,11 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig, warehouse, database, Collections.emptyMap(), tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testSchemaEvolutionImpl(topics, writeOne, fileCount);
     }
@@ -106,15 +82,11 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-
         final String topic = "schema_evolution";
         boolean writeOne = true;
         int fileCount = 3;
         List<String> topics = Collections.singletonList(topic);
-        topics.forEach(
-                t -> {
-                    createTestTopic(t, 1, 1);
-                });
+        topics.forEach(t -> createTestTopic(t, 1, 1));
 
         // ---------- Write the Canal json into Kafka -------------------
 
@@ -123,7 +95,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 writeRecordsToKafka(
                         topics.get(0),
                         readLines(
-                                "kafka.canal/database/schemaevolution/topic"
+                                "kafka/canal/database/schemaevolution/topic"
                                         + i
                                         + "/canal-data-1.txt"));
             } catch (Exception e) {
@@ -135,28 +107,17 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig, warehouse, database, Collections.emptyMap(), tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
         testSchemaEvolutionImpl(topics, writeOne, fileCount);
     }
 
     private void testSchemaEvolutionImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
-        waitTablesCreated("t1", "t2");
+        waitingTables("t1", "t2");
 
         FileStoreTable table1 = getFileStoreTable("t1");
         FileStoreTable table2 = getFileStoreTable("t2");
@@ -187,7 +148,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 writeRecordsToKafka(
                         writeOne ? topics.get(0) : topics.get(i),
                         readLines(
-                                "kafka.canal/database/schemaevolution/topic"
+                                "kafka/canal/database/schemaevolution/topic"
                                         + i
                                         + "/canal-data-2.txt"));
             } catch (Exception e) {
@@ -232,7 +193,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 writeRecordsToKafka(
                         writeOne ? topics.get(0) : topics.get(i),
                         readLines(
-                                "kafka.canal/database/schemaevolution/topic"
+                                "kafka/canal/database/schemaevolution/topic"
                                         + i
                                         + "/canal-data-3.txt"));
             } catch (Exception e) {
@@ -277,48 +238,37 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     public void testTopicIsEmpty() {
-
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
+        KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("kafka-conf [topic] must be specified.");
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "kafka-conf [topic] must be specified."));
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
         // create table t1
-        Catalog catalog = catalog();
-        catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, "test_prefix_t1_test_suffix");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("k1", DataTypes.INT().notNull())
-                        .column("v0", DataTypes.VARCHAR(10))
-                        .primaryKey("k1")
-                        .build();
-        catalog.createTable(identifier, schema, false);
+        createFileStoreTable(
+                "test_prefix_t1_test_suffix",
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.VARCHAR(10)},
+                        new String[] {"k1", "v0"}),
+                Collections.emptyList(),
+                Collections.singletonList("k1"),
+                Collections.emptyMap());
 
         final String topic1 = "prefix_suffix_0";
         final String topic2 = "prefix_suffix_1";
         boolean writeOne = false;
         int fileCount = 2;
         List<String> topics = Arrays.asList(topic1, topic2);
-        topics.forEach(
-                topic -> {
-                    createTestTopic(topic, 1, 1);
-                });
+        topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
         // ---------- Write the Canal json into Kafka -------------------
 
@@ -327,7 +277,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 writeRecordsToKafka(
                         topics.get(i),
                         readLines(
-                                "kafka.canal/database/prefixsuffix/topic"
+                                "kafka/canal/database/prefixsuffix/topic"
                                         + i
                                         + "/canal-data-1.txt"));
             } catch (Exception e) {
@@ -339,30 +289,13 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        "test_prefix_",
-                        "_test_suffix",
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTablePrefix("test_prefix_")
+                        .withTableSuffix("_test_suffix")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testTableAffixImpl(topics, writeOne, fileCount);
     }
@@ -371,25 +304,20 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
         // create table t1
-        Catalog catalog = catalog();
-        catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, "test_prefix_t1_test_suffix");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("k1", DataTypes.INT().notNull())
-                        .column("v0", DataTypes.VARCHAR(10))
-                        .primaryKey("k1")
-                        .build();
-        catalog.createTable(identifier, schema, false);
+        createFileStoreTable(
+                "test_prefix_t1_test_suffix",
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.VARCHAR(10)},
+                        new String[] {"k1", "v0"}),
+                Collections.emptyList(),
+                Collections.singletonList("k1"),
+                Collections.emptyMap());
 
         final String topic1 = "prefix_suffix";
         List<String> topics = Collections.singletonList(topic1);
         boolean writeOne = true;
         int fileCount = 2;
-        topics.forEach(
-                topic -> {
-                    createTestTopic(topic, 1, 1);
-                });
+        topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
         // ---------- Write the Canal json into Kafka -------------------
 
@@ -398,7 +326,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 writeRecordsToKafka(
                         topics.get(0),
                         readLines(
-                                "kafka.canal/database/prefixsuffix/topic"
+                                "kafka/canal/database/prefixsuffix/topic"
                                         + i
                                         + "/canal-data-1.txt"));
             } catch (Exception e) {
@@ -410,38 +338,19 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        "test_prefix_",
-                        "_test_suffix",
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTablePrefix("test_prefix_")
+                        .withTableSuffix("_test_suffix")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testTableAffixImpl(topics, writeOne, fileCount);
     }
 
     private void testTableAffixImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
-        waitTablesCreated("test_prefix_t1_test_suffix", "test_prefix_t2_test_suffix");
-
         FileStoreTable table1 = getFileStoreTable("test_prefix_t1_test_suffix");
         FileStoreTable table2 = getFileStoreTable("test_prefix_t2_test_suffix");
 
@@ -466,7 +375,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 writeRecordsToKafka(
                         writeOne ? topics.get(0) : topics.get(i),
                         readLines(
-                                "kafka.canal/database/prefixsuffix/topic"
+                                "kafka/canal/database/prefixsuffix/topic"
                                         + i
                                         + "/canal-data-2.txt"));
             } catch (Exception e) {
@@ -506,7 +415,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 writeRecordsToKafka(
                         writeOne ? topics.get(0) : topics.get(i),
                         readLines(
-                                "kafka.canal/database/prefixsuffix/topic"
+                                "kafka/canal/database/prefixsuffix/topic"
                                         + i
                                         + "/canal-data-3.txt"));
             } catch (Exception e) {
@@ -583,17 +492,14 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
             throws Exception {
         final String topic1 = "include_exclude" + UUID.randomUUID();
         List<String> topics = Collections.singletonList(topic1);
-        topics.forEach(
-                topic -> {
-                    createTestTopic(topic, 1, 1);
-                });
+        topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
         // ---------- Write the Canal json into Kafka -------------------
 
         try {
             writeRecordsToKafka(
                     topics.get(0),
-                    readLines("kafka.canal/database/include/topic0/canal-data-1.txt"));
+                    readLines("kafka/canal/database/include/topic0/canal-data-1.txt"));
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -601,56 +507,30 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        null,
-                        null,
-                        includingTables,
-                        excludingTables,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .includingTables(includingTables)
+                        .excludingTables(excludingTables)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         // check paimon tables
-        waitTablesCreated(existedTables.toArray(new String[0]));
+        waitingTables(existedTables);
         assertTableNotExists(notExistedTables);
     }
 
-    private void assertTableNotExists(List<String> tableNames) {
-        Catalog catalog = catalog();
-        for (String tableName : tableNames) {
-            Identifier identifier = Identifier.create(database, tableName);
-            assertThat(catalog.tableExists(identifier)).isFalse();
-        }
-    }
+    @Test
+    public void testCatalogAndTableConfig() {
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(getBasicKafkaConfig())
+                        .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
+                        .withTableConfig(Collections.singletonMap("table-key", "table-value"))
+                        .build();
 
-    private void waitTablesCreated(String... tables) throws Exception {
-        CommonTestUtils.waitUtil(
-                () -> {
-                    try {
-                        List<String> existed = catalog().listTables(database);
-                        return existed.containsAll(Arrays.asList(tables));
-                    } catch (Catalog.DatabaseNotExistException e) {
-                        throw new RuntimeException(e);
-                    }
-                },
-                Duration.ofSeconds(5),
-                Duration.ofMillis(100),
-                "Failed to wait tables to be created in 5 seconds.");
+        assertThat(action.catalogConfig())
+                .containsExactlyEntriesOf(Collections.singletonMap("catalog-key", "catalog-value"));
+        assertThat(action.tableConfig())
+                .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }
 }

@@ -18,11 +18,13 @@
 
 package org.apache.paimon.table.source;
 
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 import java.util.List;
 
 /** This is used to distinguish the case where the snapshot does not exist and the plan is empty. */
-public class SnapshotNotExistPlan implements TableScan.Plan {
+public class SnapshotNotExistPlan implements RichPlan {
     public static final SnapshotNotExistPlan INSTANCE = new SnapshotNotExistPlan();
 
     private SnapshotNotExistPlan() {
@@ -32,5 +34,22 @@ public class SnapshotNotExistPlan implements TableScan.Plan {
     @Override
     public List<Split> splits() {
         return Collections.emptyList();
+    }
+
+    @Nullable
+    @Override
+    public Long watermark() {
+        return null;
+    }
+
+    @Nullable
+    @Override
+    public Long snapshotId() {
+        return null;
+    }
+
+    @Override
+    public ScanMode scanMode() {
+        throw new UnsupportedOperationException();
     }
 }

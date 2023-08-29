@@ -22,10 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
@@ -44,20 +41,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link CompactAction}. */
-public class CompactActionITCase extends ActionITCaseBase {
+public class CompactActionITCase extends CompactActionITCaseBase {
 
     private static final DataType[] FIELD_TYPES =
             new DataType[] {DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()};
@@ -175,6 +169,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         // first full compaction
         validateResult(
                 table,
+                ROW_TYPE,
                 scan,
                 Arrays.asList("+I[1, 100, 15, 20221208]", "+I[1, 100, 15, 20221209]"),
                 60_000);
@@ -188,6 +183,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         // second full compaction
         validateResult(
                 table,
+                ROW_TYPE,
                 scan,
                 Arrays.asList(
                         "+U[1, 101, 15, 20221208]",
@@ -219,7 +215,7 @@ public class CompactActionITCase extends ActionITCaseBase {
 
         FileStoreTable table =
                 createFileStoreTable(
-                        ROW_TYPE, Arrays.asList("k"), Collections.emptyList(), options);
+                        ROW_TYPE, Collections.singletonList("k"), Collections.emptyList(), options);
         snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -241,7 +237,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         assertThat(snapshot.id()).isEqualTo(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
-        FileStoreScan storeScan = ((AbstractFileStoreTable) table).store().newScan();
+        FileStoreScan storeScan = table.store().newScan();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
@@ -274,7 +270,7 @@ public class CompactActionITCase extends ActionITCaseBase {
 
         FileStoreTable table =
                 createFileStoreTable(
-                        ROW_TYPE, Arrays.asList("k"), Collections.emptyList(), options);
+                        ROW_TYPE, Collections.singletonList("k"), Collections.emptyList(), options);
         snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -296,7 +292,7 @@ public class CompactActionITCase extends ActionITCaseBase {
         assertThat(snapshot.id()).isEqualTo(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
 
-        FileStoreScan storeScan = ((AbstractFileStoreTable) table).store().newScan();
+        FileStoreScan storeScan = table.store().newScan();
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
@@ -305,11 +301,6 @@ public class CompactActionITCase extends ActionITCaseBase {
 
         // first compaction, snapshot will be 3.
         checkFileAndRowSize(storeScan, 3L, 0L, 1, 6);
-
-        writeData(
-                rowData(1, 101, 15, BinaryString.fromString("20221208")),
-                rowData(1, 101, 16, BinaryString.fromString("20221208")),
-                rowData(1, 101, 15, BinaryString.fromString("20221209")));
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {
@@ -322,50 +313,5 @@ public class CompactActionITCase extends ActionITCaseBase {
         partition2.put("hh", "15");
 
         return Arrays.asList(partition1, partition2);
-    }
-
-    private void validateResult(
-            FileStoreTable table, StreamTableScan scan, List<String> expected, long timeout)
-            throws Exception {
-        List<String> actual = new ArrayList<>();
-        long start = System.currentTimeMillis();
-        while (actual.size() != expected.size()) {
-            TableScan.Plan plan = scan.plan();
-            actual.addAll(getResult(table.newReadBuilder().newRead(), plan.splits(), ROW_TYPE));
-
-            if (System.currentTimeMillis() - start > timeout) {
-                break;
-            }
-        }
-        if (actual.size() != expected.size()) {
-            throw new TimeoutException(
-                    String.format(
-                            "Cannot collect %s records in %s milliseconds.",
-                            expected.size(), timeout));
-        }
-        actual.sort(String::compareTo);
-        assertThat(actual).isEqualTo(expected);
-    }
-
-    private void checkFileAndRowSize(
-            FileStoreScan scan, Long expectedSnapshotId, Long timeout, int fileNum, long rowCount)
-            throws Exception {
-
-        long start = System.currentTimeMillis();
-        while (!Objects.equals(snapshotManager.latestSnapshotId(), expectedSnapshotId)) {
-            Thread.sleep(500);
-            if (System.currentTimeMillis() - start > timeout) {
-                throw new RuntimeException("can't wait for a compaction.");
-            }
-        }
-
-        List<ManifestEntry> files =
-                scan.withSnapshot(snapshotManager.latestSnapshotId()).plan().files(FileKind.ADD);
-        long count = 0;
-        for (ManifestEntry file : files) {
-            count += file.file().rowCount();
-        }
-        assertThat(files.size()).isEqualTo(fileNum);
-        assertThat(count).isEqualTo(rowCount);
     }
 }

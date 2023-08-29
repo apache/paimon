@@ -120,6 +120,9 @@ can use the `spark_catalog.${database_name}.${table_name}` to access Spark table
 When starting `spark-sql`, use the following command to register Paimon’s Spark Generic catalog to replace Spark
 default catalog `spark_catalog`. (default warehouse is Spark `spark.sql.warehouse.dir`)
 
+Currently, it is only recommended to use `SparkGenericCatalog` in the case of Hive metastore, Paimon will infer
+Hive conf from Spark session, you just need to configure Spark's Hive conf.
+
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog

@@ -21,16 +21,14 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.RichPlan;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
-
-import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -49,7 +47,7 @@ public interface SnapshotReader {
 
     SnapshotReader withFilter(Predicate predicate);
 
-    SnapshotReader withKind(ScanKind scanKind);
+    SnapshotReader withMode(ScanMode scanMode);
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
@@ -69,17 +67,7 @@ public interface SnapshotReader {
     List<BinaryRow> partitions();
 
     /** Result plan of this scan. */
-    interface Plan extends TableScan.Plan {
-
-        @Nullable
-        Long watermark();
-
-        /**
-         * Snapshot id of this plan, return null if the table is empty or the manifest list is
-         * specified.
-         */
-        @Nullable
-        Long snapshotId();
+    interface Plan extends RichPlan {
 
         /** Result splits. */
         List<Split> splits();
