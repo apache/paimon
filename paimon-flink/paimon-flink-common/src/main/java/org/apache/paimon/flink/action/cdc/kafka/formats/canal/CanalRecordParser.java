@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.kafka.formats.canal;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSchema;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
@@ -71,14 +72,12 @@ public class CanalRecordParser extends RecordParser {
     private static final String OP_INSERT = "INSERT";
     private static final String OP_DELETE = "DELETE";
 
-    private final List<ComputedColumn> computedColumns;
-
     public CanalRecordParser(
             boolean caseSensitive,
+            TypeMapping typeMapping,
             TableNameConverter tableNameConverter,
             List<ComputedColumn> computedColumns) {
-        super(tableNameConverter, caseSensitive);
-        this.computedColumns = computedColumns;
+        super(caseSensitive, typeMapping, tableNameConverter, computedColumns);
     }
 
     @Override
@@ -123,7 +122,8 @@ public class CanalRecordParser extends RecordParser {
         LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         mySqlFieldTypes.forEach(
-                (name, type) -> paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type)));
+                (name, type) ->
+                        paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type, typeMapping)));
 
         return new KafkaSchema(
                 extractString(FIELD_DATABASE),
@@ -317,7 +317,8 @@ public class CanalRecordParser extends RecordParser {
             Map<String, String> mySqlFieldTypes) {
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         mySqlFieldTypes.forEach(
-                (name, type) -> paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type)));
+                (name, type) ->
+                        paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type, typeMapping)));
         return paimonFieldTypes;
     }
 }
