@@ -467,7 +467,7 @@ Further processing of the data table is required when using values from nested f
 
 Functions can be invoked at the tail end of a path - the input to a function is the output of the path expression. The function output is dictated by the function itself.
 
-{{< generated/mongodb_functions) >}}
+{{< generated/mongodb_functions >}}
 
 Path Examples
 ```json
@@ -510,7 +510,7 @@ Path Examples
 }
 ```
 
-{{< generated/mongodb_path_example) >}}
+{{< generated/mongodb_path_example >}}
 
 2. The synchronized table is required to have its primary key set as `_id`. 
 This is because MongoDB's change events are recorded before updates in messages. 
