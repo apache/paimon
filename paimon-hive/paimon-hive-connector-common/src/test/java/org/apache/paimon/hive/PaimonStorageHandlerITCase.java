@@ -170,6 +170,7 @@ public class PaimonStorageHandlerITCase {
         table.createTag("my-tag", 2);
         hiveShell.execute("set paimon.scan.tag-name=my-tag;\n");
         List<String> actual = hiveShell.executeQuery("SELECT * FROM " + tableName);
+        hiveShell.execute("set paimon.scan.tag-name=null;\n");
         List<String> expected = Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine");
         assertThat(actual).isEqualTo(expected);
     }
@@ -209,6 +210,7 @@ public class PaimonStorageHandlerITCase {
         table.createTag("my-tag", 2);
         hiveShell.execute("set paimon." + tableName + ".scan.tag-name=my-tag;\n");
         List<String> actual = hiveShell.executeQuery("SELECT * FROM " + tableName);
+        hiveShell.execute("set paimon." + tableName + ".scan.tag-name=null;\n");
         List<String> expected = Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine");
         assertThat(actual).isEqualTo(expected);
     }
@@ -294,6 +296,7 @@ public class PaimonStorageHandlerITCase {
                                 + " l INNER JOIN "
                                 + rightTableName
                                 + " r ON l.d=r.g");
+        hiveShell.execute("set paimon." + leftTableName + ".scan.tag-name=null;\n");
         expected = Arrays.asList("4\t5\t6\tFine\t1\t2\t3\tFine", "1\t2\t3\tHello\t9\t8\t7\tHello");
         assertThat(actual).isEqualTo(expected);
     }
