@@ -109,7 +109,7 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
     }
 
     @SuppressWarnings("unchecked")
-    private InternalRow copyRowData(InternalRow from, InternalRow reuse) {
+    public InternalRow copyRowData(InternalRow from, InternalRow reuse) {
         GenericRow ret;
         if (reuse instanceof GenericRow) {
             ret = (GenericRow) reuse;
