@@ -18,11 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.action.DatabaseSinkMode;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
+
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -31,9 +33,6 @@ import java.sql.Statement;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
-
-import static org.apache.paimon.flink.action.DatabaseSinkMode.COMBINED;
-import static org.apache.paimon.flink.action.DatabaseSinkMode.DIVIDED;
 
 /** Test if the table list in {@link MySqlSyncDatabaseAction} is correct. */
 public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
@@ -54,7 +53,7 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                         ? ".*shard_.*"
                         : "shard_1|shard_2|shard_3|x_shard_1");
 
-        DatabaseSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())

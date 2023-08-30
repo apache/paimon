@@ -18,13 +18,23 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+import com.ververica.cdc.connectors.mysql.source.MySqlSource;
+import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.DatabaseSinkMode;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
@@ -35,16 +45,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
-
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
-import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.annotation.Nullable;
 
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -56,9 +58,7 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.DatabaseSinkMode.COMBINED;
-import static org.apache.paimon.flink.action.DatabaseSinkMode.DIVIDED;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
+import javax.annotation.Nullable;
 
 /**
  * An {@link Action} which synchronize the whole MySQL database into one Paimon database.
@@ -110,7 +110,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private String tableSuffix = "";
     private String includingTables = ".*";
     @Nullable String excludingTables;
-    private DatabaseSinkMode mode = DIVIDED;
+    private MultiTablesSinkMode mode = DIVIDED;
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     // for test purpose
@@ -168,7 +168,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
-    public MySqlSyncDatabaseAction withMode(DatabaseSinkMode mode) {
+    public MySqlSyncDatabaseAction withMode(MultiTablesSinkMode mode) {
         this.mode = mode;
         return this;
     }
@@ -273,7 +273,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 typeMapping);
 
         String database = this.database;
-        DatabaseSinkMode mode = this.mode;
+        MultiTablesSinkMode mode = this.mode;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(

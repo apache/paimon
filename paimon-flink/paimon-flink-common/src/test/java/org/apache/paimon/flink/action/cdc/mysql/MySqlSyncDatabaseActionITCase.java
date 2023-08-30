@@ -18,15 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.DatabaseSinkMode;
-import org.apache.paimon.options.CatalogOptions;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.JsonSerdeUtil;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.core.execution.JobClient;
@@ -34,12 +29,19 @@ import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
 import org.apache.flink.streaming.api.graph.StreamGraph;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
-
-import javax.annotation.Nullable;
 
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -54,10 +56,7 @@ import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.DatabaseSinkMode.COMBINED;
-import static org.apache.paimon.flink.action.DatabaseSinkMode.DIVIDED;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import javax.annotation.Nullable;
 
 /** IT cases for {@link MySqlSyncDatabaseAction}. */
 public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
@@ -936,7 +935,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         ? "database_shard_.*"
                         : "database_shard_1|database_shard_2");
 
-        DatabaseSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
@@ -1044,7 +1043,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "without_merging_shard_.*");
 
-        DatabaseSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())

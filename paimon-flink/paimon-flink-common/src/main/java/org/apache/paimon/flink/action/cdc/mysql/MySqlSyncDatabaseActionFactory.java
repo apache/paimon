@@ -18,12 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.DatabaseSinkMode;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Optional;
 
@@ -57,7 +56,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
-                .withMode(DatabaseSinkMode.fromString(params.get("mode")));
+                .withMode(MultiTablesSinkMode.fromString(params.get("mode")));
 
         if (params.has("type-mapping")) {
             String[] options = params.get("type-mapping").split(",");

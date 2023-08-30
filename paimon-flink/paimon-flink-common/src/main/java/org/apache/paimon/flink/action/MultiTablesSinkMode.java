@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink.action;
 
-import javax.annotation.Nullable;
-
 import java.io.Serializable;
+
+import javax.annotation.Nullable;
 
 /**
  * There are two modes for database sink.
@@ -31,11 +31,11 @@ import java.io.Serializable;
  * <p>2) COMBINED mode, start a single combined sink for all tables, the new table will be
  * automatically detected.
  */
-public enum DatabaseSinkMode implements Serializable {
+public enum MultiTablesSinkMode implements Serializable {
     DIVIDED,
     COMBINED;
 
-    public static DatabaseSinkMode fromString(@Nullable String mode) {
+    public static MultiTablesSinkMode fromString(@Nullable String mode) {
         if (mode == null) {
             return DIVIDED;
         }

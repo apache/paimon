@@ -18,9 +18,15 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.DatabaseSinkMode;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.sink.index.GlobalDynamicCdcBucketSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
@@ -29,17 +35,10 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
-
-import javax.annotation.Nullable;
-
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.flink.action.DatabaseSinkMode.COMBINED;
-import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import javax.annotation.Nullable;
 
 /**
  * Builder for {@link FlinkCdcSink} when syncing the whole database into one Paimon database. Each
@@ -69,7 +68,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private Catalog.Loader catalogLoader;
     // database to sync, currently only support single database
     private String database;
-    private DatabaseSinkMode mode;
+    private MultiTablesSinkMode mode;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -102,7 +101,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(DatabaseSinkMode mode) {
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withMode(MultiTablesSinkMode mode) {
         this.mode = mode;
         return this;
     }
