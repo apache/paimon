@@ -142,6 +142,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
         waitingTables("t3", "t4");
         FileStoreTable table1 = getFileStoreTable("t3");
         FileStoreTable table2 = getFileStoreTable("t4");
+
         RowType rowType1 =
                 RowType.of(
                         new DataType[] {
