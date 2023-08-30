@@ -72,22 +72,16 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     private final boolean isContinuous;
 
     @Nullable private final String databaseName;
-    private final String tableName;
 
     public BucketsTable(FileStoreTable wrapped, boolean isContinuous) {
-        this.wrapped = wrapped;
-        this.isContinuous = isContinuous;
-        this.databaseName = null;
-        this.tableName = wrapped.name();
+        this(wrapped, isContinuous, null);
     }
 
     // if need to specify the database of a table, use this method
-    public BucketsTable(
-            FileStoreTable wrapped, boolean isContinuous, String databaseName, String tableName) {
+    public BucketsTable(FileStoreTable wrapped, boolean isContinuous, String databaseName) {
         this.wrapped = wrapped;
         this.isContinuous = isContinuous;
         this.databaseName = databaseName;
-        this.tableName = tableName;
     }
 
     @Override
@@ -117,9 +111,8 @@ public class BucketsTable implements DataTable, ReadonlyTable {
         fields.add(new DataField(1, "_PARTITION", newBytesType(false)));
         fields.add(new DataField(2, "_BUCKET", new IntType(false)));
         fields.add(new DataField(3, "_FILES", newBytesType(false)));
-        fields.add(
-                new DataField(4, "_DATABASE_NAME", new VarCharType(Integer.MAX_VALUE).nullable()));
-        fields.add(new DataField(5, "_TABLE_NAME", new VarCharType(Integer.MAX_VALUE)));
+        fields.add(new DataField(4, "_DATABASE_NAME", new VarCharType(true, Integer.MAX_VALUE)));
+        fields.add(new DataField(5, "_TABLE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
         return new RowType(fields);
     }
 
@@ -160,12 +153,7 @@ public class BucketsTable implements DataTable, ReadonlyTable {
 
     @Override
     public BucketsTable copy(Map<String, String> dynamicOptions) {
-        return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous);
-    }
-
-    public BucketsTable copyWithName(Map<String, String> dynamicOptions) {
-        return new BucketsTable(
-                wrapped.copy(dynamicOptions), isContinuous, databaseName, tableName);
+        return new BucketsTable(wrapped.copy(dynamicOptions), isContinuous, databaseName);
     }
 
     @Override
@@ -215,7 +203,7 @@ public class BucketsTable implements DataTable, ReadonlyTable {
                             dataSplit.bucket(),
                             dataFileMetaSerializer.serializeList(files),
                             BinaryString.fromString(databaseName),
-                            BinaryString.fromString(tableName));
+                            BinaryString.fromString(wrapped.name()));
 
             return new IteratorRecordReader<>(Collections.singletonList(row).iterator());
         }
