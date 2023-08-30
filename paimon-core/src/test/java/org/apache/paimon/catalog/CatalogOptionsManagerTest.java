@@ -20,6 +20,7 @@ package org.apache.paimon.catalog;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 import org.junit.jupiter.api.AfterEach;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 
 import static org.apache.paimon.options.CatalogOptions.DATA_LINEAGE;
+import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.TABLE_LINEAGE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -166,6 +168,13 @@ public class CatalogOptionsManagerTest {
                                         CatalogContext.create(withoutImmutableOptions)))
                 .isInstanceOf(IllegalStateException.class);
         cleanCatalog();
+    }
+
+    @Test
+    public void testCatalogImmutableOptionKeys() {
+        assertThat(CatalogOptions.getImmutableOptionKeys())
+                .containsExactlyInAnyOrder(
+                        LINEAGE_META.key(), TABLE_LINEAGE.key(), DATA_LINEAGE.key());
     }
 
     private static void cleanCatalog() throws IOException {

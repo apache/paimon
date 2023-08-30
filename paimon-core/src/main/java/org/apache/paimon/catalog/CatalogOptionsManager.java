@@ -26,21 +26,14 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.Arrays;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 
 import static org.apache.paimon.options.CatalogOptions.DATA_LINEAGE;
-import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.TABLE_LINEAGE;
 
 /** Manage read and write of immutable {@link org.apache.paimon.options.CatalogOptions}. */
 public class CatalogOptionsManager {
     private static final String OPTIONS = "options";
-    public static final Set<String> IMMUTABLE_CATALOG_OPTION_KEYS =
-            new HashSet<>(
-                    Arrays.asList(LINEAGE_META.key(), TABLE_LINEAGE.key(), DATA_LINEAGE.key()));
     private final FileIO fileIO;
     private final Path warehouse;
 

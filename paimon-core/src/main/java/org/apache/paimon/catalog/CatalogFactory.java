@@ -23,6 +23,7 @@ import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 
@@ -92,7 +93,7 @@ public interface CatalogFactory extends Factory {
             CatalogOptionsManager catalogOptionsManager =
                     new CatalogOptionsManager(fileIO, new Path(warehouse));
             Map<String, String> immutableOptions =
-                    immutableOptions(context, CatalogOptionsManager.IMMUTABLE_CATALOG_OPTION_KEYS);
+                    immutableOptions(context, CatalogOptions.getImmutableOptionKeys());
             if (fileIO.exists(catalogOptionsManager.getCatalogOptionPath())) {
                 Map<String, String> originImmutableOptions =
                         catalogOptionsManager.immutableOptions();
