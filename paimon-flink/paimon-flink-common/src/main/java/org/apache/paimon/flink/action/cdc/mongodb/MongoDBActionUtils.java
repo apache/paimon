@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
@@ -158,6 +159,7 @@ public class MongoDBActionUtils {
     static Schema buildPaimonSchema(
             MongodbSchema mongodbSchema,
             List<String> specifiedPartitionKeys,
+            List<ComputedColumn> computedColumns,
             Map<String, String> paimonConfig,
             boolean caseSensitive) {
 
@@ -182,9 +184,13 @@ public class MongoDBActionUtils {
 
         mongodbFields.forEach(builder::column);
 
+        for (ComputedColumn computedColumn : computedColumns) {
+            builder.column(computedColumn.columnName(), computedColumn.columnType());
+        }
+
         builder.primaryKey(Lists.newArrayList(PRIMARY_KEY));
 
-        if (!specifiedPartitionKeys.isEmpty()) {
+        if (specifiedPartitionKeys.size() > 0) {
             builder.partitionKeys(specifiedPartitionKeys);
         }
 

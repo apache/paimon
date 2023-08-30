@@ -176,7 +176,6 @@ public class DeleteTag {
 
 {{< /tab >}}
 
-{{< /tab >}}
 
 {{< tab "Spark" >}}
 Run the following sql:

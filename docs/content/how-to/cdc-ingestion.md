@@ -447,6 +447,7 @@ To use this feature through `flink run`, run the following shell command.
     --database <database-name> \
     --table <table-name> \
     [--partition-keys <partition-keys>] \
+    [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -535,6 +536,7 @@ Example 1: synchronize collection into one Paimon table
     --database test_db \
     --table test_table \
     --partition-keys pt \
+    --computed-column '_year=year(age)' \
     --mongodb-conf hosts=127.0.0.1:27017 \
     --mongodb-conf username=root \
     --mongodb-conf password=123456 \

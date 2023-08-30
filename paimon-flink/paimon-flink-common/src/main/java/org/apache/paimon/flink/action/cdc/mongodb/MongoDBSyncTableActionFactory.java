@@ -24,12 +24,8 @@ import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.ArrayList;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /** Factory to create {@link MongoDBSyncTableAction}. */
 public class MongoDBSyncTableActionFactory implements ActionFactory {
@@ -44,29 +40,26 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        List<String> partitionKeys = Collections.emptyList();
-        if (params.has("partition-keys")) {
-            partitionKeys =
-                    Arrays.stream(params.get("partition-keys").split(","))
-                            .collect(Collectors.toList());
-        }
-
         checkRequiredArgument(params, "mongodb-conf");
 
-        Map<String, String> mongodbConfig = optionalConfigMap(params, "mongodb-conf");
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        Map<String, String> tableConfig = optionalConfigMap(params, "table-conf");
+        MongoDBSyncTableAction.Builder builder =
+                new MongoDBSyncTableAction.Builder(
+                                tablePath.f0,
+                                tablePath.f1,
+                                tablePath.f2,
+                                optionalConfigMap(params, "catalog-conf"),
+                                optionalConfigMap(params, "mongodb-conf"))
+                        .withTableConfig(optionalConfigMap(params, "table-conf"));
 
-        return Optional.of(
-                new MongoDBSyncTableAction(
-                        mongodbConfig,
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        partitionKeys,
-                        catalogConfig,
-                        tableConfig));
+        if (params.has("partition-keys")) {
+            builder.withPartitionKeys(params.get("partition-keys").split(","));
+        }
+
+        if (params.has("computed-column")) {
+            builder.withComputedColumnArgs(
+                    new ArrayList<>(params.getMultiParameter("computed-column")));
+        }
+        return Optional.ofNullable(builder.buildAction());
     }
 
     @Override
@@ -81,6 +74,7 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                 "  mongodb-sync-table --warehouse <warehouse-path> --database <database-name> "
                         + "--table <table-name> "
                         + "[--partition-keys <partition-keys>] "
+                        + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
                         + "[--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -91,6 +85,9 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
         System.out.println(
                 "If partition key is not defined and the specified Paimon table does not exist, "
                         + "this action will automatically create an unpartitioned Paimon table.");
+        System.out.println();
+
+        System.out.println("Please see doc for usage of --computed-column.");
         System.out.println();
 
         System.out.println("mongodb CDC source conf syntax:");

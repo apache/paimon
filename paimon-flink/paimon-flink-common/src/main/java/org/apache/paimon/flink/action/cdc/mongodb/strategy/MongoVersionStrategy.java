@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb.strategy;
 
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.mongodb.SchemaAcquisitionMode;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
@@ -67,10 +68,6 @@ public interface MongoVersionStrategy {
         return Collections.singletonList("_id");
     }
 
-    default Map<String, String> extractRow(String record) {
-        return JsonSerdeUtil.parseJsonMap(record, String.class);
-    }
-
     default Map<String, String> keyCaseInsensitive(Map<String, String> origin) {
         Map<String, String> keyCaseInsensitive = new HashMap<>();
         for (Map.Entry<String, String> entry : origin.entrySet()) {
@@ -98,6 +95,7 @@ public interface MongoVersionStrategy {
             JsonNode jsonNode,
             LinkedHashMap<String, DataType> paimonFieldTypes,
             boolean caseSensitive,
+            List<ComputedColumn> computedColumns,
             Configuration mongodbConfig)
             throws JsonProcessingException {
         SchemaAcquisitionMode mode =
@@ -111,56 +109,77 @@ public interface MongoVersionStrategy {
                                 document.toString(),
                                 mongodbConfig.getString(PARSER_PATH),
                                 mongodbConfig.getString(FIELD_NAME),
+                                computedColumns,
                                 paimonFieldTypes);
                 return caseSensitive ? specifiedRow : keyCaseInsensitive(specifiedRow);
             case DYNAMIC:
                 Map<String, String> dynamicRow =
-                        parseAndTypeJsonRow(document.toString(), paimonFieldTypes);
+                        parseAndTypeJsonRow(
+                                document.toString(),
+                                paimonFieldTypes,
+                                computedColumns,
+                                caseSensitive);
                 return caseSensitive ? dynamicRow : keyCaseInsensitive(dynamicRow);
             default:
                 throw new RuntimeException("Unsupported extraction mode: " + mode);
         }
     }
 
-    /**
-     * Parses a JSON string into a map and updates the data type mapping for each key.
-     *
-     * @param evaluate The JSON string to be parsed.
-     * @param paimonFieldTypes A map to store the data types of the keys.
-     * @return A map containing the parsed key-value pairs from the JSON string.
-     */
+    /** Parses and types a JSON row based on the given parameters. */
     default Map<String, String> parseAndTypeJsonRow(
-            String evaluate, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        Map<String, String> parsedMap = JsonSerdeUtil.parseJsonMap(evaluate, String.class);
-        for (String column : parsedMap.keySet()) {
-            paimonFieldTypes.put(column, DataTypes.STRING());
-        }
-        return extractRow(evaluate);
+            String jsonRow,
+            LinkedHashMap<String, DataType> fieldTypes,
+            List<ComputedColumn> computedColumns,
+            boolean caseSensitive) {
+        Map<String, String> parsedRow = JsonSerdeUtil.parseJsonMap(jsonRow, String.class);
+        return processParsedData(parsedRow, fieldTypes, computedColumns, caseSensitive);
     }
 
-    /**
-     * Parses specified fields from a JSON record.
-     *
-     * @param record The JSON record to be parsed.
-     * @param fieldPaths The paths of the fields to be parsed from the JSON record.
-     * @param fieldNames The names of the fields to be returned in the result map.
-     * @param paimonFieldTypes A map to store the data types of the fields.
-     * @return A map containing the parsed fields and their values.
-     */
+    /** Parses fields from a JSON record based on the given parameters. */
     static Map<String, String> parseFieldsFromJsonRecord(
             String record,
             String fieldPaths,
             String fieldNames,
-            LinkedHashMap<String, DataType> paimonFieldTypes) {
-        Map<String, String> resultMap = new HashMap<>();
+            List<ComputedColumn> computedColumns,
+            LinkedHashMap<String, DataType> fieldTypes) {
         String[] columnNames = fieldNames.split(",");
         String[] parseNames = fieldPaths.split(",");
+        Map<String, String> parsedRow = new HashMap<>();
 
         for (int i = 0; i < parseNames.length; i++) {
-            paimonFieldTypes.put(columnNames[i], DataTypes.STRING());
             String evaluate = JsonPath.read(record, parseNames[i]);
-            resultMap.put(columnNames[i], Optional.ofNullable(evaluate).orElse("{}"));
+            parsedRow.put(columnNames[i], Optional.ofNullable(evaluate).orElse("{}"));
         }
+
+        return processParsedData(parsedRow, fieldTypes, computedColumns, false);
+    }
+
+    /** Processes the parsed data to generate the result map and update field types. */
+    static Map<String, String> processParsedData(
+            Map<String, String> parsedRow,
+            LinkedHashMap<String, DataType> fieldTypes,
+            List<ComputedColumn> computedColumns,
+            boolean caseSensitive) {
+        int initialCapacity = parsedRow.size() + computedColumns.size();
+        Map<String, String> resultMap = new HashMap<>(initialCapacity);
+
+        parsedRow.forEach(
+                (column, value) -> {
+                    String key = caseSensitive ? column : column.toLowerCase();
+                    fieldTypes.putIfAbsent(key, DataTypes.STRING());
+                    resultMap.put(key, value);
+                });
+
+        computedColumns.forEach(
+                computedColumn -> {
+                    String columnName = computedColumn.columnName();
+                    String fieldReference = computedColumn.fieldReference();
+                    String computedValue = computedColumn.eval(parsedRow.get(fieldReference));
+
+                    resultMap.put(columnName, computedValue);
+                    fieldTypes.put(columnName, computedColumn.columnType());
+                });
+
         return resultMap;
     }
 }

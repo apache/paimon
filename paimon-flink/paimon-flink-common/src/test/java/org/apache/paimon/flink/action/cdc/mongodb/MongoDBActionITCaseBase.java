@@ -73,8 +73,8 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
         return MONGODB_CONTAINER.executeCommandFileInSeparateDatabase(fileName, content);
     }
 
-    protected static String writeRecordsToMongoDB(String fileName, String dbName, String content) {
-        return MONGODB_CONTAINER.executeCommandFileInSeparateDatabase(fileName, dbName, content);
+    protected static void writeRecordsToMongoDB(String fileName, String dbName, String content) {
+        MONGODB_CONTAINER.executeCommandFileInSeparateDatabase(fileName, dbName, content);
     }
 
     protected void runActionWithDefaultEnv(MongoDBSyncTableAction action) throws Exception {
@@ -111,15 +111,6 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
             throw new UnsupportedOperationException();
         }
 
-        public MongoDBSyncTableActionBuilder withComputedColumnArgs(String... computedColumnArgs) {
-            throw new UnsupportedOperationException();
-        }
-
-        public MongoDBSyncTableActionBuilder withComputedColumnArgs(
-                List<String> computedColumnArgs) {
-            throw new UnsupportedOperationException();
-        }
-
         public MongoDBSyncTableActionBuilder withTypeMappingModes(String... typeMappingModes) {
             throw new UnsupportedOperationException();
         }
@@ -138,6 +129,7 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(mapToArgs("--mongodb-conf", sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));
             args.addAll(mapToArgs("--table-conf", tableConfig));
+            args.addAll(listToArgs("--computed-column", computedColumnArgs));
 
             args.addAll(listToArgs("--partition-keys", partitionKeys));
 
