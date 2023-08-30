@@ -84,4 +84,24 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT DISTINCT bucket FROM T$files"))
                 .containsExactlyInAnyOrder(Row.of(0), Row.of(1), Row.of(2));
     }
+
+    @Test
+    public void testLargeRecords() {
+        sql("drop table t");
+        sql(
+                "create table t (pt int, k int, v int, primary key (k) not enforced) partitioned by (pt) with ("
+                        + "'bucket'='-1', "
+                        + "'dynamic-bucket.target-row-num'='10000')");
+        sql(
+                "create temporary table src (pt int, k int, v int) with ("
+                        + "'connector'='datagen', "
+                        + "'number-of-rows'='100000', "
+                        + "'fields.k.min'='0', "
+                        + "'fields.k.max'='100000', "
+                        + "'fields.pt.min'='0', "
+                        + "'fields.pt.max'='1')");
+        sql("insert into t select * from src");
+        sql("insert into t select * from src");
+        assertThat(sql("select k, count(*) from t group by k having count(*) > 1")).isEmpty();
+    }
 }

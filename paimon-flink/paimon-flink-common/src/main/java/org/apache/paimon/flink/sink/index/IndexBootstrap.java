@@ -18,25 +18,39 @@
 
 package org.apache.paimon.flink.sink.index;
 
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.AbstractInnerTableScan;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.SCAN_MODE;
+import static org.apache.paimon.CoreOptions.StartupMode.LATEST;
+
 /** Bootstrap key index from Paimon table. */
 public class IndexBootstrap implements Serializable {
 
     private static final long serialVersionUID = 1L;
+
+    public static final String BUCKET_FIELD = "_BUCKET";
 
     private final Table table;
 
@@ -56,14 +70,42 @@ public class IndexBootstrap implements Serializable {
                         .map(fieldNames::indexOf)
                         .mapToInt(Integer::intValue)
                         .toArray();
-        ReadBuilder readBuilder = table.newReadBuilder().withProjection(projection);
+
+        // force using the latest scan mode
+        ReadBuilder readBuilder =
+                table.copy(Collections.singletonMap(SCAN_MODE.key(), LATEST.toString()))
+                        .newReadBuilder()
+                        .withProjection(projection);
 
         AbstractInnerTableScan tableScan = (AbstractInnerTableScan) readBuilder.newScan();
         TableScan.Plan plan =
                 tableScan.withBucketFilter(bucket -> bucket % numAssigners == assignId).plan();
 
-        try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(plan)) {
-            reader.forEachRemaining(collector);
+        for (Split split : plan.splits()) {
+            try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
+                int bucket = ((DataSplit) split).bucket();
+                GenericRow bucketRow = GenericRow.of(bucket);
+                JoinedRow joinedRow = new JoinedRow();
+                reader.transform(row -> joinedRow.replace(row, bucketRow))
+                        .forEachRemaining(collector);
+            }
         }
+    }
+
+    public static RowType bootstrapType(TableSchema schema) {
+        List<String> primaryKeys = schema.primaryKeys();
+        List<String> partitionKeys = schema.partitionKeys();
+        List<DataField> bootstrapFields =
+                new ArrayList<>(
+                        schema.projectedLogicalRowType(
+                                        Stream.concat(primaryKeys.stream(), partitionKeys.stream())
+                                                .collect(Collectors.toList()))
+                                .getFields());
+        bootstrapFields.add(
+                new DataField(
+                        RowType.currentHighestFieldId(bootstrapFields) + 1,
+                        BUCKET_FIELD,
+                        DataTypes.INT().notNull()));
+        return new RowType(bootstrapFields);
     }
 }
