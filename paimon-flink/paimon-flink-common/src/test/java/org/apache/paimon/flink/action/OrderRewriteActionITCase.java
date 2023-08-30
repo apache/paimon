@@ -39,6 +39,7 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.Assertions;
@@ -50,6 +51,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Order Rewrite Action tests for {@link SortCompactAction}. */
 public class OrderRewriteActionITCase extends ActionITCaseBase {
@@ -69,6 +71,74 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testOrderBy() throws Exception {
+        prepareData(300, 1);
+        Assertions.assertThatCode(
+                        () ->
+                                order(
+                                        Arrays.asList(
+                                                "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
+                                                "f8", "f9", "f10", "f11", "f12", "f13", "f14",
+                                                "f15")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testOrderResult() throws Exception {
+        prepareData(300, 2);
+        Assertions.assertThatCode(() -> order(Arrays.asList("f1", "f2")))
+                .doesNotThrowAnyException();
+
+        List<ManifestEntry> files =
+                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+
+        ManifestEntry entry = files.get(0);
+        DataSplit dataSplit =
+                DataSplit.builder()
+                        .withPartition(entry.partition())
+                        .withBucket(entry.bucket())
+                        .withDataFiles(Collections.singletonList(entry.file()))
+                        .build();
+
+        final AtomicInteger i = new AtomicInteger(Integer.MIN_VALUE);
+        getTable()
+                .newReadBuilder()
+                .newRead()
+                .createReader(dataSplit)
+                .forEachRemaining(
+                        a -> {
+                            Integer current = a.getInt(1);
+                            Assertions.assertThat(current).isGreaterThanOrEqualTo(i.get());
+                            i.set(current);
+                        });
+
+        Assertions.assertThatCode(() -> order(Arrays.asList("f2", "f1")))
+                .doesNotThrowAnyException();
+
+        files = ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+
+        entry = files.get(0);
+        dataSplit =
+                DataSplit.builder()
+                        .withPartition(entry.partition())
+                        .withBucket(entry.bucket())
+                        .withDataFiles(Collections.singletonList(entry.file()))
+                        .build();
+
+        i.set(Integer.MIN_VALUE);
+        getTable()
+                .newReadBuilder()
+                .newRead()
+                .createReader(dataSplit)
+                .forEachRemaining(
+                        a -> {
+                            Integer current = a.getInt(2);
+                            Assertions.assertThat(current).isGreaterThanOrEqualTo(i.get());
+                            i.set(current);
+                        });
+    }
+
+    @Test
     public void testAllBasicTypeWorksWithZorder() throws Exception {
         prepareData(300, 1);
         // All the basic types should support zorder
@@ -84,7 +154,7 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
 
     @Test
     public void testZorderActionWorks() throws Exception {
-        prepareData(300, 30);
+        prepareData(300, 2);
         PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
         Predicate predicate = predicateBuilder.between(1, 100, 200);
 
@@ -113,6 +183,39 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
         Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
     }
 
+    @Test
+    public void testCompareZorderAndOrder() throws Exception {
+        prepareData(300, 10);
+        zorder(Arrays.asList("f2", "f1"));
+
+        PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
+        Predicate predicate = predicateBuilder.between(1, 10, 20);
+
+        List<ManifestEntry> filesZorder =
+                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> filesFilterZorder =
+                ((AppendOnlyFileStoreTable) getTable())
+                        .store()
+                        .newScan()
+                        .withFilter(predicate)
+                        .plan()
+                        .files();
+
+        order(Arrays.asList("f2", "f1"));
+        List<ManifestEntry> filesOrder =
+                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> filesFilterOrder =
+                ((AppendOnlyFileStoreTable) getTable())
+                        .store()
+                        .newScan()
+                        .withFilter(predicate)
+                        .plan()
+                        .files();
+
+        Assertions.assertThat(filesFilterZorder.size() / (double) filesZorder.size())
+                .isLessThan(filesFilterOrder.size() / (double) filesOrder.size());
+    }
+
     private void zorder(List<String> columns) throws Exception {
         SortCompactAction sortCompactAction =
                 new SortCompactAction(
@@ -121,6 +224,18 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
                         "Orders1",
                         Collections.emptyMap());
         sortCompactAction.withOrderStrategy("zorder");
+        sortCompactAction.withOrderColumns(columns);
+        sortCompactAction.run();
+    }
+
+    private void order(List<String> columns) throws Exception {
+        SortCompactAction sortCompactAction =
+                new SortCompactAction(
+                        new Path(path.toUri()).toUri().toString(),
+                        "my_db",
+                        "Orders1",
+                        Collections.emptyMap());
+        sortCompactAction.withOrderStrategy("order");
         sortCompactAction.withOrderColumns(columns);
         sortCompactAction.run();
     }

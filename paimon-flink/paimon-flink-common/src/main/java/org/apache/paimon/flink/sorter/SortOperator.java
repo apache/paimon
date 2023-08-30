@@ -31,7 +31,6 @@ import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
 
@@ -43,42 +42,28 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
 
 /** SortOperator to sort the `InternalRow`s by the `KeyType`. */
 public class SortOperator extends TableStreamOperator<InternalRow>
         implements OneInputStreamOperator<InternalRow, InternalRow>, BoundedOneInput {
 
-    private final RowType keyRowType;
-    private final RowType valueRowType;
+    private final RowType rowType;
     private final long maxMemory;
     private final int pageSize;
     private final int arity;
     private transient BinaryExternalSortBuffer buffer;
 
-    public SortOperator(RowType keyType, RowType valueRowType, long maxMemory, int pageSize) {
-        this.keyRowType = keyType;
-        this.valueRowType = valueRowType;
+    public SortOperator(RowType rowType, long maxMemory, int pageSize) {
+        this.rowType = rowType;
         this.maxMemory = maxMemory;
         this.pageSize = pageSize;
-        this.arity = keyType.getFieldCount() + valueRowType.getFieldCount();
+        this.arity = rowType.getFieldCount();
     }
 
     @Override
     public void open() throws Exception {
         super.open();
-
-        List<DataField> keyFields = keyRowType.getFields();
-        List<DataField> dataFields = valueRowType.getFields();
-
-        List<DataField> fields = new ArrayList<>();
-        fields.addAll(keyFields);
-        fields.addAll(dataFields);
-
-        RowType rowType = new RowType(fields);
 
         InternalRowSerializer serializer = InternalSerializers.create(rowType);
         NormalizedKeyComputer normalizedKeyComputer =

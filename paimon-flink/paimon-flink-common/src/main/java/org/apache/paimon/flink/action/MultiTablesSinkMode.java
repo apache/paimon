@@ -16,26 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc;
+package org.apache.paimon.flink.action;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
 /**
- * There are two modes for database sync.
+ * There are two modes for database sink.
  *
- * <p>1) DIVIDED mode, start a sink for each table, the synchronization of the new table requires
- * restarting the job.
+ * <p>1) DIVIDED mode, start a sink for each table, detecting the new table requires restarting the
+ * job.
  *
  * <p>2) COMBINED mode, start a single combined sink for all tables, the new table will be
- * automatically synchronized.
+ * automatically detected.
  */
-public enum DatabaseSyncMode implements Serializable {
+public enum MultiTablesSinkMode implements Serializable {
     DIVIDED,
     COMBINED;
 
-    public static DatabaseSyncMode fromString(@Nullable String mode) {
+    public static MultiTablesSinkMode fromString(@Nullable String mode) {
         if (mode == null) {
             return DIVIDED;
         }
