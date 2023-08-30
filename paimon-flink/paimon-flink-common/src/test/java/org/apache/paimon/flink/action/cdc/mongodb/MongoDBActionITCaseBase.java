@@ -25,7 +25,6 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,18 +74,6 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
 
     protected static String writeRecordsToMongoDB(String fileName, String dbName, String content) {
         return MONGODB_CONTAINER.executeCommandFileInSeparateDatabase(fileName, dbName, content);
-    }
-
-    protected void runActionWithDefaultEnv(MongoDBSyncTableAction action) throws Exception {
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-    }
-
-    protected void runActionWithDefaultEnv(MongoDBSyncDatabaseAction action) throws Exception {
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
     }
 
     protected MongoDBSyncTableActionBuilder syncTableActionBuilder(

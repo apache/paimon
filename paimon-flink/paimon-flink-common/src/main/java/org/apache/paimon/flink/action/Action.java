@@ -18,9 +18,13 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+
 /** Abstract class for Flink actions. */
 public interface Action {
 
     /** The execution method of the action. */
     void run() throws Exception;
+
+    default void build(StreamExecutionEnvironment env) throws Exception {}
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -139,16 +140,6 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         return config;
     }
 
-    protected void waitJobRunning(JobClient client) throws Exception {
-        while (true) {
-            JobStatus status = client.getJobStatus().get();
-            if (status == JobStatus.RUNNING) {
-                break;
-            }
-            Thread.sleep(1000);
-        }
-    }
-
     protected List<String> mapToArgs(String argKey, Map<String, String> map) {
         List<String> args = new ArrayList<>();
         for (Map.Entry<String, String> entry : map.entrySet()) {
@@ -179,6 +170,23 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return Collections.emptyList();
         }
         return Arrays.asList(argKey, nullable.toString());
+    }
+
+    public <T extends ActionBase> JobClient runActionWithDefaultEnv(T action) throws Exception {
+        action.build(env);
+        JobClient client = env.executeAsync();
+        waitJobRunning(client);
+        return client;
+    }
+
+    protected void waitJobRunning(JobClient client) throws Exception {
+        while (true) {
+            JobStatus status = client.getJobStatus().get();
+            if (status == JobStatus.RUNNING) {
+                break;
+            }
+            Thread.sleep(1000);
+        }
     }
 
     /** Base builder to build table synchronization action from action arguments. */
