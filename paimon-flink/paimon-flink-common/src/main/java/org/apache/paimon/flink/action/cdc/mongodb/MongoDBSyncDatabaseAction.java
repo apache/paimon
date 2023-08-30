@@ -22,7 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
@@ -135,7 +135,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)
-                        .withMode(DatabaseSyncMode.COMBINED);
+                        .withMode(MultiTablesSinkMode.COMBINED);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

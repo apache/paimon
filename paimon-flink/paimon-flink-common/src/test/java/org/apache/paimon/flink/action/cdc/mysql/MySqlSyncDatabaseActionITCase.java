@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
@@ -54,8 +54,8 @@ import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -936,7 +936,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         ? "database_shard_.*"
                         : "database_shard_1|database_shard_2");
 
-        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
@@ -1044,7 +1044,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "without_merging_shard_.*");
 
-        DatabaseSyncMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
