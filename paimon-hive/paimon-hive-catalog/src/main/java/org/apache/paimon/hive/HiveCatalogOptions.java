@@ -41,7 +41,7 @@ public final class HiveCatalogOptions {
                     .withDescription(
                             "File directory of the core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml. Currently, only local file system paths are supported.\n"
                                     + "If not configured, try to load from 'HADOOP_CONF_DIR' or 'HADOOP_HOME' system environment.\n"
-                                    + "Configure Priority: 1.from 'hadoop-conf-dir' 2.from HADOOP_CONF_DIR  3.from HADOOP_HOME/conf 4.HADOOP_HOME/etc/hadoop");
+                                    + "Configure Priority: 1.from 'hadoop-conf-dir' 2.from HADOOP_CONF_DIR  3.from HADOOP_HOME/conf 4.HADOOP_HOME/etc/hadoop.");
 
     public static final ConfigOption<Boolean> LOCATION_IN_PROPERTIES =
             ConfigOptions.key("location-in-properties")
