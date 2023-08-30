@@ -67,9 +67,23 @@ public class JsonSerdeUtil {
                     .collect(
                             Collectors.toMap(
                                     Map.Entry::getKey,
-                                    entry ->
-                                            OBJECT_MAPPER_INSTANCE.convertValue(
-                                                    entry.getValue(), valueType),
+                                    entry -> {
+                                        Object value = entry.getValue();
+                                        try {
+                                            if (!(valueType.isInstance(value))) {
+                                                String jsonStr =
+                                                        OBJECT_MAPPER_INSTANCE.writeValueAsString(
+                                                                value);
+                                                return OBJECT_MAPPER_INSTANCE.convertValue(
+                                                        jsonStr, valueType);
+                                            }
+                                            return OBJECT_MAPPER_INSTANCE.convertValue(
+                                                    value, valueType);
+                                        } catch (JsonProcessingException e) {
+                                            throw new RuntimeException(
+                                                    "Error converting value to JSON string", e);
+                                        }
+                                    },
                                     (oldValue, newValue) -> oldValue,
                                     LinkedHashMap::new));
         } catch (JsonProcessingException e) {
