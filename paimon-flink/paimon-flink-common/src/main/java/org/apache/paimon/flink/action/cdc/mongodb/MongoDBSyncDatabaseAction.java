@@ -77,7 +77,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     @Nullable private final String includingTables;
 
     public MongoDBSyncDatabaseAction(
-            Map<String, String> kafkaConfig,
+            Map<String, String> mongodbConfig,
             String warehouse,
             String database,
             @Nullable String tablePrefix,
@@ -87,7 +87,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
         super(warehouse, catalogConfig);
-        this.mongodbConfig = Configuration.fromMap(kafkaConfig);
+        this.mongodbConfig = Configuration.fromMap(mongodbConfig);
         this.database = database;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
@@ -131,7 +131,9 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                                                 "MongoDB Source")
                                         .flatMap(
                                                 new MongoDBRecordParser(
-                                                        false, tableNameConverter, mongodbConfig)))
+                                                        caseSensitive,
+                                                        tableNameConverter,
+                                                        mongodbConfig)))
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)
