@@ -45,7 +45,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/** this is a doc. */
+/** It is responsible for monitoring compactor source in streaming mode. */
 public class MultiTablesStreamingCompactorSourceFunction
         extends MultiTablesCompactorSourceFunction {
     private static final Logger LOG =

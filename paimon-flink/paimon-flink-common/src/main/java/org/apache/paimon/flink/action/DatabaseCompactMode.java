@@ -22,7 +22,15 @@ import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
-/** this is a doc. */
+/**
+ * There are two modes for database compact.
+ *
+ * <p>1) DIVIDED mode, start a sink for each table, the compaction of the new table requires
+ * restarting the job.
+ *
+ * <p>2) COMBINED mode, start a single combined sink for all tables, the new table will be
+ * automatically compacted.
+ */
 public enum DatabaseCompactMode implements Serializable {
     DIVIDED,
     COMBINED;

@@ -27,7 +27,7 @@ import org.apache.flink.table.data.RowData;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
-/** this is a doc. */
+/** Builder for {@link MultiTablesCompactorSink}. */
 public class MultiTablesCompactorSinkBuilder {
     private final Catalog.Loader catalogLoader;
 

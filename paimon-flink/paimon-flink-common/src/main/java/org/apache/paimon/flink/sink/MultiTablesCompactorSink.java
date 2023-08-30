@@ -48,7 +48,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** this is a doc. */
+/** A sink for processing multi-tables in dedicated compaction job. */
 public class MultiTablesCompactorSink implements Serializable {
     private static final long serialVersionUID = 1L;
 

@@ -45,7 +45,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/** this is a doc. */
+/** It is responsible for monitoring compactor source in batch mode. */
 public class MultiTablesBatchCompactorSourceFunction extends MultiTablesCompactorSourceFunction {
     private static final Logger LOG =
             LoggerFactory.getLogger(MultiTablesBatchCompactorSourceFunction.class);

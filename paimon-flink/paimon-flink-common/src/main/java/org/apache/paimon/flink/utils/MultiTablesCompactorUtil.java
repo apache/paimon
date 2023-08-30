@@ -28,7 +28,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-/** this is a doc. */
+/** Utility methods for dedicated compaction job for multi-tables. */
 public class MultiTablesCompactorUtil {
 
     private static final Logger LOG = LoggerFactory.getLogger(MultiTablesCompactorUtil.class);

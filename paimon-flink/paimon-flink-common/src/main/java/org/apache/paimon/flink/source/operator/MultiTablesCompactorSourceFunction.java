@@ -54,7 +54,20 @@ import java.util.regex.Pattern;
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactionTable;
 
-/** this is a doc. */
+/**
+ * This is the single (non-parallel) monitoring task, it is responsible for:
+ *
+ * <ol>
+ *   <li>Monitoring snapshots of the Paimon table.
+ *   <li>Creating the Tuple2<{@link Split}, String> splits corresponding to the incremental files
+ *   <li>Assigning them to downstream tasks for further processing.
+ * </ol>
+ *
+ * <p>The splits to be read are forwarded to the downstream {@link MultiTablesReadOperator} which
+ * can have parallelism greater than one.
+ *
+ * <p>Currently, only dedicated compaction job for multi-tables rely on this monitor.
+ */
 public abstract class MultiTablesCompactorSourceFunction
         extends RichSourceFunction<Tuple2<Split, String>>
         implements CheckpointedFunction, CheckpointListener {

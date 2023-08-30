@@ -44,7 +44,12 @@ import java.util.regex.Pattern;
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactionTable;
 
-/** this is a doc. */
+/**
+ * The operator that reads the Tuple2<{@link Split}, String> received from the preceding {@link
+ * MultiTablesBatchCompactorSourceFunction} or {@link MultiTablesStreamingCompactorSourceFunction}.
+ * Contrary to the {@link MultiTablesCompactorSourceFunction} which has a parallelism of 1, this
+ * operator can have DOP > 1.
+ */
 public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         implements OneInputStreamOperator<Tuple2<Split, String>, RowData> {
 

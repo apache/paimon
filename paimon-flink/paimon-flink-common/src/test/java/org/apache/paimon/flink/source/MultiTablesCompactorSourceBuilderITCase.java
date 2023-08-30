@@ -69,7 +69,7 @@ import java.util.regex.Pattern;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** this is a doc. */
+/** IT cases for {@link MultiTablesCompactorSourceBuilder}. */
 public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         implements Serializable {
     private String warehouse;

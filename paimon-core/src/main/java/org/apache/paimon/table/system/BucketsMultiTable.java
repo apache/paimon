@@ -57,7 +57,11 @@ import java.util.Map;
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
-/** this is a doc. */
+/**
+ * A table to produce modified partitions and buckets for each snapshot.
+ *
+ * <p>Only used internally by dedicated compact job sources.
+ */
 public class BucketsMultiTable implements DataTable, ReadonlyTable {
 
     private static final long serialVersionUID = 1L;

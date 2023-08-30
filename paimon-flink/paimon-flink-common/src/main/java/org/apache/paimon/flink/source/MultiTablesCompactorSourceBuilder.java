@@ -32,7 +32,10 @@ import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 
 import java.util.regex.Pattern;
 
-/** this is a doc. */
+/**
+ * source builder to build a Flink compactor source for multi-tables. This is for dedicated
+ * compactor jobs.
+ */
 public class MultiTablesCompactorSourceBuilder {
     private final Catalog.Loader catalogLoader;
     private final Pattern includingPattern;
