@@ -23,6 +23,8 @@ import org.apache.paimon.annotation.Public;
 import java.util.Arrays;
 import java.util.OptionalInt;
 
+import static org.apache.paimon.types.VarCharType.MAX_LENGTH;
+
 /**
  * Utils for creating {@link DataType}s.
  *
@@ -32,91 +34,180 @@ import java.util.OptionalInt;
 public class DataTypes {
 
     public static IntType INT() {
-        return new IntType();
+        return INT(true);
     }
 
     public static TinyIntType TINYINT() {
-        return new TinyIntType();
+        return TINYINT(true);
     }
 
     public static SmallIntType SMALLINT() {
-        return new SmallIntType();
+        return SMALLINT(true);
     }
 
     public static BigIntType BIGINT() {
-        return new BigIntType();
+        return BIGINT(true);
     }
 
     public static VarCharType STRING() {
-        return VarCharType.STRING_TYPE;
+        return STRING(true);
     }
 
     public static DoubleType DOUBLE() {
-        return new DoubleType();
+        return DOUBLE(true);
     }
 
     public static ArrayType ARRAY(DataType element) {
-        return new ArrayType(element);
+        return ARRAY(true, element);
     }
 
     public static CharType CHAR(int length) {
-        return new CharType(length);
+        return CHAR(true, length);
     }
 
     public static VarCharType VARCHAR(int length) {
-        return new VarCharType(length);
+        return VARCHAR(true, length);
     }
 
     public static BooleanType BOOLEAN() {
-        return new BooleanType();
+        return BOOLEAN(true);
     }
 
     public static DateType DATE() {
-        return new DateType();
+        return DATE(true);
     }
 
     public static TimeType TIME() {
-        return new TimeType();
+        return TIME(true);
     }
 
     public static TimeType TIME(int precision) {
-        return new TimeType(precision);
+        return TIME(true, precision);
     }
 
     public static TimestampType TIMESTAMP() {
-        return new TimestampType();
+        return TIMESTAMP(true);
     }
 
     public static TimestampType TIMESTAMP_MILLIS() {
-        return new TimestampType(3);
+        return TIMESTAMP_MILLIS(true);
     }
 
     public static TimestampType TIMESTAMP(int precision) {
-        return new TimestampType(precision);
+        return TIMESTAMP(true, precision);
     }
 
     public static LocalZonedTimestampType TIMESTAMP_WITH_LOCAL_TIME_ZONE() {
-        return new LocalZonedTimestampType();
+        return TIMESTAMP_WITH_LOCAL_TIME_ZONE(true);
     }
 
     public static LocalZonedTimestampType TIMESTAMP_WITH_LOCAL_TIME_ZONE(int precision) {
-        return new LocalZonedTimestampType(precision);
+        return TIMESTAMP_WITH_LOCAL_TIME_ZONE(true, precision);
     }
 
     public static DecimalType DECIMAL(int precision, int scale) {
-        return new DecimalType(precision, scale);
+        return DECIMAL(true, precision, scale);
     }
 
     public static VarBinaryType BYTES() {
-        return new VarBinaryType(VarBinaryType.MAX_LENGTH);
+        return BYTES(true);
     }
 
     public static FloatType FLOAT() {
-        return new FloatType();
+        return FLOAT(true);
     }
 
     public static MapType MAP(DataType keyType, DataType valueType) {
-        return new MapType(keyType, valueType);
+        return MAP(true, keyType, valueType);
+    }
+
+    public static IntType INT(boolean isNullable) {
+        return new IntType(isNullable);
+    }
+
+    public static TinyIntType TINYINT(boolean isNullable) {
+        return new TinyIntType(isNullable);
+    }
+
+    public static SmallIntType SMALLINT(boolean isNullable) {
+        return new SmallIntType(isNullable);
+    }
+
+    public static BigIntType BIGINT(boolean isNullable) {
+        return new BigIntType(isNullable);
+    }
+
+    public static VarCharType STRING(boolean isNullable) {
+        return new VarCharType(isNullable, MAX_LENGTH);
+    }
+
+    public static DoubleType DOUBLE(boolean isNullable) {
+        return new DoubleType(isNullable);
+    }
+
+    public static ArrayType ARRAY(boolean isNullable, DataType element) {
+        return new ArrayType(isNullable, element);
+    }
+
+    public static CharType CHAR(boolean isNullable, int length) {
+        return new CharType(isNullable, length);
+    }
+
+    public static VarCharType VARCHAR(boolean isNullable, int length) {
+        return new VarCharType(isNullable, length);
+    }
+
+    public static BooleanType BOOLEAN(boolean isNullable) {
+        return new BooleanType(isNullable);
+    }
+
+    public static DateType DATE(boolean isNullable) {
+        return new DateType(isNullable);
+    }
+
+    public static TimeType TIME(boolean isNullable) {
+        return new TimeType(isNullable);
+    }
+
+    public static TimeType TIME(boolean isNullable, int precision) {
+        return new TimeType(isNullable, precision);
+    }
+
+    public static TimestampType TIMESTAMP(boolean isNullable) {
+        return new TimestampType(isNullable);
+    }
+
+    public static TimestampType TIMESTAMP_MILLIS(boolean isNullable) {
+        return new TimestampType(isNullable, 3);
+    }
+
+    public static TimestampType TIMESTAMP(boolean isNullable, int precision) {
+        return new TimestampType(isNullable, precision);
+    }
+
+    public static LocalZonedTimestampType TIMESTAMP_WITH_LOCAL_TIME_ZONE(boolean isNullable) {
+        return new LocalZonedTimestampType(isNullable);
+    }
+
+    public static LocalZonedTimestampType TIMESTAMP_WITH_LOCAL_TIME_ZONE(
+            boolean isNullable, int precision) {
+        return new LocalZonedTimestampType(isNullable, precision);
+    }
+
+    public static DecimalType DECIMAL(boolean isNullable, int precision, int scale) {
+        return new DecimalType(isNullable, precision, scale);
+    }
+
+    public static VarBinaryType BYTES(boolean isNullable) {
+        return new VarBinaryType(isNullable, VarBinaryType.MAX_LENGTH);
+    }
+
+    public static FloatType FLOAT(boolean isNullable) {
+        return new FloatType(isNullable);
+    }
+
+    public static MapType MAP(boolean isNullable, DataType keyType, DataType valueType) {
+        return new MapType(isNullable, keyType, valueType);
     }
 
     public static DataField FIELD(int id, String name, DataType type) {
@@ -128,23 +219,43 @@ public class DataTypes {
     }
 
     public static RowType ROW(DataField... fields) {
-        return new RowType(Arrays.asList(fields));
+        return ROW(true, fields);
     }
 
     public static RowType ROW(DataType... fieldTypes) {
-        return RowType.builder().fields(fieldTypes).build();
+        return ROW(true, fieldTypes);
     }
 
     public static BinaryType BINARY(int length) {
-        return new BinaryType(length);
+        return BINARY(true, length);
     }
 
     public static VarBinaryType VARBINARY(int length) {
-        return new VarBinaryType(length);
+        return VARBINARY(true, length);
     }
 
     public static MultisetType MULTISET(DataType elementType) {
-        return new MultisetType(elementType);
+        return MULTISET(true, elementType);
+    }
+
+    public static RowType ROW(boolean isNullable, DataField... fields) {
+        return new RowType(isNullable, Arrays.asList(fields));
+    }
+
+    public static RowType ROW(boolean isNullable, DataType... fieldTypes) {
+        return RowType.builder(isNullable).fields(fieldTypes).build();
+    }
+
+    public static BinaryType BINARY(boolean isNullable, int length) {
+        return new BinaryType(isNullable, length);
+    }
+
+    public static VarBinaryType VARBINARY(boolean isNullable, int length) {
+        return new VarBinaryType(isNullable, length);
+    }
+
+    public static MultisetType MULTISET(boolean isNullable, DataType elementType) {
+        return new MultisetType(isNullable, elementType);
     }
 
     public static OptionalInt getPrecision(DataType dataType) {

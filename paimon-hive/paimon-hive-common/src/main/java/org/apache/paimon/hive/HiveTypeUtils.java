@@ -80,19 +80,20 @@ public class HiveTypeUtils {
      * @param type hive type string
      * @return paimon data type
      */
-    public static DataType toPaimonType(String type) {
+    public static DataType toPaimonType(String type, boolean isNullable) {
         TypeInfo typeInfo = TypeInfoUtils.getTypeInfoFromTypeString(type);
-        return toPaimonType(typeInfo);
+        return toPaimonType(typeInfo, isNullable);
     }
 
     /**
      * Convert hive data type {@link TypeInfo} to paimon data type {@link DataType}.
      *
      * @param typeInfo hive type info
+     * @param isNullable whether nullable
      * @return paimon data type
      */
-    public static DataType toPaimonType(TypeInfo typeInfo) {
-        return HiveToPaimonTypeVisitor.visit(typeInfo);
+    public static DataType toPaimonType(TypeInfo typeInfo, boolean isNullable) {
+        return HiveToPaimonTypeVisitor.visit(typeInfo, isNullable);
     }
 
     private static class PaimonToHiveTypeVisitor extends DataTypeDefaultVisitor<TypeInfo> {
@@ -226,64 +227,64 @@ public class HiveTypeUtils {
 
     private static class HiveToPaimonTypeVisitor {
 
-        static DataType visit(TypeInfo type) {
-            return visit(type, new HiveToPaimonTypeVisitor());
+        static DataType visit(TypeInfo type, boolean isNullable) {
+            return visit(type, new HiveToPaimonTypeVisitor(), isNullable);
         }
 
-        static DataType visit(TypeInfo type, HiveToPaimonTypeVisitor visitor) {
+        static DataType visit(TypeInfo type, HiveToPaimonTypeVisitor visitor, boolean isNullable) {
             if (type instanceof StructTypeInfo) {
                 StructTypeInfo structTypeInfo = (StructTypeInfo) type;
                 ArrayList<String> fieldNames = structTypeInfo.getAllStructFieldNames();
                 ArrayList<TypeInfo> typeInfos = structTypeInfo.getAllStructFieldTypeInfos();
                 RowType.Builder builder = RowType.builder();
                 for (int i = 0; i < fieldNames.size(); i++) {
-                    builder.field(fieldNames.get(i), visit(typeInfos.get(i), visitor));
+                    builder.field(fieldNames.get(i), visit(typeInfos.get(i), visitor, true));
                 }
                 return builder.build();
             } else if (type instanceof MapTypeInfo) {
                 MapTypeInfo mapTypeInfo = (MapTypeInfo) type;
                 return DataTypes.MAP(
-                        visit(mapTypeInfo.getMapKeyTypeInfo(), visitor),
-                        visit(mapTypeInfo.getMapValueTypeInfo(), visitor));
+                        visit(mapTypeInfo.getMapKeyTypeInfo(), visitor, true),
+                        visit(mapTypeInfo.getMapValueTypeInfo(), visitor, true));
             } else if (type instanceof ListTypeInfo) {
                 ListTypeInfo listTypeInfo = (ListTypeInfo) type;
-                return DataTypes.ARRAY(visit(listTypeInfo.getListElementTypeInfo(), visitor));
+                return DataTypes.ARRAY(visit(listTypeInfo.getListElementTypeInfo(), visitor, true));
             } else {
-                return visitor.atomic(type);
+                return visitor.atomic(type, isNullable);
             }
         }
 
-        public DataType atomic(TypeInfo atomic) {
+        public DataType atomic(TypeInfo atomic, boolean isNullable) {
             if (TypeInfoFactory.booleanTypeInfo.equals(atomic)) {
-                return DataTypes.BOOLEAN();
+                return DataTypes.BOOLEAN(isNullable);
             } else if (TypeInfoFactory.byteTypeInfo.equals(atomic)) {
-                return DataTypes.TINYINT();
+                return DataTypes.TINYINT(isNullable);
             } else if (TypeInfoFactory.shortTypeInfo.equals(atomic)) {
-                return DataTypes.SMALLINT();
+                return DataTypes.SMALLINT(isNullable);
             } else if (TypeInfoFactory.intTypeInfo.equals(atomic)) {
-                return DataTypes.INT();
+                return DataTypes.INT(isNullable);
             } else if (TypeInfoFactory.longTypeInfo.equals(atomic)) {
-                return DataTypes.BIGINT();
+                return DataTypes.BIGINT(isNullable);
             } else if (TypeInfoFactory.floatTypeInfo.equals(atomic)) {
-                return DataTypes.FLOAT();
+                return DataTypes.FLOAT(isNullable);
             } else if (TypeInfoFactory.doubleTypeInfo.equals(atomic)) {
-                return DataTypes.DOUBLE();
+                return DataTypes.DOUBLE(isNullable);
             } else if (atomic instanceof DecimalTypeInfo) {
                 DecimalTypeInfo decimalTypeInfo = (DecimalTypeInfo) atomic;
                 return DataTypes.DECIMAL(
-                        decimalTypeInfo.getPrecision(), decimalTypeInfo.getScale());
+                        isNullable, decimalTypeInfo.getPrecision(), decimalTypeInfo.getScale());
             } else if (atomic instanceof CharTypeInfo) {
-                return DataTypes.CHAR(((CharTypeInfo) atomic).getLength());
+                return DataTypes.CHAR(isNullable, ((CharTypeInfo) atomic).getLength());
             } else if (atomic instanceof VarcharTypeInfo) {
-                return DataTypes.VARCHAR(((VarcharTypeInfo) atomic).getLength());
+                return DataTypes.VARCHAR(isNullable, ((VarcharTypeInfo) atomic).getLength());
             } else if (TypeInfoFactory.stringTypeInfo.equals(atomic)) {
-                return DataTypes.VARCHAR(VarCharType.MAX_LENGTH);
+                return DataTypes.VARCHAR(isNullable, VarCharType.MAX_LENGTH);
             } else if (TypeInfoFactory.binaryTypeInfo.equals(atomic)) {
-                return DataTypes.VARBINARY(MAX_LENGTH);
+                return DataTypes.VARBINARY(isNullable, MAX_LENGTH);
             } else if (TypeInfoFactory.dateTypeInfo.equals(atomic)) {
-                return DataTypes.DATE();
+                return DataTypes.DATE(isNullable);
             } else if (TypeInfoFactory.timestampTypeInfo.equals(atomic)) {
-                return DataTypes.TIMESTAMP_MILLIS();
+                return DataTypes.TIMESTAMP_MILLIS(isNullable);
             }
 
             throw new UnsupportedOperationException(

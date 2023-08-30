@@ -31,6 +31,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.types.DataType;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -42,6 +45,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -111,13 +115,21 @@ public class PaimonMetaHook implements HiveMetaHook {
         List<FieldSchema> cols = table.getSd().getCols();
         Schema.Builder schemaBuilder =
                 Schema.newBuilder().comment(table.getParameters().get(COMMENT));
+
+        Set<String> nonNullableColumn = Sets.newHashSet();
+        String primaryKeys = table.getParameters().get(CoreOptions.PRIMARY_KEY.key());
+        if (primaryKeys != null) {
+            nonNullableColumn.addAll(Arrays.asList(primaryKeys.split(",")));
+        }
+
         cols.iterator()
                 .forEachRemaining(
-                        fieldSchema ->
-                                schemaBuilder.column(
-                                        fieldSchema.getName().toLowerCase(),
-                                        toPaimonType(fieldSchema.getType()),
-                                        fieldSchema.getComment()));
+                        fieldSchema -> {
+                            String columnName = fieldSchema.getName().toLowerCase();
+                            boolean isNullable = !nonNullableColumn.contains(columnName);
+                            DataType dataType = toPaimonType(fieldSchema.getType(), isNullable);
+                            schemaBuilder.column(columnName, dataType, fieldSchema.getComment());
+                        });
         // partition columns
         if (table.getPartitionKeysSize() > 0) {
             // set metastore.partitioned-table = true
@@ -126,11 +138,15 @@ public class PaimonMetaHook implements HiveMetaHook {
             table.getPartitionKeys()
                     .iterator()
                     .forEachRemaining(
-                            fieldSchema ->
-                                    schemaBuilder.column(
-                                            fieldSchema.getName().toLowerCase(),
-                                            toPaimonType(fieldSchema.getType()),
-                                            fieldSchema.getComment()));
+                            fieldSchema -> {
+                                String columnName = fieldSchema.getName().toLowerCase();
+                                schemaBuilder.column(
+                                        columnName,
+                                        toPaimonType(
+                                                fieldSchema.getType(),
+                                                !nonNullableColumn.contains(columnName)),
+                                        fieldSchema.getComment());
+                            });
 
             List<String> partitionKeys =
                     table.getPartitionKeys().stream()

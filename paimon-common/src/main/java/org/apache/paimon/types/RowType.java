@@ -203,6 +203,10 @@ public final class RowType extends DataType {
         return builder(true, new AtomicInteger(-1));
     }
 
+    public static Builder builder(boolean isNullable) {
+        return builder(isNullable, new AtomicInteger(-1));
+    }
+
     public static Builder builder(boolean isNullable, AtomicInteger fieldId) {
         return new Builder(isNullable, fieldId);
     }

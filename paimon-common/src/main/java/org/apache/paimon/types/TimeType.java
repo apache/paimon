@@ -68,6 +68,10 @@ public final class TimeType extends DataType {
         this(DEFAULT_PRECISION);
     }
 
+    public TimeType(boolean isNullable) {
+        this(isNullable, DEFAULT_PRECISION);
+    }
+
     public int getPrecision() {
         return precision;
     }

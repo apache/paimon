@@ -66,6 +66,10 @@ public class TimestampType extends DataType {
         this(DEFAULT_PRECISION);
     }
 
+    public TimestampType(boolean isNullable) {
+        this(isNullable, DEFAULT_PRECISION);
+    }
+
     public int getPrecision() {
         return precision;
     }

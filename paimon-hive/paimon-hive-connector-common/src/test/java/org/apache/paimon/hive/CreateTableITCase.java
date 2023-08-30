@@ -36,6 +36,7 @@ import org.apache.paimon.types.DataTypes;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
@@ -49,6 +50,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.apache.paimon.CoreOptions.METASTORE_PARTITIONED_TABLE;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -358,6 +360,57 @@ public class CreateTableITCase extends HiveTestBase {
         assertThat(tableSchema).isPresent();
         assertThat(tableSchema.get().primaryKeys()).contains("dt", "hh", "user_id");
         assertThat(tableSchema.get().partitionKeys()).contains("dt", "hh");
+    }
+
+    @Test
+    public void testPrimaryKeyFieldNotNull() {
+        String tableName = "primary_key_table1";
+        hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);
+        String primarykeys = "dt,hh,user_id";
+        Set<String> nonNullColumnSet = Sets.newHashSet(Arrays.asList(primarykeys.split(",")));
+        String hiveSql =
+                String.join(
+                        "\n",
+                        Arrays.asList(
+                                "CREATE TABLE " + tableName + " (",
+                                "user_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The user_id field',",
+                                "item_id "
+                                        + TypeInfoFactory.longTypeInfo.getTypeName()
+                                        + " COMMENT 'The item_id field',",
+                                "behavior "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The behavior field',",
+                                "dt "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The dt field',",
+                                "hh "
+                                        + TypeInfoFactory.stringTypeInfo.getTypeName()
+                                        + " COMMENT 'The hh field'",
+                                ")",
+                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
+                                "TBLPROPERTIES (",
+                                "  'primary-key'='" + primarykeys + "',",
+                                "  'partition'='dt,hh',",
+                                "  'bucket' = '2',",
+                                "  'bucket-key' = 'user_id'",
+                                ")"));
+
+        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+        // check the paimon table schema
+        Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
+        Path tablePath = AbstractCatalog.dataTableLocation(path, identifier);
+        Optional<TableSchema> tableSchema =
+                new SchemaManager(LocalFileIO.create(), tablePath).latest();
+        assertThat(tableSchema).isPresent();
+        TableSchema tableSchema1 = tableSchema.get();
+        List<DataField> fields = tableSchema1.fields();
+        for (DataField field : fields) {
+            if (nonNullColumnSet.contains(field.name())) {
+                assertThat(field.type().isNullable()).isFalse();
+            }
+        }
     }
 
     @Test

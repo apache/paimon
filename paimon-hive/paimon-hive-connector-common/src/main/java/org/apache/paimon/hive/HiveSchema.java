@@ -33,6 +33,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Splitter;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
@@ -120,8 +121,21 @@ public class HiveSchema {
         String columnTypes =
                 properties.getProperty(hive_metastoreConstants.META_TABLE_COLUMN_TYPES);
         List<TypeInfo> typeInfos = TypeInfoUtils.getTypeInfosFromTypeString(columnTypes);
-        List<DataType> dataTypes =
-                typeInfos.stream().map(HiveTypeUtils::toPaimonType).collect(Collectors.toList());
+
+        Set<String> nonNullableColumn = Sets.newHashSet();
+        String primaryKeys = properties.getProperty(CoreOptions.PRIMARY_KEY.key());
+        if (primaryKeys != null) {
+            nonNullableColumn.addAll(Arrays.asList(primaryKeys.split(",")));
+        }
+
+        List<DataType> dataTypes = Lists.newArrayList();
+        for (int i = 0; i < typeInfos.size(); i++) {
+            String columnName = columnNames.get(i);
+            DataType dataType =
+                    HiveTypeUtils.toPaimonType(
+                            typeInfos.get(i), !nonNullableColumn.contains(columnName));
+            dataTypes.add(dataType);
+        }
 
         // Partitions are only used for checking. They are not contained in the fields of a Hive
         // table.

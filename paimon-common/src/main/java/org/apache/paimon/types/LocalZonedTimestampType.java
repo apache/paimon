@@ -71,6 +71,10 @@ public final class LocalZonedTimestampType extends DataType {
         this(DEFAULT_PRECISION);
     }
 
+    public LocalZonedTimestampType(boolean isNullable) {
+        this(isNullable, DEFAULT_PRECISION);
+    }
+
     public int getPrecision() {
         return precision;
     }
