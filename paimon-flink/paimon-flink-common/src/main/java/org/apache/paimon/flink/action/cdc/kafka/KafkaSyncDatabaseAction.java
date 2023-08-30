@@ -22,7 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.DatabaseSinkMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
@@ -80,7 +80,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * </ul>
  *
  * <p>To automatically synchronize new table, This action creates a single sink for all Paimon
- * tables to be written. See {@link DatabaseSyncMode#COMBINED}.
+ * tables to be written. See {@link DatabaseSinkMode#COMBINED}.
  */
 public class KafkaSyncDatabaseAction extends ActionBase {
 
@@ -178,7 +178,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)
-                        .withMode(DatabaseSyncMode.COMBINED);
+                        .withMode(DatabaseSinkMode.COMBINED);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

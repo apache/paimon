@@ -24,7 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.DatabaseSinkMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
@@ -56,8 +56,8 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
+import static org.apache.paimon.flink.action.DatabaseSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.DatabaseSinkMode.DIVIDED;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -110,7 +110,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private String tableSuffix = "";
     private String includingTables = ".*";
     @Nullable String excludingTables;
-    private DatabaseSyncMode mode = DIVIDED;
+    private DatabaseSinkMode mode = DIVIDED;
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     // for test purpose
@@ -168,7 +168,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
-    public MySqlSyncDatabaseAction withMode(DatabaseSyncMode mode) {
+    public MySqlSyncDatabaseAction withMode(DatabaseSinkMode mode) {
         this.mode = mode;
         return this;
     }
@@ -273,7 +273,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 typeMapping);
 
         String database = this.database;
-        DatabaseSyncMode mode = this.mode;
+        DatabaseSinkMode mode = this.mode;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(

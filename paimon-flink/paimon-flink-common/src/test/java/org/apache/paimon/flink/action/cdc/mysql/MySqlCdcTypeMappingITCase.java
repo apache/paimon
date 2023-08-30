@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
+import static org.apache.paimon.flink.action.DatabaseSinkMode.COMBINED;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
