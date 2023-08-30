@@ -87,9 +87,8 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testLargeRecords() {
-        sql("drop table t");
         sql(
-                "create table t (pt int, k int, v int, primary key (k) not enforced) partitioned by (pt) with ("
+                "create table large_t (pt int, k int, v int, primary key (k) not enforced) partitioned by (pt) with ("
                         + "'bucket'='-1', "
                         + "'dynamic-bucket.target-row-num'='10000')");
         sql(
@@ -100,8 +99,8 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
                         + "'fields.k.max'='100000', "
                         + "'fields.pt.min'='0', "
                         + "'fields.pt.max'='1')");
-        sql("insert into t select * from src");
-        sql("insert into t select * from src");
-        assertThat(sql("select k, count(*) from t group by k having count(*) > 1")).isEmpty();
+        sql("insert into large_t select * from src");
+        sql("insert into large_t select * from src");
+        assertThat(sql("select k, count(*) from large_t group by k having count(*) > 1")).isEmpty();
     }
 }
