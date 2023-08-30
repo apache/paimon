@@ -18,9 +18,9 @@
 
 package org.apache.paimon.flink.action;
 
-import java.io.Serializable;
-
 import javax.annotation.Nullable;
+
+import java.io.Serializable;
 
 /**
  * There are two modes for database sink.

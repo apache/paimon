@@ -18,12 +18,6 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
-import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
-
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
@@ -35,10 +29,17 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
+import org.apache.flink.streaming.api.transformations.PartitionTransformation;
+
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 
-import javax.annotation.Nullable;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
  * Builder for {@link FlinkCdcSink} when syncing the whole database into one Paimon database. Each

@@ -18,17 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
-import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.core.execution.SavepointFormatType;
-import org.apache.flink.runtime.jobgraph.JobGraph;
-import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
-import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
@@ -38,10 +27,19 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
+
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.core.execution.SavepointFormatType;
+import org.apache.flink.runtime.jobgraph.JobGraph;
+import org.apache.flink.runtime.jobgraph.SavepointRestoreSettings;
+import org.apache.flink.streaming.api.graph.StreamGraph;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -56,7 +54,10 @@ import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import javax.annotation.Nullable;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link MySqlSyncDatabaseAction}. */
 public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {

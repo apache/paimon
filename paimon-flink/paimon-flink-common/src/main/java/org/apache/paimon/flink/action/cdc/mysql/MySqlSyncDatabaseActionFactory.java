@@ -18,11 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+
+import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Optional;
 

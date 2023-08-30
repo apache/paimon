@@ -18,12 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.kafka.source.KafkaSource;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
@@ -39,12 +33,19 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordSchemaBuilder;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.kafka.source.KafkaSource;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+
+import javax.annotation.Nullable;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import javax.annotation.Nullable;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * An {@link Action} which synchronize the Multiple topics into one Paimon database.
