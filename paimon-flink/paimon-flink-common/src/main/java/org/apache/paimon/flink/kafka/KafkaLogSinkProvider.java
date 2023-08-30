@@ -26,15 +26,10 @@ import org.apache.paimon.flink.sink.LogSinkFunction;
 
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.streaming.connectors.kafka.FlinkKafkaProducer.Semantic;
-import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.RowData;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.NewTopic;
-import org.apache.kafka.common.errors.TopicExistsException;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.Properties;
 
 /** A Kafka {@link LogSinkProvider}. */
@@ -54,25 +49,19 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
 
     private final LogChangelogMode changelogMode;
 
-    private final Integer numBuckets;
-
-    public static final int DEFAULT_REPLICATION_FACTOR = 2;
-
     public KafkaLogSinkProvider(
             String topic,
             Properties properties,
             @Nullable SerializationSchema<RowData> primaryKeySerializer,
             SerializationSchema<RowData> valueSerializer,
             LogConsistency consistency,
-            LogChangelogMode changelogMode,
-            Integer numBuckets) {
+            LogChangelogMode changelogMode) {
         this.topic = topic;
         this.properties = properties;
         this.primaryKeySerializer = primaryKeySerializer;
         this.valueSerializer = valueSerializer;
         this.consistency = consistency;
         this.changelogMode = changelogMode;
-        this.numBuckets = numBuckets;
     }
 
     @Override
@@ -88,7 +77,6 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
             default:
                 throw new IllegalArgumentException("Unsupported: " + consistency);
         }
-        createTopicIfNotExists();
         return new KafkaSinkFunction(topic, createSerializationSchema(), properties, semantic);
     }
 
@@ -96,29 +84,5 @@ public class KafkaLogSinkProvider implements LogSinkProvider {
     KafkaLogSerializationSchema createSerializationSchema() {
         return new KafkaLogSerializationSchema(
                 topic, primaryKeySerializer, valueSerializer, changelogMode);
-    }
-
-    private void createTopicIfNotExists() {
-        try (final AdminClient adminClient = AdminClient.create(properties)) {
-            if (!adminClient.listTopics().names().get().contains(topic)) {
-                int numBrokers = adminClient.describeCluster().nodes().get().size();
-                int replicationFactor =
-                        DEFAULT_REPLICATION_FACTOR > numBrokers
-                                ? numBrokers
-                                : DEFAULT_REPLICATION_FACTOR;
-
-                NewTopic newTopic = new NewTopic(topic, numBuckets, (short) replicationFactor);
-
-                adminClient.createTopics(Collections.singleton(newTopic)).all().get();
-            }
-        } catch (Exception e) {
-            if (e.getCause() instanceof TopicExistsException) {
-                throw new TableException(
-                        String.format(
-                                "Failed to create kafka topic. " + "Reason: topic %s exists. ",
-                                topic));
-            }
-            throw new TableException("Error in createTopicIfNotExists", e);
-        }
     }
 }
