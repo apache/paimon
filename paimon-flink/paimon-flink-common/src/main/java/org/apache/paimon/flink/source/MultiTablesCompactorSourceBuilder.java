@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.source.operator.MultiTablesBatchCompactorSourceFunction;
 import org.apache.paimon.flink.source.operator.MultiTablesStreamingCompactorSourceFunction;
-import org.apache.paimon.table.system.BucketsMultiTable;
+import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -73,7 +73,7 @@ public class MultiTablesCompactorSourceBuilder {
         if (env == null) {
             throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
         }
-        RowType produceType = BucketsMultiTable.getRowType();
+        RowType produceType = BucketsTable.getRowType();
         if (isContinuous) {
             return MultiTablesStreamingCompactorSourceFunction.buildSource(
                     env,

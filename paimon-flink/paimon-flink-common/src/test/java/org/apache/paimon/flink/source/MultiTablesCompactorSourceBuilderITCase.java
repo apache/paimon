@@ -115,6 +115,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
             // change options to test whether CompactorSourceBuilder work normally
             options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
         }
+        long monitorInterval = 1000;
 
         List<FileStoreTable> tables = new ArrayList<>();
 
@@ -163,16 +164,13 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        Options catalogOptions = this.catalogOptions;
         DataStream<RowData> source =
                 new MultiTablesCompactorSourceBuilder(
                                 catalogLoader(),
                                 Pattern.compile("db1|db2"),
                                 Pattern.compile(".*"),
                                 null,
-                                catalogOptions
-                                        .get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL)
-                                        .toMillis())
+                                monitorInterval)
                         .withContinuousMode(false)
                         .withEnv(env)
                         .build();
@@ -211,6 +209,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                     CoreOptions.ChangelogProducer.NONE.toString());
             options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "0");
         }
+        long monitorInterval = 1000;
         List<FileStoreTable> tables = new ArrayList<>();
         for (String dbName : DATABASE_NAMES) {
             for (String tableName : TABLE_NAMES) {
@@ -266,9 +265,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 Pattern.compile(".*"),
                                 Pattern.compile(".*"),
                                 null,
-                                catalogOptions
-                                        .get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL)
-                                        .toMillis())
+                                monitorInterval)
                         .withContinuousMode(true)
                         .withEnv(env)
                         .build();
@@ -377,6 +374,8 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                     CoreOptions.ChangelogProducer.NONE.toString());
             options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "0");
         }
+        long monitorInterval = 1000;
+
         List<FileStoreTable> tables = new ArrayList<>();
         for (String dbName : DATABASE_NAMES) {
             for (String tableName : TABLE_NAMES) {
@@ -432,9 +431,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 Pattern.compile(".*"),
                                 Pattern.compile("db1.+|db2.t1|db3.t1"),
                                 Pattern.compile("db1.t2"),
-                                catalogOptions
-                                        .get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL)
-                                        .toMillis())
+                                monitorInterval)
                         .withContinuousMode(true)
                         .withEnv(env)
                         .build();

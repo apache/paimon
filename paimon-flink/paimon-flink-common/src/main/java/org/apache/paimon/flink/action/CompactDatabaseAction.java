@@ -60,7 +60,7 @@ public class CompactDatabaseAction extends ActionBase {
     private final Pattern excludingPattern;
     private final Pattern databasePattern;
 
-    private DatabaseCompactMode databaseCompactMode = DatabaseCompactMode.DIVIDED;
+    private MultiTablesSinkMode databaseCompactMode = MultiTablesSinkMode.DIVIDED;
 
     private Map<String, Table> tableMap = new HashMap<>();
 
@@ -80,7 +80,7 @@ public class CompactDatabaseAction extends ActionBase {
     }
 
     public CompactDatabaseAction withDatabaseCompactMode(String mode) {
-        this.databaseCompactMode = DatabaseCompactMode.fromString(mode);
+        this.databaseCompactMode = MultiTablesSinkMode.fromString(mode);
         return this;
     }
 
@@ -103,7 +103,7 @@ public class CompactDatabaseAction extends ActionBase {
 
     @Override
     public void build(StreamExecutionEnvironment env) {
-        if (databaseCompactMode == DatabaseCompactMode.DIVIDED) {
+        if (databaseCompactMode == MultiTablesSinkMode.DIVIDED) {
             buildForDividedMode(env);
         } else {
             buildForCombinedMode(env);

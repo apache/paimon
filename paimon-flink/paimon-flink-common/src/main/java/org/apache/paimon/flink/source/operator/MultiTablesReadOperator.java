@@ -27,7 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.system.BucketsMultiTable;
+import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.utils.CloseableIterator;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -76,7 +76,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
 
     private transient Catalog catalog;
     private transient IOManagerImpl ioManager;
-    private transient Map<Identifier, BucketsMultiTable> tablesMap;
+    private transient Map<Identifier, BucketsTable> tablesMap;
     private transient Map<Identifier, TableRead> readsMap;
     private transient StreamRecord<RowData> reuseRecord;
     private transient FlinkRowData reuseRow;
@@ -132,12 +132,11 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
                             continue;
                         }
 
-                        BucketsMultiTable bucketsTable =
-                                new BucketsMultiTable(
+                        BucketsTable bucketsTable =
+                                new BucketsTable(
                                                 (FileStoreTable) table,
                                                 isStreaming,
-                                                identifier.getDatabaseName(),
-                                                identifier.getObjectName())
+                                                identifier.getDatabaseName())
                                         .copy(compactOptions(isStreaming));
                         tablesMap.put(identifier, bucketsTable);
                         readsMap.put(
@@ -150,7 +149,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     }
 
     private TableRead getTableRead(Identifier tableId) {
-        BucketsMultiTable table = tablesMap.get(tableId);
+        BucketsTable table = tablesMap.get(tableId);
         if (table == null) {
             try {
                 Table newTable = catalog.getTable(tableId);
@@ -161,11 +160,10 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
                                     newTable.getClass().getName()));
                 } else {
                     table =
-                            new BucketsMultiTable(
+                            new BucketsTable(
                                             (FileStoreTable) newTable,
                                             isStreaming,
-                                            tableId.getDatabaseName(),
-                                            tableId.getObjectName())
+                                            tableId.getDatabaseName())
                                     .copy(compactOptions(isStreaming));
                 }
                 tablesMap.put(tableId, table);

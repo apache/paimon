@@ -25,7 +25,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.system.BucketsMultiTable;
+import org.apache.paimon.table.system.BucketsTable;
 
 import org.apache.flink.api.common.state.CheckpointListener;
 import org.apache.flink.api.common.state.ListState;
@@ -84,7 +84,7 @@ public abstract class MultiTablesCompactorSourceFunction
     protected final long monitorInterval;
 
     protected transient Catalog catalog;
-    protected transient Map<Identifier, BucketsMultiTable> tablesMap;
+    protected transient Map<Identifier, BucketsTable> tablesMap;
     protected transient Map<Identifier, StreamTableScan> scansMap;
 
     public MultiTablesCompactorSourceFunction(
@@ -241,12 +241,11 @@ public abstract class MultiTablesCompactorSourceFunction
                                             + "currently, the table with unware bucket mode is not support in combined mode.");
                             continue;
                         }
-                        BucketsMultiTable bucketsTable =
-                                new BucketsMultiTable(
+                        BucketsTable bucketsTable =
+                                new BucketsTable(
                                                 fileStoreTable,
                                                 isStreaming,
-                                                identifier.getDatabaseName(),
-                                                identifier.getObjectName())
+                                                identifier.getDatabaseName())
                                         .copy(compactOptions(isStreaming));
                         tablesMap.put(identifier, bucketsTable);
                         scansMap.put(identifier, bucketsTable.newReadBuilder().newStreamScan());

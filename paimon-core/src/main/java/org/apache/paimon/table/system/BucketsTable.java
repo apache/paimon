@@ -161,6 +161,17 @@ public class BucketsTable implements DataTable, ReadonlyTable {
         return wrapped.fileIO();
     }
 
+    public static RowType getRowType() {
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "_SNAPSHOT_ID", new BigIntType(false)));
+        fields.add(new DataField(1, "_PARTITION", newBytesType(false)));
+        fields.add(new DataField(2, "_BUCKET", new IntType(false)));
+        fields.add(new DataField(3, "_FILES", newBytesType(false)));
+        fields.add(new DataField(4, "_DATABASE_NAME", new VarCharType(Integer.MAX_VALUE)));
+        fields.add(new DataField(5, "_TABLE_NAME", new VarCharType(Integer.MAX_VALUE)));
+        return new RowType(fields);
+    }
+
     private class BucketsRead implements InnerTableRead {
 
         private final DataFileMetaSerializer dataFileMetaSerializer = new DataFileMetaSerializer();
