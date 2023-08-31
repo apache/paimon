@@ -202,9 +202,9 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Paimon schema and Kafka schema are not compatible.\n"
+                                "Paimon schema and source table schema are not compatible.\n"
                                         + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
-                                        + "Kafka fields are: [`id` STRING NOT NULL, `name` STRING, `description` STRING, `weight` STRING]"));
+                                        + "Source table fields are: [`id` STRING NOT NULL, `name` STRING, `description` STRING, `weight` STRING]"));
     }
 
     @Test

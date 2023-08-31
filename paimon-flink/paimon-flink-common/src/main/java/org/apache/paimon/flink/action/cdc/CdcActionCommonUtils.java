@@ -170,9 +170,9 @@ public class CdcActionCommonUtils {
                 if (!sourceColumns.containsKey(key)
                         && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
                     throw new IllegalArgumentException(
-                            "Specified primary key "
+                            "Specified primary key '"
                                     + key
-                                    + " does not exist in source table or computed columns.");
+                                    + "' does not exist in source tables or computed columns.");
                 }
             }
             builder.primaryKey(specifiedPrimaryKeys);
