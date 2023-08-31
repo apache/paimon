@@ -178,6 +178,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
                 !mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
