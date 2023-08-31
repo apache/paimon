@@ -29,8 +29,11 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Factory to create a mock case-insensitive catalog for test. */
@@ -39,6 +42,29 @@ public class TestCaseInsensitiveCatalogFactory implements CatalogFactory {
     @Override
     public String identifier() {
         return "test-case-insensitive";
+    }
+
+    public Catalog createCatalog(CatalogContext context) {
+        String warehouse = CatalogFactory.warehouse(context).toUri().toString();
+
+        Path warehousePath = new Path(warehouse);
+        FileIO fileIO;
+        try {
+            fileIO = FileIO.get(warehousePath, context);
+            if (fileIO.exists(warehousePath)) {
+                checkArgument(
+                        fileIO.isDir(warehousePath),
+                        "The %s path '%s' should be a directory.",
+                        WAREHOUSE.key(),
+                        warehouse);
+            } else {
+                fileIO.mkdirs(warehousePath);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+        return create(fileIO, warehousePath, context);
     }
 
     @Override
