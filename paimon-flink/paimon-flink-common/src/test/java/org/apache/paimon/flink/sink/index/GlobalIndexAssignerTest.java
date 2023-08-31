@@ -170,6 +170,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         assigner.process(GenericRowData.of(2, 4, 4));
         assertThat(output.stream().map(t -> t.f1)).containsExactly(0, 0, 0);
         output.clear();
+        assigner.close();
     }
 
     @Test
@@ -194,5 +195,6 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         assigner.process(GenericRowData.of(2, 4, 4));
         assertThat(output.stream().map(t -> t.f1)).containsExactly(0, 0, 0);
         output.clear();
+        assigner.close();
     }
 }
