@@ -131,7 +131,9 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                                                 "MongoDB Source")
                                         .flatMap(
                                                 new MongoDBRecordParser(
-                                                        caseSensitive, mongodbConfig)))
+                                                        caseSensitive,
+                                                        tableNameConverter,
+                                                        mongodbConfig)))
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)

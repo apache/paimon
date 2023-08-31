@@ -169,7 +169,6 @@ public interface MongoVersionStrategy {
                     fieldTypes.putIfAbsent(key, DataTypes.STRING());
                     resultMap.put(key, value);
                 });
-
         computedColumns.forEach(
                 computedColumn -> {
                     String columnName = computedColumn.columnName();
@@ -179,7 +178,6 @@ public interface MongoVersionStrategy {
                     resultMap.put(columnName, computedValue);
                     fieldTypes.put(columnName, computedColumn.columnType());
                 });
-
         return resultMap;
     }
 }
