@@ -65,15 +65,24 @@ public class IndexBootstrapTest extends TableTestBase {
                 GenericRow.of(7, 7));
 
         IndexBootstrap indexBootstrap = new IndexBootstrap(table);
-        List<Integer> result = new ArrayList<>();
-        Consumer<InternalRow> consumer = row -> result.add(row.getInt(0));
+        List<GenericRow> result = new ArrayList<>();
+        Consumer<InternalRow> consumer =
+                row -> result.add(GenericRow.of(row.getInt(0), row.getInt(1)));
+
+        // output key and bucket
 
         indexBootstrap.bootstrap(2, 0, consumer);
-        assertThat(result).containsExactlyInAnyOrder(2, 3);
+        assertThat(result).containsExactlyInAnyOrder(GenericRow.of(2, 4), GenericRow.of(3, 0));
         result.clear();
 
         indexBootstrap.bootstrap(2, 1, consumer);
-        assertThat(result).containsExactlyInAnyOrder(1, 4, 5, 6, 7);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, 3),
+                        GenericRow.of(4, 1),
+                        GenericRow.of(5, 1),
+                        GenericRow.of(6, 3),
+                        GenericRow.of(7, 1));
         result.clear();
     }
 }

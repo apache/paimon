@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
-import org.apache.paimon.flink.sink.index.GlobalDynamicCdcBucketSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
@@ -196,8 +195,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                     new CdcDynamicBucketSink(table).build(parsedForTable, parallelism);
                     break;
                 case GLOBAL_DYNAMIC:
-                    new GlobalDynamicCdcBucketSink(table).build(parsedForTable, parallelism);
-                    break;
                 case UNAWARE:
                 default:
                     throw new UnsupportedOperationException(
