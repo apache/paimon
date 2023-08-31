@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
@@ -162,7 +163,7 @@ public class KafkaSyncTableAction extends ActionBase {
                         caseSensitive);
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
-            KafkaActionUtils.assertSchemaCompatible(table.schema(), fromCanal);
+            CdcActionCommonUtils.assertSchemaCompatible(table.schema(), fromCanal.fields());
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromCanal, false);
             table = (FileStoreTable) catalog.getTable(identifier);

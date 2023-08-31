@@ -41,6 +41,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -93,7 +95,7 @@ public class OggRecordParser extends RecordParser {
             JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         Map<String, String> rowData = extractRow(jsonNode, paimonFieldTypes);
-        rowData = adjustCase(rowData);
+        rowData = mapKeyCaseConvert(rowData, caseSensitive, recordKeyDuplicateErrMsg(rowData));
         records.add(createRecord(rowKind, rowData, paimonFieldTypes));
     }
 
