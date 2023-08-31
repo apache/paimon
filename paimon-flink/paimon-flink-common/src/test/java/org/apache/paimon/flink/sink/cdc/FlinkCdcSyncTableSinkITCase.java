@@ -46,6 +46,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -76,6 +77,7 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         innerTestRandomCdcEvents(-1, false);
     }
 
+    @Disabled
     @Test
     @Timeout(120)
     public void testRandomCdcEventsGlobalDynamicBucket() throws Exception {

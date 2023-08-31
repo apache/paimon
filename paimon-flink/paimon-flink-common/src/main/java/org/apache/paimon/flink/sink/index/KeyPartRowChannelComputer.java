@@ -45,7 +45,6 @@ public class KeyPartRowChannelComputer implements ChannelComputer<Tuple2<KeyPart
 
     public KeyPartRowChannelComputer(
             RowType rowType, RowType keyPartType, List<String> primaryKey) {
-
         this.rowType = rowType;
         this.keyPartType = keyPartType;
         this.primaryKey = primaryKey;
@@ -64,5 +63,10 @@ public class KeyPartRowChannelComputer implements ChannelComputer<Tuple2<KeyPart
                 (record.f0 == KeyPartOrRow.KEY_PART ? keyPartProject : rowProject)
                         .apply(new FlinkRowWrapper(record.f1));
         return Math.abs(key.hashCode() % numChannels);
+    }
+
+    @Override
+    public String toString() {
+        return "shuffle by key hash";
     }
 }
