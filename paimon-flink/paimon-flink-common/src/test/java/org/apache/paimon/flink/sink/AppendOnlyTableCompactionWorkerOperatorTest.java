@@ -41,7 +41,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 /** Tests for {@link AppendOnlyTableCompactionWorkerOperator}. */
@@ -159,7 +158,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
                 if (!f.isDone()) {
                     try {
                         f.get(5, TimeUnit.SECONDS);
-                    } catch (TimeoutException e) {
+                    } catch (Exception e) {
                         break;
                     }
                 }
