@@ -83,6 +83,7 @@ public class MongoDBSyncTableAction extends ActionBase {
         this.tableConfig = tableConfig;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
                 mongodbConfig.contains(MongoDBSourceOptions.COLLECTION),
