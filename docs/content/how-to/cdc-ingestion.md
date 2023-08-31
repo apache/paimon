@@ -274,7 +274,7 @@ flink-sql-connector-kafka-*.jar
 ```
 
 ### Supported Formats
-Flink provides several Kafka CDC formats: canal-json, debezium-json, ogg-jsons, maxwell-json.
+Flink provides several Kafka CDC formats: Canal, Debezium, Ogg and Maxwell JSON.
 If a message in a Kafka topic is a change event captured from another database using the Change Data Capture (CDC) tool, then you can use the Paimon Kafka CDC. Write the INSERT, UPDATE, DELETE messages parsed into the paimon table.
 <table class="table table-bordered">
     <thead>
