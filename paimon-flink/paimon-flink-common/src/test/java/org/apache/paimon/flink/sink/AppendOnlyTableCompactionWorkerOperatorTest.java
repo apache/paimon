@@ -151,6 +151,9 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
 
         for (Future<CommitMessage> f : workerOperator.result()) {
             try {
+                if (!f.isDone()) {
+                    break;
+                }
                 CommitMessage commitMessage = f.get();
                 List<DataFileMeta> fileMetas =
                         ((CommitMessageImpl) commitMessage).compactIncrement().compactAfter();

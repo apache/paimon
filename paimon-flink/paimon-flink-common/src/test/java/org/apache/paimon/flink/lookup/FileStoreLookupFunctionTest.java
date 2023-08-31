@@ -36,6 +36,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -94,6 +95,13 @@ public class FileStoreLookupFunctionTest {
         fileStoreLookupFunction =
                 new FileStoreLookupFunction(fileStoreTable, new int[] {0, 1}, new int[] {1}, null);
         fileStoreLookupFunction.open(tempDir.toString());
+    }
+
+    @AfterEach
+    public void close() throws Exception {
+        if (fileStoreLookupFunction != null) {
+            fileStoreLookupFunction.close();
+        }
     }
 
     @Test
