@@ -38,7 +38,6 @@ import org.apache.paimon.utils.ProjectedRow;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
@@ -167,14 +166,14 @@ public class CatalogOptionsTable implements ReadonlyTable {
         }
 
         @Override
-        public RecordReader<InternalRow> createReader(Split split) throws IOException {
+        public RecordReader<InternalRow> createReader(Split split) {
             if (!(split instanceof CatalogOptionsTable.CatalogOptionsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Iterator<InternalRow> rows =
                     Iterators.transform(
                             ((CatalogOptionsSplit) split).catalogOptions.entrySet().iterator(),
-                            this::toRow);
+                            entry -> (entry == null) ? null : this.toRow(entry));
             if (projection != null) {
                 rows =
                         Iterators.transform(
