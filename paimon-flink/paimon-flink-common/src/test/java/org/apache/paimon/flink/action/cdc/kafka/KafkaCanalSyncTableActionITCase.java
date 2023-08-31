@@ -643,9 +643,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Paimon schema and Kafka schema are not compatible.\n"
+                                "Paimon schema and source table schema are not compatible.\n"
                                         + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
-                                        + "Kafka fields are: [`pt` INT NOT NULL, `_id` INT NOT NULL, `v1` VARCHAR(10)]"));
+                                        + "Source table fields are: [`pt` INT NOT NULL, `_id` INT NOT NULL, `v1` VARCHAR(10)]"));
     }
 
     @Test

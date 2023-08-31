@@ -74,9 +74,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link EventParser} for MySQL Debezium JSON. */
 public class MySqlDebeziumJsonEventParser implements EventParser<String> {
@@ -284,13 +285,13 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
         Map<String, String> before = extractRow(payload.get("before"));
         if (before.size() > 0) {
-            before = caseSensitive ? before : keyCaseInsensitive(before);
+            before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
             records.add(new CdcRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(payload.get("after"));
         if (after.size() > 0) {
-            after = caseSensitive ? after : keyCaseInsensitive(after);
+            after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             records.add(new CdcRecord(RowKind.INSERT, after));
         }
 
@@ -459,19 +460,6 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         }
 
         return resultMap;
-    }
-
-    private Map<String, String> keyCaseInsensitive(Map<String, String> origin) {
-        Map<String, String> keyCaseInsensitive = new HashMap<>();
-        for (Map.Entry<String, String> entry : origin.entrySet()) {
-            String fieldName = entry.getKey().toLowerCase();
-            checkArgument(
-                    !keyCaseInsensitive.containsKey(fieldName),
-                    "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n%s",
-                    origin);
-            keyCaseInsensitive.put(fieldName, entry.getValue());
-        }
-        return keyCaseInsensitive;
     }
 
     private boolean shouldSynchronizeCurrentTable() {

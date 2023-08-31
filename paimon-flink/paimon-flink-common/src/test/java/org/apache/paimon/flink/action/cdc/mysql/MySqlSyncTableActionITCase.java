@@ -644,11 +644,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Paimon schema and MySQL schema are not compatible."));
+                                "Paimon schema and source table schema are not compatible."));
     }
 
     @Test
-    public void testInvalidPrimaryKey() {
+    public void testInvalidPrimaryKey() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
@@ -660,7 +660,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Specified primary key pk does not exist in MySQL tables or computed columns."));
+                                "Specified primary key 'pk' does not exist in source tables or computed columns."));
     }
 
     @Test
@@ -676,8 +676,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Primary keys are not specified. "
-                                        + "Also, can't infer primary keys from MySQL table schemas because "
-                                        + "MySQL tables have no primary keys or have different primary keys."));
+                                        + "Also, can't infer primary keys from source table schemas because "
+                                        + "source tables have no primary keys or have different primary keys."));
     }
 
     @Test

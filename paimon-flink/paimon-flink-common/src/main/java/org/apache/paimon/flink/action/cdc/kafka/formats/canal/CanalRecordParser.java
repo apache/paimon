@@ -45,6 +45,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -256,7 +258,7 @@ public class CanalRecordParser extends RecordParser {
         for (JsonNode datum : data) {
             Map<String, String> rowData =
                     extractRowFromJson(datum, mySqlFieldTypes, paimonFieldTypes);
-            rowData = adjustCase(rowData);
+            rowData = mapKeyCaseConvert(rowData, caseSensitive, recordKeyDuplicateErrMsg(rowData));
 
             records.add(
                     new RichCdcMultiplexRecord(
@@ -291,7 +293,7 @@ public class CanalRecordParser extends RecordParser {
                     before.putIfAbsent(entry.getKey(), entry.getValue());
                 }
 
-                before = adjustCase(before);
+                before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
                 records.add(
                         new RichCdcMultiplexRecord(
                                 databaseName,
@@ -301,7 +303,7 @@ public class CanalRecordParser extends RecordParser {
                                 new CdcRecord(RowKind.DELETE, before)));
             }
 
-            after = adjustCase(after);
+            after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             records.add(
                     new RichCdcMultiplexRecord(
                             databaseName,
