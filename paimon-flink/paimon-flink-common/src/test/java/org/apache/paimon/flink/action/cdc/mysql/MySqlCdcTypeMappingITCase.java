@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
@@ -127,7 +127,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-        int allTypeNums = 77;
+        int allTypeNums = 78;
         DataType[] types =
                 IntStream.range(0, allTypeNums)
                         .mapToObj(i -> DataTypes.STRING())
@@ -183,6 +183,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                             "_decimal",
                             "_decimal_unsigned",
                             "_decimal_unsigned_zerofill",
+                            "_big_decimal",
                             "_date",
                             "_datetime",
                             "_datetime3",
@@ -233,8 +234,8 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                                 + "1.000011, 2.000022, 3.000033, "
                                 + "1.000111, 2.000222, 3.000333, "
                                 + "12345.11, 12345.22, 12345.33, "
-                                + "1.2345678987654322E32, 1.2345678987654322E32, 1.2345678987654322E32, "
-                                + "11111, 22222, 33333, "
+                                + "123456789876543212345678987654321.11, 123456789876543212345678987654321.22, 123456789876543212345678987654321.33, "
+                                + "11111, 22222, 33333, 2222222222222222300000001111.123456789, "
                                 + "2023-03-23, "
                                 // display value of datetime is not affected by timezone
                                 + "2023-03-23 14:30:05.000, 2023-03-23 14:30:05.123, 2023-03-23 14:30:05.123456, "
@@ -274,7 +275,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
-                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL, "
                                 + "NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, "

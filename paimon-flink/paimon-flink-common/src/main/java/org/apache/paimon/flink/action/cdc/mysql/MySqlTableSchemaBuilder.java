@@ -31,10 +31,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Schema builder for MySQL cdc. */
 public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> {
@@ -81,22 +82,8 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
             primaryKeys.add(primary.asText());
         }
 
-        if (!caseSensitive) {
-            LinkedHashMap<String, DataType> tmp = new LinkedHashMap<>();
-            for (Map.Entry<String, DataType> entry : fields.entrySet()) {
-                String fieldName = entry.getKey();
-                checkArgument(
-                        !tmp.containsKey(fieldName.toLowerCase()),
-                        "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
-                        fieldName,
-                        tableName);
-                tmp.put(fieldName.toLowerCase(), entry.getValue());
-            }
-            fields = tmp;
-
-            primaryKeys =
-                    primaryKeys.stream().map(String::toLowerCase).collect(Collectors.toList());
-        }
+        fields = mapKeyCaseConvert(fields, caseSensitive, columnDuplicateErrMsg(tableName));
+        primaryKeys = listCaseConvert(primaryKeys, caseSensitive);
 
         Schema.Builder builder = Schema.newBuilder();
         builder.options(tableConfig);

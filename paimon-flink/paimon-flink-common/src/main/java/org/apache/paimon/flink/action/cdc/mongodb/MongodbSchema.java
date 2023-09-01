@@ -34,7 +34,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.FIELD_NAME;
@@ -57,13 +56,13 @@ public class MongodbSchema {
     private static final String ID_FIELD = "_id";
     private final String databaseName;
     private final String tableName;
-    private final Map<String, DataType> fields;
+    private final LinkedHashMap<String, DataType> fields;
     private final List<String> primaryKeys;
 
     public MongodbSchema(
             String databaseName,
             String tableName,
-            Map<String, DataType> fields,
+            LinkedHashMap<String, DataType> fields,
             List<String> primaryKeys) {
         this.databaseName = databaseName;
         this.tableName = tableName;
@@ -79,7 +78,7 @@ public class MongodbSchema {
         return databaseName;
     }
 
-    public Map<String, DataType> fields() {
+    public LinkedHashMap<String, DataType> fields() {
         return fields;
     }
 
@@ -105,7 +104,8 @@ public class MongodbSchema {
 
     private static MongodbSchema createSchemaFromSpecifiedConfig(Configuration mongodbConfig) {
         String[] columnNames = mongodbConfig.get(FIELD_NAME).split(",");
-        Map<String, DataType> schemaFields = generateSchemaFields(Arrays.asList(columnNames));
+        LinkedHashMap<String, DataType> schemaFields =
+                generateSchemaFields(Arrays.asList(columnNames));
         String databaseName = mongodbConfig.get(MongoDBSourceOptions.DATABASE);
         String collectionName = mongodbConfig.get(MongoDBSourceOptions.COLLECTION);
         return new MongodbSchema(
@@ -129,8 +129,8 @@ public class MongodbSchema {
         return document != null ? new ArrayList<>(document.keySet()) : Collections.emptyList();
     }
 
-    private static Map<String, DataType> generateSchemaFields(List<String> columnNames) {
-        Map<String, DataType> schemaFields = new LinkedHashMap<>();
+    private static LinkedHashMap<String, DataType> generateSchemaFields(List<String> columnNames) {
+        LinkedHashMap<String, DataType> schemaFields = new LinkedHashMap<>();
         for (String columnName : columnNames) {
             schemaFields.put(columnName, DataTypes.STRING());
         }
@@ -139,9 +139,11 @@ public class MongodbSchema {
 
     private static MongodbSchema createMongodbSchema(
             String databaseName, String collectionName, List<String> columnNames) {
-        Map<String, DataType> schemaFields = generateSchemaFields(columnNames);
         return new MongodbSchema(
-                databaseName, collectionName, schemaFields, Collections.singletonList(ID_FIELD));
+                databaseName,
+                collectionName,
+                generateSchemaFields(columnNames),
+                Collections.singletonList(ID_FIELD));
     }
 
     @Override

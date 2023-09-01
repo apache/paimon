@@ -70,6 +70,7 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         boolean isStreaming =

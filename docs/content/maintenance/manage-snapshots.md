@@ -257,4 +257,14 @@ public class RollbackTo {
 
 {{< /tab >}}
 
+{{< tab "Spark" >}}
+
+Run the following sql:
+
+```sql
+CALL rollback(table => 'test.T', version => '2');
+```
+
+{{< /tab >}}
+
 {{< /tabs >}}

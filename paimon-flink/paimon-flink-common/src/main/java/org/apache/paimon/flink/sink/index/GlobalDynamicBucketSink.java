@@ -43,11 +43,10 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.sink.index.IndexBootstrap.bootstrapType;
 
 /** Sink for global dynamic bucket table. */
 public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<RowData, Integer>> {
@@ -71,13 +70,10 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<RowData, Inte
         TableSchema schema = table.schema();
         RowType rowType = schema.logicalRowType();
         List<String> primaryKeys = schema.primaryKeys();
-        List<String> partitionKeys = schema.partitionKeys();
         RowDataSerializer rowSerializer = new RowDataSerializer(toLogicalType(rowType));
-        RowType keyPartType =
-                schema.projectedLogicalRowType(
-                        Stream.concat(primaryKeys.stream(), partitionKeys.stream())
-                                .collect(Collectors.toList()));
-        RowDataSerializer keyPartSerializer = new RowDataSerializer(toLogicalType(keyPartType));
+
+        RowType bootstrapType = bootstrapType(schema);
+        RowDataSerializer bootstrapSerializer = new RowDataSerializer(toLogicalType(bootstrapType));
 
         // Topology:
         // input -- bootstrap -- shuffle by key hash --> bucket-assigner -- shuffle by bucket -->
@@ -88,7 +84,7 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<RowData, Inte
                                 "INDEX_BOOTSTRAP",
                                 new InternalTypeInfo<>(
                                         new KeyWithRowSerializer<>(
-                                                keyPartSerializer, rowSerializer)),
+                                                bootstrapSerializer, rowSerializer)),
                                 new IndexBootstrapOperator<>(
                                         new IndexBootstrap(table), FlinkRowData::new))
                         .setParallelism(input.getParallelism());
@@ -100,7 +96,7 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<RowData, Inte
         }
 
         KeyPartRowChannelComputer channelComputer =
-                new KeyPartRowChannelComputer(rowType, keyPartType, primaryKeys);
+                new KeyPartRowChannelComputer(rowType, bootstrapType, primaryKeys);
         DataStream<Tuple2<KeyPartOrRow, RowData>> partitionByKeyHash =
                 partition(bootstraped, channelComputer, assignerParallelism);
 

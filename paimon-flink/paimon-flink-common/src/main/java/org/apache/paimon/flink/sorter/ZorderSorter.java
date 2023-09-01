@@ -18,14 +18,24 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.action.SortCompactAction;
 import org.apache.paimon.sort.zorder.ZIndexer;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.guava30.com.google.common.primitives.UnsignedBytes;
+
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -35,6 +45,9 @@ import java.util.List;
  * "z-order" column and insert sorted record to overwrite the origin table.
  */
 public class ZorderSorter extends TableSorter {
+
+    private static final RowType KEY_TYPE =
+            new RowType(Collections.singletonList(new DataField(0, "Z_INDEX", DataTypes.BYTES())));
 
     public ZorderSorter(
             StreamExecutionEnvironment batchTEnv,
@@ -57,7 +70,37 @@ public class ZorderSorter extends TableSorter {
      */
     private DataStream<RowData> sortStreamByZOrder(
             DataStream<RowData> inputStream, FileStoreTable table) {
-        ZIndexer zIndexer = new ZIndexer(table.rowType(), orderColNames);
-        return ZorderSorterUtils.sortStreamByZorder(inputStream, zIndexer, table);
+        final ZIndexer zIndexer = new ZIndexer(table.rowType(), orderColNames);
+        return SortUtils.sortStreamByKey(
+                inputStream,
+                table,
+                KEY_TYPE,
+                TypeInformation.of(byte[].class),
+                () ->
+                        (b1, b2) -> {
+                            assert b1.length == b2.length;
+                            for (int i = 0; i < b1.length; i++) {
+                                int ret = UnsignedBytes.compare(b1[i], b2[i]);
+                                if (ret != 0) {
+                                    return ret;
+                                }
+                            }
+                            return 0;
+                        },
+                new SortUtils.KeyAbstract<byte[]>() {
+                    @Override
+                    public void open() {
+                        zIndexer.open();
+                    }
+
+                    @Override
+                    public byte[] apply(RowData value) {
+                        byte[] zorder = zIndexer.index(new FlinkRowWrapper(value));
+                        // we can just return the reused bytes zorder, because the sample operator
+                        // will remember the record to sample.
+                        return Arrays.copyOf(zorder, zorder.length);
+                    }
+                },
+                GenericRow::of);
     }
 }

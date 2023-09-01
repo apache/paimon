@@ -19,17 +19,14 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchema;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
-import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Pair;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -44,8 +41,6 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -59,15 +54,16 @@ import java.util.Properties;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Utils for MySQL Action. * */
+/** Utils for MySQL Action. */
 public class MySqlActionUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
     public static final ConfigOption<Boolean> SCAN_NEWLY_ADDED_TABLE_ENABLED =
             ConfigOptions.key("scan.newly-added-table.enabled")
                     .booleanType()
@@ -132,106 +128,29 @@ public class MySqlActionUtils {
         return mySqlSchemasInfo;
     }
 
-    static void assertSchemaCompatible(TableSchema paimonSchema, Schema mySqlSchema) {
-        if (!schemaCompatible(paimonSchema, mySqlSchema)) {
-            throw new IllegalArgumentException(
-                    "Paimon schema and MySQL schema are not compatible.\n"
-                            + "Paimon fields are: "
-                            + paimonSchema.fields()
-                            + ".\nMySQL fields are: "
-                            + mySqlSchema.fields());
-        }
-    }
-
-    static boolean schemaCompatible(TableSchema paimonSchema, Schema mySqlSchema) {
-        for (DataField field : mySqlSchema.fields()) {
-            int idx = paimonSchema.fieldNames().indexOf(field.name());
-            if (idx < 0) {
-                LOG.info("Cannot find field '{}' in Paimon table.", field.name());
-                return false;
-            }
-            DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
-                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
-                LOG.info(
-                        "Cannot convert field '{}' from MySQL type '{}' to Paimon type '{}'.",
-                        field.name(),
-                        field.type(),
-                        type);
-                return false;
-            }
-        }
-        return true;
-    }
-
     static Schema buildPaimonSchema(
             MySqlTableInfo mySqlTableInfo,
             List<String> specifiedPartitionKeys,
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
-            Map<String, String> paimonConfig,
+            Map<String, String> tableConfig,
             boolean caseSensitive) {
-        Schema.Builder builder = Schema.newBuilder();
-        builder.options(paimonConfig);
         MySqlSchema mySqlSchema = mySqlTableInfo.schema();
+        LinkedHashMap<String, DataType> sourceColumns =
+                mapKeyCaseConvert(
+                        mySqlSchema.typeMapping(),
+                        caseSensitive,
+                        columnDuplicateErrMsg(mySqlTableInfo.location()));
+        List<String> primaryKeys = listCaseConvert(mySqlSchema.primaryKeys(), caseSensitive);
 
-        // build columns and primary keys from mySqlSchema
-        LinkedHashMap<String, Pair<DataType, String>> mySqlFields;
-        List<String> mySqlPrimaryKeys;
-        if (caseSensitive) {
-            mySqlFields = mySqlSchema.fields();
-            mySqlPrimaryKeys = mySqlSchema.primaryKeys();
-        } else {
-            mySqlFields = new LinkedHashMap<>();
-            for (Map.Entry<String, Pair<DataType, String>> entry :
-                    mySqlSchema.fields().entrySet()) {
-                String fieldName = entry.getKey();
-                checkArgument(
-                        !mySqlFields.containsKey(fieldName.toLowerCase()),
-                        String.format(
-                                "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, mySqlTableInfo.location()));
-                mySqlFields.put(fieldName.toLowerCase(), entry.getValue());
-            }
-            mySqlPrimaryKeys =
-                    mySqlSchema.primaryKeys().stream()
-                            .map(String::toLowerCase)
-                            .collect(Collectors.toList());
-        }
-
-        for (Map.Entry<String, Pair<DataType, String>> entry : mySqlFields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue().getLeft(), entry.getValue().getRight());
-        }
-
-        for (ComputedColumn computedColumn : computedColumns) {
-            builder.column(computedColumn.columnName(), computedColumn.columnType());
-        }
-
-        if (specifiedPrimaryKeys.size() > 0) {
-            for (String key : specifiedPrimaryKeys) {
-                if (!mySqlFields.containsKey(key)
-                        && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
-                    throw new IllegalArgumentException(
-                            "Specified primary key "
-                                    + key
-                                    + " does not exist in MySQL tables or computed columns.");
-                }
-            }
-            builder.primaryKey(specifiedPrimaryKeys);
-        } else if (mySqlPrimaryKeys.size() > 0) {
-            builder.primaryKey(mySqlPrimaryKeys);
-        } else {
-            throw new IllegalArgumentException(
-                    "Primary keys are not specified. "
-                            + "Also, can't infer primary keys from MySQL table schemas because "
-                            + "MySQL tables have no primary keys or have different primary keys.");
-        }
-
-        if (specifiedPartitionKeys.size() > 0) {
-            builder.partitionKeys(specifiedPartitionKeys);
-        }
-
-        return builder.build();
+        return CdcActionCommonUtils.buildPaimonSchema(
+                specifiedPartitionKeys,
+                specifiedPrimaryKeys,
+                computedColumns,
+                tableConfig,
+                sourceColumns,
+                mySqlSchema.comments(),
+                primaryKeys);
     }
 
     static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {

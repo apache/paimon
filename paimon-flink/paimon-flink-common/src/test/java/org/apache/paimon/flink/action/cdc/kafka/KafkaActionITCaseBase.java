@@ -25,7 +25,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -226,20 +225,6 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         return config;
     }
 
-    protected JobClient runActionWithDefaultEnv(KafkaSyncTableAction action) throws Exception {
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-        return client;
-    }
-
-    protected JobClient runActionWithDefaultEnv(KafkaSyncDatabaseAction action) throws Exception {
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-        return client;
-    }
-
     protected KafkaSyncTableActionBuilder syncTableActionBuilder(Map<String, String> kafkaConfig) {
         return new KafkaSyncTableActionBuilder(kafkaConfig);
     }
@@ -255,10 +240,6 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
         public KafkaSyncTableActionBuilder(Map<String, String> kafkaConfig) {
             super(kafkaConfig);
-        }
-
-        public KafkaSyncTableActionBuilder withTypeMappingModes(String... typeMappingModes) {
-            throw new UnsupportedOperationException();
         }
 
         public KafkaSyncTableAction build() {
@@ -278,6 +259,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToArgs("--partition-keys", partitionKeys));
             args.addAll(listToArgs("--primary-keys", primaryKeys));
+            args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
 
@@ -310,10 +292,6 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             throw new UnsupportedOperationException();
         }
 
-        public KafkaSyncDatabaseActionBuilder withTypeMappingModes(String... typeMappingModes) {
-            throw new UnsupportedOperationException();
-        }
-
         public KafkaSyncDatabaseAction build() {
             List<String> args =
                     new ArrayList<>(
@@ -327,6 +305,8 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(nullableToArgs("--table-suffix", tableSuffix));
             args.addAll(nullableToArgs("--including-tables", includingTables));
             args.addAll(nullableToArgs("--excluding-tables", excludingTables));
+
+            args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
             MultipleParameterTool params =
                     MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));

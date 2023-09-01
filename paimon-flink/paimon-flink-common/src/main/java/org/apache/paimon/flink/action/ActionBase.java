@@ -60,6 +60,8 @@ public abstract class ActionBase implements Action {
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
         env = StreamExecutionEnvironment.getExecutionEnvironment();
+        // we enable object reuse, we copy the un-reusable object ourselves.
+        env.getConfig().enableObjectReuse();
         batchTEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
 
         // register flink catalog to table environment

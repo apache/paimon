@@ -285,7 +285,7 @@ flink-sql-connector-kafka-*.jar
 ```
 
 ### Supported Formats
-Flink provides several Kafka CDC formats :canal-json、debezium-json,ogg-json,maxwell-json.
+Flink provides several Kafka CDC formats: Canal, Debezium, Ogg and Maxwell JSON.
 If a message in a Kafka topic is a change event captured from another database using the Change Data Capture (CDC) tool, then you can use the Paimon Kafka CDC. Write the INSERT, UPDATE, DELETE messages parsed into the paimon table.
 <table class="table table-bordered">
     <thead>
@@ -333,6 +333,7 @@ To use this feature through `flink run`, run the following shell command.
     --table <table-name> \
     [--partition-keys <partition-keys>] \
     [--primary-keys <primary-keys>] \
+    [--type-mapping to-string] \
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
@@ -381,6 +382,7 @@ To use this feature through `flink run`, run the following shell command.
     [--table-suffix <paimon-table-suffix>] \
     [--including-tables <table-name|name-regular-expr>] \
     [--excluding-tables <table-name|name-regular-expr>] \
+    [--type-mapping to-string] \
     [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]

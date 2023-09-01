@@ -155,6 +155,11 @@ Flink Generic Tables (Kafka and other tables)!
 
 In this mode, you should use 'connector' option for creating tables.
 
+{{< hint info >}}
+Paimon will use `hive.metastore.warehouse.dir` in your `hive-site.xml`, please use path with scheme.
+For example, `hdfs://...`. Otherwise, Paimon will use the local path.
+{{< /hint >}}
+
 ```sql
 CREATE CATALOG my_catalog WITH (
     'type'='paimon-generic',

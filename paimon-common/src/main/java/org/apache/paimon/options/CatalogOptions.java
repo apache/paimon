@@ -18,11 +18,15 @@
 
 package org.apache.paimon.options;
 
+import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.table.TableType;
 
+import java.lang.reflect.Field;
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 
@@ -78,6 +82,7 @@ public class CatalogOptions {
                     .withDescription(
                             "Allow to fallback to hadoop File IO when no file io found for the scheme.");
 
+    @Documentation.Immutable
     public static final ConfigOption<String> LINEAGE_META =
             key("lineage-meta")
                     .stringType()
@@ -97,4 +102,36 @@ public class CatalogOptions {
                                             TextElement.text(
                                                     "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
                                     .build());
+
+    @Documentation.Immutable
+    public static final ConfigOption<Boolean> TABLE_LINEAGE =
+            key("table-lineage")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether save the table lineage information or not, by default is false.");
+
+    @Documentation.Immutable
+    public static final ConfigOption<Boolean> DATA_LINEAGE =
+            key("data-lineage")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether save the data lineage information or not, by default is false.");
+
+    public static Set<String> getImmutableOptionKeys() {
+        final Field[] fields = CatalogOptions.class.getFields();
+        final Set<String> immutableKeys = new HashSet<>(fields.length);
+        for (Field field : fields) {
+            if (ConfigOption.class.isAssignableFrom(field.getType())
+                    && field.getAnnotation(Documentation.Immutable.class) != null) {
+                try {
+                    immutableKeys.add(((ConfigOption<?>) field.get(CatalogOptions.class)).key());
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        return immutableKeys;
+    }
 }
