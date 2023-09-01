@@ -45,7 +45,7 @@ If you want to do this use case test locally, start local Flink and run it first
 
 ```bash
 cd $FLINK_HOME/bin
-./start-cluster.sh
+bash start-cluster.sh
 ```
 
 Verify that the flink startup successfully completed the next steps by visiting http://localhost:8081
