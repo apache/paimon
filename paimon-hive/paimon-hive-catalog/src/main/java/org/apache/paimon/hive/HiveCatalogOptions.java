@@ -32,7 +32,7 @@ public final class HiveCatalogOptions {
                     .noDefaultValue()
                     .withDescription(
                             "File directory of the hive-site.xml , used to create HiveMetastoreClient and security authentication, such as Kerberos, LDAP, Ranger and so on.\n"
-                                    + "If not configured, try to load from 'HIVE_CONF_DIR' env.");
+                                    + "If not configured, try to load from 'HIVE_CONF_DIR' env.\n");
 
     public static final ConfigOption<String> HADOOP_CONF_DIR =
             ConfigOptions.key("hadoop-conf-dir")
@@ -41,7 +41,7 @@ public final class HiveCatalogOptions {
                     .withDescription(
                             "File directory of the core-site.xml、hdfs-site.xml、yarn-site.xml、mapred-site.xml. Currently, only local file system paths are supported.\n"
                                     + "If not configured, try to load from 'HADOOP_CONF_DIR' or 'HADOOP_HOME' system environment.\n"
-                                    + "Configure Priority: 1.from 'hadoop-conf-dir' 2.from HADOOP_CONF_DIR  3.from HADOOP_HOME/conf 4.HADOOP_HOME/etc/hadoop.");
+                                    + "Configure Priority: 1.from 'hadoop-conf-dir' 2.from HADOOP_CONF_DIR  3.from HADOOP_HOME/conf 4.HADOOP_HOME/etc/hadoop.\n");
 
     public static final ConfigOption<Boolean> LOCATION_IN_PROPERTIES =
             ConfigOptions.key("location-in-properties")
