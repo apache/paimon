@@ -18,10 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
@@ -41,7 +43,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -73,28 +74,10 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     private final Map<String, String> tableConfig;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
-    @Nullable private final String includingTables;
+    private final String includingTables;
 
     public MongoDBSyncDatabaseAction(
             Map<String, String> mongodbConfig,
-            String warehouse,
-            String database,
-            Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
-        this(
-                mongodbConfig,
-                warehouse,
-                database,
-                null,
-                null,
-                null,
-                null,
-                catalogConfig,
-                tableConfig);
-    }
-
-    public MongoDBSyncDatabaseAction(
-            Map<String, String> kafkaConfig,
             String warehouse,
             String database,
             @Nullable String tablePrefix,
@@ -104,7 +87,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> tableConfig) {
         super(warehouse, catalogConfig);
-        this.mongodbConfig = Configuration.fromMap(kafkaConfig);
+        this.mongodbConfig = Configuration.fromMap(mongodbConfig);
         this.database = database;
         this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
         this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
@@ -114,6 +97,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
         this.tableConfig = tableConfig;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
 
@@ -128,7 +112,11 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
 
         MongoDBSource<String> source =
                 MongoDBActionUtils.buildMongodbSource(
-                        mongodbConfig, buildTableList(excludedTables));
+                        mongodbConfig,
+                        CdcActionCommonUtils.combinedModeTableList(
+                                mongodbConfig.get(MongoDBSourceOptions.DATABASE),
+                                includingTables,
+                                excludedTables));
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory;
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
@@ -148,11 +136,13 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                                                 "MongoDB Source")
                                         .flatMap(
                                                 new MongoDBRecordParser(
-                                                        false, tableNameConverter, mongodbConfig)))
+                                                        caseSensitive,
+                                                        tableNameConverter,
+                                                        mongodbConfig)))
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)
-                        .withMode(DatabaseSyncMode.COMBINED);
+                        .withMode(MultiTablesSinkMode.COMBINED);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
@@ -178,44 +168,14 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                         tableSuffix));
     }
 
-    private String buildTableList(List<Identifier> excludedTables) {
-        String separatorRex = "\\.";
-        // In COMBINED mode, we should consider both existed tables and possible newly added
-        // tables, so we should use regular expression to monitor all valid tables and exclude
-        // certain invalid tables
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
 
-        // The table list is built by template:
-        // (?!(^db\\.tbl$)|(^...$))(databasePattern\\.(including_pattern1|...))
-
-        // The excluding pattern ?!(^db\\.tbl$)|(^...$) can exclude tables whose qualified name
-        // is exactly equal to 'db.tbl'
-        // The including pattern databasePattern\\.(including_pattern1|...) can include tables
-        // whose qualified name matches one of the patterns
-
-        // a table can be monitored only when its name meets the including pattern and doesn't
-        // be excluded by excluding pattern at the same time
-        String includingPattern =
-                String.format(
-                        "%s%s(%s)",
-                        mongodbConfig.get(MongoDBSourceOptions.DATABASE),
-                        separatorRex,
-                        includingTables);
-        if (excludedTables.isEmpty()) {
-            return includingPattern;
-        }
-
-        String excludingPattern =
-                excludedTables.stream()
-                        .map(
-                                t ->
-                                        String.format(
-                                                "(^%s$)",
-                                                t.getDatabaseName()
-                                                        + separatorRex
-                                                        + t.getObjectName()))
-                        .collect(Collectors.joining("|"));
-        excludingPattern = "?!" + excludingPattern;
-        return String.format("(%s)(%s)", excludingPattern, includingPattern);
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

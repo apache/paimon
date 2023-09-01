@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.kafka.formats;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.canal.CanalRecordParser;
 import org.apache.paimon.flink.action.cdc.kafka.formats.ogg.OggRecordParser;
 
@@ -58,8 +59,9 @@ public enum DataFormat {
     public RecordParser createParser(
             boolean caseSensitive,
             TableNameConverter tableNameConverter,
+            TypeMapping typeMapping,
             List<ComputedColumn> computedColumns) {
-        return parser.createParser(caseSensitive, tableNameConverter, computedColumns);
+        return parser.createParser(caseSensitive, typeMapping, tableNameConverter, computedColumns);
     }
 
     /**

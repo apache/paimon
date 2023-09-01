@@ -80,6 +80,7 @@ public class CompactDatabaseAction extends ActionBase {
         return shouldCompaction;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) {
         try {
             Pattern databasePattern = Pattern.compile(database);

@@ -274,7 +274,7 @@ flink-sql-connector-kafka-*.jar
 ```
 
 ### Supported Formats
-Flink provides several Kafka CDC formats :canal-json、debezium-json,ogg-json,maxwell-json.
+Flink provides several Kafka CDC formats: Canal, Debezium, Ogg and Maxwell JSON.
 If a message in a Kafka topic is a change event captured from another database using the Change Data Capture (CDC) tool, then you can use the Paimon Kafka CDC. Write the INSERT, UPDATE, DELETE messages parsed into the paimon table.
 <table class="table table-bordered">
     <thead>
@@ -322,6 +322,7 @@ To use this feature through `flink run`, run the following shell command.
     --table <table-name> \
     [--partition-keys <partition-keys>] \
     [--primary-keys <primary-keys>] \
+    [--type-mapping to-string] \
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
@@ -370,6 +371,7 @@ To use this feature through `flink run`, run the following shell command.
     [--table-suffix <paimon-table-suffix>] \
     [--including-tables <table-name|name-regular-expr>] \
     [--excluding-tables <table-name|name-regular-expr>] \
+    [--type-mapping to-string] \
     [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -467,7 +469,7 @@ Further processing of the data table is required when using values from nested f
 
 Functions can be invoked at the tail end of a path - the input to a function is the output of the path expression. The function output is dictated by the function itself.
 
-{{< generated/mongodb_functions) >}}
+{{< generated/mongodb_functions >}}
 
 Path Examples
 ```json
@@ -510,7 +512,7 @@ Path Examples
 }
 ```
 
-{{< generated/mongodb_path_example) >}}
+{{< generated/mongodb_path_example >}}
 
 2. The synchronized table is required to have its primary key set as `_id`. 
 This is because MongoDB's change events are recorded before updates in messages. 

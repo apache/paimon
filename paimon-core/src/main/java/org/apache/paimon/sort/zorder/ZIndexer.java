@@ -18,9 +18,11 @@
 
 package org.apache.paimon.sort.zorder;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.memory.MemorySegmentUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -128,26 +130,42 @@ public class ZIndexer implements Serializable {
 
         @Override
         public ZProcessFunction visit(CharType charType) {
-            return (row, reuse) ->
-                    row.isNullAt(fieldIndex)
-                            ? NULL_BYTES
-                            : ZOrderByteUtils.stringToOrderedBytes(
-                                            row.getString(fieldIndex).toString(),
-                                            PRIMITIVE_BUFFER_SIZE,
-                                            reuse)
-                                    .array();
+            return (row, reuse) -> {
+                BinaryString binaryString = row.getString(fieldIndex);
+
+                return row.isNullAt(fieldIndex)
+                        ? NULL_BYTES
+                        : ZOrderByteUtils.byteTruncateOrFill(
+                                        MemorySegmentUtils.getBytes(
+                                                binaryString.getSegments(),
+                                                binaryString.getOffset(),
+                                                Math.min(
+                                                        PRIMITIVE_BUFFER_SIZE,
+                                                        binaryString.getSizeInBytes())),
+                                        PRIMITIVE_BUFFER_SIZE,
+                                        reuse)
+                                .array();
+            };
         }
 
         @Override
         public ZProcessFunction visit(VarCharType varCharType) {
-            return (row, reuse) ->
-                    row.isNullAt(fieldIndex)
-                            ? NULL_BYTES
-                            : ZOrderByteUtils.stringToOrderedBytes(
-                                            row.getString(fieldIndex).toString(),
-                                            PRIMITIVE_BUFFER_SIZE,
-                                            reuse)
-                                    .array();
+            return (row, reuse) -> {
+                BinaryString binaryString = row.getString(fieldIndex);
+
+                return row.isNullAt(fieldIndex)
+                        ? NULL_BYTES
+                        : ZOrderByteUtils.byteTruncateOrFill(
+                                        MemorySegmentUtils.getBytes(
+                                                binaryString.getSegments(),
+                                                binaryString.getOffset(),
+                                                Math.min(
+                                                        PRIMITIVE_BUFFER_SIZE,
+                                                        binaryString.getSizeInBytes())),
+                                        PRIMITIVE_BUFFER_SIZE,
+                                        reuse)
+                                .array();
+            };
         }
 
         @Override

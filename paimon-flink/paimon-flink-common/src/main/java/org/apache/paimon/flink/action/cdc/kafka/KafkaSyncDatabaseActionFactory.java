@@ -20,10 +20,10 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link KafkaSyncDatabaseAction}. */
@@ -38,31 +38,27 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "warehouse");
-        checkRequiredArgument(params, "database");
         checkRequiredArgument(params, "kafka-conf");
 
-        String warehouse = params.get("warehouse");
-        String database = params.get("database");
-        String tablePrefix = params.get("table-prefix");
-        String tableSuffix = params.get("table-suffix");
-        String includingTables = params.get("including-tables");
-        String excludingTables = params.get("excluding-tables");
-
-        Map<String, String> kafkaConfigOption = optionalConfigMap(params, "kafka-conf");
-        Map<String, String> catalogConfigOption = optionalConfigMap(params, "catalog-conf");
-        Map<String, String> tableConfigOption = optionalConfigMap(params, "table-conf");
-        return Optional.of(
+        KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
-                        kafkaConfigOption,
-                        warehouse,
-                        database,
-                        tablePrefix,
-                        tableSuffix,
-                        includingTables,
-                        excludingTables,
-                        catalogConfigOption,
-                        tableConfigOption));
+                        getRequiredValue(params, "warehouse"),
+                        getRequiredValue(params, "database"),
+                        optionalConfigMap(params, "catalog-conf"),
+                        optionalConfigMap(params, "kafka-conf"));
+
+        action.withTableConfig(optionalConfigMap(params, "table-conf"))
+                .withTablePrefix(params.get("table-prefix"))
+                .withTableSuffix(params.get("table-suffix"))
+                .includingTables(params.get("including-tables"))
+                .excludingTables(params.get("excluding-tables"));
+
+        if (params.has("type-mapping")) {
+            String[] options = params.get("type-mapping").split(",");
+            action.withTypeMapping(TypeMapping.parse(options));
+        }
+
+        return Optional.of(action);
     }
 
     @Override
@@ -81,6 +77,7 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
                         + "[--table-suffix <paimon-table-suffix>] "
                         + "[--including-tables <table-name|name-regular-expr>] "
                         + "[--excluding-tables <table-name|name-regular-expr>] "
+                        + "[--type-mapping <option1,option2...>] "
                         + "[--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -100,6 +97,10 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
                         + "The usage is same as --including-tables.");
         System.out.println(
                 "--excluding-tables has higher priority than --including-tables if you specified both.");
+        System.out.println();
+
+        System.out.println(
+                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("kafka source conf syntax:");

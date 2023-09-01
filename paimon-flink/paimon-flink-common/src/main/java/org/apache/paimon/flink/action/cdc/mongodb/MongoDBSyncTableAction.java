@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
@@ -59,11 +60,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * </pre>
  */
 public class MongoDBSyncTableAction extends ActionBase {
-    public final Configuration mongodbConfig;
-    public final String database;
-    public final String table;
-    public final List<String> partitionKeys;
-    public final Map<String, String> tableConfig;
+
+    private final Configuration mongodbConfig;
+    private final String database;
+    private final String table;
+    private final List<String> partitionKeys;
+    private final Map<String, String> tableConfig;
 
     public MongoDBSyncTableAction(
             Map<String, String> mongodbConfig,
@@ -81,6 +83,7 @@ public class MongoDBSyncTableAction extends ActionBase {
         this.tableConfig = tableConfig;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
                 mongodbConfig.contains(MongoDBSourceOptions.COLLECTION),
@@ -160,6 +163,16 @@ public class MongoDBSyncTableAction extends ActionBase {
                             "Partition keys [%s] cannot contain upper case in case-insensitive catalog.",
                             partitionKeys));
         }
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

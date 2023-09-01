@@ -74,8 +74,7 @@ public abstract class TableSorter {
             List<String> orderColumns) {
         switch (OrderType.of(sortStrategy)) {
             case ORDER:
-                // todo support alphabetical order
-                throw new IllegalArgumentException("Not supported yet.");
+                return new OrderSorter(batchTEnv, origin, fileStoreTable, orderColumns);
             case ZORDER:
                 return new ZorderSorter(batchTEnv, origin, fileStoreTable, orderColumns);
             case HILBERT:

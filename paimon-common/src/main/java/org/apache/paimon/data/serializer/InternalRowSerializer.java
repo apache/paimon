@@ -72,7 +72,7 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
     }
 
     @Override
-    public Serializer<InternalRow> duplicate() {
+    public InternalRowSerializer duplicate() {
         Serializer<?>[] duplicateFieldSerializers = new Serializer[fieldSerializers.length];
         for (int i = 0; i < fieldSerializers.length; i++) {
             duplicateFieldSerializers[i] = fieldSerializers[i].duplicate();
@@ -109,7 +109,7 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
     }
 
     @SuppressWarnings("unchecked")
-    private InternalRow copyRowData(InternalRow from, InternalRow reuse) {
+    public InternalRow copyRowData(InternalRow from, InternalRow reuse) {
         GenericRow ret;
         if (reuse instanceof GenericRow) {
             ret = (GenericRow) reuse;

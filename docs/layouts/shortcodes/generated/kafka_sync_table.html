@@ -46,6 +46,10 @@ under the License.
         <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".</td>
     </tr>
     <tr>
+        <td><h5>--type-mapping</h5></td>
+        <td>It is used to specify how to map MySQL data type to Paimon type. Currently, only support option "to-string": maps all MySQL types to STRING.</td>
+    </tr>
+    <tr>
         <td><h5>--computed-column</h5></td>
         <td>The definitions of computed columns. The argument field is from Kafka topic's table field name. See <a href="#computed-functions">here</a> for a complete list of configurations. </td>
     </tr>

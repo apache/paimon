@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
@@ -50,7 +51,8 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
 
         KafkaSchema kafkaSchema =
-                KafkaSchema.getKafkaSchema(Configuration.fromMap(kafkaConfig), topic);
+                KafkaSchema.getKafkaSchema(
+                        Configuration.fromMap(kafkaConfig), topic, TypeMapping.defaultMapping());
         Map<String, DataType> fields = new LinkedHashMap<>();
         fields.put("pt", DataTypes.INT());
         fields.put("_id", DataTypes.INT());

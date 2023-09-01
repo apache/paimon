@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
@@ -34,13 +35,15 @@ import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -158,36 +161,21 @@ public class MongoDBActionUtils {
     static Schema buildPaimonSchema(
             MongodbSchema mongodbSchema,
             List<String> specifiedPartitionKeys,
-            Map<String, String> paimonConfig,
+            Map<String, String> tableConfig,
             boolean caseSensitive) {
+        LinkedHashMap<String, DataType> sourceColumns =
+                mapKeyCaseConvert(
+                        mongodbSchema.fields(),
+                        caseSensitive,
+                        columnDuplicateErrMsg(mongodbSchema.tableName()));
 
-        Schema.Builder builder = Schema.newBuilder().options(paimonConfig);
-
-        Map<String, DataType> mongodbFields =
-                caseSensitive
-                        ? mongodbSchema.fields()
-                        : mongodbSchema.fields().entrySet().stream()
-                                .collect(
-                                        Collectors.toMap(
-                                                entry -> entry.getKey().toLowerCase(),
-                                                Map.Entry::getValue,
-                                                (existing, replacement) -> {
-                                                    throw new IllegalArgumentException(
-                                                            String.format(
-                                                                    "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
-                                                                    existing,
-                                                                    mongodbSchema.tableName()));
-                                                },
-                                                LinkedHashMap::new));
-
-        mongodbFields.forEach(builder::column);
-
-        builder.primaryKey(Lists.newArrayList(PRIMARY_KEY));
-
-        if (!specifiedPartitionKeys.isEmpty()) {
-            builder.partitionKeys(specifiedPartitionKeys);
-        }
-
-        return builder.build();
+        return CdcActionCommonUtils.buildPaimonSchema(
+                specifiedPartitionKeys,
+                Lists.newArrayList(PRIMARY_KEY),
+                Collections.emptyList(),
+                tableConfig,
+                sourceColumns,
+                null,
+                Collections.emptyList());
     }
 }

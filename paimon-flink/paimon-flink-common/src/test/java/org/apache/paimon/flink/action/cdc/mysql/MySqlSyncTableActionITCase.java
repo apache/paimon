@@ -22,7 +22,6 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -44,6 +43,7 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -66,16 +66,14 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
 
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
-                                warehouse,
-                                database,
-                                tableName,
+                syncTableActionBuilder(mySqlConfig)
+                        .withCatalogConfig(
                                 Collections.singletonMap(
-                                        CatalogOptions.METASTORE.key(), "test-alter-table"),
-                                mySqlConfig)
+                                        CatalogOptions.METASTORE.key(), "test-alter-table"))
                         .withTableConfig(getBasicTableConfig())
                         .withPartitionKeys("pt")
-                        .withPrimaryKeys("pt", "_id");
+                        .withPrimaryKeys("pt", "_id")
+                        .build();
         runActionWithDefaultEnv(action);
 
         checkTableSchema(
@@ -246,8 +244,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_multiple");
 
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
+        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
         runActionWithDefaultEnv(action);
 
         checkTableSchema(
@@ -327,9 +324,10 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("table-name", "all_types_table");
 
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                syncTableActionBuilder(mySqlConfig)
                         .withPartitionKeys("pt")
-                        .withPrimaryKeys("pt", "_id");
+                        .withPrimaryKeys("pt", "_id")
+                        .build();
         JobClient client = runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -387,6 +385,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.DECIMAL(8, 0), // _decimal
                             DataTypes.DECIMAL(8, 0), // _decimal_unsigned
                             DataTypes.DECIMAL(8, 0), // _decimal_unsigned_zerofill
+                            DataTypes.DECIMAL(38, 10), // _big_decimal
                             DataTypes.DATE(), // _date
                             DataTypes.TIMESTAMP(0), // _datetime
                             DataTypes.TIMESTAMP(3), // _datetime3
@@ -466,6 +465,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_decimal",
                             "_decimal_unsigned",
                             "_decimal_unsigned_zerofill",
+                            "_big_decimal",
                             "_date",
                             "_datetime",
                             "_datetime3",
@@ -520,8 +520,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "1.000011, 2.000022, 3.000033, "
                                 + "1.000111, 2.000222, 3.000333, "
                                 + "12345.110, 12345.220, 12345.330, "
-                                + "1.2345678987654322E32, 1.2345678987654322E32, 1.2345678987654322E32, "
-                                + "11111, 22222, 33333, "
+                                + "123456789876543212345678987654321.11, 123456789876543212345678987654321.22, 123456789876543212345678987654321.33, "
+                                + "11111, 22222, 33333, 2222222222222222300000001111.1234567890, "
                                 + "19439, "
                                 // display value of datetime is not affected by timezone
                                 + "2023-03-23T14:30:05, 2023-03-23T14:30:05.123, 2023-03-23T14:30:05.123456, "
@@ -566,7 +566,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, NULL, "
-                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL, "
                                 + "NULL, "
                                 + "NULL, NULL, NULL, "
                                 + "NULL, NULL, "
@@ -614,12 +614,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "incompatible_field_\\d+");
 
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
+        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
 
-        assertThatThrownBy(() -> action.build(env))
+        assertThatThrownBy(action::run)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Column v1 have different types when merging schemas.\n"
                                         + "Current table '{paimon_sync_table.incompatible_field_2}' fields: [_id INT,v1 INT]\n"
@@ -641,28 +640,29 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 new HashMap<>());
 
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
-                        .withPrimaryKeys("a");
+                syncTableActionBuilder(mySqlConfig).withPrimaryKeys("a").build();
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Paimon schema and MySQL schema are not compatible.");
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Paimon schema and source table schema are not compatible."));
     }
 
     @Test
-    public void testInvalidPrimaryKey() {
+    public void testInvalidPrimaryKey() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
 
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
-                        .withPrimaryKeys("pk");
+                syncTableActionBuilder(mySqlConfig).withPrimaryKeys("pk").build();
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Specified primary key pk does not exist in MySQL tables or computed columns.");
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Specified primary key 'pk' does not exist in source tables or computed columns."));
     }
 
     @Test
@@ -671,15 +671,15 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "incompatible_pk_\\d+");
 
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig);
+        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Primary keys are not specified. "
-                                + "Also, can't infer primary keys from MySQL table schemas because "
-                                + "MySQL tables have no primary keys or have different primary keys.");
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Primary keys are not specified. "
+                                        + "Also, can't infer primary keys from source table schemas because "
+                                        + "source tables have no primary keys or have different primary keys."));
     }
 
     @Test
@@ -719,10 +719,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "_truncate_date=truncate(pk,2)");
 
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                syncTableActionBuilder(mySqlConfig)
                         .withPartitionKeys("_year_date")
                         .withPrimaryKeys("pk", "_year_date")
-                        .withComputedColumnArgs(computedColumnDefs);
+                        .withComputedColumnArgs(computedColumnDefs)
+                        .build();
         runActionWithDefaultEnv(action);
 
         if (executeMysql) {
@@ -806,10 +807,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("table-name", tblPattern);
 
         MySqlSyncTableAction action =
-                new MySqlSyncTableAction(warehouse, database, tableName, mySqlConfig)
+                syncTableActionBuilder(mySqlConfig)
                         .withPartitionKeys("pt")
                         .withPrimaryKeys("pk", "pt")
-                        .withComputedColumnArgs(Collections.singletonList("pt=substring(_date,5)"));
+                        .withComputedColumnArgs("pt=substring(_date,5)")
+                        .build();
         runActionWithDefaultEnv(action);
 
         try (Statement statement = getStatement()) {
@@ -839,6 +841,20 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 table,
                 rowType,
                 Arrays.asList("pk", "pt"));
+    }
+
+    @Test
+    public void testCatalogAndTableConfig() {
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(getBasicMySqlConfig())
+                        .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
+                        .withTableConfig(Collections.singletonMap("table-key", "table-value"))
+                        .build();
+
+        assertThat(action.catalogConfig())
+                .containsExactlyEntriesOf(Collections.singletonMap("catalog-key", "catalog-value"));
+        assertThat(action.tableConfig())
+                .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }
 
     private FileStoreTable getFileStoreTable() throws Exception {
