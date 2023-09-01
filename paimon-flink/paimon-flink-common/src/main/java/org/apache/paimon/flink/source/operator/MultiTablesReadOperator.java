@@ -37,12 +37,9 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
-import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactionTable;
 
 /**
  * The operator that reads the Tuple2<{@link Split}, String> received from the preceding {@link
@@ -56,21 +53,10 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     private static final long serialVersionUID = 1L;
 
     private final Catalog.Loader catalogLoader;
-    private final Pattern includingPattern;
-    private final Pattern excludingPattern;
-    private final Pattern databasePattern;
     private final boolean isStreaming;
 
-    public MultiTablesReadOperator(
-            Catalog.Loader catalogLoader,
-            Pattern includingPattern,
-            Pattern excludingPattern,
-            Pattern databasePattern,
-            boolean isStreaming) {
+    public MultiTablesReadOperator(Catalog.Loader catalogLoader, boolean isStreaming) {
         this.catalogLoader = catalogLoader;
-        this.includingPattern = includingPattern;
-        this.excludingPattern = excludingPattern;
-        this.databasePattern = databasePattern;
         this.isStreaming = isStreaming;
     }
 
@@ -93,7 +79,6 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         tablesMap = new HashMap<>();
         readsMap = new HashMap<>();
         catalog = catalogLoader.load();
-        initializeTableMap();
 
         this.reuseRow = new FlinkRowData(null);
         this.reuseRecord = new StreamRecord<>(reuseRow);
@@ -108,42 +93,6 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
             while (iterator.hasNext()) {
                 reuseRow.replace(iterator.next());
                 output.collect(reuseRecord);
-            }
-        }
-    }
-
-    private void initializeTableMap()
-            throws Catalog.DatabaseNotExistException, Catalog.TableNotExistException {
-        List<String> databases = catalog.listDatabases();
-
-        for (String databaseName : databases) {
-            if (databasePattern.matcher(databaseName).matches()) {
-                List<String> tables = catalog.listTables(databaseName);
-                for (String tableName : tables) {
-                    Identifier identifier = Identifier.create(databaseName, tableName);
-                    if (shouldCompactionTable(identifier, includingPattern, excludingPattern)
-                            && (!tablesMap.containsKey(identifier))) {
-                        Table table = catalog.getTable(identifier);
-                        if (!(table instanceof FileStoreTable)) {
-                            LOG.error(
-                                    String.format(
-                                            "Only FileStoreTable supports compact action. The table type is '%s'.",
-                                            table.getClass().getName()));
-                            continue;
-                        }
-
-                        BucketsTable bucketsTable =
-                                new BucketsTable(
-                                                (FileStoreTable) table,
-                                                isStreaming,
-                                                identifier.getDatabaseName())
-                                        .copy(compactOptions(isStreaming));
-                        tablesMap.put(identifier, bucketsTable);
-                        readsMap.put(
-                                identifier,
-                                bucketsTable.newReadBuilder().newRead().withIOManager(ioManager));
-                    }
-                }
             }
         }
     }

@@ -135,11 +135,6 @@ public class MultiTablesBatchCompactorSourceFunction extends MultiTablesCompacto
                 .transform(
                         name + "-Reader",
                         typeInfo,
-                        new MultiTablesReadOperator(
-                                catalogLoader,
-                                includingPattern,
-                                excludingPattern,
-                                databasePattern,
-                                false));
+                        new MultiTablesReadOperator(catalogLoader, false));
     }
 }

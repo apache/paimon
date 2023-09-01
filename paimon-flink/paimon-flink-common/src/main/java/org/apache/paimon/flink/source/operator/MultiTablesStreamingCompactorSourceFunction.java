@@ -141,11 +141,6 @@ public class MultiTablesStreamingCompactorSourceFunction
                 .transform(
                         name + "-Reader",
                         typeInfo,
-                        new MultiTablesReadOperator(
-                                catalogLoader,
-                                includingPattern,
-                                excludingPattern,
-                                databasePattern,
-                                true));
+                        new MultiTablesReadOperator(catalogLoader, true));
     }
 }
