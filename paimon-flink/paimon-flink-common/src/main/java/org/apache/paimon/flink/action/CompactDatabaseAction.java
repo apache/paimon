@@ -22,8 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
+import org.apache.paimon.flink.sink.BucketsRowChannelComputer;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
-import org.apache.paimon.flink.sink.MultiTablesCompactorSinkBuilder;
+import org.apache.paimon.flink.sink.MultiTablesCompactorSink;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.source.MultiTablesCompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
@@ -51,6 +52,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /** Database compact action for Flink. */
 public class CompactDatabaseAction extends ActionBase {
@@ -189,14 +192,11 @@ public class CompactDatabaseAction extends ActionBase {
                         includingPattern,
                         excludingPattern,
                         compactOptions.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis());
-
-        MultiTablesCompactorSinkBuilder sinkBuilder =
-                new MultiTablesCompactorSinkBuilder(catalogLoader(), compactOptions);
-
         DataStream<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
 
-        sinkBuilder.withInput(source).build();
+        DataStream<RowData> partitioned = partition(source, new BucketsRowChannelComputer(), null);
+        new MultiTablesCompactorSink(catalogLoader(), compactOptions).sinkFrom(partitioned);
     }
 
     private void buildForTraditionalCompaction(
