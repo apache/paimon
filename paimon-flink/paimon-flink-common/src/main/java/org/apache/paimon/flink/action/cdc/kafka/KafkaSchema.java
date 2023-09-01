@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.types.DataType;
@@ -36,8 +37,8 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
@@ -54,13 +55,13 @@ public class KafkaSchema {
     private static final int POLL_TIMEOUT_MILLIS = 1000;
     private final String databaseName;
     private final String tableName;
-    private final Map<String, DataType> fields;
+    private final LinkedHashMap<String, DataType> fields;
     private final List<String> primaryKeys;
 
     public KafkaSchema(
             String databaseName,
             String tableName,
-            Map<String, DataType> fields,
+            LinkedHashMap<String, DataType> fields,
             List<String> primaryKeys) {
         this.databaseName = databaseName;
         this.tableName = tableName;
@@ -76,7 +77,7 @@ public class KafkaSchema {
         return databaseName;
     }
 
-    public Map<String, DataType> fields() {
+    public LinkedHashMap<String, DataType> fields() {
         return fields;
     }
 
@@ -119,10 +120,12 @@ public class KafkaSchema {
      *
      * @param kafkaConfig The configuration for Kafka.
      * @param topic The topic to retrieve the schema for.
+     * @param typeMapping data type mapping options.
      * @return The Kafka schema for the topic.
      * @throws KafkaSchemaRetrievalException If unable to retrieve the schema after max retries.
      */
-    public static KafkaSchema getKafkaSchema(Configuration kafkaConfig, String topic)
+    public static KafkaSchema getKafkaSchema(
+            Configuration kafkaConfig, String topic, TypeMapping typeMapping)
             throws KafkaSchemaRetrievalException {
         KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig, topic);
         int retry = 0;
@@ -130,7 +133,8 @@ public class KafkaSchema {
 
         DataFormat format = getDataFormat(kafkaConfig);
         RecordParser recordParser =
-                format.createParser(true, new TableNameConverter(true), Collections.emptyList());
+                format.createParser(
+                        true, new TableNameConverter(true), typeMapping, Collections.emptyList());
 
         while (true) {
             ConsumerRecords<String, String> consumerRecords =

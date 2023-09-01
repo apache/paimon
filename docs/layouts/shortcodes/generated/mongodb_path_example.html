@@ -1,0 +1,97 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">JsonPath</th>
+        <th class="text-left" style="width: 85%">Result</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>$.store.book[*].author</h5></td>
+        <td>Provides the min value of an array of numbers.</td>
+    </tr>
+    <tr>
+        <td><h5>$..author</h5></td>
+        <td>All authors.</td>
+    </tr>
+    <tr>
+        <td><h5>$.store.*</h5></td>
+        <td>All things, both books and bicycles.</td>
+    </tr>
+    <tr>
+        <td><h5>$.store..price</h5></td>
+        <td>Provides the standard deviation value of an array of numbers.</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[2]</h5></td>
+        <td>The third book.</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[-2]</h5></td>
+        <td>The second to last book.</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[0,1]</h5></td>
+        <td>The first two books.</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[:2]</h5></td>
+        <td>All books from index 0 (inclusive) until index 2 (exclusive).</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[1:2]</h5></td>
+        <td>All books from index 1 (inclusive) until index 2 (exclusive)</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[-2:]</h5></td>
+        <td>Last two books</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[2:]</h5></td>
+        <td>All books from index 2 (inclusive) to last</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[?(@.isbn)]</h5></td>
+        <td>All books with an ISBN number</td>
+    </tr>
+    <tr>
+        <td><h5>$.store.book[?(@.price < 10)]</h5></td>
+        <td>All books in store cheaper than 10</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[?(@.price <= $['expensive'])]</h5></td>
+        <td>All books in store that are not "expensive"</td>
+    </tr>
+    <tr>
+        <td><h5>$..book[?(@.author =~ /.*REES/i)]</h5></td>
+        <td>All books matching regex (ignore case)</td>
+    </tr>
+    <tr>
+        <td><h5>$..*</h5></td>
+        <td>Give me every thing</td>
+    </tr>
+    <tr>
+        <td><h5>$..book.length()</h5></td>
+        <td>The number of books</td>
+    </tr>
+    </tbody>
+</table>

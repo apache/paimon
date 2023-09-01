@@ -16,14 +16,24 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation;
+package org.apache.paimon.table.source;
 
-/** Scan which part of the snapshot. */
-public enum ScanKind {
+import org.apache.paimon.annotation.Public;
+
+/**
+ * Scan which part of the snapshot.
+ *
+ * @since 0.6.0
+ */
+@Public
+public enum ScanMode {
+
     /** Scan complete data files of a snapshot. */
     ALL,
+
     /** Only scan newly changed files of a snapshot. */
     DELTA,
+
     /** Only scan changelog files of a snapshot. */
     CHANGELOG
 }

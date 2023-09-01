@@ -30,11 +30,11 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.utils.Filter;
@@ -69,7 +69,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer;
     private final DefaultValueAssigner defaultValueAssigner;
 
-    private ScanKind scanKind = ScanKind.ALL;
+    private ScanMode scanMode = ScanMode.ALL;
     private RecordComparator lazyPartitionComparator;
 
     public SnapshotReaderImpl(
@@ -149,9 +149,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
-    public SnapshotReader withKind(ScanKind scanKind) {
-        this.scanKind = scanKind;
-        scan.withKind(scanKind);
+    public SnapshotReader withMode(ScanMode scanMode) {
+        this.scanMode = scanMode;
+        scan.withKind(scanMode);
         return this;
     }
 
@@ -191,7 +191,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         List<DataSplit> splits =
                 generateSplits(
                         snapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : snapshotId,
-                        scanKind != ScanKind.ALL,
+                        scanMode != ScanMode.ALL,
                         splitGenerator,
                         files);
         return new Plan() {
@@ -205,6 +205,11 @@ public class SnapshotReaderImpl implements SnapshotReader {
             @Override
             public Long snapshotId() {
                 return plan.snapshotId();
+            }
+
+            @Override
+            public ScanMode scanMode() {
+                return plan.scanMode();
             }
 
             @Override
@@ -234,7 +239,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     /** Get splits from an overwritten snapshot files. */
     @Override
     public Plan readOverwrittenChanges() {
-        withKind(ScanKind.DELTA);
+        withMode(ScanMode.DELTA);
         FileStoreScan.Plan plan = scan.plan();
         long snapshotId = plan.snapshotId();
 
@@ -310,6 +315,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
 
             @Override
+            public ScanMode scanMode() {
+                // TODO introduce a new mode
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
             public List<Split> splits() {
                 return (List) splits;
             }
@@ -318,7 +329,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public Plan readIncrementalDiff(Snapshot before) {
-        withKind(ScanKind.ALL);
+        withMode(ScanMode.ALL);
         FileStoreScan.Plan plan = scan.plan();
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> dataFiles =
                 groupByPartFiles(plan.files(FileKind.ADD));

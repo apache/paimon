@@ -58,6 +58,10 @@ under the License.
         <td>It is used to specify which source tables are not to be synchronized. The usage is same as "--including-tables". "--excluding-tables" has higher priority than "--including-tables" if you specified both.</td>
     </tr>
     <tr>
+        <td><h5>--type-mapping</h5></td>
+        <td>It is used to specify how to map MySQL data type to Paimon type. Currently, only support option "to-string": maps all MySQL types to STRING.</td>
+    </tr>
+    <tr>
         <td><h5>--kafka-conf</h5></td>
         <td>The configuration for Flink Kafka sources. Each configuration should be specified in the format `key=value`. `properties.bootstrap.servers`, `topic`, `properties.group.id`,  and `value.format` are required configurations, others are optional.See its <a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/#connector-options">document</a> for a complete list of configurations.</td>
     </tr>

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.kafka.formats.canal;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSchema;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
@@ -44,6 +45,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -71,14 +74,12 @@ public class CanalRecordParser extends RecordParser {
     private static final String OP_INSERT = "INSERT";
     private static final String OP_DELETE = "DELETE";
 
-    private final List<ComputedColumn> computedColumns;
-
     public CanalRecordParser(
             boolean caseSensitive,
+            TypeMapping typeMapping,
             TableNameConverter tableNameConverter,
             List<ComputedColumn> computedColumns) {
-        super(tableNameConverter, caseSensitive);
-        this.computedColumns = computedColumns;
+        super(caseSensitive, typeMapping, tableNameConverter, computedColumns);
     }
 
     @Override
@@ -123,7 +124,8 @@ public class CanalRecordParser extends RecordParser {
         LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         mySqlFieldTypes.forEach(
-                (name, type) -> paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type)));
+                (name, type) ->
+                        paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type, typeMapping)));
 
         return new KafkaSchema(
                 extractString(FIELD_DATABASE),
@@ -256,7 +258,7 @@ public class CanalRecordParser extends RecordParser {
         for (JsonNode datum : data) {
             Map<String, String> rowData =
                     extractRowFromJson(datum, mySqlFieldTypes, paimonFieldTypes);
-            rowData = adjustCase(rowData);
+            rowData = mapKeyCaseConvert(rowData, caseSensitive, recordKeyDuplicateErrMsg(rowData));
 
             records.add(
                     new RichCdcMultiplexRecord(
@@ -291,7 +293,7 @@ public class CanalRecordParser extends RecordParser {
                     before.putIfAbsent(entry.getKey(), entry.getValue());
                 }
 
-                before = adjustCase(before);
+                before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
                 records.add(
                         new RichCdcMultiplexRecord(
                                 databaseName,
@@ -301,7 +303,7 @@ public class CanalRecordParser extends RecordParser {
                                 new CdcRecord(RowKind.DELETE, before)));
             }
 
-            after = adjustCase(after);
+            after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             records.add(
                     new RichCdcMultiplexRecord(
                             databaseName,
@@ -317,7 +319,8 @@ public class CanalRecordParser extends RecordParser {
             Map<String, String> mySqlFieldTypes) {
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         mySqlFieldTypes.forEach(
-                (name, type) -> paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type)));
+                (name, type) ->
+                        paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type, typeMapping)));
         return paimonFieldTypes;
     }
 }

@@ -29,6 +29,7 @@ import java.util.Map;
 
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
+import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
 import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
@@ -70,10 +71,15 @@ public class SystemTableLoader {
 
     @Nullable
     public static Table loadGlobal(
-            String tableName, FileIO fileIO, Map<String, Map<String, Path>> allTablePaths) {
+            String tableName,
+            FileIO fileIO,
+            Map<String, Map<String, Path>> allTablePaths,
+            Map<String, String> catalogOptions) {
         switch (tableName.toLowerCase()) {
             case ALL_TABLE_OPTIONS:
                 return new AllTableOptionsTable(fileIO, allTablePaths);
+            case CATALOG_OPTIONS:
+                return new CatalogOptionsTable(catalogOptions);
             default:
                 return null;
         }

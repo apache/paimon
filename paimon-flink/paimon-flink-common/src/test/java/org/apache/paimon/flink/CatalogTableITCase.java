@@ -24,6 +24,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.system.AllTableOptionsTable;
+import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -103,6 +104,12 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCatalogOptionsTable() {
+        List<Row> result = sql("SELECT * FROM sys.catalog_options");
+        assertThat(result).containsExactly(Row.of("warehouse", path));
+    }
+
+    @Test
     public void testDropSystemDatabase() {
         assertThatCode(() -> sql("DROP DATABASE sys"))
                 .hasRootCauseMessage("Can't do operation on system database.");
@@ -125,7 +132,9 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     public void testSystemDatabase() {
         sql("USE " + Catalog.SYSTEM_DATABASE_NAME);
         assertThat(sql("SHOW TABLES"))
-                .containsExactly(Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS));
+                .containsExactly(
+                        Row.of(AllTableOptionsTable.ALL_TABLE_OPTIONS),
+                        Row.of(CatalogOptionsTable.CATALOG_OPTIONS));
     }
 
     @Test

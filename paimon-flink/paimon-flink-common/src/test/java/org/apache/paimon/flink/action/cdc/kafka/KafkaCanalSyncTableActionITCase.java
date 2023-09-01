@@ -18,28 +18,24 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaCanalSyncTableActionITCase}. */
@@ -71,31 +67,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", topic);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testSchemaEvolutionImpl(topic, sourceDir);
     }
@@ -248,27 +226,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
 
         kafkaConfig.put("topic", topic);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig).withPrimaryKeys("_id").build();
+        runActionWithDefaultEnv(action);
 
         testSchemaEvolutionMultipleImpl(topic);
     }
@@ -342,26 +302,12 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
 
         kafkaConfig.put("topic", topic);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .build();
+        JobClient client = runActionWithDefaultEnv(action);
 
         testAllTypesImpl();
         client.cancel().get();
@@ -620,31 +566,17 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "togg-json");
         kafkaConfig.put("topic", topic);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("This format: togg-json is not supported.");
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "This format: togg-json is not supported."));
     }
 
     @Test
@@ -662,31 +594,17 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", topic);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(Exception.class)
-                .hasMessage("Could not get metadata from server, topic: no_non_ddl_data");
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                Exception.class,
+                                "Could not get metadata from server, topic: no_non_ddl_data"));
     }
 
     @Test
@@ -706,44 +624,28 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
 
         // create an incompatible table
-        Catalog catalog = catalog();
-        catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, tableName);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("k", DataTypes.STRING())
-                        .column("v1", DataTypes.STRING())
-                        .primaryKey("k")
-                        .build();
-        catalog.createTable(identifier, schema, false);
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v1"}),
+                Collections.emptyList(),
+                Collections.singletonList("k"),
+                Collections.emptyMap());
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Paimon schema and Kafka schema are not compatible.\n"
-                                + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
-                                + "Kafka fields are: [`pt` INT NOT NULL, `_id` INT NOT NULL, `v1` VARCHAR(10)]");
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Paimon schema and source table schema are not compatible.\n"
+                                        + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
+                                        + "Source table fields are: [`pt` INT NOT NULL, `_id` INT NOT NULL, `v1` VARCHAR(10)]"));
     }
 
     @Test
@@ -763,31 +665,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "specific-offsets");
         kafkaConfig.put("scan.startup.specific-offsets", "partition:0,offset:1");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         FileStoreTable table = getFileStoreTable(tableName);
 
@@ -821,31 +705,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "latest-offset");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/canal/table/startupmode/canal-data-2.txt"));
@@ -886,31 +752,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("scan.startup.mode", "timestamp");
         kafkaConfig.put(
                 "scan.startup.timestamp-millis", String.valueOf(System.currentTimeMillis()));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/canal/table/startupmode/canal-data-2.txt"));
@@ -949,31 +797,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "earliest-offset");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/canal/table/startupmode/canal-data-2.txt"));
@@ -1014,31 +844,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "group-offsets");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("pt"),
-                        Arrays.asList("pt", "_id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/canal/table/startupmode/canal-data-2.txt"));
@@ -1078,30 +890,14 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", topic);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList("_year"),
-                        Arrays.asList("_id", "_year"),
-                        Collections.singletonList("_year=year(_date)"),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("_id", "_year")
+                        .withTableConfig(getBasicTableConfig())
+                        .withComputedColumnArgs("_year=year(_date)")
+                        .build();
+        runActionWithDefaultEnv(action);
 
         RowType rowType =
                 RowType.of(
@@ -1114,5 +910,52 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 getFileStoreTable(tableName),
                 rowType,
                 Arrays.asList("_id", "_year"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testTypeMappingToString() throws Exception {
+        final String topic = "map-to-string";
+        createTestTopic(topic, 1, 1);
+
+        // ---------- Write the Canal json into Kafka -------------------
+        writeRecordsToKafka(topic, readLines("kafka/canal/table/tostring/canal-data-1.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withTypeMappingModes(TO_STRING.configString())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                        },
+                        new String[] {"k1", "v0", "v1"});
+        waitForResult(
+                Arrays.asList("+I[5, five, 50]", "+I[7, seven, 70]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("k1"));
+    }
+
+    @Test
+    public void testCatalogAndTableConfig() {
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(getBasicKafkaConfig())
+                        .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
+                        .withTableConfig(Collections.singletonMap("table-key", "table-value"))
+                        .build();
+
+        assertThat(action.catalogConfig())
+                .containsExactlyEntriesOf(Collections.singletonMap("catalog-key", "catalog-value"));
+        assertThat(action.tableConfig())
+                .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }
 }

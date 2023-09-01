@@ -138,12 +138,12 @@ public class MySqlTypeUtils {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    public static DataType toDataType(String mysqlType) {
+    public static DataType toDataType(String mysqlFullType, TypeMapping typeMapping) {
         return toDataType(
-                MySqlTypeUtils.getShortType(mysqlType),
-                MySqlTypeUtils.getPrecision(mysqlType),
-                MySqlTypeUtils.getScale(mysqlType),
-                false);
+                MySqlTypeUtils.getShortType(mysqlFullType),
+                MySqlTypeUtils.getPrecision(mysqlFullType),
+                MySqlTypeUtils.getScale(mysqlFullType),
+                typeMapping);
     }
 
     public static DataType toDataType(

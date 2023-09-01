@@ -32,6 +32,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
@@ -72,7 +73,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private Snapshot specifiedSnapshot = null;
     private Filter<Integer> bucketFilter = null;
     private List<ManifestFileMeta> specifiedManifests = null;
-    private ScanKind scanKind = ScanKind.ALL;
+    private ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
 
     private ManifestCacheFilter manifestCacheFilter = null;
@@ -169,8 +170,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
-    public FileStoreScan withKind(ScanKind scanKind) {
-        this.scanKind = scanKind;
+    public FileStoreScan withKind(ScanMode scanMode) {
+        this.scanMode = scanMode;
         return this;
     }
 
@@ -205,6 +206,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             @Override
             public Long snapshotId() {
                 return readSnapshot == null ? null : readSnapshot.id();
+            }
+
+            @Override
+            public ScanMode scanMode() {
+                return scanMode;
             }
 
             @Override
@@ -274,7 +280,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     private List<ManifestFileMeta> readManifests(Snapshot snapshot) {
-        switch (scanKind) {
+        switch (scanMode) {
             case ALL:
                 return snapshot.dataManifests(manifestList);
             case DELTA:
@@ -294,7 +300,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                 "Incremental scan does not accept %s snapshot",
                                 snapshot.commitKind()));
             default:
-                throw new UnsupportedOperationException("Unknown scan kind " + scanKind.name());
+                throw new UnsupportedOperationException("Unknown scan kind " + scanMode.name());
         }
     }
 

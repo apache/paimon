@@ -18,56 +18,81 @@
 
 package org.apache.paimon.flink.sink.index;
 
-import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.disk.ExternalBuffer;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.RowDataPartitionKeyExtractor;
-import org.apache.paimon.flink.sink.cdc.CdcRecord;
-import org.apache.paimon.flink.sink.cdc.CdcRecordPartitionKeyExtractor;
-import org.apache.paimon.flink.sink.cdc.CdcRecordUtils;
 import org.apache.paimon.flink.utils.ProjectToRowDataFunction;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
+import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.FlinkRowData.toFlinkRowKind;
 
 /** A {@link OneInputStreamOperator} for {@link GlobalIndexAssigner}. */
 public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, Integer>>
-        implements OneInputStreamOperator<Tuple2<KeyPartOrRow, T>, Tuple2<T, Integer>> {
+        implements OneInputStreamOperator<Tuple2<KeyPartOrRow, T>, Tuple2<T, Integer>>,
+                BoundedOneInput {
 
     private static final long serialVersionUID = 1L;
 
+    private final Table table;
     private final GlobalIndexAssigner<T> assigner;
+    private final SerializableFunction<T, InternalRow> toRow;
+    private final SerializableFunction<InternalRow, T> fromRow;
 
-    public GlobalIndexAssignerOperator(GlobalIndexAssigner<T> assigner) {
+    private transient ExternalBuffer bootstrapBuffer;
+
+    public GlobalIndexAssignerOperator(
+            Table table,
+            GlobalIndexAssigner<T> assigner,
+            SerializableFunction<T, InternalRow> toRow,
+            SerializableFunction<InternalRow, T> fromRow) {
+        this.table = table;
         this.assigner = assigner;
+        this.toRow = toRow;
+        this.fromRow = fromRow;
     }
 
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
-        File[] tmpDirs =
-                getContainingTask().getEnvironment().getIOManager().getSpillingDirectories();
+        org.apache.flink.runtime.io.disk.iomanager.IOManager ioManager =
+                getContainingTask().getEnvironment().getIOManager();
+        File[] tmpDirs = ioManager.getSpillingDirectories();
         File tmpDir = tmpDirs[ThreadLocalRandom.current().nextInt(tmpDirs.length)];
         assigner.open(
                 tmpDir,
                 getRuntimeContext().getNumberOfParallelSubtasks(),
                 getRuntimeContext().getIndexOfThisSubtask(),
                 this::collect);
+        Options options = Options.fromMap(table.options());
+        long bufferSize = options.get(CoreOptions.WRITE_BUFFER_SIZE).getBytes();
+        long pageSize = options.get(CoreOptions.PAGE_SIZE).getBytes();
+        bootstrapBuffer =
+                new ExternalBuffer(
+                        IOManager.create(ioManager.getSpillingDirectoriesPaths()),
+                        new HeapMemorySegmentPool(bufferSize, (int) pageSize),
+                        new InternalRowSerializer(table.rowType()));
     }
 
     @Override
@@ -80,8 +105,35 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
                 assigner.bootstrap(value);
                 break;
             case ROW:
-                assigner.process(value);
+                if (bootstrapBuffer != null) {
+                    bootstrapBuffer.add(toRow.apply(value));
+                } else {
+                    assigner.process(value);
+                }
                 break;
+        }
+    }
+
+    @Override
+    public void prepareSnapshotPreBarrier(long checkpointId) throws Exception {
+        endBootstrap();
+    }
+
+    @Override
+    public void endInput() throws Exception {
+        endBootstrap();
+    }
+
+    private void endBootstrap() throws Exception {
+        if (bootstrapBuffer != null) {
+            bootstrapBuffer.complete();
+            try (ExternalBuffer.BufferIterator iterator = bootstrapBuffer.newIterator()) {
+                while (iterator.advanceNext()) {
+                    assigner.process(fromRow.apply(iterator.getRow()));
+                }
+            }
+            bootstrapBuffer.reset();
+            bootstrapBuffer = null;
         }
     }
 
@@ -95,39 +147,22 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
     }
 
     public static GlobalIndexAssignerOperator<RowData> forRowData(Table table) {
-        return new GlobalIndexAssignerOperator<>(createRowDataAssigner(table));
+        return new GlobalIndexAssignerOperator<>(
+                table, createRowDataAssigner(table), FlinkRowWrapper::new, FlinkRowData::new);
     }
 
     public static GlobalIndexAssigner<RowData> createRowDataAssigner(Table t) {
+        RowType bootstrapType = IndexBootstrap.bootstrapType(((AbstractFileStoreTable) t).schema());
+        int bucketIndex = bootstrapType.getFieldCount() - 1;
         return new GlobalIndexAssigner<>(
                 t,
                 RowDataPartitionKeyExtractor::new,
                 KeyPartPartitionKeyExtractor::new,
+                row -> row.getInt(bucketIndex),
                 new ProjectToRowDataFunction(t.rowType(), t.partitionKeys()),
                 (rowData, rowKind) -> {
                     rowData.setRowKind(toFlinkRowKind(rowKind));
                     return rowData;
                 });
-    }
-
-    public static GlobalIndexAssignerOperator<CdcRecord> forCdcRecord(Table table) {
-        RowType partitionType = ((FileStoreTable) table).schema().logicalPartitionType();
-        List<String> partitionNames = partitionType.getFieldNames();
-        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(partitionType);
-        GlobalIndexAssigner<CdcRecord> assigner =
-                new GlobalIndexAssigner<>(
-                        table,
-                        CdcRecordPartitionKeyExtractor::new,
-                        CdcRecordPartitionKeyExtractor::new,
-                        (record, part) -> {
-                            CdcRecord partCdc =
-                                    CdcRecordUtils.fromGenericRow(
-                                            GenericRow.of(converter.convert(part)), partitionNames);
-                            Map<String, String> fields = new HashMap<>(record.fields());
-                            fields.putAll(partCdc.fields());
-                            return new CdcRecord(record.kind(), fields);
-                        },
-                        CdcRecord::setRowKind);
-        return new GlobalIndexAssignerOperator<>(assigner);
     }
 }

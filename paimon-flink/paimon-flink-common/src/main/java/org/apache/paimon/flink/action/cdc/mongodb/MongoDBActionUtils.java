@@ -18,14 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
-import com.mongodb.client.MongoDatabase;
 import com.ververica.cdc.connectors.base.options.SourceOptions;
 import com.ververica.cdc.connectors.base.options.StartupOptions;
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
@@ -36,38 +34,61 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
-import org.bson.Document;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Utils for MongoDB Action. */
+/**
+ * Utility class for MongoDB-related actions.
+ *
+ * <p>This class provides a set of utility methods to facilitate the creation and configuration of
+ * MongoDB sources, as well as the construction of Paimon schemas based on MongoDB schemas. It also
+ * includes methods for validating MongoDB configurations and fetching MongoDB version information.
+ *
+ * <p>Key functionalities include:
+ *
+ * <ul>
+ *   <li>Building MongoDB sources with various configurations.
+ *   <li>Constructing Paimon schemas based on MongoDB schemas.
+ *   <li>Validating essential MongoDB configurations.
+ * </ul>
+ *
+ * <p>Note: This utility class is designed to be used in conjunction with Flink and Paimon
+ * integrations.
+ */
 public class MongoDBActionUtils {
+
+    private static final String INITIAL_MODE = "initial";
+    private static final String LATEST_OFFSET_MODE = "latest-offset";
+    private static final String TIMESTAMP_MODE = "timestamp";
+    private static final String PRIMARY_KEY = "_id";
 
     public static final ConfigOption<String> FIELD_NAME =
             ConfigOptions.key("field.name")
                     .stringType()
                     .noDefaultValue()
-                    .withDescription(
-                            "Set the field names to be synchronized in the  `specified` mode.");
+                    .withDescription("Field names to synchronize when in `specified` mode.");
 
     public static final ConfigOption<String> PARSER_PATH =
             ConfigOptions.key("parser.path")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Configure the JSON parsing path for synchronizing field values in the `specified` mode.");
+                            "JSON parsing path for field synchronization in `specified` mode.");
 
     public static final ConfigOption<String> START_MODE =
             ConfigOptions.key("schema.start.mode")
                     .stringType()
                     .defaultValue("dynamic")
-                    .withDescription("Can choose between the `dynamic` and `specified` modes.");
+                    .withDescription("Mode selection: `dynamic` or `specified`.");
 
     static MongoDBSource<String> buildMongodbSource(Configuration mongodbConfig, String tableList) {
         validateMongodbConfig(mongodbConfig);
@@ -100,14 +121,20 @@ public class MongoDBActionUtils {
                 .collectionList(tableList);
 
         String startupMode = mongodbConfig.get(SourceOptions.SCAN_STARTUP_MODE);
-        if ("initial".equalsIgnoreCase(startupMode)) {
-            sourceBuilder.startupOptions(StartupOptions.initial());
-        } else if ("latest-offset".equalsIgnoreCase(startupMode)) {
-            sourceBuilder.startupOptions(StartupOptions.latest());
-        } else if ("timestamp".equalsIgnoreCase(startupMode)) {
-            sourceBuilder.startupOptions(
-                    StartupOptions.timestamp(
-                            mongodbConfig.get(SourceOptions.SCAN_STARTUP_TIMESTAMP_MILLIS)));
+        switch (startupMode.toLowerCase()) {
+            case INITIAL_MODE:
+                sourceBuilder.startupOptions(StartupOptions.initial());
+                break;
+            case LATEST_OFFSET_MODE:
+                sourceBuilder.startupOptions(StartupOptions.latest());
+                break;
+            case TIMESTAMP_MODE:
+                sourceBuilder.startupOptions(
+                        StartupOptions.timestamp(
+                                mongodbConfig.get(SourceOptions.SCAN_STARTUP_TIMESTAMP_MILLIS)));
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported startup mode: " + startupMode);
         }
 
         Map<String, Object> customConverterConfigs = new HashMap<>();
@@ -134,50 +161,21 @@ public class MongoDBActionUtils {
     static Schema buildPaimonSchema(
             MongodbSchema mongodbSchema,
             List<String> specifiedPartitionKeys,
-            Map<String, String> paimonConfig,
+            Map<String, String> tableConfig,
             boolean caseSensitive) {
-        Schema.Builder builder = Schema.newBuilder();
-        builder.options(paimonConfig);
+        LinkedHashMap<String, DataType> sourceColumns =
+                mapKeyCaseConvert(
+                        mongodbSchema.fields(),
+                        caseSensitive,
+                        columnDuplicateErrMsg(mongodbSchema.tableName()));
 
-        Map<String, DataType> mongodbFields;
-        if (caseSensitive) {
-            mongodbFields = mongodbSchema.fields();
-        } else {
-            mongodbFields = new LinkedHashMap<>();
-            for (Map.Entry<String, DataType> entry : mongodbSchema.fields().entrySet()) {
-                String fieldName = entry.getKey();
-                checkArgument(
-                        !mongodbFields.containsKey(fieldName.toLowerCase()),
-                        String.format(
-                                "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, mongodbSchema.tableName()));
-                mongodbFields.put(fieldName.toLowerCase(), entry.getValue());
-            }
-        }
-
-        for (Map.Entry<String, DataType> entry : mongodbFields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue());
-        }
-
-        builder.primaryKey(Lists.newArrayList("_id"));
-
-        if (specifiedPartitionKeys.size() > 0) {
-            builder.partitionKeys(specifiedPartitionKeys);
-        }
-
-        return builder.build();
-    }
-
-    public static int getMongoDBVersion(Configuration mongodbConfig) {
-        String hosts = mongodbConfig.get(MongoDBSourceOptions.HOSTS);
-        String databaseName = mongodbConfig.get(MongoDBSourceOptions.DATABASE);
-
-        String url = String.format("mongodb://%s/%s", hosts, databaseName);
-        try (MongoClient mongoClient = MongoClients.create(url)) {
-            MongoDatabase database = mongoClient.getDatabase(databaseName);
-            Document buildInfo = database.runCommand(new Document("buildInfo", 1));
-            String[] split = ((String) buildInfo.get("version")).split("\\.");
-            return Integer.parseInt(split[0]);
-        }
+        return CdcActionCommonUtils.buildPaimonSchema(
+                specifiedPartitionKeys,
+                Lists.newArrayList(PRIMARY_KEY),
+                Collections.emptyList(),
+                tableConfig,
+                sourceColumns,
+                null,
+                Collections.emptyList());
     }
 }

@@ -91,6 +91,10 @@ public class TypeMapping implements Serializable {
     public enum TypeMappingMode {
         TINYINT1_NOT_BOOL,
         TO_NULLABLE,
-        TO_STRING
+        TO_STRING;
+
+        public String configString() {
+            return name().toLowerCase().replace("_", "-");
+        }
     }
 }

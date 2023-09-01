@@ -27,7 +27,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -40,6 +39,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.RichPlan;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableRead;
@@ -225,8 +226,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return this;
         }
 
-        public SnapshotReader withKind(ScanKind scanKind) {
-            snapshotReader.withKind(scanKind);
+        public SnapshotReader withMode(ScanMode scanMode) {
+            snapshotReader.withMode(scanMode);
             return this;
         }
 
@@ -307,7 +308,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public Plan plan() {
+        public RichPlan plan() {
             return streamScan.plan();
         }
 
@@ -322,15 +323,14 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return streamScan.checkpoint();
         }
 
-        @Nullable
-        @Override
-        public Long watermark() {
-            return streamScan.watermark();
-        }
-
         @Override
         public void restore(@Nullable Long nextSnapshotId) {
             streamScan.restore(nextSnapshotId);
+        }
+
+        @Override
+        public void restore(@Nullable Long nextSnapshotId, ScanMode scanMode) {
+            streamScan.restore(nextSnapshotId, scanMode);
         }
 
         @Override

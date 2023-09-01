@@ -19,12 +19,12 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.operation.ScanKind;
 import org.apache.paimon.predicate.Equal;
 import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
@@ -341,7 +341,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
                     TableRead read = table.newRead();
@@ -359,7 +359,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
 
@@ -384,7 +384,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
                     // project "c", "b", "pt" in schema0
@@ -400,7 +400,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
 
@@ -424,7 +424,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
                     // filter with "b" = 15 in schema0
@@ -442,7 +442,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                     List<Split> splits =
                             toSplits(
                                     table.newSnapshotReader()
-                                            .withKind(ScanKind.DELTA)
+                                            .withMode(ScanMode.DELTA)
                                             .read()
                                             .dataSplits());
 

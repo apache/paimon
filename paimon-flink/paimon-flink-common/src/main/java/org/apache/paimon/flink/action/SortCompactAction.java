@@ -35,6 +35,8 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -45,6 +47,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Compact with sort action. */
 public class SortCompactAction extends CompactAction {
+
+    private static final Logger LOG = LoggerFactory.getLogger(SortCompactAction.class);
 
     private String sortStrategy;
     private List<String> orderColumns;
@@ -64,18 +68,18 @@ public class SortCompactAction extends CompactAction {
 
     @Override
     public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         build(env);
         execute(env, "Sort Compact Job");
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) {
         // only support batch sort yet
         if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                 != RuntimeExecutionMode.BATCH) {
-            throw new IllegalArgumentException(
-                    "Only support batch mode yet, please set -Dexecution.runtime-mode=BATCH");
+            LOG.warn(
+                    "Sort Compact only support batch mode yet. Please add -Dexecution.runtime-mode=BATCH. The action this time will shift to batch mode forcely.");
+            env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         }
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         if (!(fileStoreTable instanceof AppendOnlyFileStoreTable)) {
@@ -102,7 +106,7 @@ public class SortCompactAction extends CompactAction {
             sourceBuilder.withPredicate(partitionPredicate);
         }
 
-        String scanParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
+        String scanParallelism = tableConfig.get(FlinkConnectorOptions.SCAN_PARALLELISM.key());
         if (scanParallelism != null) {
             sourceBuilder.withParallelism(Integer.parseInt(scanParallelism));
         }

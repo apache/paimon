@@ -18,27 +18,20 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaOggSyncTableActionITCase}. */
@@ -64,31 +57,12 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", topic);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testSchemaEvolutionImpl(topic, sourceDir);
     }
@@ -180,31 +154,17 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "togg-json");
         kafkaConfig.put("topic", topic);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("This format: togg-json is not supported.");
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "This format: togg-json is not supported."));
     }
 
     @Test
@@ -224,44 +184,27 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
 
         // create an incompatible table
-        Catalog catalog = catalog();
-        catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, tableName);
-        Schema schema =
-                Schema.newBuilder()
-                        .column("k", DataTypes.STRING())
-                        .column("v1", DataTypes.STRING())
-                        .primaryKey("k")
-                        .build();
-        catalog.createTable(identifier, schema, false);
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v1"}),
+                Collections.emptyList(),
+                Collections.singletonList("k"),
+                Collections.emptyMap());
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
 
-        assertThatThrownBy(() -> action.build(env))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage(
-                        "Paimon schema and Kafka schema are not compatible.\n"
-                                + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
-                                + "Kafka fields are: [`id` STRING NOT NULL, `name` STRING, `description` STRING, `weight` STRING]");
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Paimon schema and source table schema are not compatible.\n"
+                                        + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
+                                        + "Source table fields are: [`id` STRING NOT NULL, `name` STRING, `description` STRING, `weight` STRING]"));
     }
 
     @Test
@@ -281,31 +224,12 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "specific-offsets");
         kafkaConfig.put("scan.startup.specific-offsets", "partition:0,offset:1");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         FileStoreTable table = getFileStoreTable(tableName);
 
@@ -342,32 +266,13 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "latest-offset");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
-        waitJobRunning(client);
-        waitTablesCreated(tableName);
         Thread.sleep(5000);
         FileStoreTable table = getFileStoreTable(tableName);
         try {
@@ -412,31 +317,12 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("scan.startup.mode", "timestamp");
         kafkaConfig.put(
                 "scan.startup.timestamp-millis", String.valueOf(System.currentTimeMillis()));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/ogg/table/startupmode/ogg-data-2.txt"));
@@ -479,31 +365,12 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "earliest-offset");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/ogg/table/startupmode/ogg-data-2.txt"));
@@ -548,31 +415,12 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", topic);
         kafkaConfig.put("scan.startup.mode", "group-offsets");
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncTableAction action =
-                new KafkaSyncTableAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.emptyList(),
-                        Collections.singletonList("id"),
-                        Collections.emptyList(),
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-
-        waitJobRunning(client);
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         try {
             writeRecordsToKafka(topic, readLines("kafka/ogg/table/startupmode/ogg-data-2.txt"));
@@ -599,5 +447,44 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.800000011920929]",
                                 "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
         waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testComputedColumn() throws Exception {
+        String topic = "computed_column";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines = readLines("kafka/ogg/table/computedcolumn/ogg-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "ogg-json");
+        kafkaConfig.put("topic", topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("_id", "_year")
+                        .withComputedColumnArgs("_year=year(_date)")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT().notNull()
+                        },
+                        new String[] {"_id", "_date", "_year"});
+        waitForResult(
+                Collections.singletonList("+I[101, 2023-03-23, 2023]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Arrays.asList("_id", "_year"));
     }
 }

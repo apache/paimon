@@ -24,7 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
@@ -56,8 +56,9 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.DatabaseSyncMode.DIVIDED;
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.schemaCompatible;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.tableList;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -110,17 +111,12 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     private String tableSuffix = "";
     private String includingTables = ".*";
     @Nullable String excludingTables;
-    private DatabaseSyncMode mode = DIVIDED;
+    private MultiTablesSinkMode mode = DIVIDED;
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
     private final List<Identifier> excludedTables = new ArrayList<>();
-
-    public MySqlSyncDatabaseAction(
-            String warehouse, String database, Map<String, String> mySqlConfig) {
-        this(warehouse, database, Collections.emptyMap(), mySqlConfig);
-    }
 
     public MySqlSyncDatabaseAction(
             String warehouse,
@@ -173,7 +169,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
-    public MySqlSyncDatabaseAction withMode(DatabaseSyncMode mode) {
+    public MySqlSyncDatabaseAction withMode(MultiTablesSinkMode mode) {
         this.mode = mode;
         return this;
     }
@@ -183,6 +179,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
                 !mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
@@ -258,7 +255,14 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
 
         MySqlSource<String> source =
-                MySqlActionUtils.buildMySqlSource(mySqlConfig, buildTableList());
+                MySqlActionUtils.buildMySqlSource(
+                        mySqlConfig,
+                        tableList(
+                                mode,
+                                mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME),
+                                includingTables,
+                                monitoredTables,
+                                excludedTables));
 
         String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
@@ -278,7 +282,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 typeMapping);
 
         String database = this.database;
-        DatabaseSyncMode mode = this.mode;
+        MultiTablesSinkMode mode = this.mode;
         FlinkCdcSyncDatabaseSinkBuilder<String> sinkBuilder =
                 new FlinkCdcSyncDatabaseSinkBuilder<String>()
                         .withInput(
@@ -342,7 +346,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
     private boolean shouldMonitorTable(
             TableSchema tableSchema, Schema mySqlSchema, Supplier<String> errMsg) {
-        if (MySqlActionUtils.schemaCompatible(tableSchema, mySqlSchema)) {
+        if (schemaCompatible(tableSchema, mySqlSchema.fields())) {
             return true;
         } else if (ignoreIncompatible) {
             LOG.warn(errMsg.get() + "This table will be ignored.");
@@ -377,57 +381,14 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return excludedTables;
     }
 
-    /**
-     * See {@link com.ververica.cdc.connectors.mysql.debezium.DebeziumUtils#discoverCapturedTables}
-     * and {@code MySqlSyncDatabaseTableListITCase}.
-     */
-    private String buildTableList() {
-        String separatorRex = "\\.";
-        if (mode == DIVIDED) {
-            // In DIVIDED mode, we only concern about existed tables
-            return monitoredTables.stream()
-                    .map(t -> t.getDatabaseName() + separatorRex + t.getObjectName())
-                    .collect(Collectors.joining("|"));
-        } else if (mode == COMBINED) {
-            // In COMBINED mode, we should consider both existed tables and possible newly created
-            // tables, so we should use regular expression to monitor all valid tables and exclude
-            // certain invalid tables
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
+    }
 
-            // The table list is built by template:
-            // (?!(^db\\.tbl$)|(^...$))((databasePattern)\\.(including_pattern1|...))
-
-            // The excluding pattern ?!(^db\\.tbl$)|(^...$) can exclude tables whose qualified name
-            // is exactly equal to 'db.tbl'
-            // The including pattern (databasePattern)\\.(including_pattern1|...) can include tables
-            // whose qualified name matches one of the patterns
-
-            // a table can be monitored only when its name meets the including pattern and doesn't
-            // be excluded by excluding pattern at the same time
-            String includingPattern =
-                    String.format(
-                            "(%s)%s(%s)",
-                            mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME),
-                            separatorRex,
-                            includingTables);
-            if (excludedTables.isEmpty()) {
-                return includingPattern;
-            }
-
-            String excludingPattern =
-                    excludedTables.stream()
-                            .map(
-                                    t ->
-                                            String.format(
-                                                    "(^%s$)",
-                                                    t.getDatabaseName()
-                                                            + separatorRex
-                                                            + t.getObjectName()))
-                            .collect(Collectors.joining("|"));
-            excludingPattern = "?!" + excludingPattern;
-            return String.format("(%s)(%s)", excludingPattern, includingPattern);
-        }
-
-        throw new UnsupportedOperationException("Unknown DatabaseSyncMode: " + mode);
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
     }
 
     // ------------------------------------------------------------------------

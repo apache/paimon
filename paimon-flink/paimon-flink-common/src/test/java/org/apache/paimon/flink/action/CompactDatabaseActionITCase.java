@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -87,7 +86,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             Map<String, String> options)
             throws Exception {
 
-        Catalog catalog = catalog();
         Identifier identifier = Identifier.create(databaseName, tableName);
         catalog.createDatabase(databaseName, true);
         catalog.createTable(

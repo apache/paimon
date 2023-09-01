@@ -18,18 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -37,13 +31,10 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
@@ -52,16 +43,12 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-
         final String topic1 = "schema_evolution_0";
         final String topic2 = "schema_evolution_1";
         boolean writeOne = false;
         int fileCount = 2;
         List<String> topics = Arrays.asList(topic1, topic2);
-        topics.forEach(
-                topic -> {
-                    createTestTopic(topic, 1, 1);
-                });
+        topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
         // ---------- Write the ogg json into Kafka -------------------
 
@@ -81,22 +68,11 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig, warehouse, database, Collections.emptyMap(), tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testSchemaEvolutionImpl(topics, writeOne, fileCount);
     }
@@ -104,15 +80,11 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-
         final String topic = "schema_evolution";
         boolean writeOne = true;
         int fileCount = 2;
         List<String> topics = Collections.singletonList(topic);
-        topics.forEach(
-                t -> {
-                    createTestTopic(t, 1, 1);
-                });
+        topics.forEach(t -> createTestTopic(t, 1, 1));
 
         // ---------- Write the ogg json into Kafka -------------------
 
@@ -132,29 +104,18 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig, warehouse, database, Collections.emptyMap(), tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testSchemaEvolutionImpl(topics, writeOne, fileCount);
     }
 
     private void testSchemaEvolutionImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
-        waitTablesCreated("T1", "T2");
+        waitingTables("T1", "T2");
 
         FileStoreTable table1 = getFileStoreTable("T1");
         FileStoreTable table2 = getFileStoreTable("T2");
@@ -241,20 +202,12 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     @Test
     public void testTopicIsEmpty() {
-
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "ogg-json");
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        Collections.emptyMap(),
-                        Collections.emptyMap());
+        KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
 
-        assertThatThrownBy(() -> action.build(env))
+        assertThatThrownBy(action::run)
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,
@@ -265,28 +218,26 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
         // create table t1
-        Catalog catalog = catalog();
-        catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, "TEST_PREFIX_T1_TEST_SUFFIX");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.STRING().notNull())
-                        .column("name", DataTypes.STRING())
-                        .column("description", DataTypes.STRING())
-                        .column("weight", DataTypes.STRING())
-                        .primaryKey("id")
-                        .build();
-        catalog.createTable(identifier, schema, false);
+        createFileStoreTable(
+                "TEST_PREFIX_T1_TEST_SUFFIX",
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"}),
+                Collections.emptyList(),
+                Collections.singletonList("id"),
+                Collections.emptyMap());
 
         final String topic1 = "prefix_suffix_0";
         final String topic2 = "prefix_suffix_1";
         boolean writeOne = false;
         int fileCount = 2;
         List<String> topics = Arrays.asList(topic1, topic2);
-        topics.forEach(
-                topic -> {
-                    createTestTopic(topic, 1, 1);
-                });
+        topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
         // ---------- Write the ogg json into Kafka -------------------
 
@@ -304,30 +255,13 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        "TEST_PREFIX_",
-                        "_TEST_SUFFIX",
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTablePrefix("TEST_PREFIX_")
+                        .withTableSuffix("_TEST_SUFFIX")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testTableAffixImpl(topics, writeOne, fileCount);
     }
@@ -336,27 +270,25 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
         // create table t1
-        Catalog catalog = catalog();
-        catalog.createDatabase(database, true);
-        Identifier identifier = Identifier.create(database, "TEST_PREFIX_T1_TEST_SUFFIX");
-        Schema schema =
-                Schema.newBuilder()
-                        .column("id", DataTypes.STRING().notNull())
-                        .column("name", DataTypes.STRING())
-                        .column("description", DataTypes.STRING())
-                        .column("weight", DataTypes.STRING())
-                        .primaryKey("id")
-                        .build();
-        catalog.createTable(identifier, schema, false);
+        createFileStoreTable(
+                "TEST_PREFIX_T1_TEST_SUFFIX",
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"}),
+                Collections.emptyList(),
+                Collections.singletonList("id"),
+                Collections.emptyMap());
 
         final String topic1 = "prefix_suffix";
         List<String> topics = Collections.singletonList(topic1);
         boolean writeOne = true;
         int fileCount = 2;
-        topics.forEach(
-                topic -> {
-                    createTestTopic(topic, 1, 1);
-                });
+        topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
         // ---------- Write the ogg json into Kafka -------------------
 
@@ -374,37 +306,20 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        "TEST_PREFIX_",
-                        "_TEST_SUFFIX",
-                        null,
-                        null,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTablePrefix("TEST_PREFIX_")
+                        .withTableSuffix("_TEST_SUFFIX")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         testTableAffixImpl(topics, writeOne, fileCount);
     }
 
     private void testTableAffixImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
-        waitTablesCreated("TEST_PREFIX_T1_TEST_SUFFIX", "TEST_PREFIX_T2_TEST_SUFFIX");
+        waitingTables("TEST_PREFIX_T1_TEST_SUFFIX", "TEST_PREFIX_T2_TEST_SUFFIX");
 
         FileStoreTable table1 = getFileStoreTable("TEST_PREFIX_T1_TEST_SUFFIX");
         FileStoreTable table2 = getFileStoreTable("TEST_PREFIX_T2_TEST_SUFFIX");
@@ -521,10 +436,7 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
             throws Exception {
         final String topic1 = "include_exclude" + UUID.randomUUID();
         List<String> topics = Collections.singletonList(topic1);
-        topics.forEach(
-                topic -> {
-                    createTestTopic(topic, 1, 1);
-                });
+        topics.forEach(topic -> createTestTopic(topic, 1, 1));
 
         // ---------- Write the ogg json into Kafka -------------------
 
@@ -538,41 +450,16 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "ogg-json");
         kafkaConfig.put("topic", String.join(";", topics));
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
-
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        Map<String, String> tableConfig = new HashMap<>();
-        tableConfig.put("bucket", String.valueOf(random.nextInt(3) + 1));
-        tableConfig.put("sink.parallelism", String.valueOf(random.nextInt(3) + 1));
         KafkaSyncDatabaseAction action =
-                new KafkaSyncDatabaseAction(
-                        kafkaConfig,
-                        warehouse,
-                        database,
-                        null,
-                        null,
-                        includingTables,
-                        excludingTables,
-                        Collections.emptyMap(),
-                        tableConfig);
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .includingTables(includingTables)
+                        .excludingTables(excludingTables)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
 
         // check paimon tables
-        waitTablesCreated(existedTables.toArray(new String[0]));
+        waitingTables(existedTables);
         assertTableNotExists(notExistedTables);
-    }
-
-    private void assertTableNotExists(List<String> tableNames) {
-        Catalog catalog = catalog();
-        for (String tableName : tableNames) {
-            Identifier identifier = Identifier.create(database, tableName);
-            assertThat(catalog.tableExists(identifier)).isFalse();
-        }
     }
 }

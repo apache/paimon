@@ -18,11 +18,9 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.StringUtils;
 
@@ -52,6 +50,9 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 class KafkaActionUtils {
@@ -61,98 +62,28 @@ class KafkaActionUtils {
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
 
-    static void assertSchemaCompatible(TableSchema tableSchema, Schema kafkaCanalSchema) {
-        if (!schemaCompatible(tableSchema, kafkaCanalSchema)) {
-            throw new IllegalArgumentException(
-                    "Paimon schema and Kafka schema are not compatible.\n"
-                            + "Paimon fields are: "
-                            + tableSchema.fields()
-                            + ".\nKafka fields are: "
-                            + kafkaCanalSchema.fields());
-        }
-    }
-
-    static boolean schemaCompatible(TableSchema paimonSchema, Schema kafkaCanalSchema) {
-        for (DataField field : kafkaCanalSchema.fields()) {
-            int idx = paimonSchema.fieldNames().indexOf(field.name());
-            if (idx < 0) {
-                return false;
-            }
-            DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
-                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     static Schema buildPaimonSchema(
             KafkaSchema kafkaSchema,
             List<String> specifiedPartitionKeys,
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
-            Map<String, String> paimonConfig,
+            Map<String, String> tableConfig,
             boolean caseSensitive) {
-        Schema.Builder builder = Schema.newBuilder();
-        builder.options(paimonConfig);
+        LinkedHashMap<String, DataType> sourceColumns =
+                mapKeyCaseConvert(
+                        kafkaSchema.fields(),
+                        caseSensitive,
+                        columnDuplicateErrMsg(kafkaSchema.tableName()));
+        List<String> primaryKeys = listCaseConvert(kafkaSchema.primaryKeys(), caseSensitive);
 
-        // build columns and primary keys from mySqlSchema
-        Map<String, DataType> mySqlFields;
-        List<String> mySqlPrimaryKeys;
-        if (caseSensitive) {
-            mySqlFields = kafkaSchema.fields();
-            mySqlPrimaryKeys = kafkaSchema.primaryKeys();
-        } else {
-            mySqlFields = new LinkedHashMap<>();
-            for (Map.Entry<String, DataType> entry : kafkaSchema.fields().entrySet()) {
-                String fieldName = entry.getKey();
-                checkArgument(
-                        !mySqlFields.containsKey(fieldName.toLowerCase()),
-                        String.format(
-                                "Duplicate key '%s' in table '%s' appears when converting fields map keys to case-insensitive form.",
-                                fieldName, kafkaSchema.tableName()));
-                mySqlFields.put(fieldName.toLowerCase(), entry.getValue());
-            }
-            mySqlPrimaryKeys =
-                    kafkaSchema.primaryKeys().stream()
-                            .map(String::toLowerCase)
-                            .collect(Collectors.toList());
-        }
-
-        for (Map.Entry<String, DataType> entry : mySqlFields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue(), null);
-        }
-
-        for (ComputedColumn computedColumn : computedColumns) {
-            builder.column(computedColumn.columnName(), computedColumn.columnType());
-        }
-
-        if (specifiedPrimaryKeys.size() > 0) {
-            for (String key : specifiedPrimaryKeys) {
-                if (!mySqlFields.containsKey(key)
-                        && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
-                    throw new IllegalArgumentException(
-                            "Specified primary key "
-                                    + key
-                                    + " does not exist in kafka topic's table or computed columns.");
-                }
-            }
-            builder.primaryKey(specifiedPrimaryKeys);
-        } else if (mySqlPrimaryKeys.size() > 0) {
-            builder.primaryKey(mySqlPrimaryKeys);
-        } else {
-            throw new IllegalArgumentException(
-                    "Primary keys are not specified. "
-                            + "Also, can't infer primary keys from kafka topic's table schemas because "
-                            + "Kafka topic's table have no primary keys or have different primary keys.");
-        }
-
-        if (specifiedPartitionKeys.size() > 0) {
-            builder.partitionKeys(specifiedPartitionKeys);
-        }
-
-        return builder.build();
+        return CdcActionCommonUtils.buildPaimonSchema(
+                specifiedPartitionKeys,
+                specifiedPrimaryKeys,
+                computedColumns,
+                tableConfig,
+                sourceColumns,
+                null,
+                primaryKeys);
     }
 
     static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {

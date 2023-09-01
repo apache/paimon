@@ -474,15 +474,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(LogChangelogMode.AUTO)
                     .withDescription("Specify the log changelog mode for table.");
 
-    public static final ConfigOption<Boolean> LOG_SCAN_REMOVE_NORMALIZE =
-            key("log.scan.remove-normalize")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "Whether to force the removal of the normalize node when streaming read."
-                                    + " Note: This is dangerous and is likely to cause data errors if downstream"
-                                    + " is used to calculate aggregation and the input is not complete changelog.");
-
     public static final ConfigOption<String> LOG_KEY_FORMAT =
             key("log.key.format")
                     .stringType()

@@ -18,11 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.DatabaseSyncMode;
+import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -39,6 +41,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -77,47 +80,67 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * </ul>
  *
  * <p>To automatically synchronize new table, This action creates a single sink for all Paimon
- * tables to be written. See {@link DatabaseSyncMode#COMBINED}.
+ * tables to be written. See {@link MultiTablesSinkMode#COMBINED}.
  */
 public class KafkaSyncDatabaseAction extends ActionBase {
 
-    private final Configuration kafkaConfig;
     private final String database;
-    private final String tablePrefix;
-    private final String tableSuffix;
-    @Nullable private final Pattern includingPattern;
-    @Nullable private final Pattern excludingPattern;
-    private final Map<String, String> tableConfig;
+    private final Configuration kafkaConfig;
+
+    private Map<String, String> tableConfig = new HashMap<>();
+    private String tablePrefix = "";
+    private String tableSuffix = "";
+    private String includingTables = ".*";
+    @Nullable String excludingTables;
+    private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     public KafkaSyncDatabaseAction(
-            Map<String, String> kafkaConfig,
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
-        this(kafkaConfig, warehouse, database, null, null, null, null, catalogConfig, tableConfig);
-    }
-
-    public KafkaSyncDatabaseAction(
-            Map<String, String> kafkaConfig,
-            String warehouse,
-            String database,
-            @Nullable String tablePrefix,
-            @Nullable String tableSuffix,
-            @Nullable String includingTables,
-            @Nullable String excludingTables,
-            Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
+            Map<String, String> kafkaConfig) {
         super(warehouse, catalogConfig);
-        this.kafkaConfig = Configuration.fromMap(kafkaConfig);
         this.database = database;
-        this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
-        this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
-        this.includingPattern = includingTables == null ? null : Pattern.compile(includingTables);
-        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
-        this.tableConfig = tableConfig;
+        this.kafkaConfig = Configuration.fromMap(kafkaConfig);
     }
 
+    public KafkaSyncDatabaseAction withTableConfig(Map<String, String> tableConfig) {
+        this.tableConfig = tableConfig;
+        return this;
+    }
+
+    public KafkaSyncDatabaseAction withTablePrefix(@Nullable String tablePrefix) {
+        if (tablePrefix != null) {
+            this.tablePrefix = tablePrefix;
+        }
+        return this;
+    }
+
+    public KafkaSyncDatabaseAction withTableSuffix(@Nullable String tableSuffix) {
+        if (tableSuffix != null) {
+            this.tableSuffix = tableSuffix;
+        }
+        return this;
+    }
+
+    public KafkaSyncDatabaseAction includingTables(@Nullable String includingTables) {
+        if (includingTables != null) {
+            this.includingTables = includingTables;
+        }
+        return this;
+    }
+
+    public KafkaSyncDatabaseAction excludingTables(@Nullable String excludingTables) {
+        this.excludingTables = excludingTables;
+        return this;
+    }
+
+    public KafkaSyncDatabaseAction withTypeMapping(TypeMapping typeMapping) {
+        this.typeMapping = typeMapping;
+        return this;
+    }
+
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
 
@@ -133,11 +156,13 @@ public class KafkaSyncDatabaseAction extends ActionBase {
 
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);
         RecordParser recordParser =
-                format.createParser(caseSensitive, tableNameConverter, Collections.emptyList());
+                format.createParser(
+                        caseSensitive, tableNameConverter, typeMapping, Collections.emptyList());
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
                 new RichCdcMultiplexRecordSchemaBuilder(tableConfig);
-        Pattern includingPattern = this.includingPattern;
-        Pattern excludingPattern = this.excludingPattern;
+        Pattern includingPattern = Pattern.compile(includingTables);
+        Pattern excludingPattern =
+                excludingTables == null ? null : Pattern.compile(excludingTables);
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
                 () ->
                         new RichCdcMultiplexRecordEventParser(
@@ -154,7 +179,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)
-                        .withMode(DatabaseSyncMode.COMBINED);
+                        .withMode(MultiTablesSinkMode.COMBINED);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
@@ -178,6 +203,16 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                 String.format(
                         "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
                         tableSuffix));
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @VisibleForTesting
+    public Map<String, String> catalogConfig() {
+        return catalogConfig;
     }
 
     // ------------------------------------------------------------------------

@@ -20,17 +20,13 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 /** Factory to create {@link KafkaSyncTableAction}. */
 public class KafkaSyncTableActionFactory implements ActionFactory {
@@ -45,42 +41,36 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
-
-        List<String> partitionKeys = Collections.emptyList();
-        if (params.has("partition-keys")) {
-            partitionKeys =
-                    Arrays.stream(params.get("partition-keys").split(","))
-                            .collect(Collectors.toList());
-        }
-
-        List<String> primaryKeys = Collections.emptyList();
-        if (params.has("primary-keys")) {
-            primaryKeys =
-                    Arrays.stream(params.get("primary-keys").split(","))
-                            .collect(Collectors.toList());
-        }
-        List<String> computedColumnArgs = Collections.emptyList();
-        if (params.has("computed-column")) {
-            computedColumnArgs = new ArrayList<>(params.getMultiParameter("computed-column"));
-        }
-
         checkRequiredArgument(params, "kafka-conf");
 
-        Map<String, String> kafkaConfig = optionalConfigMap(params, "kafka-conf");
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        Map<String, String> paimonConfig = optionalConfigMap(params, "paimon-conf");
-
-        return Optional.of(
+        KafkaSyncTableAction action =
                 new KafkaSyncTableAction(
-                        kafkaConfig,
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        partitionKeys,
-                        primaryKeys,
-                        computedColumnArgs,
-                        catalogConfig,
-                        paimonConfig));
+                                tablePath.f0,
+                                tablePath.f1,
+                                tablePath.f2,
+                                optionalConfigMap(params, "catalog-conf"),
+                                optionalConfigMap(params, "kafka-conf"))
+                        .withTableConfig(optionalConfigMap(params, "table-conf"));
+
+        if (params.has("partition-keys")) {
+            action.withPartitionKeys(params.get("partition-keys").split(","));
+        }
+
+        if (params.has("primary-keys")) {
+            action.withPrimaryKeys(params.get("primary-keys").split(","));
+        }
+
+        if (params.has("computed-column")) {
+            action.withComputedColumnArgs(
+                    new ArrayList<>(params.getMultiParameter("computed-column")));
+        }
+
+        if (params.has("type-mapping")) {
+            String[] options = params.get("type-mapping").split(",");
+            action.withTypeMapping(TypeMapping.parse(options));
+        }
+
+        return Optional.of(action);
     }
 
     @Override
@@ -96,6 +86,7 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
                         + "--table <table-name> "
                         + "[--partition-keys <partition-keys>] "
                         + "[--primary-keys <primary-keys>] "
+                        + "[--type-mapping <option1,option2...>] "
                         + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
                         + "[--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
@@ -112,6 +103,10 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
         System.out.println("Primary keys syntax:");
         System.out.println("  key1,key2,...");
         System.out.println("Primary keys will be derived from tables if not specified.");
+        System.out.println();
+
+        System.out.println(
+                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("Please see doc for usage of --computed-column.");
