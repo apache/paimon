@@ -61,12 +61,7 @@ public class StoreMultiCommitter
 
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader, String commitUser, @Nullable CommitterMetrics metrics) {
-        this.catalog = catalogLoader.load();
-        this.commitUser = commitUser;
-        this.metrics = metrics;
-
-        this.tableCommitters = new HashMap<>();
-        this.isCompactJob = false;
+        this(catalogLoader, commitUser, metrics, false);
     }
 
     public StoreMultiCommitter(
@@ -178,15 +173,9 @@ public class StoreMultiCommitter
                                 "Failed to get committer for table %s", tableId.getFullName()),
                         e);
             }
-            if (isCompactJob) {
-                committer =
-                        new StoreCommitter(
-                                table.newCommit(commitUser).ignoreEmptyCommit(true), metrics);
-            } else {
-                committer =
-                        new StoreCommitter(
-                                table.newCommit(commitUser).ignoreEmptyCommit(false), metrics);
-            }
+            committer =
+                    new StoreCommitter(
+                            table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob), metrics);
             tableCommitters.put(tableId, committer);
         }
 

@@ -24,6 +24,7 @@ import org.apache.paimon.flink.source.operator.MultiTablesBatchCompactorSourceFu
 import org.apache.paimon.flink.source.operator.MultiTablesStreamingCompactorSourceFunction;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -70,9 +71,7 @@ public class MultiTablesCompactorSourceBuilder {
     }
 
     public DataStream<RowData> build() {
-        if (env == null) {
-            throw new IllegalArgumentException("StreamExecutionEnvironment should not be null.");
-        }
+        Preconditions.checkArgument(env != null, "StreamExecutionEnvironment should not be null.");
         RowType produceType = BucketsTable.getRowType();
         if (isContinuous) {
             return MultiTablesStreamingCompactorSourceFunction.buildSource(

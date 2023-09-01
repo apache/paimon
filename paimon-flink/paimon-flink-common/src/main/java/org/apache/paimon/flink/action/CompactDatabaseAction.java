@@ -57,7 +57,7 @@ public class CompactDatabaseAction extends ActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(CompactDatabaseAction.class);
 
     private final Pattern includingPattern;
-    private final Pattern excludingPattern;
+    @Nullable private final Pattern excludingPattern;
     private final Pattern databasePattern;
 
     private MultiTablesSinkMode databaseCompactMode = MultiTablesSinkMode.DIVIDED;
