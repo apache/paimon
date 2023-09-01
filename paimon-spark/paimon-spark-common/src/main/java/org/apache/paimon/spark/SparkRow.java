@@ -32,6 +32,8 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.apache.spark.sql.Row;
 
 import java.io.Serializable;
@@ -43,6 +45,8 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import scala.collection.mutable.WrappedArray;
 
 /** A {@link InternalRow} wraps spark {@link Row}. */
 public class SparkRow implements InternalRow, Serializable {
@@ -286,6 +290,11 @@ public class SparkRow implements InternalRow, Serializable {
 
         @Override
         public InternalArray getArray(int i) {
+            if (getAs(i) instanceof WrappedArray) {
+                List<Object> result = Lists.newArrayList();
+                ((WrappedArray) getAs(i)).iterator().foreach(x -> result.add(x));
+                return new PaimonArray(((ArrayType) elementType).getElementType(), result);
+            }
             return new PaimonArray(((ArrayType) elementType).getElementType(), getAs(i));
         }
 
