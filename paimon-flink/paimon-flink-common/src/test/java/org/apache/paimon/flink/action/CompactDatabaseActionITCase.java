@@ -138,9 +138,22 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         if (mode.equals("divided")) {
-            new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>()).build(env);
+            //            new CompactDatabaseAction(warehouse, null, null, null, new
+            // HashMap<>()).build(env);
+            new CompactDatabaseAction(warehouse, new HashMap<>())
+                    .includingtDatabases(null)
+                    .includingtTables(null)
+                    .excludingtTables(null)
+                    .build(env);
         } else {
-            new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>())
+            //            new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>())
+            //                    .withDatabaseCompactMode("combined")
+            //                    .withCompactOptions(compactOptions)
+            //                    .build(env);
+            new CompactDatabaseAction(warehouse, new HashMap<>())
+                    .includingtDatabases(null)
+                    .includingtTables(null)
+                    .excludingtTables(null)
                     .withDatabaseCompactMode("combined")
                     .withCompactOptions(compactOptions)
                     .build(env);
@@ -223,9 +236,21 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.getCheckpointConfig().setCheckpointInterval(500);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         if (mode.equals("divided")) {
-            new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>()).build(env);
+            // new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>()).build(env);
+            new CompactDatabaseAction(warehouse, new HashMap<>())
+                    .includingtDatabases(null)
+                    .includingtTables(null)
+                    .excludingtTables(null)
+                    .build(env);
         } else {
-            new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>())
+            //            new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>())
+            //                    .withDatabaseCompactMode("combined")
+            //                    .withCompactOptions(compactOptions)
+            //                    .build(env);
+            new CompactDatabaseAction(warehouse, new HashMap<>())
+                    .includingtDatabases(null)
+                    .includingtTables(null)
+                    .excludingtTables(null)
                     .withDatabaseCompactMode("combined")
                     .withCompactOptions(compactOptions)
                     .build(env);
@@ -477,12 +502,26 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
 
         if (mode.equals("divided")) {
-            new CompactDatabaseAction(
-                            warehouse, null, includingPattern, excludesPattern, new HashMap<>())
+            //            new CompactDatabaseAction(
+            //                            warehouse, null, includingPattern, excludesPattern, new
+            // HashMap<>())
+            //                    .build(env);
+            new CompactDatabaseAction(warehouse, new HashMap<>())
+                    .includingtDatabases(null)
+                    .includingtTables(includingPattern)
+                    .excludingtTables(excludesPattern)
                     .build(env);
         } else {
-            new CompactDatabaseAction(
-                            warehouse, null, includingPattern, excludesPattern, new HashMap<>())
+            //            new CompactDatabaseAction(
+            //                            warehouse, null, includingPattern, excludesPattern, new
+            // HashMap<>())
+            //                    .withDatabaseCompactMode("combined")
+            //                    .withCompactOptions(compactOptions)
+            //                    .build(env);
+            new CompactDatabaseAction(warehouse, new HashMap<>())
+                    .includingtDatabases(null)
+                    .includingtTables(includingPattern)
+                    .excludingtTables(excludesPattern)
                     .withDatabaseCompactMode("combined")
                     .withCompactOptions(compactOptions)
                     .build(env);

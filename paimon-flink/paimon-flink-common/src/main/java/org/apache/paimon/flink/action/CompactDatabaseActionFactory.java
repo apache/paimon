@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link CompactDatabaseAction}. */
@@ -35,15 +34,17 @@ public class CompactDatabaseActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        String warehouse = params.get("warehouse");
-        String database = params.get("database");
-        String includingTables = params.get("including-tables");
-        String excludingTables = params.get("excluding-tables");
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-
         CompactDatabaseAction action =
                 new CompactDatabaseAction(
-                        warehouse, database, includingTables, excludingTables, catalogConfig);
+                        getRequiredValue(params, "warehouse"),
+                        optionalConfigMap(params, "catalog-conf"));
+
+        action.includingtDatabases(params.get("including-databases"))
+                .includingtTables(params.get("including-tables"))
+                .excludingtTables(params.get("excluding-tables"))
+                .withDatabaseCompactMode(params.get("mode"))
+                .withCompactOptions(optionalConfigMap(params, "compact-conf"));
+
         return Optional.of(action);
     }
 

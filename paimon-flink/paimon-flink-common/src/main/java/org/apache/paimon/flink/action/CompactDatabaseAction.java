@@ -59,9 +59,9 @@ import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 public class CompactDatabaseAction extends ActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(CompactDatabaseAction.class);
 
-    private final Pattern includingPattern;
-    @Nullable private final Pattern excludingPattern;
-    private final Pattern databasePattern;
+    private Pattern includingPattern;
+    @Nullable private Pattern excludingPattern;
+    private Pattern databasePattern;
 
     private MultiTablesSinkMode databaseCompactMode = MultiTablesSinkMode.DIVIDED;
 
@@ -82,7 +82,27 @@ public class CompactDatabaseAction extends ActionBase {
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
     }
 
-    public CompactDatabaseAction withDatabaseCompactMode(String mode) {
+    public CompactDatabaseAction(String warehouse, Map<String, String> catalogConfig) {
+        super(warehouse, catalogConfig);
+    }
+
+    public CompactDatabaseAction includingtDatabases(@Nullable String includingDatabases) {
+        this.databasePattern =
+                Pattern.compile(includingDatabases == null ? ".*" : includingDatabases);
+        return this;
+    }
+
+    public CompactDatabaseAction includingtTables(@Nullable String includingTables) {
+        this.includingPattern = Pattern.compile(includingTables == null ? ".*" : includingTables);
+        return this;
+    }
+
+    public CompactDatabaseAction excludingtTables(@Nullable String excludingTables) {
+        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
+        return this;
+    }
+
+    public CompactDatabaseAction withDatabaseCompactMode(@Nullable String mode) {
         this.databaseCompactMode = MultiTablesSinkMode.fromString(mode);
         return this;
     }
