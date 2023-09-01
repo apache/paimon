@@ -39,6 +39,17 @@ We currently support the following sync ways:
 6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table. 
 7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
 
+## Start local Flink
+
+If you want to do this use case test locally, start local Flink and run it first
+
+```bash
+cd $FLINK_HOME/bin
+./start-cluster.sh
+```
+
+Verify that the flink startup successfully completed the next steps by visiting http://localhost:8081
+
 ## MySQL
 
 Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
