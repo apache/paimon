@@ -258,7 +258,6 @@ public class MultiTablesStoreCompactOperator
             if (changelogProducer == CoreOptions.ChangelogProducer.FULL_COMPACTION
                     || deltaCommits >= 0) {
                 int finalDeltaCommits = Math.max(deltaCommits, 1);
-                // 这个 lamda 表达式代表接口 Provider 的具体实现
                 return (table, commitUser, state, ioManager, memoryPool) ->
                         new GlobalFullCompactionSinkWrite(
                                 table,

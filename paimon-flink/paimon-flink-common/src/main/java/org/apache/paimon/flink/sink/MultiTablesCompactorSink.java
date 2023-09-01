@@ -61,11 +61,6 @@ public class MultiTablesCompactorSink implements Serializable {
     private CoreOptions coreOptions;
     private Options options;
 
-    // this class use the parameters below:
-    // coreOptions.writeOnly()
-    // options.get(SINK_USE_MANAGED_MEMORY)
-    // options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY)
-
     public MultiTablesCompactorSink(Catalog.Loader catalogLoader, Options options) {
         this.catalogLoader = catalogLoader;
         this.ignorePreviousFiles = false;
@@ -172,6 +167,7 @@ public class MultiTablesCompactorSink implements Serializable {
         }
     }
 
+    // TODO:refactor FlinkSink to adopt this sink
     protected OneInputStreamOperator<RowData, MultiTableCommittable> createWriteOperator(
             CheckpointConfig checkpointConfig, boolean isStreaming, String commitUser) {
         return new MultiTablesStoreCompactOperator(
