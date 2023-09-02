@@ -18,6 +18,8 @@
 
 package org.apache.paimon.hive;
 
+import org.apache.paimon.utils.StringUtils;
+
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -31,8 +33,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 
 import static org.apache.hadoop.hive.metastore.Warehouse.getDnsPath;
 
@@ -59,6 +60,7 @@ public class LocationKeyExtractor {
         // read what metastore tells us
         location = properties.getProperty(hive_metastoreConstants.META_TABLE_LOCATION);
         if (location != null) {
+            location = tableLocation(location, properties);
             if (conf != null) {
                 try {
                     return getDnsPath(new Path(location), conf).toString();
@@ -149,5 +151,18 @@ public class LocationKeyExtractor {
         }
 
         return null;
+    }
+
+    /** Get table location through partition location. */
+    private static String tableLocation(String location, Properties properties) {
+        String partitionProperty =
+                properties.getProperty(hive_metastoreConstants.META_TABLE_PARTITION_COLUMNS);
+        if (StringUtils.isEmpty(partitionProperty)) {
+            return location;
+        }
+
+        List<String> partitionKeys =
+                Arrays.asList(partitionProperty.split(org.apache.paimon.fs.Path.SEPARATOR));
+        return location.split(org.apache.paimon.fs.Path.SEPARATOR + partitionKeys.get(0) + "=")[0];
     }
 }
