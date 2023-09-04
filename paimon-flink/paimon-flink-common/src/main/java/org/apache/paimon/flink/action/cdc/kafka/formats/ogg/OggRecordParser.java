@@ -21,42 +21,36 @@ package org.apache.paimon.flink.action.cdc.kafka.formats.ogg;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.KafkaSchema;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
-import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
- * Implementation of {@link RecordParser} for parsing messages in the Ogg format.
+ * The {@code OggRecordParser} class extends the abstract {@link RecordParser} and is responsible
+ * for parsing records from the Oracle GoldenGate (OGG) JSON format. Oracle GoldenGate is a software
+ * application used for real-time data integration and replication in heterogeneous IT environments.
+ * This parser extracts relevant information from the OGG JSON records and transforms them into a
+ * list of {@link RichCdcMultiplexRecord} objects.
  *
- * <p>This parser handles records in the Ogg format and extracts relevant information to produce
- * {@link RichCdcMultiplexRecord} objects.
+ * <p>The class handles three types of database operations, represented by "U" for UPDATE, "I" for
+ * INSERT, and "D" for DELETE. It then generates corresponding {@link RichCdcMultiplexRecord}
+ * objects to represent these changes in the state of the database.
+ *
+ * <p>Validation is performed to ensure that the JSON records contain all the necessary fields (such
+ * as table, operation type, and primary keys). The class also supports Kafka schema extraction,
+ * providing a way to understand the structure of the incoming records and their corresponding field
+ * types.
  */
 public class OggRecordParser extends RecordParser {
 
-    private static final DataType STRING_DATA_TYPE = DataTypes.STRING();
-    private static final String FIELD_PRIMARY_KEYS = "primary_keys";
     private static final String FIELD_BEFORE = "before";
-    private static final String FIELD_AFTER = "after";
     private static final String FIELD_TYPE = "op_type";
     private static final String OP_UPDATE = "U";
     private static final String OP_INSERT = "I";
@@ -73,57 +67,22 @@ public class OggRecordParser extends RecordParser {
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
-        String type = extractString(FIELD_TYPE);
-        switch (type) {
+        String operation = extractStringFromRootJson(FIELD_TYPE);
+        switch (operation) {
             case OP_UPDATE:
                 processRecord(root.get(FIELD_BEFORE), RowKind.DELETE, records);
-                processRecord(root.get(FIELD_AFTER), RowKind.INSERT, records);
+                processRecord(root.get(fieldData), RowKind.INSERT, records);
                 break;
             case OP_INSERT:
-                processRecord(root.get(FIELD_AFTER), RowKind.INSERT, records);
+                processRecord(root.get(fieldData), RowKind.INSERT, records);
                 break;
             case OP_DELETE:
                 processRecord(root.get(FIELD_BEFORE), RowKind.DELETE, records);
                 break;
             default:
-                throw new UnsupportedOperationException("Unknown record type: " + type);
+                throw new UnsupportedOperationException("Unknown record operation: " + operation);
         }
         return records;
-    }
-
-    private void processRecord(
-            JsonNode jsonNode, RowKind rowKind, List<RichCdcMultiplexRecord> records) {
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
-        Map<String, String> rowData = extractRow(jsonNode, paimonFieldTypes);
-        rowData = mapKeyCaseConvert(rowData, caseSensitive, recordKeyDuplicateErrMsg(rowData));
-        records.add(createRecord(rowKind, rowData, paimonFieldTypes));
-    }
-
-    private RichCdcMultiplexRecord createRecord(
-            RowKind rowKind,
-            Map<String, String> data,
-            LinkedHashMap<String, DataType> paimonFieldTypes) {
-        return new RichCdcMultiplexRecord(
-                databaseName,
-                tableName,
-                paimonFieldTypes,
-                extractPrimaryKeys(FIELD_PRIMARY_KEYS),
-                new CdcRecord(rowKind, data));
-    }
-
-    @Override
-    public KafkaSchema getKafkaSchema(String record) {
-        try {
-            root = OBJECT_MAPPER.readValue(record, JsonNode.class);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Error processing JSON: " + record, e);
-        }
-        validateFormat();
-
-        LinkedHashMap<String, DataType> paimonFieldTypes = extractFieldTypesFromOracleType();
-
-        return new KafkaSchema(
-                databaseName, tableName, paimonFieldTypes, extractPrimaryKeys(FIELD_PRIMARY_KEYS));
     }
 
     @Override
@@ -133,27 +92,27 @@ public class OggRecordParser extends RecordParser {
 
         checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
         checkNotNull(root.get(FIELD_TYPE), errorMessageTemplate, FIELD_TYPE);
-        checkNotNull(root.get(FIELD_PRIMARY_KEYS), errorMessageTemplate, FIELD_PRIMARY_KEYS);
+        checkNotNull(root.get(fieldPrimaryKeys), errorMessageTemplate, fieldPrimaryKeys);
 
         String fieldType = root.get(FIELD_TYPE).asText();
 
         switch (fieldType) {
             case OP_UPDATE:
-                checkNotNull(root.get(FIELD_AFTER), errorMessageTemplate, FIELD_AFTER);
+                checkNotNull(root.get(fieldData), errorMessageTemplate, fieldData);
                 checkNotNull(root.get(FIELD_BEFORE), errorMessageTemplate, FIELD_BEFORE);
                 break;
             case OP_INSERT:
-                checkNotNull(root.get(FIELD_AFTER), errorMessageTemplate, FIELD_AFTER);
+                checkNotNull(root.get(fieldData), errorMessageTemplate, fieldData);
                 break;
             case OP_DELETE:
                 checkNotNull(root.get(FIELD_BEFORE), errorMessageTemplate, FIELD_BEFORE);
-                checkNotNull(root.get(FIELD_AFTER), errorMessageTemplate, "null");
+                checkNotNull(root.get(fieldData), errorMessageTemplate, "null");
                 break;
         }
     }
 
     @Override
-    protected String extractString(String key) {
+    protected String extractStringFromRootJson(String key) {
         if (key.equals(FIELD_TABLE)) {
             extractDatabaseAndTableNames();
             return tableName;
@@ -164,60 +123,24 @@ public class OggRecordParser extends RecordParser {
         return root.get(key) != null ? root.get(key).asText() : null;
     }
 
+    @Override
+    protected void setPrimaryField() {
+        fieldPrimaryKeys = "primary_keys";
+    }
+
+    @Override
+    protected void setDataField() {
+        fieldData = "after";
+    }
+
     private void extractDatabaseAndTableNames() {
         JsonNode tableNode = root.get(FIELD_TABLE);
         if (tableNode != null) {
-            String[] dbt = tableNode.asText().split("\\.", 2); // Limit split to 2 parts
+            String[] dbt = tableNode.asText().split("\\.", 2);
             if (dbt.length == 2) {
                 databaseName = dbt[0];
                 tableName = dbt[1];
             }
         }
-    }
-
-    private LinkedHashMap<String, DataType> extractFieldTypesFromOracleType() {
-        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
-        JsonNode record = root.get(FIELD_AFTER);
-        Map<String, Object> linkedHashMap =
-                OBJECT_MAPPER.convertValue(
-                        record, new TypeReference<LinkedHashMap<String, Object>>() {});
-        if (linkedHashMap == null) {
-            return new LinkedHashMap<>();
-        }
-
-        Set<String> keySet = linkedHashMap.keySet();
-        String[] columns = keySet.toArray(new String[0]);
-        for (String column : columns) {
-            fieldTypes.put(toFieldName(column), DataTypes.STRING());
-        }
-        return fieldTypes;
-    }
-
-    private Map<String, String> extractRow(
-            JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        Map<String, String> linkedHashMap =
-                OBJECT_MAPPER.convertValue(
-                        record, new TypeReference<LinkedHashMap<String, String>>() {});
-        if (linkedHashMap == null) {
-            return Collections.emptyMap();
-        }
-
-        Map<String, String> resultMap = new HashMap<>();
-        linkedHashMap.forEach(
-                (key, value) -> {
-                    paimonFieldTypes.put(key, STRING_DATA_TYPE);
-                    resultMap.put(key, value);
-                });
-
-        // generate values for computed columns
-        computedColumns.forEach(
-                computedColumn -> {
-                    resultMap.put(
-                            computedColumn.columnName(),
-                            computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
-                    paimonFieldTypes.put(computedColumn.columnName(), computedColumn.columnType());
-                });
-
-        return resultMap;
     }
 }
