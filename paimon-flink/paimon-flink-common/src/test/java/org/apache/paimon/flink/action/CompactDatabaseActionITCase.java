@@ -138,18 +138,12 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         if (mode.equals("divided")) {
-            //            new CompactDatabaseAction(warehouse, null, null, null, new
-            // HashMap<>()).build(env);
             new CompactDatabaseAction(warehouse, new HashMap<>())
                     .includingtDatabases(null)
                     .includingtTables(null)
                     .excludingtTables(null)
                     .build(env);
         } else {
-            //            new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>())
-            //                    .withDatabaseCompactMode("combined")
-            //                    .withCompactOptions(compactOptions)
-            //                    .build(env);
             new CompactDatabaseAction(warehouse, new HashMap<>())
                     .includingtDatabases(null)
                     .includingtTables(null)
@@ -236,17 +230,12 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.getCheckpointConfig().setCheckpointInterval(500);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         if (mode.equals("divided")) {
-            // new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>()).build(env);
             new CompactDatabaseAction(warehouse, new HashMap<>())
                     .includingtDatabases(null)
                     .includingtTables(null)
                     .excludingtTables(null)
                     .build(env);
         } else {
-            //            new CompactDatabaseAction(warehouse, null, null, null, new HashMap<>())
-            //                    .withDatabaseCompactMode("combined")
-            //                    .withCompactOptions(compactOptions)
-            //                    .build(env);
             new CompactDatabaseAction(warehouse, new HashMap<>())
                     .includingtDatabases(null)
                     .includingtTables(null)
@@ -502,22 +491,12 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
 
         if (mode.equals("divided")) {
-            //            new CompactDatabaseAction(
-            //                            warehouse, null, includingPattern, excludesPattern, new
-            // HashMap<>())
-            //                    .build(env);
             new CompactDatabaseAction(warehouse, new HashMap<>())
                     .includingtDatabases(null)
                     .includingtTables(includingPattern)
                     .excludingtTables(excludesPattern)
                     .build(env);
         } else {
-            //            new CompactDatabaseAction(
-            //                            warehouse, null, includingPattern, excludesPattern, new
-            // HashMap<>())
-            //                    .withDatabaseCompactMode("combined")
-            //                    .withCompactOptions(compactOptions)
-            //                    .build(env);
             new CompactDatabaseAction(warehouse, new HashMap<>())
                     .includingtDatabases(null)
                     .includingtTables(includingPattern)
@@ -606,7 +585,11 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
         env.getCheckpointConfig().setCheckpointInterval(500);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(warehouse, database, null, null, new HashMap<>()).build(env);
+        new CompactDatabaseAction(warehouse, new HashMap<>())
+                .includingtDatabases(null)
+                .includingtTables(null)
+                .excludingtTables(null)
+                .build(env);
         JobClient client = env.executeAsync();
 
         for (FileStoreTable table : tables) {
@@ -677,7 +660,11 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(warehouse, database, null, null, new HashMap<>()).build(env);
+        new CompactDatabaseAction(warehouse, new HashMap<>())
+                .includingtDatabases(null)
+                .includingtTables(null)
+                .excludingtTables(null)
+                .build(env);
         env.execute();
 
         for (FileStoreTable table : tables) {

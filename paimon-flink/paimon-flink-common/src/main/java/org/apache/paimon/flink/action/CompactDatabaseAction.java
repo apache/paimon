@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
 import org.apache.paimon.flink.sink.BucketsRowChannelComputer;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
@@ -59,41 +60,31 @@ import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 public class CompactDatabaseAction extends ActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(CompactDatabaseAction.class);
 
-    private Pattern includingPattern;
+    private Pattern includingPattern = Pattern.compile(".*");
     @Nullable private Pattern excludingPattern;
-    private Pattern databasePattern;
+    private Pattern databasePattern = Pattern.compile(".*");
 
     private MultiTablesSinkMode databaseCompactMode = MultiTablesSinkMode.DIVIDED;
 
-    private Map<String, Table> tableMap = new HashMap<>();
+    private final Map<String, Table> tableMap = new HashMap<>();
 
-    @Nullable private Options compactOptions = null;
-
-    public CompactDatabaseAction(
-            String warehouse,
-            @Nullable String includingDatabases,
-            @Nullable String includingTables,
-            @Nullable String excludingTables,
-            Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
-        this.databasePattern =
-                Pattern.compile(includingDatabases == null ? ".*" : includingDatabases);
-        this.includingPattern = Pattern.compile(includingTables == null ? ".*" : includingTables);
-        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
-    }
+    private Options compactOptions = new Options();
 
     public CompactDatabaseAction(String warehouse, Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
     }
 
     public CompactDatabaseAction includingtDatabases(@Nullable String includingDatabases) {
-        this.databasePattern =
-                Pattern.compile(includingDatabases == null ? ".*" : includingDatabases);
+        if (includingDatabases != null) {
+            this.databasePattern = Pattern.compile(includingDatabases);
+        }
         return this;
     }
 
     public CompactDatabaseAction includingtTables(@Nullable String includingTables) {
-        this.includingPattern = Pattern.compile(includingTables == null ? ".*" : includingTables);
+        if (includingTables != null) {
+            this.includingPattern = Pattern.compile(includingTables);
+        }
         return this;
     }
 
@@ -198,13 +189,11 @@ public class CompactDatabaseAction extends ActionBase {
     }
 
     private void buildForCombinedMode(StreamExecutionEnvironment env) {
-        Preconditions.checkArgument(
-                compactOptions != null, "in combined mode, compact options need to be set.");
 
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
-        // Currently, multi-tables compaction do not support tables which bucketmode is UNWARE.
+        // TODO: Currently, multi-tables compaction don't support tables which bucketmode is UNWARE.
         MultiTablesCompactorSourceBuilder sourceBuilder =
                 new MultiTablesCompactorSourceBuilder(
                         catalogLoader(),
@@ -215,7 +204,11 @@ public class CompactDatabaseAction extends ActionBase {
         DataStream<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
 
-        DataStream<RowData> partitioned = partition(source, new BucketsRowChannelComputer(), null);
+        DataStream<RowData> partitioned =
+                partition(
+                        source,
+                        new BucketsRowChannelComputer(),
+                        compactOptions.get(FlinkConnectorOptions.SINK_PARALLELISM));
         new MultiTablesCompactorSink(catalogLoader(), compactOptions).sinkFrom(partitioned);
     }
 
