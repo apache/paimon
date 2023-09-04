@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 /** It is responsible for monitoring compactor source in streaming mode. */
 public class MultiTablesStreamingCompactorSourceFunction
         extends MultiTablesCompactorSourceFunction {
+
     private static final Logger LOG =
             LoggerFactory.getLogger(MultiTablesStreamingCompactorSourceFunction.class);
 
@@ -132,15 +133,12 @@ public class MultiTablesStreamingCompactorSourceFunction
                         tupleTypeInfo,
                         sourceOperator,
                         isParallel,
-                        name + "-Monitor",
+                        name,
                         Boundedness.CONTINUOUS_UNBOUNDED)
                 .forceNonParallel()
                 .partitionCustom(
                         (key, numPartitions) -> key % numPartitions,
                         split -> ((DataSplit) split.f0).bucket())
-                .transform(
-                        name + "-Reader",
-                        typeInfo,
-                        new MultiTablesReadOperator(catalogLoader, true));
+                .transform(name, typeInfo, new MultiTablesReadOperator(catalogLoader, true));
     }
 }

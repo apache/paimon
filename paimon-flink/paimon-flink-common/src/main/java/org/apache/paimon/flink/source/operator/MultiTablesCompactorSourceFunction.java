@@ -27,28 +27,15 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.system.BucketsTable;
 
-import org.apache.flink.api.common.state.CheckpointListener;
-import org.apache.flink.api.common.state.ListState;
-import org.apache.flink.api.common.state.ListStateDescriptor;
-import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
-import org.apache.flink.runtime.state.FunctionInitializationContext;
-import org.apache.flink.runtime.state.FunctionSnapshotContext;
-import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
-import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
-import java.util.OptionalLong;
-import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
@@ -69,8 +56,8 @@ import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompa
  * <p>Currently, only dedicated compaction job for multi-tables rely on this monitor.
  */
 public abstract class MultiTablesCompactorSourceFunction
-        extends RichSourceFunction<Tuple2<Split, String>>
-        implements CheckpointedFunction, CheckpointListener {
+        extends RichSourceFunction<Tuple2<Split, String>> {
+
     private static final long serialVersionUID = 1L;
 
     private static final Logger LOG =
@@ -106,99 +93,13 @@ public abstract class MultiTablesCompactorSourceFunction
 
     protected transient SourceContext<Tuple2<Split, String>> ctx;
 
-    protected transient ListState<Long> checkpointState;
-    protected transient ListState<Tuple2<Long, Long>> nextSnapshotState;
-    protected transient TreeMap<Long, Long> nextSnapshotPerCheckpoint;
-
     @Override
-    public void initializeState(FunctionInitializationContext context) throws Exception {
+    public void open(Configuration parameters) throws Exception {
         tablesMap = new HashMap<>();
         scansMap = new HashMap<>();
-
         catalog = catalogLoader.load();
 
         updateTableMap();
-
-        this.checkpointState =
-                context.getOperatorStateStore()
-                        .getListState(
-                                new ListStateDescriptor<>(
-                                        "next-snapshot", LongSerializer.INSTANCE));
-
-        @SuppressWarnings("unchecked")
-        final Class<Tuple2<Long, Long>> typedTuple =
-                (Class<Tuple2<Long, Long>>) (Class<?>) Tuple2.class;
-        this.nextSnapshotState =
-                context.getOperatorStateStore()
-                        .getListState(
-                                new ListStateDescriptor<>(
-                                        "next-snapshot-per-checkpoint",
-                                        new TupleSerializer<>(
-                                                typedTuple,
-                                                new TypeSerializer[] {
-                                                    LongSerializer.INSTANCE, LongSerializer.INSTANCE
-                                                })));
-
-        this.nextSnapshotPerCheckpoint = new TreeMap<>();
-
-        if (context.isRestored()) {
-            LOG.info("Restoring state for the {}.", getClass().getSimpleName());
-
-            List<Long> retrievedStates = new ArrayList<>();
-            for (Long entry : this.checkpointState.get()) {
-                retrievedStates.add(entry);
-            }
-
-            // given that the parallelism of the function is 1, we can only have 1 retrieved items.
-
-            Preconditions.checkArgument(
-                    retrievedStates.size() <= 1,
-                    getClass().getSimpleName() + " retrieved invalid state.");
-
-            if (retrievedStates.size() == 1) {
-                for (StreamTableScan scan : this.scansMap.values()) {
-                    scan.restore(retrievedStates.get(0));
-                }
-            }
-
-            for (Tuple2<Long, Long> tuple2 : nextSnapshotState.get()) {
-                nextSnapshotPerCheckpoint.put(tuple2.f0, tuple2.f1);
-            }
-        } else {
-            LOG.info("No state to restore for the {}.", getClass().getSimpleName());
-        }
-    }
-
-    @Override
-    public void snapshotState(FunctionSnapshotContext ctx) throws Exception {
-        this.checkpointState.clear();
-        // TODO: how to get nextSnapshot better?
-        Long nextSnapshot = this.scansMap.values().iterator().next().checkpoint();
-        if (nextSnapshot != null) {
-            this.checkpointState.add(nextSnapshot);
-            this.nextSnapshotPerCheckpoint.put(ctx.getCheckpointId(), nextSnapshot);
-        }
-
-        List<Tuple2<Long, Long>> nextSnapshots = new ArrayList<>();
-        this.nextSnapshotPerCheckpoint.forEach((k, v) -> nextSnapshots.add(new Tuple2<>(k, v)));
-        this.nextSnapshotState.update(nextSnapshots);
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("{} checkpoint {}.", getClass().getSimpleName(), nextSnapshot);
-        }
-    }
-
-    @Override
-    public void run(SourceContext<Tuple2<Split, String>> ctx) throws Exception {}
-
-    @Override
-    public void notifyCheckpointComplete(long checkpointId) {
-        NavigableMap<Long, Long> nextSnapshots =
-                nextSnapshotPerCheckpoint.headMap(checkpointId, true);
-        OptionalLong max = nextSnapshots.values().stream().mapToLong(Long::longValue).max();
-        // // TODO: scansMap.values().iterator().next()?
-        max.ifPresent(scansMap.values().iterator().next()::notifyCheckpointComplete);
-        nextSnapshots.clear();
     }
 
     @Override

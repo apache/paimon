@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 
 /** It is responsible for monitoring compactor source in batch mode. */
 public class MultiTablesBatchCompactorSourceFunction extends MultiTablesCompactorSourceFunction {
+
     private static final Logger LOG =
             LoggerFactory.getLogger(MultiTablesBatchCompactorSourceFunction.class);
 
@@ -122,19 +123,11 @@ public class MultiTablesBatchCompactorSourceFunction extends MultiTablesCompacto
                 new TupleTypeInfo<>(
                         new JavaTypeInfo<>(Split.class), BasicTypeInfo.STRING_TYPE_INFO);
         return new DataStreamSource<>(
-                        env,
-                        tupleTypeInfo,
-                        sourceOperator,
-                        false,
-                        name + "-Monitor",
-                        Boundedness.BOUNDED)
+                        env, tupleTypeInfo, sourceOperator, false, name, Boundedness.BOUNDED)
                 .forceNonParallel()
                 .partitionCustom(
                         (key, numPartitions) -> key % numPartitions,
                         split -> ((DataSplit) split.f0).bucket())
-                .transform(
-                        name + "-Reader",
-                        typeInfo,
-                        new MultiTablesReadOperator(catalogLoader, false));
+                .transform(name, typeInfo, new MultiTablesReadOperator(catalogLoader, false));
     }
 }
