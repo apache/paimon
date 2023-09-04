@@ -33,7 +33,10 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
 
 import static org.apache.hadoop.hive.metastore.Warehouse.getDnsPath;
 
