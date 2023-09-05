@@ -257,6 +257,11 @@ Paimon's snapshot is similar to flink's checkpoint, and both will automatically 
 allows snapshots to be retained for a long time. Therefore, we can combine the two features of paimon's tag and flink's 
 savepoint to achieve incremental recovery of job from the specified savepoint.
 
+At the same time to open the change parameter will also promote the automatic creation of the tag, now although open the "tag.automatic-creation" parameter but,
+the automatic creation of the tag is based on the write data to trigger the creation. This can't be used in a batch processing scenario
+because batch processing requires an accurate trigger signal. When no data is written into the stream table, the auto-generation 
+of tags is interrupted. Therefore, we need a mechanism for generating tags based on checkpoints. This parameter can address the aforementioned issue.
+
 **Step 1: Enable automatically create tags for savepoint.**
 
 You can set `sink.savepoint.auto-tag` to `true` to enable the feature of automatically creating tags for savepoint.

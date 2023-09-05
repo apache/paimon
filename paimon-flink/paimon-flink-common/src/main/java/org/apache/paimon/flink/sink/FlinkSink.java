@@ -24,6 +24,8 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.tag.TagAutoCreation;
+import org.apache.paimon.utils.SerializableSupplier;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -195,7 +197,9 @@ public abstract class FlinkSink<T> implements Serializable {
                     new AutoTagForSavepointCommitterOperator<>(
                             (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
                             table::snapshotManager,
-                            table::tagManager);
+                            table::tagManager,
+                            (SerializableSupplier<TagAutoCreation>)
+                                    () -> table.store().newTagCreationManager());
         }
         SingleOutputStreamOperator<?> committed =
                 written.transform(

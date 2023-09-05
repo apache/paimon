@@ -79,7 +79,6 @@ public class TagAutoCreation {
     private final TagPeriodHandler periodHandler;
     private final Duration delay;
     private final Integer numRetainedMax;
-
     private LocalDateTime nextTag;
     private long nextSnapshot;
 
@@ -115,10 +114,20 @@ public class TagAutoCreation {
         }
     }
 
+    public void refreshTags() {
+        Long snapshotId = Optional.ofNullable(snapshotManager.latestSnapshotId()).orElse(1L);
+        LocalDateTime currentTime =
+                Instant.ofEpochMilli(System.currentTimeMillis())
+                        .atZone(ZoneId.systemDefault())
+                        .toLocalDateTime();
+        processTags(snapshotManager.snapshot(snapshotId), Optional.of(currentTime));
+    }
+
     public void run() {
         while (true) {
             if (snapshotManager.snapshotExists(nextSnapshot)) {
-                tryToTag(snapshotManager.snapshot(nextSnapshot));
+                Snapshot snapshot = snapshotManager.snapshot(nextSnapshot);
+                processTags(snapshot, timeExtractor.extract(snapshot));
                 nextSnapshot++;
             } else {
                 // avoid snapshot has been expired
@@ -132,34 +141,31 @@ public class TagAutoCreation {
         }
     }
 
-    private void tryToTag(Snapshot snapshot) {
-        Optional<LocalDateTime> timeOptional = timeExtractor.extract(snapshot);
-        if (!timeOptional.isPresent()) {
-            return;
-        }
+    private void processTags(Snapshot snapshot, Optional<LocalDateTime> timeOptional) {
+        timeOptional.ifPresent(time -> createTags(snapshot, time));
+        pruneOldTags();
+    }
 
-        LocalDateTime time = timeOptional.get();
+    private void createTags(Snapshot snapshot, LocalDateTime time) {
         if (nextTag == null
                 || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag))) {
             LocalDateTime thisTag = periodHandler.normalizeToTagTime(time);
             String tagName = periodHandler.timeToTag(thisTag);
             tagManager.createTag(snapshot, tagName);
             nextTag = periodHandler.nextTagTime(thisTag);
+        }
+    }
 
-            if (numRetainedMax != null) {
-                SortedMap<Snapshot, String> tags = tagManager.tags();
-                if (tags.size() > numRetainedMax) {
-                    int toDelete = tags.size() - numRetainedMax;
-                    int i = 0;
-                    for (String tag : tags.values()) {
-                        tagManager.deleteTag(tag, tagDeletion, snapshotManager);
-                        i++;
-                        if (i == toDelete) {
-                            break;
-                        }
-                    }
-                }
-            }
+    private void pruneOldTags() {
+        if (numRetainedMax == null) {
+            return;
+        }
+        SortedMap<Snapshot, String> tags = tagManager.tags();
+        int tagsToDelete = tags.size() - numRetainedMax;
+        if (tagsToDelete > 0) {
+            tags.values().stream()
+                    .limit(tagsToDelete)
+                    .forEach(tag -> tagManager.deleteTag(tag, tagDeletion, snapshotManager));
         }
     }
 

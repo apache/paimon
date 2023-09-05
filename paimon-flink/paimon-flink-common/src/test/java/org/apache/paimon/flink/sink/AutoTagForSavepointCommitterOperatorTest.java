@@ -25,6 +25,8 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.tag.TagAutoCreation;
+import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.ThrowingConsumer;
 
 import org.apache.flink.core.execution.SavepointFormatType;
@@ -161,7 +163,9 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                 (CommitterOperator<Committable, ManifestCommittable>)
                         super.createCommitterOperator(table, commitUser, committableStateManager),
                 table::snapshotManager,
-                table::tagManager);
+                table::tagManager,
+                (SerializableSupplier<TagAutoCreation>)
+                        () -> table.store().newTagCreationManager());
     }
 
     @Override
@@ -175,6 +179,8 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                         super.createCommitterOperator(
                                 table, commitUser, committableStateManager, initializeFunction),
                 table::snapshotManager,
-                table::tagManager);
+                table::tagManager,
+                (SerializableSupplier<TagAutoCreation>)
+                        () -> table.store().newTagCreationManager());
     }
 }
