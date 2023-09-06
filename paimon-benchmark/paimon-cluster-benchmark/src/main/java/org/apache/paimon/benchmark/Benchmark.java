@@ -94,10 +94,10 @@ public class Benchmark {
         String sinksValue = line.getOptionValue(SINKS.getOpt());
         List<Sink> sinks = Sink.load(location);
         if (!"all".equalsIgnoreCase(sinksValue)) {
-            List<String> wantedSinks =
+            Set<String> wantedSinks =
                     Arrays.stream(sinksValue.split(","))
                             .map(String::trim)
-                            .collect(Collectors.toList());
+                            .collect(Collectors.toSet());
             Set<String> supportedSinks = sinks.stream().map(Sink::name).collect(Collectors.toSet());
             Set<String> unSupportedSinks = new HashSet<>(wantedSinks);
             unSupportedSinks.removeAll(supportedSinks);
