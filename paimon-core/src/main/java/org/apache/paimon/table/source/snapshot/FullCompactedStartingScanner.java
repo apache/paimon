@@ -21,7 +21,11 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.CoreOptions.StartupMode;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.Snapshot.CommitKind;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -29,16 +33,18 @@ import javax.annotation.Nullable;
  * {@link StartingScanner} for the {@link StartupMode#COMPACTED_FULL} startup mode with
  * 'full-compaction.delta-commits'.
  */
-public class FullCompactedStartingScanner extends CompactedStartingScanner {
+public class FullCompactedStartingScanner extends AbstractStartingScanner {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FullCompactedStartingScanner.class);
 
     private final int deltaCommits;
 
     public FullCompactedStartingScanner(SnapshotManager snapshotManager, int deltaCommits) {
         super(snapshotManager);
         this.deltaCommits = deltaCommits;
+        this.startingSnapshotId = pick();
     }
 
-    @Override
     @Nullable
     protected Long pick() {
         return snapshotManager.pickOrLatest(this::picked);
@@ -48,6 +54,30 @@ public class FullCompactedStartingScanner extends CompactedStartingScanner {
         long identifier = snapshot.commitIdentifier();
         return snapshot.commitKind() == CommitKind.COMPACT
                 && isFullCompactedIdentifier(identifier, deltaCommits);
+    }
+
+    @Override
+    public ScanMode startingScanMode() {
+        return ScanMode.ALL;
+    }
+
+    @Override
+    public Result scan(SnapshotReader snapshotReader) {
+        Long startingSnapshotId = pick();
+        if (startingSnapshotId == null) {
+            startingSnapshotId = snapshotManager.latestSnapshotId();
+            if (startingSnapshotId == null) {
+                LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
+                return new NoSnapshot();
+            } else {
+                LOG.debug(
+                        "No compact snapshot found, reading from the latest snapshot {}.",
+                        startingSnapshotId);
+            }
+        }
+
+        return StartingScanner.fromPlan(
+                snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId).read());
     }
 
     public static boolean isFullCompactedIdentifier(long identifier, int deltaCommits) {

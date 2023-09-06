@@ -43,7 +43,7 @@ public class StaticFromTimestampStartingScanner extends AbstractStartingScanner 
         super(snapshotManager);
         this.startupMillis = startupMillis;
         Snapshot snapshot = timeTravelToTimestamp(snapshotManager, startupMillis);
-        if (snapshot == null) {
+        if (snapshot != null) {
             this.startingSnapshotId = snapshot.id();
         }
     }

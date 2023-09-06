@@ -49,6 +49,7 @@ public class ContinuousLatestStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
+        Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
             return new NoSnapshot();

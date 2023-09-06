@@ -69,9 +69,7 @@ public class StaticFromTagStartingScannerTest extends ScannerTestBase {
     @Test
     public void testNonExistingTag() {
         SnapshotManager snapshotManager = table.snapshotManager();
-        StaticFromTagStartingScanner scanner =
-                new StaticFromTagStartingScanner(snapshotManager, "non-existing");
-        assertThatThrownBy(() -> scanner.scan(snapshotReader))
+        assertThatThrownBy(() -> new StaticFromTagStartingScanner(snapshotManager, "non-existing"))
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,

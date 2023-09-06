@@ -45,6 +45,7 @@ public class CompactedStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
+        Long startingSnapshotId = pick();
         if (startingSnapshotId == null) {
             startingSnapshotId = snapshotManager.latestSnapshotId();
             if (startingSnapshotId == null) {
