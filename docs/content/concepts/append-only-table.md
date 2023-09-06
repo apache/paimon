@@ -207,8 +207,9 @@ although we can stream read and write still). All the records will go into one d
 and we do not maintain the order anymore. As we don't have the concept of bucket, we will not shuffle the input records by bucket anymore,
 which will speed up the inserting.
 
-{{< img src="/img/for-scalable.png">}}
+Using this mode, you can replace your Hive table to lake table.
 
+{{< img src="/img/for-scalable.png">}}
 
 ### Compaction
 
