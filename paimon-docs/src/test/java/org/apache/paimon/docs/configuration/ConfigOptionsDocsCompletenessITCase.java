@@ -156,6 +156,23 @@ public class ConfigOptionsDocsCompletenessITCase {
                                             + " in "
                                             + supposedState.containingClass
                                             + " is not documented.");
+                        } else if (documentedState.size() == 1) {
+                            DocumentedOption candidate = documentedState.get(0);
+                            boolean matchFound = false;
+                            if (supposedState.defaultValue.equals(candidate.defaultValue)
+                                    && supposedState.description.equals(candidate.description)) {
+                                matchFound = true;
+                            }
+                            if (!matchFound) {
+                                problems.add(
+                                        String.format(
+                                                "Documentation of %s in %s is outdated. Expected: default=(%s) description=(%s).",
+                                                supposedState.key,
+                                                supposedState.containingClass.getSimpleName(),
+                                                supposedState.defaultValue,
+                                                supposedState.description));
+                            }
+                            documentedOptions.remove(key);
                         } else {
                             final Iterator<DocumentedOption> candidates =
                                     documentedState.iterator();
