@@ -33,13 +33,14 @@ public class FullCompactedStartingScanner extends CompactedStartingScanner {
 
     private final int deltaCommits;
 
-    public FullCompactedStartingScanner(int deltaCommits) {
+    public FullCompactedStartingScanner(SnapshotManager snapshotManager, int deltaCommits) {
+        super(snapshotManager);
         this.deltaCommits = deltaCommits;
     }
 
     @Override
     @Nullable
-    protected Long pick(SnapshotManager snapshotManager) {
+    protected Long pick() {
         return snapshotManager.pickOrLatest(this::picked);
     }
 

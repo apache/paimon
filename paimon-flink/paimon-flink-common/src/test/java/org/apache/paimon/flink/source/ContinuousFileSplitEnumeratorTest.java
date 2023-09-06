@@ -28,6 +28,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 
 import org.apache.flink.api.connector.source.SourceSplit;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -828,6 +829,11 @@ public class ContinuousFileSplitEnumeratorTest {
         public MockScan(TreeMap<Long, RichPlan> results) {
             this.results = results;
             this.nextSnapshotId = null;
+        }
+
+        @Override
+        public StartingContext startingContext() {
+            return null;
         }
 
         @Override

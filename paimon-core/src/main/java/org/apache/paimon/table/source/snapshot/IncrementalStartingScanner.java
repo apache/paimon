@@ -35,26 +35,21 @@ import java.util.List;
 import java.util.Map;
 
 /** {@link StartingScanner} for incremental changes by snapshot. */
-public class IncrementalStartingScanner implements StartingScanner {
+public class IncrementalStartingScanner extends AbstractStartingScanner {
 
-    private long start;
-    private long end;
+    private long endingSnapshotId;
 
-    public IncrementalStartingScanner(long start, long end) {
-        this.start = start;
-        this.end = end;
+    public IncrementalStartingScanner(SnapshotManager snapshotManager, long start, long end) {
+        super(snapshotManager);
+        this.startingSnapshotId = start;
+        this.endingSnapshotId = end;
     }
 
     @Override
-    public Result scan(SnapshotManager manager, SnapshotReader reader) {
-        long earliestSnapshotId = manager.earliestSnapshotId();
-        long latestSnapshotId = manager.latestSnapshotId();
-        start = (start < earliestSnapshotId) ? earliestSnapshotId - 1 : start;
-        end = (end > latestSnapshotId) ? latestSnapshotId : end;
-
+    public Result scan(SnapshotReader reader) {
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new HashMap<>();
-        for (long i = start + 1; i < end + 1; i++) {
-            List<DataSplit> splits = readDeltaSplits(reader, manager.snapshot(i));
+        for (long i = startingSnapshotId + 1; i < endingSnapshotId + 1; i++) {
+            List<DataSplit> splits = readDeltaSplits(reader, snapshotManager.snapshot(i));
             for (DataSplit split : splits) {
                 grouped.computeIfAbsent(
                                 Pair.of(split.partition(), split.bucket()), k -> new ArrayList<>())
@@ -70,7 +65,7 @@ public class IncrementalStartingScanner implements StartingScanner {
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
                 result.add(
                         DataSplit.builder()
-                                .withSnapshot(end)
+                                .withSnapshot(endingSnapshotId)
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .withDataFiles(files)
@@ -87,7 +82,7 @@ public class IncrementalStartingScanner implements StartingScanner {
 
                     @Override
                     public Long snapshotId() {
-                        return end;
+                        return endingSnapshotId;
                     }
 
                     @Override

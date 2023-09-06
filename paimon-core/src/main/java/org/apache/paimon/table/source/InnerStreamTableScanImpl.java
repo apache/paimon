@@ -31,6 +31,7 @@ import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.utils.SnapshotManager;
@@ -51,9 +52,11 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     private final boolean supportStreamingReadOverwrite;
     private final DefaultValueAssigner defaultValueAssigner;
 
+    private boolean inited = false;
     private StartingScanner startingScanner;
     private FollowUpScanner followUpScanner;
     private BoundedChecker boundedChecker;
+
     private boolean isFullPhaseEnd = false;
     @Nullable private Long nextSnapshotId;
 
@@ -77,15 +80,17 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     }
 
     @Override
+    public StartingContext startingContext() {
+        if (!inited) {
+            initScanner();
+        }
+        return startingScanner.startingContext();
+    }
+
+    @Override
     public RichPlan plan() {
-        if (startingScanner == null) {
-            startingScanner = createStartingScanner(true);
-        }
-        if (followUpScanner == null) {
-            followUpScanner = createFollowUpScanner();
-        }
-        if (boundedChecker == null) {
-            boundedChecker = createBoundedChecker();
+        if (!inited) {
+            initScanner();
         }
 
         if (nextSnapshotId == null) {
@@ -95,8 +100,21 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         }
     }
 
+    private void initScanner() {
+        if (startingScanner == null) {
+            startingScanner = createStartingScanner(true);
+        }
+        if (followUpScanner == null) {
+            followUpScanner = createFollowUpScanner();
+        }
+        if (boundedChecker == null) {
+            boundedChecker = createBoundedChecker();
+        }
+        inited = true;
+    }
+
     private RichPlan tryFirstPlan() {
-        StartingScanner.Result result = startingScanner.scan(snapshotManager, snapshotReader);
+        StartingScanner.Result result = startingScanner.scan(snapshotReader);
         if (result instanceof ScannedResult) {
             ScannedResult scannedResult = (ScannedResult) result;
             long currentSnapshotId = scannedResult.currentSnapshotId();

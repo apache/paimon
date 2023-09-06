@@ -25,21 +25,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** {@link StartingScanner} used internally for stand-alone streaming compact job sources. */
-public class ContinuousCompactorStartingScanner implements StartingScanner {
+public class ContinuousCompactorStartingScanner extends AbstractStartingScanner {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(ContinuousCompactorStartingScanner.class);
 
+    public ContinuousCompactorStartingScanner(SnapshotManager snapshotManager) {
+        super(snapshotManager);
+        this.startingSnapshotId = snapshotManager.earliestSnapshotId();
+    }
+
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
+    public Result scan(SnapshotReader snapshotReader) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-        if (latestSnapshotId == null || earliestSnapshotId == null) {
+        if (latestSnapshotId == null || startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
             return new NoSnapshot();
         }
 
-        for (long id = latestSnapshotId; id >= earliestSnapshotId; id--) {
+        for (long id = latestSnapshotId; id >= startingSnapshotId; id--) {
             Snapshot snapshot = snapshotManager.snapshot(id);
             if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                 LOG.debug("Found latest compact snapshot {}, reading from the next snapshot.", id);
@@ -49,7 +53,7 @@ public class ContinuousCompactorStartingScanner implements StartingScanner {
 
         LOG.debug(
                 "No compact snapshot found, reading from the earliest snapshot {}.",
-                earliestSnapshotId);
-        return new NextSnapshot(earliestSnapshotId);
+                startingSnapshotId);
+        return new NextSnapshot(startingSnapshotId);
     }
 }
