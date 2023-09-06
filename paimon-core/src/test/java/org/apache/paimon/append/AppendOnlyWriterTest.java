@@ -46,12 +46,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -264,6 +269,43 @@ public class AppendOnlyWriterTest {
         assertThat(secInc.newFilesIncrement().newFiles()).hasSize(1);
     }
 
+    @Test
+    public void testCloseUnexpectedly() throws Exception {
+        final CountDownLatch latch = new CountDownLatch(1);
+        AppendOnlyWriter writer =
+                createWriter(20 * 1024, false, Collections.emptyList(), latch).getLeft();
+
+        for (int i = 0; i < 10; i++) { // create 10 small files.
+            for (int j = 0; j < 10; j++) {
+                writer.write(row(j, String.format("%03d", j), PART));
+            }
+            CommitIncrement increment = writer.prepareCommit(false);
+            assertThat(increment.compactIncrement().isEmpty()).isTrue();
+        }
+        Set<Path> committedFiles =
+                Files.walk(tempDir)
+                        .filter(Files::isRegularFile)
+                        .map(p -> new Path(p.toString()))
+                        .collect(Collectors.toSet());
+
+        // start compaction and write more records
+        latch.countDown();
+        for (int j = 0; j < 10; j++) {
+            writer.write(row(j, String.format("%03d", j), PART));
+        }
+        writer.sync();
+
+        // writer closed unexpectedly
+        writer.close();
+
+        Set<Path> afterClosedUnexpectedly =
+                Files.walk(tempDir)
+                        .filter(Files::isRegularFile)
+                        .map(p -> new Path(p.toString()))
+                        .collect(Collectors.toSet());
+        assertThat(afterClosedUnexpectedly).containsExactlyInAnyOrderElementsOf(committedFiles);
+    }
+
     private FieldStats initStats(Integer min, Integer max, long nullCount) {
         return new FieldStats(min, max, nullCount);
     }
@@ -291,6 +333,14 @@ public class AppendOnlyWriterTest {
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
+        return createWriter(targetFileSize, forceCompact, scannedFiles, new CountDownLatch(0));
+    }
+
+    private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
+            long targetFileSize,
+            boolean forceCompact,
+            List<DataFileMeta> scannedFiles,
+            CountDownLatch latch) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         AppendOnlyCompactManager compactManager =
@@ -301,11 +351,13 @@ public class AppendOnlyWriterTest {
                         MIN_FILE_NUM,
                         MAX_FILE_NUM,
                         targetFileSize,
-                        compactBefore ->
-                                compactBefore.isEmpty()
-                                        ? Collections.emptyList()
-                                        : Collections.singletonList(
-                                                generateCompactAfter(compactBefore)));
+                        compactBefore -> {
+                            latch.await();
+                            return compactBefore.isEmpty()
+                                    ? Collections.emptyList()
+                                    : Collections.singletonList(
+                                            generateCompactAfter(compactBefore));
+                        });
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
@@ -325,11 +377,12 @@ public class AppendOnlyWriterTest {
         return Pair.of(writer, compactManager.allFiles());
     }
 
-    private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) {
+    private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) throws IOException {
         int size = toCompact.size();
         long minSeq = toCompact.get(0).minSequenceNumber();
         long maxSeq = toCompact.get(size - 1).maxSequenceNumber();
         String fileName = "compact-" + UUID.randomUUID();
+        LocalFileIO.create().newOutputStream(pathFactory.toPath(fileName), false).close();
         return DataFileMeta.forAppend(
                 fileName,
                 toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),
