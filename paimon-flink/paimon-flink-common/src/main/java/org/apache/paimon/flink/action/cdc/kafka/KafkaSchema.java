@@ -37,8 +37,8 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
@@ -55,13 +55,13 @@ public class KafkaSchema {
     private static final int POLL_TIMEOUT_MILLIS = 1000;
     private final String databaseName;
     private final String tableName;
-    private final Map<String, DataType> fields;
+    private final LinkedHashMap<String, DataType> fields;
     private final List<String> primaryKeys;
 
     public KafkaSchema(
             String databaseName,
             String tableName,
-            Map<String, DataType> fields,
+            LinkedHashMap<String, DataType> fields,
             List<String> primaryKeys) {
         this.databaseName = databaseName;
         this.tableName = tableName;
@@ -77,7 +77,7 @@ public class KafkaSchema {
         return databaseName;
     }
 
-    public Map<String, DataType> fields() {
+    public LinkedHashMap<String, DataType> fields() {
         return fields;
     }
 

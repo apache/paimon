@@ -21,7 +21,6 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.AfterAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -90,19 +89,6 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
         // see mysql/my.cnf in test resources
         config.put("server-time-zone", ZoneId.of("America/New_York").toString());
         return config;
-    }
-
-    protected JobClient runActionWithDefaultEnv(MySqlSyncTableAction action) throws Exception {
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-        return client;
-    }
-
-    protected void runActionWithDefaultEnv(MySqlSyncDatabaseAction action) throws Exception {
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
     }
 
     protected MySqlSyncTableActionBuilder syncTableActionBuilder(Map<String, String> mySqlConfig) {

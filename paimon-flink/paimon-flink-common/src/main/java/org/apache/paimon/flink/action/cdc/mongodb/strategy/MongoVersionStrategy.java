@@ -40,10 +40,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.FIELD_NAME;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.PARSER_PATH;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.START_MODE;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Interface for processing strategies tailored for different MongoDB versions. */
 public interface MongoVersionStrategy {
@@ -68,17 +69,8 @@ public interface MongoVersionStrategy {
         return Collections.singletonList("_id");
     }
 
-    default Map<String, String> keyCaseInsensitive(Map<String, String> origin) {
-        Map<String, String> keyCaseInsensitive = new HashMap<>();
-        for (Map.Entry<String, String> entry : origin.entrySet()) {
-            String fieldName = entry.getKey().toLowerCase();
-            checkArgument(
-                    !keyCaseInsensitive.containsKey(fieldName),
-                    "Duplicate key appears when converting map keys to case-insensitive form. Original map is:\n%s",
-                    origin);
-            keyCaseInsensitive.put(fieldName, entry.getValue());
-        }
-        return keyCaseInsensitive;
+    default Map<String, String> extractRow(String record) {
+        return JsonSerdeUtil.parseJsonMap(record, String.class);
     }
 
     /**
@@ -102,37 +94,39 @@ public interface MongoVersionStrategy {
                 SchemaAcquisitionMode.valueOf(mongodbConfig.getString(START_MODE).toUpperCase());
         ObjectNode objectNode = (ObjectNode) OBJECT_MAPPER.readTree(jsonNode.asText());
         JsonNode document = objectNode.set("_id", objectNode.get("_id").get("$oid"));
+        Map<String, String> row;
         switch (mode) {
             case SPECIFIED:
-                Map<String, String> specifiedRow =
+                row =
                         parseFieldsFromJsonRecord(
                                 document.toString(),
                                 mongodbConfig.getString(PARSER_PATH),
                                 mongodbConfig.getString(FIELD_NAME),
                                 computedColumns,
                                 paimonFieldTypes);
-                return caseSensitive ? specifiedRow : keyCaseInsensitive(specifiedRow);
+                break;
             case DYNAMIC:
-                Map<String, String> dynamicRow =
+                row =
                         parseAndTypeJsonRow(
                                 document.toString(),
                                 paimonFieldTypes,
                                 computedColumns,
                                 caseSensitive);
-                return caseSensitive ? dynamicRow : keyCaseInsensitive(dynamicRow);
+                break;
             default:
                 throw new RuntimeException("Unsupported extraction mode: " + mode);
         }
+        return mapKeyCaseConvert(row, caseSensitive, recordKeyDuplicateErrMsg(row));
     }
 
     /** Parses and types a JSON row based on the given parameters. */
     default Map<String, String> parseAndTypeJsonRow(
-            String jsonRow,
-            LinkedHashMap<String, DataType> fieldTypes,
+            String evaluate,
+            LinkedHashMap<String, DataType> paimonFieldTypes,
             List<ComputedColumn> computedColumns,
             boolean caseSensitive) {
-        Map<String, String> parsedRow = JsonSerdeUtil.parseJsonMap(jsonRow, String.class);
-        return processParsedData(parsedRow, fieldTypes, computedColumns, caseSensitive);
+        Map<String, String> parsedRow = JsonSerdeUtil.parseJsonMap(evaluate, String.class);
+        return processParsedData(parsedRow, paimonFieldTypes, computedColumns, caseSensitive);
     }
 
     /** Parses fields from a JSON record based on the given parameters. */

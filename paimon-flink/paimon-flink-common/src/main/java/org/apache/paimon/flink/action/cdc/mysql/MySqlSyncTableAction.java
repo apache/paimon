@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
@@ -142,6 +143,7 @@ public class MySqlSyncTableAction extends ActionBase {
         return this;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
                 mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
@@ -188,7 +190,7 @@ public class MySqlSyncTableAction extends ActionBase {
                         computedFields,
                         fieldNames);
             }
-            MySqlActionUtils.assertSchemaCompatible(table.schema(), fromMySql);
+            CdcActionCommonUtils.assertSchemaCompatible(table.schema(), fromMySql.fields());
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromMySql, false);
             table = (FileStoreTable) catalog.getTable(identifier);

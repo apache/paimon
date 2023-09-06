@@ -25,7 +25,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -224,20 +223,6 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         config.put("properties.enable.auto.commit", "false");
         config.put("properties.auto.offset.reset", "earliest");
         return config;
-    }
-
-    protected JobClient runActionWithDefaultEnv(KafkaSyncTableAction action) throws Exception {
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-        return client;
-    }
-
-    protected JobClient runActionWithDefaultEnv(KafkaSyncDatabaseAction action) throws Exception {
-        action.build(env);
-        JobClient client = env.executeAsync();
-        waitJobRunning(client);
-        return client;
     }
 
     protected KafkaSyncTableActionBuilder syncTableActionBuilder(Map<String, String> kafkaConfig) {

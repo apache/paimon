@@ -72,7 +72,7 @@ public class InternalRowSerializer extends AbstractRowDataSerializer<InternalRow
     }
 
     @Override
-    public Serializer<InternalRow> duplicate() {
+    public InternalRowSerializer duplicate() {
         Serializer<?>[] duplicateFieldSerializers = new Serializer[fieldSerializers.length];
         for (int i = 0; i < fieldSerializers.length; i++) {
             duplicateFieldSerializers[i] = fieldSerializers[i].duplicate();

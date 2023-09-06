@@ -140,6 +140,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
 
@@ -158,7 +159,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                 format.createParser(
                         caseSensitive, tableNameConverter, typeMapping, Collections.emptyList());
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
-                new RichCdcMultiplexRecordSchemaBuilder(tableConfig);
+                new RichCdcMultiplexRecordSchemaBuilder(tableConfig, caseSensitive);
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);

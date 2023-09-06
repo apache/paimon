@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.sink.index.GlobalDynamicCdcBucketSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
@@ -119,9 +118,6 @@ public class CdcSinkBuilder<T> {
                 return buildForFixedBucket(parsed);
             case DYNAMIC:
                 return new CdcDynamicBucketSink((FileStoreTable) table).build(parsed, parallelism);
-            case GLOBAL_DYNAMIC:
-                return new GlobalDynamicCdcBucketSink((FileStoreTable) table)
-                        .build(parsed, parallelism);
             case UNAWARE:
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);

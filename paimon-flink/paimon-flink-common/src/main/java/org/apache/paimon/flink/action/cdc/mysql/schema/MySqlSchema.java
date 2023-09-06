@@ -28,7 +28,6 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -94,10 +93,16 @@ public class MySqlSchema {
         return primaryKeys;
     }
 
-    public Map<String, DataType> typeMapping() {
-        Map<String, DataType> typeMapping = new HashMap<>();
+    public LinkedHashMap<String, DataType> typeMapping() {
+        LinkedHashMap<String, DataType> typeMapping = new LinkedHashMap<>();
         fields.forEach((name, pair) -> typeMapping.put(name, pair.getLeft()));
         return typeMapping;
+    }
+
+    public List<String> comments() {
+        List<String> comments = new ArrayList<>();
+        fields.forEach((name, pair) -> comments.add(pair.getRight()));
+        return comments;
     }
 
     public MySqlSchema merge(String currentTable, String otherTable, MySqlSchema other) {

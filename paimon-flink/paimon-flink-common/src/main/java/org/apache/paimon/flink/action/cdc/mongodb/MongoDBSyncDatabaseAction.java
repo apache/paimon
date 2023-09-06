@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
@@ -42,7 +43,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -74,7 +74,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     private final Map<String, String> tableConfig;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
-    @Nullable private final String includingTables;
+    private final String includingTables;
 
     public MongoDBSyncDatabaseAction(
             Map<String, String> mongodbConfig,
@@ -97,6 +97,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
         this.tableConfig = tableConfig;
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
 
@@ -111,11 +112,15 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
 
         MongoDBSource<String> source =
                 MongoDBActionUtils.buildMongodbSource(
-                        mongodbConfig, buildTableList(excludedTables));
+                        mongodbConfig,
+                        CdcActionCommonUtils.combinedModeTableList(
+                                mongodbConfig.get(MongoDBSourceOptions.DATABASE),
+                                includingTables,
+                                excludedTables));
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory;
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
-                new RichCdcMultiplexRecordSchemaBuilder(tableConfig);
+                new RichCdcMultiplexRecordSchemaBuilder(tableConfig, caseSensitive);
         Pattern includingPattern = this.includingPattern;
         Pattern excludingPattern = this.excludingPattern;
         parserFactory =
@@ -161,46 +166,6 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                 String.format(
                         "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
                         tableSuffix));
-    }
-
-    private String buildTableList(List<Identifier> excludedTables) {
-        String separatorRex = "\\.";
-        // In COMBINED mode, we should consider both existed tables and possible newly added
-        // tables, so we should use regular expression to monitor all valid tables and exclude
-        // certain invalid tables
-
-        // The table list is built by template:
-        // (?!(^db\\.tbl$)|(^...$))(databasePattern\\.(including_pattern1|...))
-
-        // The excluding pattern ?!(^db\\.tbl$)|(^...$) can exclude tables whose qualified name
-        // is exactly equal to 'db.tbl'
-        // The including pattern databasePattern\\.(including_pattern1|...) can include tables
-        // whose qualified name matches one of the patterns
-
-        // a table can be monitored only when its name meets the including pattern and doesn't
-        // be excluded by excluding pattern at the same time
-        String includingPattern =
-                String.format(
-                        "%s%s(%s)",
-                        mongodbConfig.get(MongoDBSourceOptions.DATABASE),
-                        separatorRex,
-                        includingTables);
-        if (excludedTables.isEmpty()) {
-            return includingPattern;
-        }
-
-        String excludingPattern =
-                excludedTables.stream()
-                        .map(
-                                t ->
-                                        String.format(
-                                                "(^%s$)",
-                                                t.getDatabaseName()
-                                                        + separatorRex
-                                                        + t.getObjectName()))
-                        .collect(Collectors.joining("|"));
-        excludingPattern = "?!" + excludingPattern;
-        return String.format("(%s)(%s)", excludingPattern, includingPattern);
     }
 
     @VisibleForTesting

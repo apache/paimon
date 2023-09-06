@@ -162,6 +162,13 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         compactManager.cancelCompaction();
         sync();
 
+        compactManager.close();
+        for (DataFileMeta file : compactAfter) {
+            // appendOnlyCompactManager will rewrite the file and no file upgrade will occur, so we
+            // can directly delete the file in compactAfter.
+            fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
+        }
+
         if (writer != null) {
             writer.abort();
             writer = null;

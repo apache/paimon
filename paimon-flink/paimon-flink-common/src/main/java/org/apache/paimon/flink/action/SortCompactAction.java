@@ -72,6 +72,7 @@ public class SortCompactAction extends CompactAction {
         execute(env, "Sort Compact Job");
     }
 
+    @Override
     public void build(StreamExecutionEnvironment env) {
         // only support batch sort yet
         if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)

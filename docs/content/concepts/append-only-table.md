@@ -235,7 +235,7 @@ write-only for inserting job, and after per-partition data done, trigger a parti
 You can trigger action by shell script:
 ```shell
 <FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-0.5-SNAPSHOT.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
