@@ -67,7 +67,7 @@ Performance:
 #### Cross Partitions Update Dynamic Bucket Mode
 
 {{< hint info >}}
-This is an experimental feature.
+This is an experimental feature. Release `0.5.0-incubating` is not available, please use a higher version.
 {{< /hint >}}
 
 When you need cross partition updates (primary keys not contain all partition fields), Dynamic Bucket mode directly
