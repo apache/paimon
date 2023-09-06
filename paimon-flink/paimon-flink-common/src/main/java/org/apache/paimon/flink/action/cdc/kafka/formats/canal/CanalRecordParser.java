@@ -91,7 +91,7 @@ public class CanalRecordParser extends RecordParser {
         List<String> primaryKeys = extractPrimaryKeys();
         LinkedHashMap<String, String> mySqlFieldTypes = extractFieldTypesFromMySqlType();
         LinkedHashMap<String, DataType> paimonFieldTypes =
-                convertToPaimonFieldTypes(mySqlFieldTypes);
+                convertToPaimonFieldTypes(mySqlFieldTypes, caseSensitive);
 
         String type = extractString(FIELD_TYPE);
         ArrayNode data = JsonSerdeUtil.getNodeAs(root, FIELD_DATA, ArrayNode.class);
@@ -316,11 +316,13 @@ public class CanalRecordParser extends RecordParser {
     }
 
     private LinkedHashMap<String, DataType> convertToPaimonFieldTypes(
-            Map<String, String> mySqlFieldTypes) {
+            Map<String, String> mySqlFieldTypes, boolean caseSensitive) {
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         mySqlFieldTypes.forEach(
                 (name, type) ->
-                        paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type, typeMapping)));
+                        paimonFieldTypes.put(
+                                caseSensitive ? name : name.toLowerCase(),
+                                MySqlTypeUtils.toDataType(type, typeMapping)));
         return paimonFieldTypes;
     }
 }

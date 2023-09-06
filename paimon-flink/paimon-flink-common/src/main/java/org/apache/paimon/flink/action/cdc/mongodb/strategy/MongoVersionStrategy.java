@@ -103,7 +103,7 @@ public interface MongoVersionStrategy {
                                 paimonFieldTypes);
                 break;
             case DYNAMIC:
-                row = parseAndTypeJsonRow(document.toString(), paimonFieldTypes);
+                row = parseAndTypeJsonRow(document.toString(), paimonFieldTypes, caseSensitive);
                 break;
             default:
                 throw new RuntimeException("Unsupported extraction mode: " + mode);
@@ -119,10 +119,12 @@ public interface MongoVersionStrategy {
      * @return A map containing the parsed key-value pairs from the JSON string.
      */
     default Map<String, String> parseAndTypeJsonRow(
-            String evaluate, LinkedHashMap<String, DataType> paimonFieldTypes) {
+            String evaluate,
+            LinkedHashMap<String, DataType> paimonFieldTypes,
+            boolean caseSensitive) {
         Map<String, String> parsedMap = JsonSerdeUtil.parseJsonMap(evaluate, String.class);
         for (String column : parsedMap.keySet()) {
-            paimonFieldTypes.put(column, DataTypes.STRING());
+            paimonFieldTypes.put(caseSensitive ? column : column.toLowerCase(), DataTypes.STRING());
         }
         return extractRow(evaluate);
     }
