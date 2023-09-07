@@ -57,12 +57,12 @@ import org.apache.paimon.options.Options;
 
 public class CreateCatalog {
 
-    public static void createFilesystemCatalog() {
+    public static Catalog createFilesystemCatalog() {
         CatalogContext context = CatalogContext.create(new Path("..."));
-        Catalog catalog = CatalogFactory.createCatalog(context);
+        return CatalogFactory.createCatalog(context);
     }
 
-    public static void createHiveCatalog() {
+    public static Catalog createHiveCatalog() {
         // Paimon Hive catalog relies on Hive jars
         // You should add hive classpath or hive bundled jar.
         Options options = new Options();
@@ -72,7 +72,7 @@ public class CreateCatalog {
         options.set("hive-conf-dir", "...");
         options.set("hadoop-conf-dir", "...");
         CatalogContext context = CatalogContext.create(options);
-        Catalog catalog = CatalogFactory.createCatalog(context);
+        return CatalogFactory.createCatalog(context);
     }
 }
 ```
@@ -83,17 +83,17 @@ You can use the catalog to create databases. The created databases are persisten
 
 ```java
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.fs.Path;
 
 public class CreateDatabase {
 
-     public static void main(String[] args) {
-            try {
-                catalog.createDatabase("my_db", false);
-            } catch (Catalog.DatabaseAlreadyExistException e) {
-                // do something
-            }
+    public static void main(String[] args) {
+        try {
+            Catalog catalog = CreateCatalog.createFilesystemCatalog();
+            catalog.createDatabase("my_db", false);
+        } catch (Catalog.DatabaseAlreadyExistException e) {
+            // do something
         }
+    }
 }
 ```
 
@@ -103,13 +103,13 @@ You can use the catalog to determine whether the database exists
 
 ```java
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.fs.Path;
 
 public class DatabaseExists {
 
-     public static void main(String[] args) {
-             boolean exists = catalog.databaseExists("my_db");
-        }
+    public static void main(String[] args) {
+        Catalog catalog = CreateCatalog.createFilesystemCatalog();
+        boolean exists = catalog.databaseExists("my_db");
+    }
 }
 ```
 
@@ -119,13 +119,15 @@ You can use the catalog to list databases.
 
 ```java
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.fs.Path;
+
+import java.util.List;
 
 public class ListDatabases {
 
-     public static void main(String[] args) {
-            List<String> databases = catalog.listDatabases();
-        }
+    public static void main(String[] args) {
+        Catalog catalog = CreateCatalog.createFilesystemCatalog();
+        List<String> databases = catalog.listDatabases();
+    }
 }
 ```
 
@@ -135,21 +137,19 @@ You can use the catalog to drop databases.
 
 ```java
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.fs.Path;
 
 public class DropDatabase {
 
-     public static void main(String[] args) {
-            try {
-                catalog.dropDatabase("my_db", false, true);
-            } catch (Catalog.DatabaseNotEmptyException e) {
-                // do something
-            } catch (Catalog.DatabaseNotExistException e) {
-                // do something
-            }
+    public static void main(String[] args) {
+        try {
+            Catalog catalog = CreateCatalog.createFilesystemCatalog();
+            catalog.dropDatabase("my_db", false, true);
+        } catch (Catalog.DatabaseNotEmptyException e) {
+            // do something
+        } catch (Catalog.DatabaseNotExistException e) {
+            // do something
         }
+    }
 }
 ```
 
@@ -159,7 +159,6 @@ You can use the catalog to create tables. The created tables are persistence in 
 Next time you can directly obtain these tables.
 
 ```java
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
@@ -169,14 +168,15 @@ public class CreateTable {
 
     public static void main(String[] args) {
         Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.primaryKey("...");
-        schemaBuilder.partitionKeys("...");
-        schemaBuilder.column("f0", DataTypes.INT());
-        schemaBuilder.column("f1", DataTypes.STRING());
+        schemaBuilder.primaryKey("f0", "f1");
+        schemaBuilder.partitionKeys("f1");
+        schemaBuilder.column("f0", DataTypes.STRING());
+        schemaBuilder.column("f1", DataTypes.INT());
         Schema schema = schemaBuilder.build();
 
         Identifier identifier = Identifier.create("my_db", "my_table");
         try {
+            Catalog catalog = CreateCatalog.createFilesystemCatalog();
             catalog.createTable(identifier, schema, false);
         } catch (Catalog.TableAlreadyExistException e) {
             // do something
@@ -192,18 +192,20 @@ public class CreateTable {
 The `Table` interface provides access to the table metadata and tools to read and write table.
 
 ```java
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.Table;
 
 public class GetTable {
 
-    public static void main(String[] args) {
+    public static Table getTable() {
         Identifier identifier = Identifier.create("my_db", "my_table");
         try {
-            Table table = catalog.getTable(identifier);
+            Catalog catalog = CreateCatalog.createFilesystemCatalog();
+            return catalog.getTable(identifier);
         } catch (Catalog.TableNotExistException e) {
             // do something
+            throw new RuntimeException("table not exist");
         }
     }
 }
@@ -214,14 +216,14 @@ public class GetTable {
 You can use the catalog to determine whether the table exists
 
 ```java
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 
 public class TableExists {
 
- public static void main(String[] args) {
+    public static void main(String[] args) {
         Identifier identifier = Identifier.create("my_db", "my_table");
+        Catalog catalog = CreateCatalog.createFilesystemCatalog();
         boolean exists = catalog.tableExists(identifier);
     }
 }
@@ -232,14 +234,16 @@ public class TableExists {
 You can use the catalog to list tables.
 
 ```java
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.catalog.Catalog;
+
+import java.util.List;
 
 public class ListTables {
 
- public static void main(String[] args) {
+    public static void main(String[] args) {
         try {
-            catalog.listTables("my_db");
+            Catalog catalog = CreateCatalog.createFilesystemCatalog();
+            List<String> tables = catalog.listTables("my_db");
         } catch (Catalog.DatabaseNotExistException e) {
             // do something
         }
@@ -252,7 +256,6 @@ public class ListTables {
 You can use the catalog to drop table.
 
 ```java
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 
@@ -261,6 +264,7 @@ public class DropTable {
     public static void main(String[] args) {
         Identifier identifier = Identifier.create("my_db", "my_table");
         try {
+            Catalog catalog = CreateCatalog.createFilesystemCatalog();
             catalog.dropTable(identifier, false);
         } catch (Catalog.TableNotExistException e) {
             // do something
@@ -274,7 +278,6 @@ public class DropTable {
 You can use the catalog to rename a table.
 
 ```java
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 
@@ -284,6 +287,7 @@ public class RenameTable {
         Identifier fromTableIdentifier = Identifier.create("my_db", "my_table");
         Identifier toTableIdentifier = Identifier.create("my_db", "test_table");
         try {
+            Catalog catalog = CreateCatalog.createFilesystemCatalog();
             catalog.renameTable(fromTableIdentifier, toTableIdentifier, false);
         } catch (Catalog.TableAlreadyExistException e) {
             // do something
@@ -305,48 +309,61 @@ You can use the catalog to alter a table, but you need to pay attention to the f
 - Update column to nested row type is not supported.
 
 ```java
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+
 import com.google.common.collect.Lists;
+
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 public class AlterTable {
 
     public static void main(String[] args) {
         Identifier identifier = Identifier.create("my_db", "my_table");
-       
-        Map<String,String> options = new HashMap<>();
+
+        Map<String, String> options = new HashMap<>();
         options.put("bucket", "4");
         options.put("compaction.max.file-num", "40");
-       
-        catalog.createTable(
-            identifier,
-                  new Schema(
-                      Lists.newArrayList(
-                          new DataField(0, "col1", DataTypes.STRING(), "field1"),
-                          new DataField(1, "col2", DataTypes.STRING(), "field2"),
-                          new DataField(2, "col3", DataTypes.STRING(), "field3"),
-                          new DataField(3, "col4", DataTypes.BIGINT(), "field4"),
-                          new DataField(
-                              4,
-                              "col5",
-                              DataTypes.ROW(
-                                  new DataField(5, "f1", DataTypes.STRING(), "f1"),
-                                  new DataField(6, "f2", DataTypes.STRING(), "f2"),
-                                  new DataField(7, "f3", DataTypes.STRING(), "f3")),
-                              "field5"),
-                          new DataField(8, "col6", DataTypes.STRING(), "field6")),
-                      Lists.newArrayList("col1"), // partition keys
-                      Lists.newArrayList("col1", "col2"),  //primary key
-                      options,
-                      "table comment"),
-                  false);
-       
+
+        Catalog catalog = CreateCatalog.createFilesystemCatalog();
+        try {
+            catalog.createTable(
+                identifier,
+                new Schema(
+                    Lists.newArrayList(
+                        new DataField(0, "col1", DataTypes.STRING(), "field1"),
+                        new DataField(1, "col2", DataTypes.STRING(), "field2"),
+                        new DataField(2, "col3", DataTypes.STRING(), "field3"),
+                        new DataField(3, "col4", DataTypes.BIGINT(), "field4"),
+                        new DataField(
+                            4,
+                            "col5",
+                            DataTypes.ROW(
+                                new DataField(
+                                    5, "f1", DataTypes.STRING(), "f1"),
+                                new DataField(
+                                    6, "f2", DataTypes.STRING(), "f2"),
+                                new DataField(
+                                    7, "f3", DataTypes.STRING(), "f3")),
+                            "field5"),
+                        new DataField(8, "col6", DataTypes.STRING(), "field6")),
+                    Lists.newArrayList("col1"), // partition keys
+                    Lists.newArrayList("col1", "col2"), // primary key
+                    options,
+                    "table comment"),
+                false);
+        } catch (Catalog.TableAlreadyExistException e) {
+            // do something
+        } catch (Catalog.DatabaseNotExistException e) {
+            // do something
+        }
+
         // add option
         SchemaChange addOption = SchemaChange.setOption("snapshot.time-retained", "2h");
         // remove option
@@ -355,40 +372,54 @@ public class AlterTable {
         SchemaChange addColumn = SchemaChange.addColumn("col1_after", DataTypes.STRING());
         // add a column after col1
         SchemaChange.Move after = SchemaChange.Move.after("col1_after", "col1");
-        SchemaChange addColumnAfterField = 
+        SchemaChange addColumnAfterField =
             SchemaChange.addColumn("col7", DataTypes.STRING(), "", after);
         // rename column
         SchemaChange renameColumn = SchemaChange.renameColumn("col3", "col3_new_name");
         // drop column
         SchemaChange dropColumn = SchemaChange.dropColumn("col6");
         // update column comment
-        SchemaChange updateColumnComment = SchemaChange.updateColumnComment(new String[]{"col4"}, "col4 field");
+        SchemaChange updateColumnComment =
+            SchemaChange.updateColumnComment(new String[] {"col4"}, "col4 field");
         // update nested column comment
         SchemaChange updateNestedColumnComment =
-        SchemaChange.updateColumnComment(new String[]{"col5", "f1"}, "col5 f1 field");
+            SchemaChange.updateColumnComment(new String[] {"col5", "f1"}, "col5 f1 field");
         // update column type
         SchemaChange updateColumnType = SchemaChange.updateColumnType("col4", DataTypes.DOUBLE());
         // update column position, you need to pass in a parameter of type Move
-        SchemaChange updateColumnPosition = SchemaChange.updateColumnPosition(SchemaChange.Move.first("col4"));
+        SchemaChange updateColumnPosition =
+            SchemaChange.updateColumnPosition(SchemaChange.Move.first("col4"));
         // update column nullability
-        SchemaChange updateColumnNullability = SchemaChange.updateColumnNullability(new String[]{"col4"}, false);
+        SchemaChange updateColumnNullability =
+            SchemaChange.updateColumnNullability(new String[] {"col4"}, false);
         // update nested column nullability
-        SchemaChange updateNestedColumnNullability = 
-            SchemaChange.updateColumnNullability(new String[]{"col5", "f2"}, false);
+        SchemaChange updateNestedColumnNullability =
+            SchemaChange.updateColumnNullability(new String[] {"col5", "f2"}, false);
 
-        SchemaChange[] schemaChanges = new SchemaChange[] {
-            addOption, removeOption, addColumn, addColumnAfterField, renameColumn, dropColumn,
-            updateColumnComment, updateNestedColumnComment, updateColumnType, updateColumnPosition,
-            updateColumnNullability, updateNestedColumnNullability};
+        SchemaChange[] schemaChanges =
+            new SchemaChange[] {
+                addOption,
+                removeOption,
+                addColumn,
+                addColumnAfterField,
+                renameColumn,
+                dropColumn,
+                updateColumnComment,
+                updateNestedColumnComment,
+                updateColumnType,
+                updateColumnPosition,
+                updateColumnNullability,
+                updateNestedColumnNullability
+            };
         try {
             catalog.alterTable(identifier, Arrays.asList(schemaChanges), false);
         } catch (Catalog.TableNotExistException e) {
             // do something
-        } catch (Catalog.TableAlreadyExistException e) {
+        } catch (Catalog.ColumnAlreadyExistException e) {
             // do something
-        } catch (Catalog.DatabaseNotExistException e) {
+        } catch (Catalog.ColumnNotExistException e) {
             // do something
-        } 
+        }
     }
 }
 ```
@@ -417,30 +448,36 @@ The reading is divided into two stages:
 
 ```java
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
 import com.google.common.collect.Lists;
 
-import java.io.IOException;
 import java.util.List;
 
 public class ReadTable {
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         // 1. Create a ReadBuilder and push filter (`withFilter`)
         // and projection (`withProjection`) if necessary
-        // [{"Alice", 12},{"Bob", 5},{"Emily", 18}]
-         PredicateBuilder builder = 
-            new PredicateBuilder(RowType.of(DataTypes.STRING(),DataTypes.INT()));
-         Predicate notNull = builder.isNotNull(0);
-         Predicate greaterOrEqual = builder.greaterOrEqual(1, 12);
+        Table table = GetTable.getTable();
 
-        ReadBuilder readBuilder = table.newReadBuilder()
+        PredicateBuilder builder =
+            new PredicateBuilder(RowType.of(DataTypes.STRING(), DataTypes.INT()));
+        Predicate notNull = builder.isNotNull(0);
+        Predicate greaterOrEqual = builder.greaterOrEqual(1, 12);
+
+        int[] projection = new int[] {0, 1};
+
+        ReadBuilder readBuilder =
+            table.newReadBuilder()
                 .withProjection(projection)
                 .withFilter(Lists.newArrayList(notNull, greaterOrEqual));
 
@@ -452,7 +489,7 @@ public class ReadTable {
         // 4. Read a split in task
         TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);
-        reader.forEachRemaining(ReadTable::readRow);
+        reader.forEachRemaining(System.out::println);
     }
 }
 ```
@@ -466,21 +503,21 @@ The writing is divided into two stages:
    When the commit fails for certain reason, abort unsuccessful commit via CommitMessages. 
 
 ```java
-import java.util.List;
-
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
 
-public class WriteTable {
+import java.util.List;
 
-    public static void main(String[] args) {
+public class BatchWrite {
+    public static void main(String[] args) throws Exception {
         // 1. Create a WriteBuilder (Serializable)
-        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder()
-                .withOverwrite(staticPartition);
+        Table table = GetTable.getTable();
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder().withOverwrite();
 
         // 2. Write records in distributed tasks
         BatchTableWrite write = writeBuilder.newWrite();
@@ -498,7 +535,7 @@ public class WriteTable {
         // 3. Collect all CommitMessages to a global node and commit
         BatchTableCommit commit = writeBuilder.newCommit();
         commit.commit(messages);
-        
+
         // Abort unsuccessful commit to delete data files
         // commit.abort(messages);
     }
@@ -513,24 +550,40 @@ StreamTableScan provides the ability to checkpoint and restore, which can let yo
 during stream reading.
 
 ```java
-import java.io.IOException;
-import java.util.List;
-
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
+import com.google.common.collect.Lists;
+
+import java.util.List;
 
 public class StreamReadTable {
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws Exception {
         // 1. Create a ReadBuilder and push filter (`withFilter`)
         // and projection (`withProjection`) if necessary
-        ReadBuilder readBuilder = table.newReadBuilder()
+        Table table = GetTable.getTable();
+
+        PredicateBuilder builder =
+            new PredicateBuilder(RowType.of(DataTypes.STRING(), DataTypes.INT()));
+        Predicate notNull = builder.isNotNull(0);
+        Predicate greaterOrEqual = builder.greaterOrEqual(1, 12);
+
+        int[] projection = new int[] {0, 1};
+
+        ReadBuilder readBuilder =
+            table.newReadBuilder()
                 .withProjection(projection)
-                .withFilter(filter);
+                .withFilter(Lists.newArrayList(notNull, greaterOrEqual));
 
         // 2. Plan splits in 'Coordinator' (or named 'Driver')
         StreamTableScan scan = readBuilder.newStreamScan();
@@ -539,13 +592,15 @@ public class StreamReadTable {
             // Distribute these splits to different tasks
 
             Long state = scan.checkpoint();
-            // can be restored in scan.restore(state) after failover
-        }
+            // can be restored in scan.restore(state) after fail over
 
-        // 3. Read a split in task
-        TableRead read = readBuilder.newRead();
-        RecordReader<InternalRow> reader = read.createReader(splits);
-        reader.forEachRemaining(row -> System.out.println(row));
+            // 3. Read a split in task
+            TableRead read = readBuilder.newRead();
+            RecordReader<InternalRow> reader = read.createReader(splits);
+            reader.forEachRemaining(System.out::println);
+
+            Thread.sleep(1000);
+        }
     }
 }
 ```
@@ -565,44 +620,53 @@ Key points to achieve exactly-once consistency:
   to exclude the committed messages by commitIdentifier.
 
 ```java
-import java.util.List;
-
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 
+import java.util.List;
+
 public class StreamWriteTable {
 
     public static void main(String[] args) throws Exception {
         // 1. Create a WriteBuilder (Serializable)
+        Table table = GetTable.getTable();
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
 
         // 2. Write records in distributed tasks
         StreamTableWrite write = writeBuilder.newWrite();
         // commitIdentifier like Flink checkpointId
         long commitIdentifier = 0;
+
         while (true) {
+            GenericRow record1 = GenericRow.of(BinaryString.fromString("Alice"), 12);
+            GenericRow record2 = GenericRow.of(BinaryString.fromString("Bob"), 5);
+            GenericRow record3 = GenericRow.of(BinaryString.fromString("Emily"), 18);
             write.write(record1);
             write.write(record2);
             write.write(record3);
-            List<CommitMessage> messages = write.prepareCommit(
-                    false, commitIdentifier);
+            List<CommitMessage> messages = write.prepareCommit(false, commitIdentifier);
             commitIdentifier++;
+
+            // 3. Collect all CommitMessages to a global node and commit
+            StreamTableCommit commit = writeBuilder.newCommit();
+            commit.commit(commitIdentifier, messages);
+
+            // 4. When failure occurs and you're not sure if the commit process is successful,
+            //    you can use `filterAndCommit` to retry the commit process.
+            //    Succeeded commits will be automatically skipped.
+            /*
+            Map<Long, List<CommitMessage>> commitIdentifiersAndMessages = new HashMap<>();
+            commitIdentifiersAndMessages.put(commitIdentifier, messages);
+            commit.filterAndCommit(commitIdentifiersAndMessages);
+            */
+
+            Thread.sleep(1000);
         }
-
-        // 3. Collect all CommitMessages to a global node and commit
-        StreamTableCommit commit = writeBuilder.newCommit();
-        commit.commit(commitIdentifier, messages);
-
-        // 4. When failure occurs and you're not sure if the commit process is successful,
-        //    you can use `filterAndCommit` to retry the commit process.
-        //    Succeeded commits will be automatically skipped.
-        /*
-        Map<Long, List<CommitMessage>> commitIdentifiersAndMessages = new HashMap<>();
-        commitIdentifiersAndMessages.put(commitIdentifier, messages);
-        commit.filterAndCommit(commitIdentifiersAndMessages);
-        */
     }
 }
 ```
@@ -642,5 +706,3 @@ public class StreamWriteTable {
 | <=           | org.apache.paimon.predicate.PredicateBuilder.LessOrEqual     |
 | >            | org.apache.paimon.predicate.PredicateBuilder.GreaterThan     |
 | >=           | org.apache.paimon.predicate.PredicateBuilder.GreaterOrEqual  |
-
-

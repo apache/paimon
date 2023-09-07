@@ -33,9 +33,11 @@ import org.apache.flink.configuration.Configuration;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** The entry point to run benchmark. */
@@ -59,7 +61,7 @@ public class Benchmark {
     public static void main(String[] args) throws Exception {
         if (args.length != 6) {
             throw new RuntimeException(
-                    "Usage: --location /path/to/benchmark --queries q1,q3 --sinks paimon,hudi_merge_on_read");
+                    "Usage: --location /path/to/benchmark --queries q1 --sinks paimon");
         }
 
         Options options = getOptions();
@@ -71,20 +73,41 @@ public class Benchmark {
         String queriesValue = line.getOptionValue(QUERIES.getOpt());
         List<Query> queries = Query.load(location);
         if (!"all".equalsIgnoreCase(queriesValue)) {
-            List<String> wantedQueries =
+            Set<String> wantedQueries =
                     Arrays.stream(queriesValue.split(","))
                             .map(String::trim)
-                            .collect(Collectors.toList());
+                            .collect(Collectors.toSet());
+            Set<String> supportedQueries =
+                    queries.stream().map(Query::name).collect(Collectors.toSet());
+            Set<String> unSupportedQueries = new HashSet<>(wantedQueries);
+            unSupportedQueries.removeAll(supportedQueries);
+            if (!unSupportedQueries.isEmpty()) {
+                throw new RuntimeException(
+                        "Unsupported queries: "
+                                + unSupportedQueries
+                                + ", current supported queries are "
+                                + supportedQueries);
+            }
             queries.removeIf(q -> !wantedQueries.contains(q.name()));
         }
 
         String sinksValue = line.getOptionValue(SINKS.getOpt());
         List<Sink> sinks = Sink.load(location);
         if (!"all".equalsIgnoreCase(sinksValue)) {
-            List<String> wantedSinks =
+            Set<String> wantedSinks =
                     Arrays.stream(sinksValue.split(","))
                             .map(String::trim)
-                            .collect(Collectors.toList());
+                            .collect(Collectors.toSet());
+            Set<String> supportedSinks = sinks.stream().map(Sink::name).collect(Collectors.toSet());
+            Set<String> unSupportedSinks = new HashSet<>(wantedSinks);
+            unSupportedSinks.removeAll(supportedSinks);
+            if (!unSupportedSinks.isEmpty()) {
+                throw new RuntimeException(
+                        "Unsupported sinks: "
+                                + unSupportedSinks
+                                + ", current supported sinks are "
+                                + supportedSinks);
+            }
             sinks.removeIf(s -> !wantedSinks.contains(s.name()));
         }
 
@@ -212,6 +235,6 @@ public class Benchmark {
             }
         }
         builder.append(separator);
-        System.err.println(builder.toString());
+        System.err.println(builder);
     }
 }
