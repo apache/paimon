@@ -34,35 +34,17 @@ Paimon currently supports Trino 358 and above.
 
 ## Preparing Paimon Jar File
 
-{{< stable >}}
-
 Download the jar file with corresponding version.
-
-| Version       | Jar                                                                                                                                                                  |
-|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [358, 368)    | [paimon-trino-358-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-358/{{< version >}}/paimon-trino-358-{{< version >}}.jar) |
-| [368, 369)    | [paimon-trino-368-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-368/{{< version >}}/paimon-trino-368-{{< version >}}.jar) |
-| [369, 370)    | [paimon-trino-369-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-369/{{< version >}}/paimon-trino-369-{{< version >}}.jar) |
-| [370, 388)    | [paimon-trino-370-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-370/{{< version >}}/paimon-trino-370-{{< version >}}.jar) |
-| [388, 393)    | [paimon-trino-388-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-388/{{< version >}}/paimon-trino-388-{{< version >}}.jar) |
-| [393, 422]    | [paimon-trino-393-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-393/{{< version >}}/paimon-trino-393-{{< version >}}.jar) |
-| [422, latest] | [paimon-trino-422-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-422/{{< version >}}/paimon-trino-422-{{< version >}}.jar) |
-
-{{< /stable >}}
-
-{{< unstable >}}
 
 | Version    | Jar                                                                                                                                 |
 |------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| [358, 368) | [paimon-trino-358-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-358/{{< version >}}/) |
-| [368, 369) | [paimon-trino-368-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-368/{{< version >}}/) |
-| [369, 370) | [paimon-trino-369-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-369/{{< version >}}/) |
-| [370, 388) | [paimon-trino-370-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-370/{{< version >}}/) |
-| [388, 393) | [paimon-trino-388-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-388/{{< version >}}/) |
-| [393, 422] | [paimon-trino-393-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-393/{{< version >}}/) |
-| [422, latest] | [paimon-trino-422-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
-
-{{< /unstable >}}
+| [358, 368) | [paimon-trino-358-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-358/0.5-SNAPSHOT/) |
+| [368, 369) | [paimon-trino-368-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-368/0.5-SNAPSHOT/) |
+| [369, 370) | [paimon-trino-369-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-369/0.5-SNAPSHOT/) |
+| [370, 388) | [paimon-trino-370-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-370/0.5-SNAPSHOT/) |
+| [388, 393) | [paimon-trino-388-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-388/0.5-SNAPSHOT/) |
+| [393, 422] | [paimon-trino-393-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-393/0.5-SNAPSHOT/) |
+| [422, latest] | [paimon-trino-422-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/0.5-SNAPSHOT/) |
 
 You can also manually build a bundled jar from the source code. However, there are a few preliminary steps that need to be taken before compiling:
 

@@ -82,17 +82,17 @@ This documentation is a guide for downloading Paimon Jars.
 | Hive 2.2         | [paimon-hive-connector-2.2-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.2/{{< version >}}/paimon-hive-connector-2.2-{{< version >}}.jar)                         |
 | Hive 2.1         | [paimon-hive-connector-2.1-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1/{{< version >}}/paimon-hive-connector-2.1-{{< version >}}.jar)                         |
 | Hive 2.1-cdh-6.3 | [paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-hive-connector-2.1-cdh-6.3/{{< version >}}/paimon-hive-connector-2.1-cdh-6.3-{{< version >}}.jar) |
-| Presto 0.236     | [paimon-presto-0.236-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}.jar)                                           |
-| Presto 0.268     | [paimon-presto-0.268-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}.jar)                                           |
-| Presto 0.273     | [paimon-presto-0.273-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}.jar)                                           |
-| Presto SQL 332   | [paimon-prestosql-332-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-prestosql-332/{{< version >}}/paimon-prestosql-332-{{< version >}}.jar)                                        |
-| Trino 358        | [paimon-trino-358-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-358/{{< version >}}/paimon-trino-358-{{< version >}}.jar)                                                    |
-| Trino 368        | [paimon-trino-368-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-368/{{< version >}}/paimon-trino-368-{{< version >}}.jar)                                                    |
-| Trino 369        | [paimon-trino-369-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-369/{{< version >}}/paimon-trino-369-{{< version >}}.jar)                                                    |
-| Trino 370        | [paimon-trino-370-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-370/{{< version >}}/paimon-trino-370-{{< version >}}.jar)                                                    |
-| Trino 388        | [paimon-trino-388-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-388/{{< version >}}/paimon-trino-388-{{< version >}}.jar)                                                    |
-| Trino 393        | [paimon-trino-393-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-393/{{< version >}}/paimon-trino-393-{{< version >}}.jar)                                                    |
-| Trino 422        | [paimon-trino-422-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-trino-422/{{< version >}}/paimon-trino-422-{{< version >}}.jar)                                                    |
+| Presto [0.236, 0.268) | [paimon-presto-0.236-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/0.5-SNAPSHOT/) |
+| Presto [0.268, 0.273) | [paimon-presto-0.268-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/0.5-SNAPSHOT/) |
+| Presto [0.273, latest] | [paimon-presto-0.273-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/0.5-SNAPSHOT/) |
+| Presto SQL 332  | [paimon-prestosql-332-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-prestosql-332/0.5-SNAPSHOT/)                           |
+| Trino [358, 368) | [paimon-trino-358-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-358/0.5-SNAPSHOT/) |
+| Trino [368, 369) | [paimon-trino-368-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-368/0.5-SNAPSHOT/) |
+| Trino [369, 370) | [paimon-trino-369-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-369/0.5-SNAPSHOT/) |
+| Trino [370, 388) | [paimon-trino-370-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-370/0.5-SNAPSHOT/) |
+| Trino [388, 393) | [paimon-trino-388-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-388/0.5-SNAPSHOT/) |
+| Trino [393, 422] | [paimon-trino-393-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-393/0.5-SNAPSHOT/) |
+| Trino [422, latest] | [paimon-trino-422-0.5-SNAPSHOT.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/0.5-SNAPSHOT/) |
 
 {{< /stable >}}
 
