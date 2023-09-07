@@ -69,12 +69,12 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testOptionsChange() throws Exception {
-        final String topic = "test_options_change";
+    public void testTableOptionsChange() throws Exception {
+        final String topic = "test_table_options_change";
         createTestTopic(topic, 1, 1);
 
         // ---------- Write the Canal json into Kafka -------------------
-        writeRecordsToKafka(topic, readLines("kafka/canal/table/tostring/canal-data-1.txt"));
+        writeRecordsToKafka(topic, readLines("kafka/canal/table/optionschange/canal-data-1.txt"));
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "canal-json");
@@ -83,12 +83,14 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         tableConfig.put("bucket", "1");
         tableConfig.put("sink.parallelism", "1");
 
-        KafkaSyncDatabaseAction action1 =
-                syncDatabaseActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
+        KafkaSyncTableAction action1 =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
         JobClient jobClient = runActionWithDefaultEnv(action1);
 
         waitingTables(tableName);
         jobClient.cancel();
+
+        writeRecordsToKafka(topic, readLines("kafka/canal/table/optionschange/canal-data-2.txt"));
 
         tableConfig.put("sink.savepoint.auto-tag", "true");
         tableConfig.put("tag.num-retained-max", "5");
@@ -100,8 +102,8 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         tableConfig.put("snapshot.num-retained.max", "10");
         tableConfig.put("changelog-producer", "input");
 
-        KafkaSyncDatabaseAction action2 =
-                syncDatabaseActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
+        KafkaSyncTableAction action2 =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
         runActionWithDefaultEnv(action2);
 
         FileStoreTable table = getFileStoreTable(tableName);
@@ -112,7 +114,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testNewlyAddedTablesOptionsChange() throws Exception {
-        final String topic = "test_options_change";
+        final String topic = "test_database_options_change";
         createTestTopic(topic, 1, 1);
 
         // ---------- Write the Canal json into Kafka -------------------

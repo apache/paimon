@@ -110,10 +110,11 @@ public class TagAutoCreation {
             Snapshot lastTag = tags.lastKey();
             this.nextSnapshot = lastTag.id() + 1;
             LocalDateTime time;
+            String lastTagValue = tags.get(lastTag);
             if (periodHandler instanceof DailyTagPeriodHandler) {
-                time = periodHandler.tagToTime(tags.get(lastTag).split(" ")[0]);
+                time = periodHandler.tagToTime(lastTagValue.split(" ")[0]);
             } else {
-                time = periodHandler.tagToTime(tags.get(lastTag));
+                time = periodHandler.tagToTime(lastTagValue);
             }
             this.nextTag = periodHandler.nextTagTime(time);
         }
