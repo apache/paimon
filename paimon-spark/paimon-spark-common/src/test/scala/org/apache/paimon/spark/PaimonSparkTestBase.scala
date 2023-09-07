@@ -69,6 +69,10 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     spark.sql(s"DROP TABLE IF EXISTS $tableName0")
   }
 
+  protected def withTempDirs(f: (File, File) => Unit): Unit = {
+    withTempDir(file1 => withTempDir(file2 => f(file1, file2)))
+  }
+
   override def test(testName: String, testTags: Tag*)(testFun: => Any)(implicit
       pos: Position): Unit = {
     println(testName)

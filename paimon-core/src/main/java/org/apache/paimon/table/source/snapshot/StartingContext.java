@@ -43,5 +43,5 @@ public class StartingContext {
         return this.scanFullSnapshot;
     }
 
-    public static final StartingContext EMPTY = new StartingContext(0L, false);
+    public static final StartingContext EMPTY = new StartingContext(1L, false);
 }

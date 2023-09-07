@@ -335,8 +335,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public void restore(@Nullable Long nextSnapshotId, ScanMode scanMode) {
-            streamScan.restore(nextSnapshotId, scanMode);
+        public void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot) {
+            streamScan.restore(nextSnapshotId, scanAllSnapshot);
         }
 
         @Override
