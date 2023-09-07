@@ -39,6 +39,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -54,7 +55,9 @@ import org.apache.flink.table.plan.stats.TableStats;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -219,7 +222,14 @@ public class DataTableSource extends FlinkTableSource {
 
     private DataStream<RowData> configureSource(
             FlinkSourceBuilder sourceBuilder, StreamExecutionEnvironment env) {
-        Options options = Options.fromMap(this.table.options());
+        Map<String, String> tableOptions = new HashMap<>(this.table.options());
+        Map<String, String> envOptions = ((Configuration) env.getConfiguration()).toMap();
+        if (envOptions.containsKey(FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key())) {
+            tableOptions.put(
+                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key(),
+                    envOptions.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key()));
+        }
+        Options options = Options.fromMap(tableOptions);
         Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
         if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
             if (streaming) {
