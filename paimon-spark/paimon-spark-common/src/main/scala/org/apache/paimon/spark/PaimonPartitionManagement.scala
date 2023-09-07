@@ -17,11 +17,9 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.operation.FileStoreCommit
-import org.apache.paimon.table.{AbstractFileStoreTable, Table}
+import org.apache.paimon.table.AbstractFileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
-import org.apache.paimon.table.source.TableScan
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{FileStorePathFactory, RowDataPartitionComputer}
 
@@ -30,8 +28,8 @@ import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util
 import java.util.{Collections, UUID}
+import java.util.{Map => JMap}
 
 import scala.collection.JavaConverters._
 
@@ -75,11 +73,11 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
 
   override def replacePartitionMetadata(
       ident: InternalRow,
-      properties: util.Map[String, String]): Unit = {
+      properties: JMap[String, String]): Unit = {
     throw new UnsupportedOperationException("Replace partition is not supported")
   }
 
-  override def loadPartitionMetadata(ident: InternalRow): util.Map[String, String] = {
+  override def loadPartitionMetadata(ident: InternalRow): JMap[String, String] = {
     throw new UnsupportedOperationException("Load partition is not supported")
   }
 
@@ -123,7 +121,7 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
       .toArray
   }
 
-  override def createPartition(ident: InternalRow, properties: util.Map[String, String]): Unit = {
+  override def createPartition(ident: InternalRow, properties: JMap[String, String]): Unit = {
     throw new UnsupportedOperationException("Create partition is not supported")
   }
 }

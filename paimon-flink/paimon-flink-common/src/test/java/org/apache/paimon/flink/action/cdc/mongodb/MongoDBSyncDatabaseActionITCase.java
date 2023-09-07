@@ -18,6 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.mysql.TestCaseInsensitiveCatalogFactory;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -26,10 +30,12 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -170,6 +176,68 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
                             DataTypes.STRING()
                         },
                         new String[] {"_id", "kind", "etag", "pageInfo", "items"});
+        List<String> primaryKeys2 = Collections.singletonList("_id");
+        List<String> expected2 =
+                Arrays.asList(
+                        "+I[610000000000000000000101, youtube#videoListResponse, \\\"79S54kzisD_9SOTfQLu_0TVQSpY/mYlS4-ghMGhc1wTFCwoQl3IYDZc\\\", {\"totalResults\":1,\"resultsPerPage\":1}, [{\"kind\":\"youtube#video\",\"etag\":\"\\\\\\\"79S54kzisD_9SOTfQLu_0TVQSpY/A4foLs-VO317Po_ulY6b5mSimZA\\\\\\\"\",\"id\":\"wHkPb68dxEw\",\"statistics\":{\"viewCount\":\"9211\",\"likeCount\":\"79\",\"dislikeCount\":\"11\",\"favoriteCount\":\"0\",\"commentCount\":\"29\"},\"topicDetails\":{\"topicIds\":[\"/m/02mjmr\"],\"relevantTopicIds\":[\"/m/0cnfvd\",\"/m/01jdpf\"]}}]]",
+                        "+I[610000000000000000000102, youtube#videoListResponse, \\\"79S54kzisD_9SOTfQLu_0TVQSpY/mYlS4-ghMGhc1wTFCwoQl3IYDZc\\\", page, [{\"kind\":\"youtube#video\",\"etag\":\"\\\\\\\"79S54kzisD_9SOTfQLu_0TVQSpY/A4foLs-VO317Po_ulY6b5mSimZA\\\\\\\"\",\"id\":\"wHkPb68dxEw\",\"statistics\":{\"viewCount\":\"9211\",\"likeCount\":\"79\",\"dislikeCount\":\"11\",\"favoriteCount\":\"0\",\"commentCount\":\"29\"},\"topicDetails\":{\"topicIds\":[\"/m/02mjmr\"],\"relevantTopicIds\":[\"/m/0cnfvd\",\"/m/01jdpf\"]}}]]",
+                        "+I[610000000000000000000103, youtube#videoListResponse, \\\"79S54kzisD_9SOTfQLu_0TVQSpY/mYlS4-ghMGhc1wTFCwoQl3IYDZc\\\", {\"pagehit\":{\"kind\":\"youtube#video\"},\"totalResults\":1,\"resultsPerPage\":1}, [{\"kind\":\"youtube#video\",\"etag\":\"\\\\\\\"79S54kzisD_9SOTfQLu_0TVQSpY/A4foLs-VO317Po_ulY6b5mSimZA\\\\\\\"\",\"id\":\"wHkPb68dxEw\",\"statistics\":{\"viewCount\":\"9211\",\"likeCount\":\"79\",\"dislikeCount\":\"11\",\"favoriteCount\":\"0\",\"commentCount\":\"29\"},\"topicDetails\":{\"topicIds\":[\"/m/02mjmr\"],\"relevantTopicIds\":[\"/m/0cnfvd\",\"/m/01jdpf\"]}}]]");
+        waitForResult(expected2, table2, rowType2, primaryKeys2);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testDynamicTableCreationInMongoDB() throws Exception {
+        catalog =
+                new TestCaseInsensitiveCatalogFactory()
+                        .createCatalog(CatalogContext.create(new Path(warehouse)));
+        String dbName = database + UUID.randomUUID();
+        writeRecordsToMongoDB("test-data-5", dbName, "database");
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", dbName);
+        MongoDBSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        Field catalogField = ActionBase.class.getDeclaredField("catalog");
+        catalogField.setAccessible(true);
+        Object newCatalog = catalog;
+        catalogField.set(action, newCatalog);
+        runActionWithDefaultEnv(action);
+
+        waitingTables("t3");
+        FileStoreTable table1 = getFileStoreTable("t3");
+        writeRecordsToMongoDB("test-data-6", dbName, "database");
+        waitingTables("t4");
+        FileStoreTable table2 = getFileStoreTable("t4");
+
+        RowType rowType1 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"_id", "country", "languages", "religions"});
+        List<String> primaryKeys1 = Collections.singletonList("_id");
+        List<String> expected1 =
+                Arrays.asList(
+                        "+I[610000000000000000000101, Switzerland, Italian, {\"f\":\"v\",\"n\":null}]",
+                        "+I[610000000000000000000102, Switzerland, Italian, ]",
+                        "+I[610000000000000000000103, Switzerland, [\"Italian\"], ]");
+        waitForResult(expected1, table1, rowType1, primaryKeys1);
+
+        RowType rowType2 =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"_id", "kind", "etag", "pageinfo", "items"});
         List<String> primaryKeys2 = Collections.singletonList("_id");
         List<String> expected2 =
                 Arrays.asList(

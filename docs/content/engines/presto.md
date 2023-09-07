@@ -43,6 +43,7 @@ Download the jar file with corresponding version.
 | [0.236, 0.268) | [paimon-presto-0.236-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}.jar) |
 | [0.268, 0.273) | [paimon-presto-0.268-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}.jar) |
 | [0.273, latest] | [paimon-presto-0.273-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}.jar) |
+| Presto SQL 332  | [paimon-prestosql-332-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-prestosql-332/{{< version >}}/paimon-prestosql-332-{{< version >}}.jar)|
 
 {{< /stable >}}
 
@@ -53,6 +54,7 @@ Download the jar file with corresponding version.
 | [0.236, 0.268) | [paimon-presto-0.236-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/{{< version >}}/) |
 | [0.268, 0.273) | [paimon-presto-0.268-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/) |
 | [0.273, latest] | [paimon-presto-0.273-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/) |
+| Presto SQL 332  | [paimon-prestosql-332-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-prestosql-332/{{< version >}}/)                           |
 
 {{< /unstable >}}
 

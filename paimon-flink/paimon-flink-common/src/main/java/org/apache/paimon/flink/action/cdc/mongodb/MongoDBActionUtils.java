@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
@@ -161,6 +162,7 @@ public class MongoDBActionUtils {
     static Schema buildPaimonSchema(
             MongodbSchema mongodbSchema,
             List<String> specifiedPartitionKeys,
+            List<ComputedColumn> computedColumns,
             Map<String, String> tableConfig,
             boolean caseSensitive) {
         LinkedHashMap<String, DataType> sourceColumns =
@@ -172,7 +174,7 @@ public class MongoDBActionUtils {
         return CdcActionCommonUtils.buildPaimonSchema(
                 specifiedPartitionKeys,
                 Lists.newArrayList(PRIMARY_KEY),
-                Collections.emptyList(),
+                computedColumns,
                 tableConfig,
                 sourceColumns,
                 null,

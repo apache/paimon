@@ -25,7 +25,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.io.TempDir;
 
 /** ITCase for spark writer with kryo serializer. */
-public class SparkWriteWIthKyroITCase extends SparkWriteITCase {
+public class SparkWriteWithKyroITCase extends SparkWriteITCase {
 
     @BeforeAll
     @Override

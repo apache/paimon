@@ -263,15 +263,17 @@ By specifying `'merge-engine' = 'first-row'`, users can keep the first row of th
 2. You can not specify `sequence.field`.
 3. Not accept `DELETE` and `UPDATE_BEFORE` message.
 
+This is of great help in replacing log deduplication in streaming computation.
+
 ## Changelog Producers
 
 Streaming queries will continuously produce the latest changes. These changes can come from the underlying table files or from an [external log system]({{< ref "concepts/external-log-systems" >}}) like Kafka. Compared to the external log system, changes from table files have lower cost but higher latency (depending on how often snapshots are created).
 
-By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from files.
+By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from table files.
 
 {{< hint info >}}
 
-The `changelog-producer` table property only affects changelog from files. It does not affect the external log system.
+The `changelog-producer` table property only affects changelog from table files. It does not affect the external log system.
 
 {{< /hint >}}
 
@@ -341,6 +343,9 @@ Lookup will cache data on the memory and local disk, you can use the following o
 Lookup changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
 changelog for the same record.
 
+(Note: Please increase `'execution.checkpointing.max-concurrent-checkpoints'` Flink configuration, this is very
+important for performance).
+
 ### Full Compaction
 
 If you think the resource consumption of 'lookup' is too large, you can consider using 'full-compaction' changelog producer,
@@ -360,6 +365,9 @@ Full compaction changelog producer can produce complete changelog for any type o
 
 Full-compaction changelog-producer supports `changelog-producer.row-deduplicate` to avoid generating -U, +U
 changelog for the same record.
+
+(Note: Please increase `'execution.checkpointing.max-concurrent-checkpoints'` Flink configuration, this is very
+important for performance).
 
 ## Sequence Field
 

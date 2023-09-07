@@ -58,9 +58,9 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         long timestamp = snapshotManager.snapshot(3).timeMillis();
 
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(timestamp);
+                new ContinuousFromTimestampStartingScanner(snapshotManager, timestamp);
         StartingScanner.NextSnapshot result =
-                (StartingScanner.NextSnapshot) scanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(3);
 
         write.close();
@@ -71,9 +71,9 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(System.currentTimeMillis());
-        assertThat(scanner.scan(snapshotManager, snapshotReader))
-                .isInstanceOf(StartingScanner.NoSnapshot.class);
+                new ContinuousFromTimestampStartingScanner(
+                        snapshotManager, System.currentTimeMillis());
+        assertThat(scanner.scan(snapshotReader)).isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 
     @Test
@@ -92,9 +92,9 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         long timestamp = snapshotManager.snapshot(1).timeMillis();
 
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(timestamp);
+                new ContinuousFromTimestampStartingScanner(snapshotManager, timestamp);
         StartingScanner.NextSnapshot result =
-                (StartingScanner.NextSnapshot) scanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         // next snapshot
         assertThat(result.nextSnapshotId()).isEqualTo(1);
 

@@ -320,7 +320,7 @@ All Hive's data types are available in package `org.apache.hadoop.hive.serde2.ty
       <td>true</td>
     </tr>
     <tr>
-      <td><code>BaseCharTypeInfo("char(%d)")</code></td>
+      <td><code>CharTypeInfo(length)</code></td>
       <td><code>CharType(length)</code></td>
       <td>true</td>
     </tr>
@@ -330,7 +330,7 @@ All Hive's data types are available in package `org.apache.hadoop.hive.serde2.ty
       <td>true</td>
     </tr>
     <tr>
-      <td><code>BaseCharTypeInfo("varchar(%d)")</code></td>
+      <td><code>VarcharTypeInfo(length)</code></td>
       <td><code>VarCharType(length), length is less than VarCharType.MAX_LENGTH</code></td>
       <td>true</td>
     </tr>
@@ -340,17 +340,17 @@ All Hive's data types are available in package `org.apache.hadoop.hive.serde2.ty
       <td>true</td>
     </tr>
     <tr>
-      <td><code>TimestampType</code></td>
+      <td><code>PrimitiveTypeInfo("timestamp")</code></td>
       <td><code>TimestampType</code></td>
       <td>true</td>
     </tr>
     <tr>
-      <td><code>DecimalTypeInfo("decimal(%d, %d)")</code></td>
+      <td><code>DecimalTypeInfo(precision, scale)</code></td>
       <td><code>DecimalType(precision, scale)</code></td>
       <td>true</td>
     </tr>
     <tr>
-      <td><code>DecimalTypeInfo("binary")</code></td>
+      <td><code>PrimitiveTypeInfo("binary")</code></td>
       <td><code>VarBinaryType</code>, <code>BinaryType</code></td>
       <td>true</td>
     </tr>

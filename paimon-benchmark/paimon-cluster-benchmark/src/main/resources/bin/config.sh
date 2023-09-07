@@ -47,7 +47,7 @@ export BENCHMARK_LOG_DIR
 export BENCHMARK_CONF_DIR
 export BENCHMARK_BIN_DIR
 
-# Auxilliary function which extracts the name of host from a line which
+# Auxiliary function which extracts the name of host from a line which
 # also potentially includes topology information and the taskManager type
 extractHostName() {
     # handle comments: extract first part of string (before first # character)

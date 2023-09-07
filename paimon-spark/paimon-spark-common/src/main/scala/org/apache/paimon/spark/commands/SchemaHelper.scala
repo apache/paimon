@@ -26,13 +26,13 @@ import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-trait SchemaHelper {
+trait SchemaHelper extends WithFileStoreTable {
 
   val originTable: FileStoreTable
 
   protected var newTable: Option[FileStoreTable] = None
 
-  def table: FileStoreTable = newTable.getOrElse(originTable)
+  override def table: FileStoreTable = newTable.getOrElse(originTable)
 
   def tableSchema: TableSchema = table.schema
 

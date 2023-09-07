@@ -45,6 +45,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -308,6 +309,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public StartingContext startingContext() {
+            return streamScan.startingContext();
+        }
+
+        @Override
         public RichPlan plan() {
             return streamScan.plan();
         }
@@ -329,8 +335,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public void restore(@Nullable Long nextSnapshotId, ScanMode scanMode) {
-            streamScan.restore(nextSnapshotId, scanMode);
+        public void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot) {
+            streamScan.restore(nextSnapshotId, scanAllSnapshot);
         }
 
         @Override

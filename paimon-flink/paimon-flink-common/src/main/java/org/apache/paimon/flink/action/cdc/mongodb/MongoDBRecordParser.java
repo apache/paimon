@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.mongodb.strategy.Mongo4VersionStrategy;
 import org.apache.paimon.flink.action.cdc.mongodb.strategy.MongoVersionStrategy;
@@ -29,6 +30,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
+
+import java.util.Collections;
+import java.util.List;
 
 /**
  * A parser for MongoDB Debezium JSON strings, converting them into a list of {@link
@@ -55,22 +59,27 @@ public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMulti
     private static final String FIELD_TABLE = "coll";
     private static final String FIELD_NAMESPACE = "ns";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
+    private final List<ComputedColumn> computedColumns;
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
     private final Configuration mongodbConfig;
     private JsonNode root;
 
-    public MongoDBRecordParser(boolean caseSensitive, Configuration mongodbConfig) {
-        this(caseSensitive, new TableNameConverter(caseSensitive), mongodbConfig);
+    public MongoDBRecordParser(
+            boolean caseSensitive,
+            TableNameConverter tableNameConverter,
+            Configuration mongodbConfig) {
+        this(caseSensitive, tableNameConverter, Collections.emptyList(), mongodbConfig);
     }
 
     public MongoDBRecordParser(
             boolean caseSensitive,
             TableNameConverter tableNameConverter,
+            List<ComputedColumn> computedColumns,
             Configuration mongodbConfig) {
         this.caseSensitive = caseSensitive;
         this.tableNameConverter = tableNameConverter;
+        this.computedColumns = computedColumns;
         this.mongodbConfig = mongodbConfig;
     }
 
@@ -81,7 +90,7 @@ public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMulti
         String collection = tableNameConverter.convert(extractString(FIELD_TABLE));
         MongoVersionStrategy versionStrategy =
                 VersionStrategyFactory.create(
-                        databaseName, collection, caseSensitive, mongodbConfig);
+                        databaseName, collection, caseSensitive, computedColumns, mongodbConfig);
         versionStrategy.extractRecords(root).forEach(out::collect);
     }
 
@@ -94,13 +103,14 @@ public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMulti
                 String databaseName,
                 String collection,
                 boolean caseSensitive,
+                List<ComputedColumn> computedColumns,
                 Configuration mongodbConfig) {
             // TODO: When MongoDB CDC is upgraded to 2.5, uncomment the version check logic
             // if (mongodbVersion >= 6) {
             //     return new Mongo6VersionStrategy(databaseName, collection, caseSensitive);
             // }
             return new Mongo4VersionStrategy(
-                    databaseName, collection, caseSensitive, mongodbConfig);
+                    databaseName, collection, caseSensitive, computedColumns, mongodbConfig);
         }
     }
 }
