@@ -44,7 +44,7 @@ public interface StreamTableScan extends TableScan, Restorable<Long> {
     void restore(@Nullable Long nextSnapshotId);
 
     /** Restore from checkpoint next snapshot id with scan kind. */
-    void restore(@Nullable Long nextSnapshotId, ScanMode scanMode);
+    void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot);
 
     /** Checkpoint to return next snapshot id. */
     @Nullable

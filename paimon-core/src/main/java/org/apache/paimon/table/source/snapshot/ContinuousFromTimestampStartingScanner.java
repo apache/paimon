@@ -43,15 +43,6 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
     }
 
     @Override
-    public StartingContext startingContext() {
-        if (startingSnapshotId == null) {
-            return StartingContext.EMPTY;
-        } else {
-            return new StartingContext(startingSnapshotId + 1, false);
-        }
-    }
-
-    @Override
     public Result scan(SnapshotReader snapshotReader) {
         Long startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
         if (startingSnapshotId == null) {

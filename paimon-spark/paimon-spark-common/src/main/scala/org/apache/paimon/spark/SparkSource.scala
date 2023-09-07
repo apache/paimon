@@ -32,7 +32,7 @@ import org.apache.spark.sql.streaming.OutputMode
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.sql.util.CaseInsensitiveStringMap
 
-import java.util
+import java.util.{Map => JMap}
 
 import scala.collection.JavaConverters._
 
@@ -61,7 +61,7 @@ class SparkSource
   override def getTable(
       schema: StructType,
       partitioning: Array[Transform],
-      properties: util.Map[String, String]): Table = {
+      properties: JMap[String, String]): Table = {
     new SparkTable(loadTable(properties))
   }
 
@@ -76,7 +76,7 @@ class SparkSource
     SparkSource.toBaseRelation(table, sqlContext)
   }
 
-  private def loadTable(options: util.Map[String, String]): FileStoreTable = {
+  private def loadTable(options: JMap[String, String]): FileStoreTable = {
     val catalogContext = CatalogContext.create(
       Options.fromMap(options),
       SparkSession.active.sessionState.newHadoopConf())

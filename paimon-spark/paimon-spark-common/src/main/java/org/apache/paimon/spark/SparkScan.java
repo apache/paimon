@@ -18,6 +18,9 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.sources.PaimonMicroBatchStream;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 
@@ -27,6 +30,7 @@ import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 import org.apache.spark.sql.connector.read.Scan;
 import org.apache.spark.sql.connector.read.Statistics;
 import org.apache.spark.sql.connector.read.SupportsReportStatistics;
+import org.apache.spark.sql.connector.read.streaming.MicroBatchStream;
 import org.apache.spark.sql.types.StructType;
 
 import java.util.List;
@@ -39,11 +43,13 @@ import java.util.OptionalLong;
  */
 public class SparkScan implements Scan, SupportsReportStatistics {
 
+    private final Table table;
     private final ReadBuilder readBuilder;
 
     private List<Split> splits;
 
-    public SparkScan(ReadBuilder readBuilder) {
+    public SparkScan(Table table, ReadBuilder readBuilder) {
+        this.table = table;
         this.readBuilder = readBuilder;
     }
 
@@ -73,6 +79,11 @@ public class SparkScan implements Scan, SupportsReportStatistics {
                 return new SparkReaderFactory(readBuilder);
             }
         };
+    }
+
+    @Override
+    public MicroBatchStream toMicroBatchStream(String checkpointLocation) {
+        return new PaimonMicroBatchStream((FileStoreTable) table, readBuilder, checkpointLocation);
     }
 
     protected List<Split> splits() {
