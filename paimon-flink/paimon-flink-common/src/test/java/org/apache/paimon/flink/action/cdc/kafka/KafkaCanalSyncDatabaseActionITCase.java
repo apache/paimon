@@ -352,6 +352,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     private void testTableAffixImpl(List<String> topics, boolean writeOne, int fileCount)
             throws Exception {
+        waitingTables("test_prefix_t1_test_suffix", "test_prefix_t2_test_suffix");
+
         FileStoreTable table1 = getFileStoreTable("test_prefix_t1_test_suffix");
         FileStoreTable table2 = getFileStoreTable("test_prefix_t2_test_suffix");
 
