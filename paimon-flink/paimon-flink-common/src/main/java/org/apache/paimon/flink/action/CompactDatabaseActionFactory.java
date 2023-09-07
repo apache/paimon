@@ -39,9 +39,9 @@ public class CompactDatabaseActionFactory implements ActionFactory {
                         getRequiredValue(params, "warehouse"),
                         optionalConfigMap(params, "catalog-conf"));
 
-        action.includingtDatabases(params.get("including-databases"))
-                .includingtTables(params.get("including-tables"))
-                .excludingtTables(params.get("excluding-tables"))
+        action.includingDatabases(params.get("including-databases"))
+                .includingTables(params.get("including-tables"))
+                .excludingTables(params.get("excluding-tables"))
                 .withDatabaseCompactMode(params.get("mode"))
                 .withCompactOptions(optionalConfigMap(params, "compact-conf"));
 

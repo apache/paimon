@@ -39,7 +39,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.compactOptions;
-import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactionTable;
+import static org.apache.paimon.flink.utils.MultiTablesCompactorUtil.shouldCompactTable;
 
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
@@ -123,7 +123,7 @@ public abstract class MultiTablesCompactorSourceFunction
                 List<String> tables = catalog.listTables(databaseName);
                 for (String tableName : tables) {
                     Identifier identifier = Identifier.create(databaseName, tableName);
-                    if (shouldCompactionTable(identifier, includingPattern, excludingPattern)
+                    if (shouldCompactTable(identifier, includingPattern, excludingPattern)
                             && (!tablesMap.containsKey(identifier))) {
                         Table table = catalog.getTable(identifier);
                         if (!(table instanceof FileStoreTable)) {

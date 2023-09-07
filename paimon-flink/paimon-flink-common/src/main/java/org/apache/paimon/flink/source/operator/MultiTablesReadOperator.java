@@ -29,6 +29,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.system.BucketsTable;
 import org.apache.paimon.utils.CloseableIterator;
+import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -102,19 +103,16 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         if (table == null) {
             try {
                 Table newTable = catalog.getTable(tableId);
-                if (!(newTable instanceof FileStoreTable)) {
-                    LOG.error(
-                            String.format(
-                                    "Only FileStoreTable supports compact action. The table type is '%s'.",
-                                    newTable.getClass().getName()));
-                } else {
-                    table =
-                            new BucketsTable(
-                                            (FileStoreTable) newTable,
-                                            isStreaming,
-                                            tableId.getDatabaseName())
-                                    .copy(compactOptions(isStreaming));
-                }
+                Preconditions.checkArgument(
+                        newTable instanceof FileStoreTable,
+                        "Only FileStoreTable supports compact action. The table type is '%s'.",
+                        newTable.getClass().getName());
+                table =
+                        new BucketsTable(
+                                        (FileStoreTable) newTable,
+                                        isStreaming,
+                                        tableId.getDatabaseName())
+                                .copy(compactOptions(isStreaming));
                 tablesMap.put(tableId, table);
                 readsMap.put(tableId, table.newReadBuilder().newRead().withIOManager(ioManager));
             } catch (Catalog.TableNotExistException e) {

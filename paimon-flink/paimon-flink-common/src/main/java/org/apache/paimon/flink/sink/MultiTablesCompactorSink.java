@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
@@ -58,14 +57,12 @@ public class MultiTablesCompactorSink implements Serializable {
     private final Catalog.Loader catalogLoader;
     private final boolean ignorePreviousFiles;
 
-    private CoreOptions coreOptions;
-    private Options options;
+    private final Options options;
 
     public MultiTablesCompactorSink(Catalog.Loader catalogLoader, Options options) {
         this.catalogLoader = catalogLoader;
         this.ignorePreviousFiles = false;
         this.options = options;
-        this.coreOptions = new CoreOptions(options);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<RowData> input) {
@@ -136,7 +133,7 @@ public class MultiTablesCompactorSink implements Serializable {
                                 new CommitterOperator<>(
                                         streamingCheckpointEnabled,
                                         commitUser,
-                                        createCommitterFactory(streamingCheckpointEnabled),
+                                        createCommitterFactory(),
                                         createCommittableStateManager()))
                         .setParallelism(1)
                         .setMaxParallelism(1);
@@ -180,7 +177,7 @@ public class MultiTablesCompactorSink implements Serializable {
     }
 
     protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>
-            createCommitterFactory(boolean streamingCheckpointEnabled) {
+            createCommitterFactory() {
         return (user, metricGroup) ->
                 new StoreMultiCommitter(
                         catalogLoader, user, new CommitterMetrics(metricGroup), true);

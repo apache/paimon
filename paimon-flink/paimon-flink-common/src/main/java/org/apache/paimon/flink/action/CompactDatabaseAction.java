@@ -74,21 +74,21 @@ public class CompactDatabaseAction extends ActionBase {
         super(warehouse, catalogConfig);
     }
 
-    public CompactDatabaseAction includingtDatabases(@Nullable String includingDatabases) {
+    public CompactDatabaseAction includingDatabases(@Nullable String includingDatabases) {
         if (includingDatabases != null) {
             this.databasePattern = Pattern.compile(includingDatabases);
         }
         return this;
     }
 
-    public CompactDatabaseAction includingtTables(@Nullable String includingTables) {
+    public CompactDatabaseAction includingTables(@Nullable String includingTables) {
         if (includingTables != null) {
             this.includingPattern = Pattern.compile(includingTables);
         }
         return this;
     }
 
-    public CompactDatabaseAction excludingtTables(@Nullable String excludingTables) {
+    public CompactDatabaseAction excludingTables(@Nullable String excludingTables) {
         this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
         return this;
     }

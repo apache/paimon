@@ -21,8 +21,6 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
@@ -30,7 +28,6 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.util.AbstractTestBase;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -117,8 +114,6 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         }
         long monitorInterval = 1000;
 
-        List<FileStoreTable> tables = new ArrayList<>();
-
         for (String dbName : DATABASE_NAMES) {
             for (String tableName : TABLE_NAMES) {
                 FileStoreTable table =
@@ -129,7 +124,6 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
-                tables.add(table);
                 SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -376,7 +370,6 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         }
         long monitorInterval = 1000;
 
-        List<FileStoreTable> tables = new ArrayList<>();
         for (String dbName : DATABASE_NAMES) {
             for (String tableName : TABLE_NAMES) {
                 FileStoreTable table =
@@ -387,7 +380,6 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
-                tables.add(table);
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 StreamTableWrite write = streamWriteBuilder.newWrite();
@@ -464,7 +456,6 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
-                tables.add(table);
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 StreamTableWrite write = streamWriteBuilder.newWrite();
@@ -552,10 +543,6 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
         writer.writeInt(1, hh);
         writer.complete();
         return b;
-    }
-
-    private Catalog catalog() {
-        return CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
     }
 
     private Catalog.Loader catalogLoader() {

@@ -60,7 +60,7 @@ public class MultiTablesCompactorUtil {
         }
     }
 
-    public static boolean shouldCompactionTable(
+    public static boolean shouldCompactTable(
             Identifier tableIdentifier, Pattern includingPattern, Pattern excludingPattern) {
         String paimonFullTableName = tableIdentifier.getFullName();
         boolean shouldCompaction = includingPattern.matcher(paimonFullTableName).matches();

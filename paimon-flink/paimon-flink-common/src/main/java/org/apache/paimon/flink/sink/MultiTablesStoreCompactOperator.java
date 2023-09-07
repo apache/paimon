@@ -61,9 +61,9 @@ public class MultiTablesStoreCompactOperator
     private static final long serialVersionUID = 1L;
 
     private StoreSinkWrite.Provider storeSinkWriteProvider;
-    private CheckpointConfig checkpointConfig;
-    private boolean isStreaming;
-    private boolean ignorePreviousFiles;
+    private final CheckpointConfig checkpointConfig;
+    private final boolean isStreaming;
+    private final boolean ignorePreviousFiles;
     private final String initialCommitUser;
 
     private transient StoreSinkWriteState state;

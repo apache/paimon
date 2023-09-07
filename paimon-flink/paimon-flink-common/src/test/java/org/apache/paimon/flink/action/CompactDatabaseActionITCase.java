@@ -139,15 +139,15 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         if (mode.equals("divided")) {
             new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingtDatabases(null)
-                    .includingtTables(null)
-                    .excludingtTables(null)
+                    .includingDatabases(null)
+                    .includingTables(null)
+                    .excludingTables(null)
                     .build(env);
         } else {
             new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingtDatabases(null)
-                    .includingtTables(null)
-                    .excludingtTables(null)
+                    .includingDatabases(null)
+                    .includingTables(null)
+                    .excludingTables(null)
                     .withDatabaseCompactMode("combined")
                     .withCompactOptions(compactOptions)
                     .build(env);
@@ -231,15 +231,15 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         if (mode.equals("divided")) {
             new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingtDatabases(null)
-                    .includingtTables(null)
-                    .excludingtTables(null)
+                    .includingDatabases(null)
+                    .includingTables(null)
+                    .excludingTables(null)
                     .build(env);
         } else {
             new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingtDatabases(null)
-                    .includingtTables(null)
-                    .excludingtTables(null)
+                    .includingDatabases(null)
+                    .includingTables(null)
+                    .excludingTables(null)
                     .withDatabaseCompactMode("combined")
                     .withCompactOptions(compactOptions)
                     .build(env);
@@ -492,15 +492,15 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
         if (mode.equals("divided")) {
             new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingtDatabases(null)
-                    .includingtTables(includingPattern)
-                    .excludingtTables(excludesPattern)
+                    .includingDatabases(null)
+                    .includingTables(includingPattern)
+                    .excludingTables(excludesPattern)
                     .build(env);
         } else {
             new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingtDatabases(null)
-                    .includingtTables(includingPattern)
-                    .excludingtTables(excludesPattern)
+                    .includingDatabases(null)
+                    .includingTables(includingPattern)
+                    .excludingTables(excludesPattern)
                     .withDatabaseCompactMode("combined")
                     .withCompactOptions(compactOptions)
                     .build(env);
@@ -586,9 +586,9 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.getCheckpointConfig().setCheckpointInterval(500);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         new CompactDatabaseAction(warehouse, new HashMap<>())
-                .includingtDatabases(null)
-                .includingtTables(null)
-                .excludingtTables(null)
+                .includingDatabases(null)
+                .includingTables(null)
+                .excludingTables(null)
                 .build(env);
         JobClient client = env.executeAsync();
 
@@ -661,9 +661,9 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.setRuntimeMode(RuntimeExecutionMode.BATCH);
         env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
         new CompactDatabaseAction(warehouse, new HashMap<>())
-                .includingtDatabases(null)
-                .includingtTables(null)
-                .excludingtTables(null)
+                .includingDatabases(null)
+                .includingTables(null)
+                .excludingTables(null)
                 .build(env);
         env.execute();
 
