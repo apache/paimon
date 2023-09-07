@@ -42,8 +42,12 @@ under the License.
         <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".</td>
     </tr>
     <tr>
+        <td><h5>--computed-column</h5></td>
+        <td>The definitions of computed columns. The argument field is from MongoDB collection field name. See <a href="#computed-functions">here</a> for a complete list of configurations. </td>
+    </tr>
+    <tr>
         <td><h5>--mongodb-conf</h5></td>
-        <td>The configuration for Flink CDC MongoDB sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name and table-name are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mongodb-cdc.html#connector-options">document</a> for a complete list of configurations.</td>
+        <td>The configuration for Flink CDC MongoDB sources. Each configuration should be specified in the format "key=value". hosts, username, password, database and collection are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mongodb-cdc.html#connector-options">document</a> for a complete list of configurations.</td>
     </tr>
     <tr>
         <td><h5>--catalog-conf</h5></td>
