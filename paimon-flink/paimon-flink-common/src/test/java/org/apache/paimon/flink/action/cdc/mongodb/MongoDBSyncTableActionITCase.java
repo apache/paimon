@@ -204,4 +204,31 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
         Map<String, String> options = table.options();
         assertThat(options).containsAllEntriesOf(tableConfig).containsKey("path");
     }
+
+    @Test
+    @Timeout(60)
+    public void testComputedColumn() throws Exception {
+        writeRecordsToMongoDB("test-table-1", database, "table/computedcolumn");
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", database);
+        mongodbConfig.put("collection", "test_computed_column");
+
+        MongoDBSyncTableAction action =
+                syncTableActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withComputedColumnArgs("_year=year(_date)")
+                        .build();
+        runActionWithDefaultEnv(action);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.INT()
+                        },
+                        new String[] {"_id", "_date", "_year"});
+        waitForResult(
+                Collections.singletonList("+I[100000000000000000000101, 2023-03-23, 2023]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("_id"));
+    }
 }
