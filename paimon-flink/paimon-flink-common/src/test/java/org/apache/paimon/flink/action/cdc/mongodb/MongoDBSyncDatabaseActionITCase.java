@@ -27,12 +27,14 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -245,5 +247,46 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
                         "+I[610000000000000000000102, youtube#videoListResponse, \\\"79S54kzisD_9SOTfQLu_0TVQSpY/mYlS4-ghMGhc1wTFCwoQl3IYDZc\\\", page, [{\"kind\":\"youtube#video\",\"etag\":\"\\\\\\\"79S54kzisD_9SOTfQLu_0TVQSpY/A4foLs-VO317Po_ulY6b5mSimZA\\\\\\\"\",\"id\":\"wHkPb68dxEw\",\"statistics\":{\"viewCount\":\"9211\",\"likeCount\":\"79\",\"dislikeCount\":\"11\",\"favoriteCount\":\"0\",\"commentCount\":\"29\"},\"topicDetails\":{\"topicIds\":[\"/m/02mjmr\"],\"relevantTopicIds\":[\"/m/0cnfvd\",\"/m/01jdpf\"]}}]]",
                         "+I[610000000000000000000103, youtube#videoListResponse, \\\"79S54kzisD_9SOTfQLu_0TVQSpY/mYlS4-ghMGhc1wTFCwoQl3IYDZc\\\", {\"pagehit\":{\"kind\":\"youtube#video\"},\"totalResults\":1,\"resultsPerPage\":1}, [{\"kind\":\"youtube#video\",\"etag\":\"\\\\\\\"79S54kzisD_9SOTfQLu_0TVQSpY/A4foLs-VO317Po_ulY6b5mSimZA\\\\\\\"\",\"id\":\"wHkPb68dxEw\",\"statistics\":{\"viewCount\":\"9211\",\"likeCount\":\"79\",\"dislikeCount\":\"11\",\"favoriteCount\":\"0\",\"commentCount\":\"29\"},\"topicDetails\":{\"topicIds\":[\"/m/02mjmr\"],\"relevantTopicIds\":[\"/m/0cnfvd\",\"/m/01jdpf\"]}}]]");
         waitForResult(expected2, table2, rowType2, primaryKeys2);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testNewlyAddedTablesOptionsChange() throws Exception {
+        String dbName = database + UUID.randomUUID();
+        writeRecordsToMongoDB("test-data-5", dbName, "database");
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", dbName);
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", "1");
+        tableConfig.put("sink.parallelism", "1");
+
+        MongoDBSyncDatabaseAction action1 =
+                syncDatabaseActionBuilder(mongodbConfig).withTableConfig(tableConfig).build();
+
+        JobClient jobClient = runActionWithDefaultEnv(action1);
+
+        waitingTables("t3");
+        jobClient.cancel();
+
+        tableConfig.put("sink.savepoint.auto-tag", "true");
+        tableConfig.put("tag.num-retained-max", "5");
+        tableConfig.put("tag.automatic-creation", "process-time");
+        tableConfig.put("tag.creation-period", "hourly");
+        tableConfig.put("tag.creation-delay", "600000");
+        tableConfig.put("snapshot.time-retained", "1h");
+        tableConfig.put("snapshot.num-retained.min", "5");
+        tableConfig.put("snapshot.num-retained.max", "10");
+        tableConfig.put("changelog-producer", "input");
+
+        writeRecordsToMongoDB("test-data-6", dbName, "database");
+
+        MongoDBSyncDatabaseAction action2 =
+                syncDatabaseActionBuilder(mongodbConfig).withTableConfig(tableConfig).build();
+        runActionWithDefaultEnv(action2);
+        waitingTables("t4");
+
+        FileStoreTable table = getFileStoreTable("t4");
+        Map<String, String> options = table.options();
+        assertThat(options).containsAllEntriesOf(tableConfig).containsKey("path");
     }
 }

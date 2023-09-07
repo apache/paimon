@@ -30,8 +30,10 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.ConfigChangeGenerator;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
@@ -162,7 +164,6 @@ public class MySqlSyncTableAction extends ActionBase {
         validateMySqlTableInfos(mySqlSchemasInfo);
 
         catalog.createDatabase(database, true);
-
         MySqlTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
         Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
@@ -178,6 +179,9 @@ public class MySqlSyncTableAction extends ActionBase {
                         caseSensitive);
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
+            List<SchemaChange> schemaChanges =
+                    ConfigChangeGenerator.generateConfigChanges(table.options(), tableConfig);
+            catalog.alterTable(identifier, schemaChanges, true);
             if (computedColumns.size() > 0) {
                 List<String> computedFields =
                         computedColumns.stream()

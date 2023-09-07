@@ -109,8 +109,12 @@ public class TagAutoCreation {
         } else {
             Snapshot lastTag = tags.lastKey();
             this.nextSnapshot = lastTag.id() + 1;
-
-            LocalDateTime time = periodHandler.tagToTime(tags.get(lastTag));
+            LocalDateTime time;
+            if (periodHandler instanceof DailyTagPeriodHandler) {
+                time = periodHandler.tagToTime(tags.get(lastTag).split(" ")[0]);
+            } else {
+                time = periodHandler.tagToTime(tags.get(lastTag));
+            }
             this.nextTag = periodHandler.nextTagTime(time);
         }
     }

@@ -31,10 +31,12 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.ConfigChangeGenerator;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -164,6 +166,9 @@ public class KafkaSyncTableAction extends ActionBase {
                         caseSensitive);
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
+            List<SchemaChange> schemaChanges =
+                    ConfigChangeGenerator.generateConfigChanges(table.options(), tableConfig);
+            catalog.alterTable(identifier, schemaChanges, true);
             CdcActionCommonUtils.assertSchemaCompatible(table.schema(), fromCanal.fields());
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromCanal, false);

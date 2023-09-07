@@ -23,10 +23,12 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.ConfigChangeGenerator;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
@@ -113,6 +115,9 @@ public class MongoDBSyncTableAction extends ActionBase {
         // Check if table exists before trying to get or create it
         if (catalog.tableExists(identifier)) {
             table = (FileStoreTable) catalog.getTable(identifier);
+            List<SchemaChange> schemaChanges =
+                    ConfigChangeGenerator.generateConfigChanges(table.options(), tableConfig);
+            catalog.alterTable(identifier, schemaChanges, true);
         } else {
             Schema fromMongodb =
                     MongoDBActionUtils.buildPaimonSchema(
