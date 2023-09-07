@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.utils.Restorable;
 
 import javax.annotation.Nullable;
@@ -32,6 +33,8 @@ import javax.annotation.Nullable;
  */
 @Public
 public interface StreamTableScan extends TableScan, Restorable<Long> {
+
+    StartingContext startingContext();
 
     @Override
     RichPlan plan();

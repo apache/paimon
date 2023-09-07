@@ -45,6 +45,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -305,6 +306,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public InnerStreamTableScan withFilter(Predicate predicate) {
             convert(predicate).ifPresent(streamScan::withFilter);
             return this;
+        }
+
+        @Override
+        public StartingContext startingContext() {
+            return streamScan.startingContext();
         }
 
         @Override

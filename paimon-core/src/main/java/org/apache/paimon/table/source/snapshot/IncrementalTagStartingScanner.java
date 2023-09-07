@@ -23,19 +23,28 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 /** {@link StartingScanner} for incremental changes by tag. */
-public class IncrementalTagStartingScanner implements StartingScanner {
+public class IncrementalTagStartingScanner extends AbstractStartingScanner {
 
     private final String start;
     private final String end;
 
-    public IncrementalTagStartingScanner(String start, String end) {
+    public IncrementalTagStartingScanner(
+            SnapshotManager snapshotManager, String start, String end) {
+        super(snapshotManager);
         this.start = start;
         this.end = end;
+        TagManager tagManager =
+                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+        Snapshot startingSnapshot = tagManager.taggedSnapshot(start);
+        if (startingSnapshot != null) {
+            this.startingSnapshotId = startingSnapshot.id();
+        }
     }
 
     @Override
-    public Result scan(SnapshotManager manager, SnapshotReader reader) {
-        TagManager tagManager = new TagManager(manager.fileIO(), manager.tablePath());
+    public Result scan(SnapshotReader reader) {
+        TagManager tagManager =
+                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         Snapshot tag1 = tagManager.taggedSnapshot(start);
         Snapshot tag2 = tagManager.taggedSnapshot(end);
 

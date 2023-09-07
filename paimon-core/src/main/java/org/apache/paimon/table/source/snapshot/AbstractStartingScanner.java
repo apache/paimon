@@ -18,24 +18,22 @@
 
 package org.apache.paimon.table.source.snapshot;
 
-import org.apache.paimon.CoreOptions;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+/** The abstract class for StartingScanner. */
+public abstract class AbstractStartingScanner implements StartingScanner {
 
-/**
- * {@link StartingScanner} for the {@link CoreOptions.StartupMode#LATEST} startup mode of a
- * streaming read.
- */
-public class ContinuousLatestStartingScanner extends AbstractStartingScanner {
+    protected final SnapshotManager snapshotManager;
 
-    private static final Logger LOG =
-            LoggerFactory.getLogger(ContinuousLatestStartingScanner.class);
+    protected Long startingSnapshotId = null;
 
-    public ContinuousLatestStartingScanner(SnapshotManager snapshotManager) {
-        super(snapshotManager);
-        this.startingSnapshotId = snapshotManager.latestSnapshotId();
+    AbstractStartingScanner(SnapshotManager snapshotManager) {
+        this.snapshotManager = snapshotManager;
+    }
+
+    protected ScanMode startingScanMode() {
+        return ScanMode.DELTA;
     }
 
     @Override
@@ -43,17 +41,7 @@ public class ContinuousLatestStartingScanner extends AbstractStartingScanner {
         if (startingSnapshotId == null) {
             return StartingContext.EMPTY;
         } else {
-            return new StartingContext(startingSnapshotId + 1, false);
+            return new StartingContext(startingSnapshotId, startingScanMode() == ScanMode.ALL);
         }
-    }
-
-    @Override
-    public Result scan(SnapshotReader snapshotReader) {
-        Long startingSnapshotId = snapshotManager.latestSnapshotId();
-        if (startingSnapshotId == null) {
-            LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
-            return new NoSnapshot();
-        }
-        return new NextSnapshot(startingSnapshotId + 1);
     }
 }

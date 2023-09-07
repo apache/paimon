@@ -45,9 +45,9 @@ public class FullCompactedStartingScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
 
-        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(3);
+        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(snapshotManager, 3);
         StartingScanner.ScannedResult result =
-                (StartingScanner.ScannedResult) scanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.ScannedResult) scanner.scan(snapshotReader);
         assertThat(result.currentSnapshotId()).isEqualTo(8);
 
         write.close();
@@ -57,9 +57,8 @@ public class FullCompactedStartingScannerTest extends ScannerTestBase {
     @Test
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
-        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(3);
-        assertThat(scanner.scan(snapshotManager, snapshotReader))
-                .isInstanceOf(StartingScanner.NoSnapshot.class);
+        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(snapshotManager, 3);
+        assertThat(scanner.scan(snapshotReader)).isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 
     @Test
@@ -85,11 +84,11 @@ public class FullCompactedStartingScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
-        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(3);
+        FullCompactedStartingScanner scanner = new FullCompactedStartingScanner(snapshotManager, 3);
 
         // No compact snapshot found, reading from the latest snapshot
         StartingScanner.ScannedResult result =
-                (StartingScanner.ScannedResult) scanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.ScannedResult) scanner.scan(snapshotReader);
         assertThat(result.currentSnapshotId()).isEqualTo(4);
 
         write.close();

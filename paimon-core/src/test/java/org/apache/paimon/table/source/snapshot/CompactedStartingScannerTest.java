@@ -55,9 +55,9 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
-        CompactedStartingScanner scanner = new CompactedStartingScanner();
+        CompactedStartingScanner scanner = new CompactedStartingScanner(snapshotManager);
         StartingScanner.ScannedResult result =
-                (StartingScanner.ScannedResult) scanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.ScannedResult) scanner.scan(snapshotReader);
         assertThat(result.currentSnapshotId()).isEqualTo(3);
         assertThat(getResult(table.newRead(), toSplits(result.splits())))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|101", "+I 1|20|200", "+I 1|30|300"));
@@ -69,9 +69,8 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
     @Test
     public void testNoSnapshot() {
         SnapshotManager snapshotManager = table.snapshotManager();
-        CompactedStartingScanner scanner = new CompactedStartingScanner();
-        assertThat(scanner.scan(snapshotManager, snapshotReader))
-                .isInstanceOf(StartingScanner.NoSnapshot.class);
+        CompactedStartingScanner scanner = new CompactedStartingScanner(snapshotManager);
+        assertThat(scanner.scan(snapshotReader)).isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 
     @Test
@@ -87,11 +86,11 @@ public class CompactedStartingScannerTest extends ScannerTestBase {
 
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(1);
 
-        CompactedStartingScanner scanner = new CompactedStartingScanner();
+        CompactedStartingScanner scanner = new CompactedStartingScanner(snapshotManager);
 
         // No compact snapshot found, reading from the latest snapshot
         StartingScanner.ScannedResult result =
-                (StartingScanner.ScannedResult) scanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.ScannedResult) scanner.scan(snapshotReader);
         assertThat(result.currentSnapshotId()).isEqualTo(1);
 
         write.close();
