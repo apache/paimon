@@ -49,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Collections;
 import java.util.Optional;
 
+import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 /** Tests for {@link DataTableSource}. */
@@ -120,7 +121,10 @@ class DataTableSourceTest {
                 StreamExecutionEnvironment.createLocalEnvironment(
                         Configuration.fromMap(
                                 Collections.singletonMap(
-                                        FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key(),
+                                        String.format(
+                                                "%s%s",
+                                                PAIMON_PREFIX,
+                                                FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key()),
                                         "false")));
         DataStream<RowData> sourceStream2 =
                 runtimeProvider.produceDataStream(s -> Optional.empty(), sEnv2);
