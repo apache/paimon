@@ -39,6 +39,26 @@ We currently support the following sync ways:
 6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table. 
 7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
 
+
+## What is Schema Evolution
+
+Suppose we have a MySQL table named `tableA`, it has three fields: `field_1`, `field_2`, `field_3`. When we want to load
+this MySQL table to Paimon, we can do this in Flink SQL, or use [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction).
+
+**Flink SQL:**
+
+In Flink SQL, if we change the table schema of the MySQL table after the ingestion, the table schema change will not be synchronized to Paimon.
+
+{{< img src="/img/cdc-ingestion-flinksql.png">}}
+
+**MySqlSyncTableAction:**
+
+In [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction),
+if we change the table schema of the MySQL table after the ingestion, the table schema change will be synchronized to Paimon,
+and the data of `field_4` which is newly added will be synchronized to Paimon too.
+
+{{< img src="/img/cdc-ingestion-schema-evolution.png">}}
+
 ## MySQL
 
 Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
