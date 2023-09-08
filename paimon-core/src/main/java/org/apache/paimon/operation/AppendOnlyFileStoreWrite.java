@@ -52,7 +52,7 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
-public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow> {
+public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> {
 
     private final FileIO fileIO;
     private final AppendOnlyFileStoreRead read;
@@ -80,7 +80,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options) {
-        super(commitUser, snapshotManager, scan, null);
+        super(commitUser, snapshotManager, scan, options, null);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
@@ -121,6 +121,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
 
         return new AppendOnlyWriter(
                 fileIO,
+                ioManager,
                 schemaId,
                 fileFormat,
                 targetFileSize,

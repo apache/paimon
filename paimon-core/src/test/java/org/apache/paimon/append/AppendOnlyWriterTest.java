@@ -24,12 +24,16 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.ChannelWithMeta;
+import org.apache.paimon.disk.ExternalBuffer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.DataType;
@@ -42,12 +46,15 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -306,6 +313,89 @@ public class AppendOnlyWriterTest {
         assertThat(afterClosedUnexpectedly).containsExactlyInAnyOrderElementsOf(committedFiles);
     }
 
+    @Test
+    public void testExternalBufferWorks() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+
+        ExternalBuffer buffer = writer.getWriteBuffer();
+        Assertions.assertThat(buffer.size()).isEqualTo(100);
+        Assertions.assertThat(buffer.memoryOccupancy()).isLessThanOrEqualTo(16384L);
+
+        writer.close();
+    }
+
+    @Test
+    public void testMultipleFlush() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+
+        writer.flushMemory();
+        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
+        Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
+        Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(0);
+        long rowCount = writer.getNewFiles().stream().map(t -> t.rowCount()).reduce(0L, Long::sum);
+        Assertions.assertThat(rowCount).isEqualTo(100);
+
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+        writer.flushMemory();
+
+        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
+        Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
+        Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(1);
+        rowCount = writer.getNewFiles().stream().map(t -> t.rowCount()).reduce(0L, Long::sum);
+        Assertions.assertThat(rowCount).isEqualTo(200);
+    }
+
+    @Test
+    public void testClose() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+
+        ExternalBuffer externalBuffer = writer.getWriteBuffer();
+        List<ChannelWithMeta> channel = externalBuffer.getSpillChannels();
+
+        writer.close();
+
+        for (ChannelWithMeta meta : channel) {
+            File file = new File(meta.getChannel().getPath());
+            Assertions.assertThat(file.exists()).isEqualTo(false);
+        }
+        Assertions.assertThat(writer.getWriteBuffer()).isEqualTo(null);
+    }
+
     private FieldStats initStats(Integer min, Integer max, long nullCount) {
         return new FieldStats(min, max, nullCount);
     }
@@ -358,9 +448,11 @@ public class AppendOnlyWriterTest {
                                     : Collections.singletonList(
                                             generateCompactAfter(compactBefore));
                         });
+        CoreOptions options = new CoreOptions(new HashMap<>());
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
+                        IOManager.create(tempDir.toString()),
                         SCHEMA_ID,
                         fileFormat,
                         targetFileSize,
@@ -372,8 +464,9 @@ public class AppendOnlyWriterTest {
                         null,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                new CoreOptions(new HashMap<>()),
-                                AppendOnlyWriterTest.SCHEMA.getFieldNames()));
+                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()));
+        writer.setMemoryPool(
+                new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
     }
 

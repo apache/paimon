@@ -163,6 +163,10 @@ public class ExternalBuffer {
         return numRows;
     }
 
+    public long memoryOccupancy() {
+        return inMemoryBuffer.currentDataBufferOffset;
+    }
+
     private int memorySize() {
         return pool.freePages() * segmentSize;
     }
@@ -234,7 +238,7 @@ public class ExternalBuffer {
         }
 
         private boolean nextIterator() throws IOException {
-            if (currentChannelID == Integer.MAX_VALUE) {
+            if (currentChannelID == Integer.MAX_VALUE || numRows == 0) {
                 return false;
             } else if (currentChannelID < spilledChannelIDs.size() - 1) {
                 nextSpilledIterator();
@@ -275,7 +279,7 @@ public class ExternalBuffer {
     }
 
     @VisibleForTesting
-    List<ChannelWithMeta> getSpillChannels() {
+    public List<ChannelWithMeta> getSpillChannels() {
         return spilledChannelIDs;
     }
 

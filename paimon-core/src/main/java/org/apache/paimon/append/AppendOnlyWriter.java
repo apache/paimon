@@ -19,8 +19,12 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.disk.ExternalBuffer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
@@ -28,6 +32,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
+import org.apache.paimon.memory.MemoryOwner;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -48,7 +54,7 @@ import java.util.concurrent.ExecutionException;
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
  */
-public class AppendOnlyWriter implements RecordWriter<InternalRow> {
+public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner {
 
     private final FileIO fileIO;
     private final long schemaId;
@@ -64,11 +70,13 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     private final LongCounter seqNumCounter;
     private final String fileCompression;
     private final FieldStatsCollector.Factory[] statsCollectors;
+    private final IOManager ioManager;
 
-    private RowDataRollingFileWriter writer;
+    private ExternalBuffer writeBuffer;
 
     public AppendOnlyWriter(
             FileIO fileIO,
+            IOManager ioManager,
             long schemaId,
             FileFormat fileFormat,
             long targetFileSize,
@@ -93,9 +101,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.fileCompression = fileCompression;
+        this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
-
-        this.writer = createRollingRowWriter();
 
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
@@ -110,12 +117,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
                 rowData.getRowKind() == RowKind.INSERT,
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",
                 rowData.getRowKind());
-        writer.write(rowData);
+        writeBuffer.add(rowData);
     }
 
     @Override
     public void compact(boolean fullCompaction) throws Exception {
-        flushWriter(true, fullCompaction);
+        flushWriteBuffer(true, fullCompaction);
     }
 
     @Override
@@ -130,18 +137,28 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
 
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
-        flushWriter(false, false);
+        flushWriteBuffer(false, false);
         trySyncLatestCompaction(waitCompaction || forceCompact);
         return drainIncrement();
     }
 
-    private void flushWriter(boolean waitForLatestCompaction, boolean forcedFullCompaction)
+    // This method flush writer buffer record to data file
+    private void flushWriteBuffer(boolean waitForLatestCompaction, boolean forcedFullCompaction)
             throws Exception {
         List<DataFileMeta> flushedFiles = new ArrayList<>();
-        if (writer != null) {
-            writer.close();
+        if (writeBuffer != null) {
+            writeBuffer.complete();
+            RowDataRollingFileWriter writer = createRollingRowWriter();
+            try (ExternalBuffer.BufferIterator iterator = writeBuffer.newIterator()) {
+                while (iterator.advanceNext()) {
+                    writer.write(iterator.getRow());
+                }
+            } finally {
+                writer.close();
+            }
             flushedFiles.addAll(writer.result());
-            writer = createRollingRowWriter();
+            // reuse writeBuffer
+            writeBuffer.reset();
         }
 
         // add new generated files
@@ -169,9 +186,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
         }
 
-        if (writer != null) {
-            writer.abort();
-            writer = null;
+        if (writeBuffer != null) {
+            writeBuffer.reset();
+            // enable gc
+            writeBuffer = null;
         }
     }
 
@@ -213,5 +231,31 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         compactAfter.clear();
 
         return new CommitIncrement(newFilesIncrement, compactIncrement);
+    }
+
+    @Override
+    public void setMemoryPool(MemorySegmentPool memoryPool) {
+        this.writeBuffer =
+                new ExternalBuffer(ioManager, memoryPool, new InternalRowSerializer(writeSchema));
+    }
+
+    @Override
+    public long memoryOccupancy() {
+        return writeBuffer.memoryOccupancy();
+    }
+
+    @Override
+    public void flushMemory() throws Exception {
+        flushWriteBuffer(false, false);
+    }
+
+    @VisibleForTesting
+    ExternalBuffer getWriteBuffer() {
+        return writeBuffer;
+    }
+
+    @VisibleForTesting
+    List<DataFileMeta> getNewFiles() {
+        return newFiles;
     }
 }
