@@ -42,9 +42,9 @@ import java.util.List;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** An external buffer for storing rows, it will spill the data to disk when the memory is full. */
-public class ExternalBuffer {
+public class SpillableBuffer {
 
-    private static final Logger LOG = LoggerFactory.getLogger(ExternalBuffer.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SpillableBuffer.class);
 
     private final IOManager ioManager;
     private final MemorySegmentPool pool;
@@ -53,14 +53,18 @@ public class ExternalBuffer {
 
     // The size of each segment
     private final int segmentSize;
+    private final boolean spillable;
 
     private final List<ChannelWithMeta> spilledChannelIDs;
     private int numRows;
 
     private boolean addCompleted;
 
-    public ExternalBuffer(
-            IOManager ioManager, MemorySegmentPool pool, AbstractRowDataSerializer<?> serializer) {
+    public SpillableBuffer(
+            IOManager ioManager,
+            MemorySegmentPool pool,
+            AbstractRowDataSerializer<?> serializer,
+            boolean spillable) {
         this.ioManager = ioManager;
         this.pool = pool;
 
@@ -71,6 +75,7 @@ public class ExternalBuffer {
 
         this.segmentSize = pool.pageSize();
 
+        this.spillable = spillable;
         this.spilledChannelIDs = new ArrayList<>();
 
         this.numRows = 0;
@@ -89,12 +94,15 @@ public class ExternalBuffer {
         addCompleted = false;
     }
 
-    public void add(InternalRow row) throws IOException {
+    public boolean add(InternalRow row) throws IOException {
         checkState(!addCompleted, "This buffer has add completed.");
         if (!inMemoryBuffer.write(row)) {
             // Check if record is too big.
             if (inMemoryBuffer.getCurrentDataBufferOffset() == 0) {
                 throwTooBigException(row);
+            }
+            if (!spillable) {
+                return false;
             }
             spill();
             if (!inMemoryBuffer.write(row)) {
@@ -103,6 +111,7 @@ public class ExternalBuffer {
         }
 
         numRows++;
+        return true;
     }
 
     public void complete() {

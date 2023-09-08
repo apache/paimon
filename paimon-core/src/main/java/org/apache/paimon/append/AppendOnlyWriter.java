@@ -23,8 +23,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.SpillableBuffer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
@@ -69,10 +69,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
+    private final boolean spillable;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
 
-    private ExternalBuffer writeBuffer;
+    private SpillableBuffer writeBuffer;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -86,6 +87,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean forceCompact,
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
+            boolean spillable,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors) {
         this.fileIO = fileIO;
@@ -101,6 +103,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.fileCompression = fileCompression;
+        this.spillable = spillable;
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
 
@@ -117,7 +120,17 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 rowData.getRowKind() == RowKind.INSERT,
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",
                 rowData.getRowKind());
-        writeBuffer.add(rowData);
+        boolean success = writeBuffer.add(rowData);
+        if (!success) {
+            flushWriteBuffer(false, false);
+            success = writeBuffer.add(rowData);
+            if (!success) {
+                // Should not get here, because writeBuffer will throw too big exception out.
+                // But we throw again in case of something unexpected happens. (like someone changed
+                // code in SpillableBuffer.)
+                throw new RuntimeException("Mem table is too small to hold a single element.");
+            }
+        }
     }
 
     @Override
@@ -149,7 +162,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         if (writeBuffer != null) {
             writeBuffer.complete();
             RowDataRollingFileWriter writer = createRollingRowWriter();
-            try (ExternalBuffer.BufferIterator iterator = writeBuffer.newIterator()) {
+            try (SpillableBuffer.BufferIterator iterator = writeBuffer.newIterator()) {
                 while (iterator.advanceNext()) {
                     writer.write(iterator.getRow());
                 }
@@ -236,7 +249,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     @Override
     public void setMemoryPool(MemorySegmentPool memoryPool) {
         this.writeBuffer =
-                new ExternalBuffer(ioManager, memoryPool, new InternalRowSerializer(writeSchema));
+                new SpillableBuffer(
+                        ioManager, memoryPool, new InternalRowSerializer(writeSchema), spillable);
     }
 
     @Override
@@ -250,7 +264,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     }
 
     @VisibleForTesting
-    ExternalBuffer getWriteBuffer() {
+    SpillableBuffer getWriteBuffer() {
         return writeBuffer;
     }
 

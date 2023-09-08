@@ -24,6 +24,7 @@ import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
@@ -38,8 +40,8 @@ import static org.apache.paimon.memory.MemorySegmentPool.DEFAULT_PAGE_SIZE;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link ExternalBuffer}. */
-public class ExternalBufferTest {
+/** Test for {@link SpillableBuffer}. */
+public class SpillableBufferTest {
 
     @TempDir Path tempDir;
 
@@ -54,16 +56,17 @@ public class ExternalBufferTest {
         this.serializer = new BinaryRowSerializer(1);
     }
 
-    private ExternalBuffer newBuffer() {
-        return new ExternalBuffer(
+    private SpillableBuffer newBuffer() {
+        return new SpillableBuffer(
                 ioManager,
                 new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
-                this.serializer);
+                this.serializer,
+                true);
     }
 
     @Test
     public void testLess() throws Exception {
-        ExternalBuffer buffer = newBuffer();
+        SpillableBuffer buffer = newBuffer();
 
         int number = 100;
         List<Long> expected = insertMulti(buffer, number);
@@ -80,7 +83,7 @@ public class ExternalBufferTest {
 
     @Test
     public void testSpill() throws Exception {
-        ExternalBuffer buffer = newBuffer();
+        SpillableBuffer buffer = newBuffer();
 
         int number = 5000; // 16 * 5000
         List<Long> expected = insertMulti(buffer, number);
@@ -97,7 +100,7 @@ public class ExternalBufferTest {
 
     @Test
     public void testBufferReset() throws Exception {
-        ExternalBuffer buffer = newBuffer();
+        SpillableBuffer buffer = newBuffer();
 
         // less
         insertMulti(buffer, 10);
@@ -120,7 +123,7 @@ public class ExternalBufferTest {
     @Test
     public void testBufferResetWithSpill() throws Exception {
         int inMemoryThreshold = 20;
-        ExternalBuffer buffer = newBuffer();
+        SpillableBuffer buffer = newBuffer();
 
         // spill
         List<Long> expected = insertMulti(buffer, 5000);
@@ -148,17 +151,46 @@ public class ExternalBufferTest {
     }
 
     @Test
+    public void testNonSpill() throws Exception {
+        SpillableBuffer buffer =
+                new SpillableBuffer(
+                        ioManager,
+                        new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
+                        this.serializer,
+                        false);
+
+        BinaryRow binaryRow = new BinaryRow(1);
+        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
+
+        byte[] s = new byte[20 * 1024];
+        Arrays.fill(s, (byte) 'a');
+        binaryRowWriter.writeString(0, BinaryString.fromBytes(s));
+        binaryRowWriter.complete();
+
+        boolean result = buffer.add(binaryRow);
+        Assertions.assertThat(result).isTrue();
+        result = buffer.add(binaryRow);
+        Assertions.assertThat(result).isTrue();
+        result = buffer.add(binaryRow);
+        Assertions.assertThat(result).isTrue();
+        result = buffer.add(binaryRow);
+        // cannot write anymore
+        Assertions.assertThat(result).isFalse();
+    }
+
+    @Test
     public void testHugeRecord() {
-        ExternalBuffer buffer =
-                new ExternalBuffer(
+        SpillableBuffer buffer =
+                new SpillableBuffer(
                         ioManager,
                         new HeapMemorySegmentPool(3 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
-                        new BinaryRowSerializer(1));
+                        new BinaryRowSerializer(1),
+                        true);
         assertThatThrownBy(() -> writeHuge(buffer)).isInstanceOf(IOException.class);
         buffer.reset();
     }
 
-    private void writeHuge(ExternalBuffer buffer) throws IOException {
+    private void writeHuge(SpillableBuffer buffer) throws IOException {
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(row);
         writer.reset();
@@ -168,13 +200,13 @@ public class ExternalBufferTest {
         buffer.add(row);
     }
 
-    private void assertBuffer(List<Long> expected, ExternalBuffer buffer) {
-        ExternalBuffer.BufferIterator iterator = buffer.newIterator();
+    private void assertBuffer(List<Long> expected, SpillableBuffer buffer) {
+        SpillableBuffer.BufferIterator iterator = buffer.newIterator();
         assertBuffer(expected, iterator);
         iterator.close();
     }
 
-    private void assertBuffer(List<Long> expected, ExternalBuffer.BufferIterator iterator) {
+    private void assertBuffer(List<Long> expected, SpillableBuffer.BufferIterator iterator) {
         List<Long> values = new ArrayList<>();
         while (iterator.advanceNext()) {
             values.add(iterator.getRow().getLong(0));
@@ -182,21 +214,21 @@ public class ExternalBufferTest {
         assertThat(values).isEqualTo(expected);
     }
 
-    private List<Long> insertMulti(ExternalBuffer buffer, int cnt) throws IOException {
+    private List<Long> insertMulti(SpillableBuffer buffer, int cnt) throws IOException {
         ArrayList<Long> expected = new ArrayList<>(cnt);
         insertMulti(buffer, cnt, expected);
         buffer.complete();
         return expected;
     }
 
-    private void insertMulti(ExternalBuffer buffer, int cnt, List<Long> expected)
+    private void insertMulti(SpillableBuffer buffer, int cnt, List<Long> expected)
             throws IOException {
         for (int i = 0; i < cnt; i++) {
             expected.add(randomInsert(buffer));
         }
     }
 
-    private long randomInsert(ExternalBuffer buffer) throws IOException {
+    private long randomInsert(SpillableBuffer buffer) throws IOException {
         long l = random.nextLong();
         BinaryRow row = new BinaryRow(1);
         BinaryRowWriter writer = new BinaryRowWriter(row);

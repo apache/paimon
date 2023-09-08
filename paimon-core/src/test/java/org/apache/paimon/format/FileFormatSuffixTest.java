@@ -80,6 +80,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         false,
                         dataFilePathFactory,
                         null,
+                        true,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
                                 options, SCHEMA.getFieldNames()));
