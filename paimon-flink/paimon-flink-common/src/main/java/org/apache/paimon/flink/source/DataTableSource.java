@@ -55,9 +55,7 @@ import org.apache.flink.table.plan.stats.TableStats;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -71,6 +69,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
@@ -81,6 +80,9 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_
  * LogSourceProvider}.
  */
 public class DataTableSource extends FlinkTableSource {
+    private static final String FLINK_INFER_SCAN_PARALLELISM =
+            String.format(
+                    "%s%s", PAIMON_PREFIX, FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key());
 
     private final ObjectIdentifier tableIdentifier;
     protected final boolean streaming;
@@ -222,14 +224,13 @@ public class DataTableSource extends FlinkTableSource {
 
     private DataStream<RowData> configureSource(
             FlinkSourceBuilder sourceBuilder, StreamExecutionEnvironment env) {
-        Map<String, String> tableOptions = new HashMap<>(this.table.options());
-        Map<String, String> envOptions = ((Configuration) env.getConfiguration()).toMap();
-        if (envOptions.containsKey(FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key())) {
-            tableOptions.put(
-                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key(),
-                    envOptions.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key()));
+        Options options = Options.fromMap(this.table.options());
+        Configuration envConfig = (Configuration) env.getConfiguration();
+        if (envConfig.containsKey(FLINK_INFER_SCAN_PARALLELISM)) {
+            options.set(
+                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM,
+                    Boolean.parseBoolean(envConfig.toMap().get(FLINK_INFER_SCAN_PARALLELISM)));
         }
-        Options options = Options.fromMap(tableOptions);
         Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
         if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
             if (streaming) {
