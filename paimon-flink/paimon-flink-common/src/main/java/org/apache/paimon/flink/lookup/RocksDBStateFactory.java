@@ -28,10 +28,14 @@ import org.rocksdb.DBOptions;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
+import org.rocksdb.TtlDB;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 
 /** Factory to create state. */
 public class RocksDBStateFactory implements Closeable {
@@ -42,7 +46,8 @@ public class RocksDBStateFactory implements Closeable {
 
     private final ColumnFamilyOptions columnFamilyOptions;
 
-    public RocksDBStateFactory(String path, org.apache.paimon.options.Options conf)
+    public RocksDBStateFactory(
+            String path, org.apache.paimon.options.Options conf, @Nullable Duration ttlSecs)
             throws IOException {
         DBOptions dbOptions =
                 RocksDBOptions.createDBOptions(
@@ -55,8 +60,12 @@ public class RocksDBStateFactory implements Closeable {
                 RocksDBOptions.createColumnOptions(new ColumnFamilyOptions(), conf)
                         .setMergeOperatorName(MERGE_OPERATOR_NAME);
 
+        Options options = new Options(dbOptions, columnFamilyOptions);
         try {
-            this.db = RocksDB.open(new Options(dbOptions, columnFamilyOptions), path);
+            this.db =
+                    ttlSecs == null
+                            ? RocksDB.open(options, path)
+                            : TtlDB.open(options, path, (int) ttlSecs.getSeconds(), false);
         } catch (RocksDBException e) {
             throw new IOException("Error while opening RocksDB instance.", e);
         }

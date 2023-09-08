@@ -106,7 +106,10 @@ public class GlobalIndexAssigner<T> implements Serializable {
         // state
         Options options = coreOptions.toConfiguration();
         this.path = new File(tmpDir, "lookup-" + UUID.randomUUID());
-        this.stateFactory = new RocksDBStateFactory(path.toString(), options);
+
+        this.stateFactory =
+                new RocksDBStateFactory(
+                        path.toString(), options, coreOptions.crossPartitionUpsertIndexTtl());
         RowType keyType = table.schema().logicalTrimmedPrimaryKeysType();
         this.keyIndex =
                 stateFactory.valueState(

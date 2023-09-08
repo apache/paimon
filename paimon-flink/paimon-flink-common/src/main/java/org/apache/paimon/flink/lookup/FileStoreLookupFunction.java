@@ -124,7 +124,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private void open() throws Exception {
         Options options = Options.fromMap(table.options());
         this.refreshInterval = options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL);
-        this.stateFactory = new RocksDBStateFactory(path.toString(), options);
+        this.stateFactory = new RocksDBStateFactory(path.toString(), options, null);
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
