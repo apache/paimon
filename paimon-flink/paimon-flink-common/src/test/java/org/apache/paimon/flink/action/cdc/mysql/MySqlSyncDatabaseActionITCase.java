@@ -526,31 +526,31 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(60)
     public void testNewlyAddedTables() throws Exception {
         testNewlyAddedTable(1, true, false, "paimon_sync_database_newly_added_tables");
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(60)
     public void testNewlyAddedTableSingleTable() throws Exception {
         testNewlyAddedTable(1, false, false, "paimon_sync_database_newly_added_tables_1");
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(60)
     public void testNewlyAddedTableMultipleTables() throws Exception {
         testNewlyAddedTable(3, false, false, "paimon_sync_database_newly_added_tables_2");
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(60)
     public void testNewlyAddedTableSchemaChange() throws Exception {
         testNewlyAddedTable(1, false, true, "paimon_sync_database_newly_added_tables_3");
     }
 
     @Test
-    @Timeout(600)
+    @Timeout(60)
     public void testNewlyAddedTableSingleTableWithSavepoint() throws Exception {
         testNewlyAddedTable(1, true, true, "paimon_sync_database_newly_added_tables_4");
     }
