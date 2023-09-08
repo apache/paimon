@@ -609,7 +609,8 @@ public class FileStoreCommitTest {
         store.commitData(
                 data.values().stream().flatMap(Collection::stream).collect(Collectors.toList()),
                 gen::getPartition,
-                kv -> 0);
+                kv -> 0,
+                Collections.singletonMap(0, 1L));
 
         // generate partitions to be dropped
         ThreadLocalRandom random = ThreadLocalRandom.current();
