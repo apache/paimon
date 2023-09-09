@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.sink.index;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Table;
@@ -32,6 +34,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -76,6 +79,16 @@ public class IndexBootstrap implements Serializable {
                 table.copy(Collections.singletonMap(SCAN_MODE.key(), LATEST.toString()))
                         .newReadBuilder()
                         .withProjection(projection);
+
+        String minPartition =
+                CoreOptions.fromMap(table.options()).crossPartitionUpsertBootstrapMinPartition();
+        if (minPartition != null) {
+            int partIndex = fieldNames.indexOf(table.partitionKeys().get(0));
+            Object minPart = TypeUtils.castFromString(minPartition, rowType.getTypeAt(partIndex));
+            PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
+            readBuilder =
+                    readBuilder.withFilter(predicateBuilder.greaterOrEqual(partIndex, minPart));
+        }
 
         AbstractInnerTableScan tableScan = (AbstractInnerTableScan) readBuilder.newScan();
         TableScan.Plan plan =
