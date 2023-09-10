@@ -29,9 +29,12 @@ public class RichCdcMultiplexRecordSchemaBuilder
         implements NewTableSchemaBuilder<RichCdcMultiplexRecord> {
 
     private final Map<String, String> tableConfig;
+    private final boolean caseSensitive;
 
-    public RichCdcMultiplexRecordSchemaBuilder(Map<String, String> tableConfig) {
+    public RichCdcMultiplexRecordSchemaBuilder(
+            Map<String, String> tableConfig, boolean caseSensitive) {
         this.tableConfig = tableConfig;
+        this.caseSensitive = caseSensitive;
     }
 
     @Override
@@ -40,7 +43,10 @@ public class RichCdcMultiplexRecordSchemaBuilder
         builder.options(tableConfig);
 
         for (Map.Entry<String, DataType> entry : record.fieldTypes().entrySet()) {
-            builder.column(entry.getKey(), entry.getValue(), null);
+            builder.column(
+                    caseSensitive ? entry.getKey() : entry.getKey().toLowerCase(),
+                    entry.getValue(),
+                    null);
         }
 
         Schema schema = builder.primaryKey(record.primaryKeys()).build();

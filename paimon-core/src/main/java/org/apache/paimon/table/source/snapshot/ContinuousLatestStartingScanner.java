@@ -28,13 +28,18 @@ import org.slf4j.LoggerFactory;
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#LATEST} startup mode of a
  * streaming read.
  */
-public class ContinuousLatestStartingScanner implements StartingScanner {
+public class ContinuousLatestStartingScanner extends AbstractStartingScanner {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(ContinuousLatestStartingScanner.class);
 
+    public ContinuousLatestStartingScanner(SnapshotManager snapshotManager) {
+        super(snapshotManager);
+        this.startingSnapshotId = snapshotManager.latestSnapshotId();
+    }
+
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
+    public Result scan(SnapshotReader snapshotReader) {
         Long startingSnapshotId = snapshotManager.latestSnapshotId();
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");

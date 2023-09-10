@@ -28,6 +28,7 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 
 import org.apache.flink.api.connector.source.SourceSplit;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -831,6 +832,11 @@ public class ContinuousFileSplitEnumeratorTest {
         }
 
         @Override
+        public StartingContext startingContext() {
+            return null;
+        }
+
+        @Override
         public RichPlan plan() {
             Map.Entry<Long, RichPlan> planEntry = results.pollFirstEntry();
             if (planEntry == null) {
@@ -861,7 +867,7 @@ public class ContinuousFileSplitEnumeratorTest {
         public void restore(Long state) {}
 
         @Override
-        public void restore(@Nullable Long nextSnapshotId, ScanMode scanMode) {}
+        public void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot) {}
 
         public void allowEnd(boolean allowEnd) {
             this.allowEnd = allowEnd;

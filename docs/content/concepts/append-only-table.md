@@ -207,8 +207,9 @@ although we can stream read and write still). All the records will go into one d
 and we do not maintain the order anymore. As we don't have the concept of bucket, we will not shuffle the input records by bucket anymore,
 which will speed up the inserting.
 
-{{< img src="/img/for-scalable.png">}}
+Using this mode, you can replace your Hive table to lake table.
 
+{{< img src="/img/for-scalable.png">}}
 
 ### Compaction
 
@@ -235,7 +236,7 @@ write-only for inserting job, and after per-partition data done, trigger a parti
 You can trigger action by shell script:
 ```shell
 <FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-0.5-SNAPSHOT.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \

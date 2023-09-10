@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb.strategy;
 
+import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
@@ -49,16 +50,19 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
     private final String collection;
     private final boolean caseSensitive;
     private final Configuration mongodbConfig;
+    private final List<ComputedColumn> computedColumns;
 
     public Mongo4VersionStrategy(
             String databaseName,
             String collection,
             boolean caseSensitive,
+            List<ComputedColumn> computedColumns,
             Configuration mongodbConfig) {
         this.databaseName = databaseName;
         this.collection = collection;
         this.caseSensitive = caseSensitive;
         this.mongodbConfig = mongodbConfig;
+        this.computedColumns = computedColumns;
     }
 
     /**
@@ -115,7 +119,12 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
             JsonNode fullDocument, LinkedHashMap<String, DataType> paimonFieldTypes)
             throws JsonProcessingException {
         Map<String, String> insert =
-                getExtractRow(fullDocument, paimonFieldTypes, caseSensitive, mongodbConfig);
+                getExtractRow(
+                        fullDocument,
+                        paimonFieldTypes,
+                        caseSensitive,
+                        computedColumns,
+                        mongodbConfig);
         return new RichCdcMultiplexRecord(
                 databaseName,
                 collection,
@@ -136,7 +145,12 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
             JsonNode fullDocument, LinkedHashMap<String, DataType> paimonFieldTypes)
             throws JsonProcessingException {
         Map<String, String> after =
-                getExtractRow(fullDocument, paimonFieldTypes, caseSensitive, mongodbConfig);
+                getExtractRow(
+                        fullDocument,
+                        paimonFieldTypes,
+                        caseSensitive,
+                        computedColumns,
+                        mongodbConfig);
         return new RichCdcMultiplexRecord(
                 databaseName,
                 collection,

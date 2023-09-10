@@ -69,7 +69,7 @@ It is recommended that the parallelism of sink should be less than or equal to t
 ### Asynchronous Compaction
 
 Compaction is inherently asynchronous, but if you want it to be completely asynchronous and not blocking writing,
-expect a mode to have maximum write throughput, the compaction can be done slowly and not in a hurry.
+expect a mode to have maximum writing throughput, the compaction can be done slowly and not in a hurry.
 You can use the following strategies for your table:
 
 ```shell

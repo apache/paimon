@@ -120,7 +120,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory;
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
-                new RichCdcMultiplexRecordSchemaBuilder(tableConfig);
+                new RichCdcMultiplexRecordSchemaBuilder(tableConfig, caseSensitive);
         Pattern includingPattern = this.includingPattern;
         Pattern excludingPattern = this.excludingPattern;
         parserFactory =

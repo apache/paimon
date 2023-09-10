@@ -18,6 +18,7 @@
 
 package org.apache.paimon.plugin;
 
+import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LocalFileUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -61,7 +62,9 @@ public class PluginLoader {
 
     private static final String[] COMPONENT_CLASSPATH = new String[] {"org.apache.paimon"};
 
-    private final ClassLoader submoduleClassLoader;
+    private final Path delegateJar;
+
+    private final ComponentClassLoader submoduleClassLoader;
 
     public PluginLoader(String jarName) {
         try {
@@ -71,7 +74,7 @@ public class PluginLoader {
                             .orElseGet(() -> Paths.get(System.getProperty("java.io.tmpdir")));
             Files.createDirectories(
                     LocalFileUtils.getTargetPathIfContainsSymbolicPath(tmpDirectory));
-            Path delegateJar =
+            delegateJar =
                     extractResource(
                             jarName,
                             ownerClassLoader,
@@ -137,6 +140,12 @@ public class PluginLoader {
 
     public ClassLoader submoduleClassLoader() {
         return submoduleClassLoader;
+    }
+
+    @Override
+    protected void finalize() throws IOException {
+        submoduleClassLoader.close();
+        FileIOUtils.deleteFileOrDirectory(delegateJar.toFile());
     }
 
     private static Optional<Path> tmpDirectoryFromYarn() {

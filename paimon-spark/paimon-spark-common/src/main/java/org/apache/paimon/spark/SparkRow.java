@@ -32,6 +32,8 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.apache.spark.sql.Row;
 
 import java.io.Serializable;
@@ -43,6 +45,9 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import scala.collection.JavaConverters;
+import scala.collection.mutable.WrappedArray;
 
 /** A {@link InternalRow} wraps spark {@link Row}. */
 public class SparkRow implements InternalRow, Serializable {
@@ -286,12 +291,26 @@ public class SparkRow implements InternalRow, Serializable {
 
         @Override
         public InternalArray getArray(int i) {
-            return new PaimonArray(((ArrayType) elementType).getElementType(), getAs(i));
+            Object array = getAs(i);
+            if (array instanceof WrappedArray) {
+                List<Object> result = Lists.newArrayList();
+                ((WrappedArray) array).iterator().foreach(x -> result.add(x));
+                return new PaimonArray(((ArrayType) elementType).getElementType(), result);
+            }
+            return new PaimonArray(
+                    ((ArrayType) elementType).getElementType(), (List<Object>) array);
         }
 
         @Override
         public InternalMap getMap(int i) {
-            return toPaimonMap((MapType) elementType, getAs(i));
+            Object map = getAs(i);
+            if (map instanceof scala.collection.immutable.Map) {
+                return toPaimonMap(
+                        (MapType) elementType,
+                        JavaConverters.mapAsJavaMap(
+                                (scala.collection.immutable.Map<Object, Object>) map));
+            }
+            return toPaimonMap((MapType) elementType, (Map<Object, Object>) map);
         }
 
         @Override
