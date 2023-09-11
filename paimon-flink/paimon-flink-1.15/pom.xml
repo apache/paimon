@@ -158,6 +158,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-flink-common</include>
+                                    <include>org.apache.paimon:paimon-flink-cdc</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
