@@ -293,7 +293,11 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+    public void createTable(
+            Identifier identifier,
+            Schema schema,
+            boolean ignoreIfExists,
+            Map<String, String> tableProperties)
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotSystemTable(identifier, "createTable");
         String databaseName = identifier.getDatabaseName();
@@ -324,7 +328,7 @@ public class HiveCatalog extends AbstractCatalog {
                             + " to underlying files.",
                     e);
         }
-        Table table = newHmsTable(identifier);
+        Table table = newHmsTable(identifier, tableProperties);
         try {
             updateHmsTable(table, identifier, tableSchema);
             client.createTable(table);
@@ -337,6 +341,12 @@ public class HiveCatalog extends AbstractCatalog {
             }
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
         }
+    }
+
+    @Override
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
+        createTable(identifier, schema, ignoreIfExists, new HashMap<>());
     }
 
     @Override
@@ -482,7 +492,7 @@ public class HiveCatalog extends AbstractCatalog {
         return database;
     }
 
-    private Table newHmsTable(Identifier identifier) {
+    private Table newHmsTable(Identifier identifier, Map<String, String> tableProperties) {
         long currentTimeMillis = System.currentTimeMillis();
         TableType tableType =
                 OptionsUtils.convertToEnum(
@@ -505,6 +515,7 @@ public class HiveCatalog extends AbstractCatalog {
                         tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
         table.getParameters()
                 .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
+        table.getParameters().putAll(tableProperties);
         if (TableType.EXTERNAL.equals(tableType)) {
             table.getParameters().put("EXTERNAL", "TRUE");
         }

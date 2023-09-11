@@ -93,6 +93,7 @@ public class KafkaSyncTableAction extends ActionBase {
     private List<String> primaryKeys = new ArrayList<>();
 
     private Map<String, String> tableConfig = new HashMap<>();
+    private Map<String, String> tableProperties = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
@@ -141,6 +142,11 @@ public class KafkaSyncTableAction extends ActionBase {
         return this;
     }
 
+    public KafkaSyncTableAction withHiveProperties(Map<String, String> tableProperties) {
+        this.tableProperties = tableProperties;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
@@ -166,7 +172,7 @@ public class KafkaSyncTableAction extends ActionBase {
             table = (FileStoreTable) catalog.getTable(identifier);
             CdcActionCommonUtils.assertSchemaCompatible(table.schema(), fromCanal.fields());
         } catch (Catalog.TableNotExistException e) {
-            catalog.createTable(identifier, fromCanal, false);
+            catalog.createTable(identifier, fromCanal, false, tableProperties);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);

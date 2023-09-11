@@ -27,6 +27,7 @@ import org.apache.paimon.table.Table;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -152,9 +153,19 @@ public interface Catalog extends AutoCloseable {
      * @param schema the table definition
      * @param ignoreIfExists flag to specify behavior when a table already exists at the given path:
      *     if set to false, it throws a TableAlreadyExistException, if set to true, do nothing.
+     * @param tableProperties A map of properties to be associated with the new table. These
+     *     properties can include various metadata, configurations, and settings related to the
+     *     table.
      * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
      * @throws DatabaseNotExistException if the database in identifier doesn't exist
      */
+    void createTable(
+            Identifier identifier,
+            Schema schema,
+            boolean ignoreIfExists,
+            Map<String, String> tableProperties)
+            throws TableAlreadyExistException, DatabaseNotExistException;
+
     void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException;
 

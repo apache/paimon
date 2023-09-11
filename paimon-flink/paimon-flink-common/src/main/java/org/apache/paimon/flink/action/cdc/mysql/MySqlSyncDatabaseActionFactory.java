@@ -57,7 +57,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
-                .withMode(MultiTablesSinkMode.fromString(params.get("mode")));
+                .withMode(MultiTablesSinkMode.fromString(params.get("mode")))
+                .withHiveProperties(optionalConfigMap(params, "hive-table-properties"));
 
         if (params.has("type-mapping")) {
             String[] options = params.get("type-mapping").split(",");
@@ -90,7 +91,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--type-mapping <option1,option2...>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
-                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]] "
+                        + "[--hive-table-properties <paimon-table-hive-properties> [--hive-properties <paimon-table-hive-properties> ...]]");
         System.out.println();
 
         System.out.println(
@@ -169,6 +171,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
                         + "    --table-conf bucket=4 \\\n"
                         + "    --table-conf changelog-producer=input \\\n"
-                        + "    --table-conf sink.parallelism=4");
+                        + "    --table-conf sink.parallelism=4 \\\n"
+                        + "    --hive-table-properties table description=paimon test table \\\n"
+                        + "    --hive-table-properties technical leader=paimon");
     }
 }

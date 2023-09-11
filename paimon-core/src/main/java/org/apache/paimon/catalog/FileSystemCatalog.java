@@ -27,6 +27,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -155,7 +156,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+    public void createTable(
+            Identifier identifier,
+            Schema schema,
+            boolean ignoreIfExists,
+            Map<String, String> tableProperties)
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotSystemTable(identifier, "createTable");
         if (!databaseExists(identifier.getDatabaseName())) {
@@ -174,6 +179,12 @@ public class FileSystemCatalog extends AbstractCatalog {
         copyTableDefaultOptions(schema.options());
 
         uncheck(() -> new SchemaManager(fileIO, path).createTable(schema));
+    }
+
+    @Override
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
+        createTable(identifier, schema, ignoreIfExists, new HashMap<>());
     }
 
     @Override

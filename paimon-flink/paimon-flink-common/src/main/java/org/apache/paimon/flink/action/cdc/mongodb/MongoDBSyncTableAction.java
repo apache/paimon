@@ -72,6 +72,7 @@ public class MongoDBSyncTableAction extends ActionBase {
     private final String table;
     private final List<String> partitionKeys;
     private final Map<String, String> tableConfig;
+    private final Map<String, String> tableProperties;
     private final List<String> computedColumnArgs;
 
     private MongoDBSyncTableAction(Builder builder) {
@@ -82,6 +83,7 @@ public class MongoDBSyncTableAction extends ActionBase {
         this.partitionKeys = builder.partitionKeys;
         this.tableConfig = builder.tableConfig;
         this.computedColumnArgs = builder.computedColumnArgs;
+        this.tableProperties = builder.tableProperties;
     }
 
     /**
@@ -97,6 +99,7 @@ public class MongoDBSyncTableAction extends ActionBase {
         private final Map<String, String> catalogConfig;
         private List<String> partitionKeys = new ArrayList<>();
         private Map<String, String> tableConfig = new HashMap<>();
+        private Map<String, String> tableProperties = new HashMap<>();
         private List<String> computedColumnArgs = new ArrayList<>();
 
         public Builder(
@@ -128,6 +131,11 @@ public class MongoDBSyncTableAction extends ActionBase {
 
         public Builder withComputedColumnArgs(List<String> computedColumnArgs) {
             this.computedColumnArgs = computedColumnArgs;
+            return this;
+        }
+
+        public Builder withHiveProperties(Map<String, String> tableProperties) {
+            this.tableProperties = tableProperties;
             return this;
         }
 
@@ -176,7 +184,7 @@ public class MongoDBSyncTableAction extends ActionBase {
                             computedColumns,
                             tableConfig,
                             caseSensitive);
-            catalog.createTable(identifier, fromMongodb, false);
+            catalog.createTable(identifier, fromMongodb, false, tableProperties);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
 

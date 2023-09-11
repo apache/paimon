@@ -49,7 +49,8 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                                 tablePath.f2,
                                 optionalConfigMap(params, "catalog-conf"),
                                 optionalConfigMap(params, "mongodb-conf"))
-                        .withTableConfig(optionalConfigMap(params, "table-conf"));
+                        .withTableConfig(optionalConfigMap(params, "table-conf"))
+                        .withHiveProperties(optionalConfigMap(params, "hive-table-properties"));
 
         if (params.has("partition-keys")) {
             builder.withPartitionKeys(params.get("partition-keys").split(","));
@@ -77,7 +78,8 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                         + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
                         + "[--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
-                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]] "
+                        + "[--hive-table-properties <paimon-table-hive-properties> [--hive-properties <paimon-table-hive-properties> ...]]");
         System.out.println();
 
         System.out.println("Partition keys syntax:");
@@ -128,6 +130,8 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                         + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
                         + "    --table-conf bucket=4 \\\n"
                         + "    --table-conf changelog-producer=input \\\n"
-                        + "    --table-conf sink.parallelism=4");
+                        + "    --table-conf sink.parallelism=4 \\\n"
+                        + "    --hive-table-properties table description=paimon test table \\\n"
+                        + "    --hive-table-properties technical leader=paimon");
     }
 }
