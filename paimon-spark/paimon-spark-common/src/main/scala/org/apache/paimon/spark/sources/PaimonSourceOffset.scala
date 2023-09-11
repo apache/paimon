@@ -60,4 +60,14 @@ object PaimonSourceOffset {
       case _ => throw new IllegalArgumentException(s"Can't parse $offset to PaimonSourceOffset.")
     }
   }
+
+  def gt(indexedDataSplit: IndexedDataSplit, start: PaimonSourceOffset): Boolean = {
+    indexedDataSplit.snapshotId > start.snapshotId ||
+    (indexedDataSplit.snapshotId == start.snapshotId && indexedDataSplit.index > start.index)
+  }
+
+  def le(indexedDataSplit: IndexedDataSplit, end: PaimonSourceOffset): Boolean = {
+    indexedDataSplit.snapshotId < end.snapshotId ||
+    (indexedDataSplit.snapshotId == end.snapshotId && indexedDataSplit.index <= end.index)
+  }
 }
