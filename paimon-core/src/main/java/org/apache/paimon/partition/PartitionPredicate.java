@@ -31,7 +31,6 @@ import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /** A special predicate to filter partition only, just like {@link Predicate}. */
 public interface PartitionPredicate {
@@ -45,29 +44,12 @@ public interface PartitionPredicate {
                 new RowDataToObjectArrayConverter(partitionType), predicate);
     }
 
-    static PartitionPredicate fromPartitions(RowType partitionType, List<BinaryRow> partitions) {
-        if (partitions.isEmpty()) {
-            throw new IllegalArgumentException("Partitions can not be empty.");
-        }
-
-        if (partitions.size() > 10) {
-            return fromMultiple(partitionType, partitions);
-        }
-
-        RowDataToObjectArrayConverter converter = new RowDataToObjectArrayConverter(partitionType);
-        List<Predicate> predicates =
-                partitions.stream()
-                        .filter(p -> p.getFieldCount() > 0)
-                        .map(converter::createEqualPredicate)
-                        .collect(Collectors.toList());
-        return fromPredicate(partitionType, PredicateBuilder.or(predicates));
-    }
-
     static PartitionPredicate fromMultiple(RowType partitionType, List<BinaryRow> partitions) {
         return new MultiplePartitionPredicate(
                 new RowDataToObjectArrayConverter(partitionType), new HashSet<>(partitions));
     }
 
+    /** A {@link PartitionPredicate} using {@link Predicate}. */
     class DefaultPartitionPredicate implements PartitionPredicate {
 
         private final RowDataToObjectArrayConverter converter;
@@ -90,6 +72,10 @@ public interface PartitionPredicate {
         }
     }
 
+    /**
+     * A {@link PartitionPredicate} optimizing for multiple partitions. Its FieldStats filtering
+     * effect may not be as good as {@link DefaultPartitionPredicate}.
+     */
     class MultiplePartitionPredicate implements PartitionPredicate {
 
         private final Set<BinaryRow> partitions;

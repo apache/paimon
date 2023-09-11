@@ -112,7 +112,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         if (partitions.isEmpty()) {
             return this;
         } else {
-            this.partitionFilter = PartitionPredicate.fromPartitions(partitionType, partitions);
+            this.partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);
             return this;
         }
     }
