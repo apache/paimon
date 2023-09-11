@@ -103,13 +103,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     @Override
     public FileStoreScan withPartitionFilter(Predicate predicate) {
-        this.partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
+        if (partitionType.getFieldCount() > 0) {
+            this.partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
+        }
         return this;
     }
 
     @Override
     public FileStoreScan withPartitionFilter(List<BinaryRow> partitions) {
-        if (!partitions.isEmpty()) {
+        if (partitionType.getFieldCount() > 0 && !partitions.isEmpty()) {
             this.partitionFilter = PartitionPredicate.fromMultiple(partitionType, partitions);
         }
         return this;
