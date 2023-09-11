@@ -40,10 +40,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
+
 /** Utils for create {@link FileStoreTable} and {@link Predicate}. */
 public class HiveUtils {
-
-    private static final String PAIMON_PREFIX = "paimon.";
 
     public static FileStoreTable createFileStoreTable(JobConf jobConf) {
         Options options = extractCatalogConfig(jobConf);
