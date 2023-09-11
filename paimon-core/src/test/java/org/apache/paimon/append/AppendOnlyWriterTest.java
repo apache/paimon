@@ -315,7 +315,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testExternalBufferWorks() throws Exception {
-        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 
         // we give it a small Memory Pool, force it to spill
         writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
@@ -336,8 +336,21 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
-    public void testMultipleFlush() throws Exception {
+    public void testNoBuffer() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        SpillableBuffer buffer = writer.getWriteBuffer();
+        Assertions.assertThat(buffer).isNull();
+
+        writer.close();
+    }
+
+    @Test
+    public void testMultipleFlush() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 
         // we give it a small Memory Pool, force it to spill
         writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
@@ -371,7 +384,7 @@ public class AppendOnlyWriterTest {
 
     @Test
     public void testClose() throws Exception {
-        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
 
         // we give it a small Memory Pool, force it to spill
         writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
@@ -452,26 +465,33 @@ public class AppendOnlyWriterTest {
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
-        return createWriter(targetFileSize, false, true, Collections.emptyList()).getLeft();
+        return createWriter(targetFileSize, false, false, false, Collections.emptyList()).getLeft();
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize, boolean spillable) {
-        return createWriter(targetFileSize, false, spillable, Collections.emptyList()).getLeft();
+        return createWriter(targetFileSize, false, true, spillable, Collections.emptyList())
+                .getLeft();
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
         return createWriter(
-                targetFileSize, forceCompact, true, scannedFiles, new CountDownLatch(0));
+                targetFileSize, forceCompact, true, true, scannedFiles, new CountDownLatch(0));
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
             long targetFileSize,
             boolean forceCompact,
+            boolean useWriteBuffer,
             boolean spillable,
             List<DataFileMeta> scannedFiles) {
         return createWriter(
-                targetFileSize, forceCompact, spillable, scannedFiles, new CountDownLatch(0));
+                targetFileSize,
+                forceCompact,
+                useWriteBuffer,
+                spillable,
+                scannedFiles,
+                new CountDownLatch(0));
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
@@ -479,12 +499,13 @@ public class AppendOnlyWriterTest {
             boolean forceCompact,
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
-        return createWriter(targetFileSize, forceCompact, true, scannedFiles, latch);
+        return createWriter(targetFileSize, forceCompact, false, false, scannedFiles, latch);
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
             long targetFileSize,
             boolean forceCompact,
+            boolean useWriteBuffer,
             boolean spillable,
             List<DataFileMeta> scannedFiles,
             CountDownLatch latch) {
@@ -519,6 +540,7 @@ public class AppendOnlyWriterTest {
                         forceCompact,
                         pathFactory,
                         null,
+                        useWriteBuffer,
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(

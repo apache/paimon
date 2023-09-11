@@ -65,6 +65,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
     private final String fileCompression;
+    private final boolean useWriteBuffer;
     private final boolean spillable;
     private final FieldStatsCollector.Factory[] statsCollectors;
 
@@ -94,6 +95,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.commitForceCompact = options.commitForceCompact();
         this.skipCompaction = options.writeOnly();
         this.fileCompression = options.fileCompression();
+        this.useWriteBuffer = options.useWriteBuffer();
         this.spillable = options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
@@ -133,6 +135,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 commitForceCompact,
                 factory,
                 restoreIncrement,
+                useWriteBuffer,
                 spillable,
                 fileCompression,
                 statsCollectors);

@@ -69,11 +69,13 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
+    private final boolean useWriteBuffer;
     private final boolean spillable;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
 
     private SpillableBuffer writeBuffer;
+    private RowDataRollingFileWriter writer;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -87,6 +89,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean forceCompact,
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
+            boolean useWriteBuffer,
             boolean spillable,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors) {
@@ -103,9 +106,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.fileCompression = fileCompression;
+        this.useWriteBuffer = useWriteBuffer;
         this.spillable = spillable;
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
+
+        if (!useWriteBuffer) {
+            this.writer = createRollingRowWriter();
+        }
 
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
@@ -120,10 +128,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 rowData.getRowKind() == RowKind.INSERT,
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",
                 rowData.getRowKind());
-        boolean success = writeBuffer.add(rowData);
+        boolean success = writeData(rowData);
         if (!success) {
-            flushWriteBuffer(false, false);
-            success = writeBuffer.add(rowData);
+            flush(false, false);
+            success = writeData(rowData);
             if (!success) {
                 // Should not get here, because writeBuffer will throw too big exception out.
                 // But we throw again in case of something unexpected happens. (like someone changed
@@ -133,9 +141,18 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         }
     }
 
+    private boolean writeData(InternalRow rowData) throws Exception {
+        if (useWriteBuffer) {
+            return writeBuffer.add(rowData);
+        } else {
+            writer.write(rowData);
+            return true;
+        }
+    }
+
     @Override
     public void compact(boolean fullCompaction) throws Exception {
-        flushWriteBuffer(true, fullCompaction);
+        flush(true, fullCompaction);
     }
 
     @Override
@@ -150,13 +167,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
-        flushWriteBuffer(false, false);
+        flush(false, false);
         trySyncLatestCompaction(waitCompaction || forceCompact);
         return drainIncrement();
     }
 
-    // This method flush writer buffer record to data file
-    private void flushWriteBuffer(boolean waitForLatestCompaction, boolean forcedFullCompaction)
+    private void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction)
             throws Exception {
         List<DataFileMeta> flushedFiles = new ArrayList<>();
         if (writeBuffer != null) {
@@ -172,6 +188,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             flushedFiles.addAll(writer.result());
             // reuse writeBuffer
             writeBuffer.reset();
+        }
+
+        if (writer != null) {
+            writer.close();
+            flushedFiles.addAll(writer.result());
+            writer = createRollingRowWriter();
         }
 
         // add new generated files
@@ -201,8 +223,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
         if (writeBuffer != null) {
             writeBuffer.reset();
-            // enable gc
             writeBuffer = null;
+        }
+
+        if (writer != null) {
+            writer.abort();
+            writer = null;
         }
     }
 
@@ -248,9 +274,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public void setMemoryPool(MemorySegmentPool memoryPool) {
-        this.writeBuffer =
-                new SpillableBuffer(
-                        ioManager, memoryPool, new InternalRowSerializer(writeSchema), spillable);
+        if (useWriteBuffer) {
+            this.writeBuffer =
+                    new SpillableBuffer(
+                            ioManager,
+                            memoryPool,
+                            new InternalRowSerializer(writeSchema),
+                            spillable);
+        }
     }
 
     @Override
@@ -260,7 +291,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public void flushMemory() throws Exception {
-        flushWriteBuffer(false, false);
+        flush(false, false);
     }
 
     @VisibleForTesting
