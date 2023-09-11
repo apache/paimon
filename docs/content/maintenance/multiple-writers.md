@@ -116,7 +116,7 @@ Or run the following command to submit a compaction job for multiple database.
 * `--excluding-tables`  is used to specify which source tables are not to be compacted. The usage is same as "--including-tables". "--excluding-tables" has higher priority than "--including-tables" if you specified both.
 * `mode` is used to specify synchronization mode. Possible values:
   * "divided" (the default mode if you haven't specified one): start a sink for each table, the compaction of the new table requires restarting the job.
-  * "combined": start a single combined sink for all tables, the new table will be automatically synchronized.
+  * "combined": start a single combined sink for all tables, the new table will be automatically compacted.
 * `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
 * `--compact-conf` is the configuration for compaction in combined mode. Each configuration should be specified in the format `key=value`. Compact configuration is listed below:
 
