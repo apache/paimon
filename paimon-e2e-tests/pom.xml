@@ -57,6 +57,13 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-cdc</artifactId>
+            <version>${project.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-hive-connector-common</artifactId>
             <version>${project.version}</version>
             <scope>runtime</scope>
@@ -89,6 +96,14 @@ under the License.
             <artifactId>paimon-test-utils</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-cdc</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+            <type>test-jar</type>
         </dependency>
 
         <!-- testcontainers -->
@@ -154,6 +169,16 @@ under the License.
                             <artifactId>paimon-flink-action</artifactId>
                             <version>${project.version}</version>
                             <destFileName>paimon-flink-action.jar</destFileName>
+                            <type>jar</type>
+                            <overWrite>true</overWrite>
+                            <outputDirectory>/tmp/paimon-e2e-tests-jars
+                            </outputDirectory>
+                        </artifactItem>
+                        <artifactItem>
+                            <groupId>org.apache.paimon</groupId>
+                            <artifactId>paimon-flink-cdc</artifactId>
+                            <version>${project.version}</version>
+                            <destFileName>paimon-flink-cdc.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
                             <outputDirectory>/tmp/paimon-e2e-tests-jars

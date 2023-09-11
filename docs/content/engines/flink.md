@@ -44,6 +44,7 @@ Download the jar file with corresponding version.
 | Flink 1.15 | Bundled Jar  | [paimon-flink-1.15-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.15/{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
 | Flink 1.14 | Bundled Jar  | [paimon-flink-1.14-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.14/{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
 | Flink Action | Action Jar  | [paimon-flink-action-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-action/{{< version >}}/paimon-flink-action-{{< version >}}.jar) |
+| Flink CDC | Action Jar | [paimon-flink-cdc-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-cdc/{{< version >}}/paimon-flink-cdc-{{< version >}}.jar) | 
 
 {{< /stable >}}
 
@@ -56,6 +57,7 @@ Download the jar file with corresponding version.
 | Flink 1.15 | Bundled Jar | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/) |
 | Flink 1.14 | Bundled Jar | [paimon-flink-1.14-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.14/{{< version >}}/) |
 | Flink Action | Action Jar | [paimon-flink-action-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-action/{{< version >}}/) |
+| Flink CDC | Action Jar | [paimon-flink-cdc-{{< version>}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-cdc/{{< version >}}/) |
 
 {{< /unstable >}}
 

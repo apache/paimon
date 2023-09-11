@@ -59,6 +59,13 @@ and the data of `field_4` which is newly added will be synchronized to Paimon to
 
 {{< img src="/img/cdc-ingestion-schema-evolution.png">}}
 
+## Prepare Paimon Flink CDC Action Jars
+
+```
+paimon-flink-action-{{< version >}}.jar
+paimon-flink-cdc-{{< version >}}.jar
+```
+
 ## MySQL
 
 Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
