@@ -118,6 +118,10 @@ public interface PartitionPredicate {
 
         @Override
         public boolean test(long rowCount, FieldStats[] fieldStats) {
+            if (fieldStats.length == 0) {
+                return true;
+            }
+
             for (int i = 0; i < fieldStats.length; i++) {
                 if (min[i].test(rowCount, fieldStats) && max[i].test(rowCount, fieldStats)) {
                     return true;

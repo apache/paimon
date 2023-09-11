@@ -29,7 +29,9 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.or;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,7 +40,16 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class PartitionPredicateTest {
 
     @Test
-    public void test() {
+    public void testNoPartition() {
+        PartitionPredicate predicate =
+                PartitionPredicate.fromMultiple(RowType.of(), Collections.singletonList(EMPTY_ROW));
+
+        assertThat(predicate.test(EMPTY_ROW)).isTrue();
+        assertThat(predicate.test(1, new FieldStats[] {})).isTrue();
+    }
+
+    @Test
+    public void testPartition() {
         RowType type = DataTypes.ROW(DataTypes.INT(), DataTypes.INT());
         PredicateBuilder builder = new PredicateBuilder(type);
         Predicate predicate =
