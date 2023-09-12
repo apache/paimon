@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.procedures.Procedure;
 
 import java.util.ArrayList;
@@ -34,26 +32,14 @@ public class ProcedureUtil {
 
     private ProcedureUtil() {}
 
-    private static final String SYSTEM_DATABASE_NAME = "system";
     private static final List<String> SYSTEM_PROCEDURES = new ArrayList<>();
-    private static final Map<ObjectPath, Procedure> SYSTEM_PROCEDURES_MAP = new HashMap<>();
+    private static final Map<String, Procedure> SYSTEM_PROCEDURES_MAP = new HashMap<>();
 
-    public static List<String> listProcedures(String dbName) {
-        checkDatabase(dbName);
+    public static List<String> listProcedures() {
         return Collections.unmodifiableList(SYSTEM_PROCEDURES);
     }
 
-    public static Optional<Procedure> getProcedure(ObjectPath procedurePath) {
-        checkDatabase(procedurePath.getDatabaseName());
-        return Optional.ofNullable(SYSTEM_PROCEDURES_MAP.get(procedurePath));
-    }
-
-    private static void checkDatabase(String dbName) {
-        if (!dbName.equals(SYSTEM_DATABASE_NAME)) {
-            throw new CatalogException(
-                    "Currently, Paimon catalog only supports built-in procedures in database '"
-                            + SYSTEM_DATABASE_NAME
-                            + "'.");
-        }
+    public static Optional<Procedure> getProcedure(String procedureName) {
+        return Optional.ofNullable(SYSTEM_PROCEDURES_MAP.get(procedureName));
     }
 }

@@ -73,7 +73,6 @@ import java.util.stream.Stream;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
-import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -556,21 +555,6 @@ public class FlinkCatalogTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
                         "Creating table in default database is disabled, please specify a database name.");
-    }
-
-    @Test
-    public void testOnlySupportSystemProcedures() throws Exception {
-        assertThatThrownBy(() -> catalog.listProcedures("default"))
-                .satisfies(
-                        anyCauseMatches(
-                                CatalogException.class,
-                                "Currently, Paimon catalog only supports built-in procedures in database 'system'."));
-
-        assertThatThrownBy(() -> catalog.getProcedure(new ObjectPath("default", "compact")))
-                .satisfies(
-                        anyCauseMatches(
-                                CatalogException.class,
-                                "Currently, Paimon catalog only supports built-in procedures in database 'system'."));
     }
 
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {

@@ -875,8 +875,13 @@ public class FlinkCatalog extends AbstractCatalog {
     /**
      * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.17-.
      */
-    public List<String> listProcedures(String dbName) throws CatalogException {
-        return ProcedureUtil.listProcedures(dbName);
+    public List<String> listProcedures(String dbName)
+            throws DatabaseNotExistException, CatalogException {
+        if (!databaseExists(dbName)) {
+            throw new DatabaseNotExistException(name, dbName);
+        }
+
+        return ProcedureUtil.listProcedures();
     }
 
     /**
@@ -884,7 +889,7 @@ public class FlinkCatalog extends AbstractCatalog {
      */
     public Procedure getProcedure(ObjectPath procedurePath)
             throws ProcedureNotExistException, CatalogException {
-        return ProcedureUtil.getProcedure(procedurePath)
+        return ProcedureUtil.getProcedure(procedurePath.getObjectName())
                 .orElseThrow(() -> new ProcedureNotExistException(name, procedurePath));
     }
 }
