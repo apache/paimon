@@ -39,17 +39,21 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
 
     private long endingSnapshotId;
 
-    public IncrementalStartingScanner(SnapshotManager snapshotManager, long start, long end) {
+    private ScanMode scanMode;
+
+    public IncrementalStartingScanner(
+            SnapshotManager snapshotManager, long start, long end, ScanMode scanMode) {
         super(snapshotManager);
         this.startingSnapshotId = start;
         this.endingSnapshotId = end;
+        this.scanMode = scanMode;
     }
 
     @Override
     public Result scan(SnapshotReader reader) {
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new HashMap<>();
         for (long i = startingSnapshotId + 1; i < endingSnapshotId + 1; i++) {
-            List<DataSplit> splits = readDeltaSplits(reader, snapshotManager.snapshot(i));
+            List<DataSplit> splits = readSplits(reader, snapshotManager.snapshot(i));
             for (DataSplit split : splits) {
                 grouped.computeIfAbsent(
                                 Pair.of(split.partition(), split.bucket()), k -> new ArrayList<>())
@@ -98,6 +102,17 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                 });
     }
 
+    private List<DataSplit> readSplits(SnapshotReader reader, Snapshot s) {
+        switch (scanMode) {
+            case CHANGELOG:
+                return readChangeLogSplits(reader, s);
+            case DELTA:
+                return readDeltaSplits(reader, s);
+            default:
+                throw new UnsupportedOperationException("Unsupported scan kind: " + scanMode);
+        }
+    }
+
     @SuppressWarnings({"unchecked", "rawtypes"})
     private List<DataSplit> readDeltaSplits(SnapshotReader reader, Snapshot s) {
         if (s.commitKind() != CommitKind.APPEND) {
@@ -105,5 +120,14 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             return Collections.emptyList();
         }
         return (List) reader.withSnapshot(s).withMode(ScanMode.DELTA).read().splits();
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private List<DataSplit> readChangeLogSplits(SnapshotReader reader, Snapshot s) {
+        if (s.commitKind() == CommitKind.OVERWRITE) {
+            // ignore OVERWRITE
+            return Collections.emptyList();
+        }
+        return (List) reader.withSnapshot(s).withMode(ScanMode.CHANGELOG).read().splits();
     }
 }

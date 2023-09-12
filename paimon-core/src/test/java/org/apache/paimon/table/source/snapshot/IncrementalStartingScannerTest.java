@@ -58,21 +58,21 @@ public class IncrementalStartingScannerTest extends ScannerTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(4);
 
         IncrementalStartingScanner deltaScanner =
-                new IncrementalStartingScanner(1L, 4L, ScanMode.DELTA);
+                new IncrementalStartingScanner(snapshotManager, 1L, 4L, ScanMode.DELTA);
         StartingScanner.ScannedResult deltaResult =
-                (StartingScanner.ScannedResult) deltaScanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.ScannedResult) deltaScanner.scan(snapshotReader);
         assertThat(deltaResult.currentSnapshotId()).isEqualTo(4);
         assertThat(getResult(table.newRead(), toSplits(deltaResult.splits())))
                 .hasSameElementsAs(Arrays.asList("+I 2|20|200", "+I 1|10|100", "+I 3|40|500"));
 
         IncrementalStartingScanner changeLogScanner =
-                new IncrementalStartingScanner(2L, 4L, ScanMode.CHANGELOG);
+                new IncrementalStartingScanner(snapshotManager, 1L, 4L, ScanMode.CHANGELOG);
         StartingScanner.ScannedResult changeLogResult =
-                (StartingScanner.ScannedResult)
-                        changeLogScanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.ScannedResult) changeLogScanner.scan(snapshotReader);
         assertThat(changeLogResult.currentSnapshotId()).isEqualTo(4);
         assertThat(getResult(table.newRead(), toSplits(changeLogResult.splits())))
-                .hasSameElementsAs(Arrays.asList("+U 3|40|500"));
+                .hasSameElementsAs(
+                        Arrays.asList("+I 2|20|200", "+I 1|10|100", "+I 3|40|400", "+U 3|40|500"));
 
         write.close();
         commit.close();

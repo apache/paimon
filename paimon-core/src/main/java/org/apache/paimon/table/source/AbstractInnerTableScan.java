@@ -155,7 +155,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                         options.incrementalBetweenScanMode();
                 ScanMode scanMode;
                 switch (scanType) {
-                    case DELATA:
+                    case DELTA:
                         scanMode = ScanMode.DELTA;
                         break;
                     case CHANGELOG:
