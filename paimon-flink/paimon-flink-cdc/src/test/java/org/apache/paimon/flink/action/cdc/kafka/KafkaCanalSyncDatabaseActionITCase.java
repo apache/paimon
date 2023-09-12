@@ -125,7 +125,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         RowType rowType1 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                         new String[] {"k", "v1"});
         List<String> primaryKeys1 = Collections.singletonList("k");
         List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
@@ -135,7 +135,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
+                            DataTypes.STRING().notNull(),
                             DataTypes.INT(),
                             DataTypes.BIGINT()
                         },
@@ -160,7 +160,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.INT()
                         },
                         new String[] {"k", "v1", "v2"});
         expected =
@@ -175,10 +175,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
+                            DataTypes.STRING().notNull(),
                             DataTypes.INT(),
                             DataTypes.BIGINT(),
-                            DataTypes.VARCHAR(10)
+                            DataTypes.STRING()
                         },
                         new String[] {"k1", "k2", "v1", "v2", "v3"});
         expected =
@@ -205,7 +205,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.BIGINT()
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.BIGINT()
                         },
                         new String[] {"k", "v1", "v2"});
         expected =
@@ -221,10 +221,10 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
+                            DataTypes.STRING().notNull(),
                             DataTypes.INT(),
                             DataTypes.BIGINT(),
-                            DataTypes.VARCHAR(20)
+                            DataTypes.STRING()
                         },
                         new String[] {"k1", "k2", "v1", "v2", "v3"});
         expected =
@@ -258,7 +258,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         createFileStoreTable(
                 "test_prefix_t1_test_suffix",
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
                         new String[] {"k1", "v0"}),
                 Collections.emptyList(),
                 Collections.singletonList("k1"),
@@ -308,7 +308,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         createFileStoreTable(
                 "test_prefix_t1_test_suffix",
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
                         new String[] {"k1", "v0"}),
                 Collections.emptyList(),
                 Collections.singletonList("k1"),
@@ -359,7 +359,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         RowType rowType1 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                         new String[] {"k1", "v0"});
         List<String> primaryKeys1 = Collections.singletonList("k1");
         List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
@@ -367,7 +367,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         RowType rowType2 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                         new String[] {"k2", "v0"});
         List<String> primaryKeys2 = Collections.singletonList("k2");
         expected = Arrays.asList("+I[2, two]", "+I[4, four]");
@@ -388,7 +388,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.INT()
                         },
                         new String[] {"k1", "v0", "v1"});
         expected =
@@ -402,7 +402,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         rowType2 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.VARCHAR(10)
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.STRING()
                         },
                         new String[] {"k2", "v0", "v1"});
         expected =
@@ -429,7 +429,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.BIGINT()
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.BIGINT()
                         },
                         new String[] {"k1", "v0", "v1"});
         expected =
@@ -444,7 +444,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         rowType2 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.VARCHAR(20)
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.STRING()
                         },
                         new String[] {"k2", "v0", "v1"});
         expected =

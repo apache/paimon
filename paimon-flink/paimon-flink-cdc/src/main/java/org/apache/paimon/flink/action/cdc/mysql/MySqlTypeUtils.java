@@ -258,11 +258,7 @@ public class MySqlTypeUtils {
                 }
                 // because tidb ddl event does not contain field precision
             case CHAR:
-                return length == null || length == 0 ? DataTypes.STRING() : DataTypes.CHAR(length);
             case VARCHAR:
-                return length == null || length == 0
-                        ? DataTypes.STRING()
-                        : DataTypes.VARCHAR(length);
             case TINYTEXT:
             case TEXT:
             case MEDIUMTEXT:

@@ -79,7 +79,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         checkTableSchema(
                 "[{\"id\":0,\"name\":\"pt\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},"
                         + "{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"_id\"},"
-                        + "{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"}]");
+                        + "{\"id\":2,\"name\":\"v1\",\"type\":\"STRING\",\"description\":\"v1\"}]");
 
         try (Statement statement = getStatement()) {
             testSchemaEvolutionImpl(statement);
@@ -103,9 +103,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(),
-                            DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10)
+                            DataTypes.INT().notNull(), DataTypes.INT().notNull(), DataTypes.STRING()
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
@@ -123,7 +121,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10),
+                            DataTypes.STRING(),
                             DataTypes.INT()
                         },
                         new String[] {"pt", "_id", "v1", "v2"});
@@ -150,7 +148,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10),
+                            DataTypes.STRING(),
                             DataTypes.BIGINT()
                         },
                         new String[] {"pt", "_id", "v1", "v2"});
@@ -182,7 +180,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(20),
+                            DataTypes.STRING(),
                             DataTypes.BIGINT(),
                             DataTypes.DECIMAL(8, 3),
                             DataTypes.VARBINARY(10),
@@ -214,7 +212,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(20),
+                            DataTypes.STRING(),
                             DataTypes.BIGINT(),
                             DataTypes.DECIMAL(8, 3),
                             DataTypes.VARBINARY(20),
@@ -249,9 +247,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         checkTableSchema(
                 "[{\"id\":0,\"name\":\"_id\",\"type\":\"INT NOT NULL\",\"description\":\"primary\"},"
-                        + "{\"id\":1,\"name\":\"v1\",\"type\":\"VARCHAR(10)\",\"description\":\"v1\"},"
+                        + "{\"id\":1,\"name\":\"v1\",\"type\":\"STRING\",\"description\":\"v1\"},"
                         + "{\"id\":2,\"name\":\"v2\",\"type\":\"INT\",\"description\":\"v2\"},"
-                        + "{\"id\":3,\"name\":\"v3\",\"type\":\"VARCHAR(10)\",\"description\":\"v3\"}]");
+                        + "{\"id\":3,\"name\":\"v3\",\"type\":\"STRING\",\"description\":\"v3\"}]");
 
         try (Statement statement = getStatement()) {
             testSchemaEvolutionMultipleImpl(statement);
@@ -268,9 +266,9 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10),
+                            DataTypes.STRING(),
                             DataTypes.INT(),
-                            DataTypes.VARCHAR(10)
+                            DataTypes.STRING()
                         },
                         new String[] {"_id", "v1", "v2", "v3"});
         List<String> primaryKeys = Collections.singletonList("_id");
@@ -292,13 +290,13 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(20),
+                            DataTypes.STRING(),
                             DataTypes.BIGINT(),
-                            DataTypes.VARCHAR(10),
+                            DataTypes.STRING(),
                             DataTypes.INT(),
                             DataTypes.DOUBLE(),
                             DataTypes.DECIMAL(5, 3),
-                            DataTypes.VARCHAR(10)
+                            DataTypes.STRING()
                         },
                         new String[] {"_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *("});
         expected =
@@ -394,8 +392,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.TIMESTAMP(2), // _datetime_p2
                             DataTypes.TIMESTAMP(6), // _timestamp
                             DataTypes.TIMESTAMP(0), // _timestamp0
-                            DataTypes.CHAR(10), // _char
-                            DataTypes.VARCHAR(20), // _varchar
+                            DataTypes.STRING(), // _char
+                            DataTypes.STRING(), // _varchar
                             DataTypes.STRING(), // _tinytext
                             DataTypes.STRING(), // _text
                             DataTypes.STRING(), // _mediumtext
@@ -828,7 +826,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10),
+                            DataTypes.STRING(),
                             DataTypes.STRING().notNull()
                         },
                         new String[] {"pk", "_date", "pt"});

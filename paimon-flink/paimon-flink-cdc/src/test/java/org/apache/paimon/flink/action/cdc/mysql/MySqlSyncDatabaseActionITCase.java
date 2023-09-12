@@ -101,7 +101,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         RowType rowType1 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                         new String[] {"k", "v1"});
         List<String> primaryKeys1 = Collections.singletonList("k");
         List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
@@ -111,7 +111,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
+                            DataTypes.STRING().notNull(),
                             DataTypes.INT(),
                             DataTypes.BIGINT()
                         },
@@ -130,7 +130,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.INT()
                         },
                         new String[] {"k", "v1", "v2"});
         expected =
@@ -145,10 +145,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
+                            DataTypes.STRING().notNull(),
                             DataTypes.INT(),
                             DataTypes.BIGINT(),
-                            DataTypes.VARCHAR(10)
+                            DataTypes.STRING()
                         },
                         new String[] {"k1", "k2", "v1", "v2", "v3"});
         expected =
@@ -168,7 +168,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.BIGINT()
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.BIGINT()
                         },
                         new String[] {"k", "v1", "v2"});
         expected =
@@ -184,10 +184,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
+                            DataTypes.STRING().notNull(),
                             DataTypes.INT(),
                             DataTypes.BIGINT(),
-                            DataTypes.VARCHAR(20)
+                            DataTypes.STRING()
                         },
                         new String[] {"k1", "k2", "v1", "v2", "v3"});
         expected =
@@ -265,7 +265,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     RowType.of(
                             new DataType[] {
                                 DataTypes.INT().notNull(),
-                                DataTypes.VARCHAR(10).notNull(),
+                                DataTypes.STRING().notNull(),
                                 DataTypes.INT(),
                                 DataTypes.BIGINT()
                             },
@@ -283,7 +283,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         createFileStoreTable(
                 "test_prefix_t1_test_suffix",
                 RowType.of(
-                        new DataType[] {DataTypes.INT(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT(), DataTypes.STRING()},
                         new String[] {"k1", "v0"}),
                 Collections.emptyList(),
                 Collections.singletonList("k1"),
@@ -319,7 +319,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         RowType rowType1 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                         new String[] {"k1", "v0"});
         List<String> primaryKeys1 = Collections.singletonList("k1");
         List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
@@ -327,7 +327,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         RowType rowType2 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                         new String[] {"k2", "v0"});
         List<String> primaryKeys2 = Collections.singletonList("k2");
         expected = Arrays.asList("+I[2, two]", "+I[4, four]");
@@ -343,7 +343,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.INT()
                         },
                         new String[] {"k1", "v0", "v1"});
         expected =
@@ -357,7 +357,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         rowType2 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.VARCHAR(10)
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.STRING()
                         },
                         new String[] {"k2", "v0", "v1"});
         expected =
@@ -376,7 +376,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         rowType1 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.BIGINT()
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.BIGINT()
                         },
                         new String[] {"k1", "v0", "v1"});
         expected =
@@ -391,7 +391,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         rowType2 =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.VARCHAR(20)
+                            DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.STRING()
                         },
                         new String[] {"k2", "v0", "v1"});
         expected =
@@ -481,7 +481,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         assertThat(JsonSerdeUtil.toFlatJson(table.schema().fields()))
                 .isEqualTo(
                         "[{\"id\":0,\"name\":\"k\",\"type\":\"INT NOT NULL\",\"description\":\"\"},"
-                                + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"VARCHAR(20)\",\"description\":\"\"}]");
+                                + "{\"id\":1,\"name\":\"uppercase_v0\",\"type\":\"STRING\",\"description\":\"\"}]");
 
         // check sync schema changes and records
         try (Statement statement = getStatement()) {
@@ -489,7 +489,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             statement.executeUpdate("INSERT INTO T VALUES (1, 'Hi')");
             RowType rowType1 =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(20)},
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                             new String[] {"k", "uppercase_v0"});
             waitForResult(
                     Collections.singletonList("+I[1, Hi]"),
@@ -501,7 +501,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             statement.executeUpdate("INSERT INTO T VALUES (2, 'Paimon')");
             RowType rowType2 =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(30)},
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                             new String[] {"k", "uppercase_v0"});
             waitForResult(
                     Arrays.asList("+I[1, Hi]", "+I[2, Paimon]"),
@@ -514,7 +514,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             RowType rowType3 =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.VARCHAR(30), DataTypes.DOUBLE()
+                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.DOUBLE()
                             },
                             new String[] {"k", "uppercase_v0", "uppercase_v1"});
             waitForResult(
@@ -582,7 +582,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             // make sure the job steps into incremental phase
             RowType rowType =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                             new String[] {"k", "v1"});
             List<String> primaryKeys = Collections.singletonList("k");
             waitForResult(Collections.singletonList("+I[1, one]"), table1, rowType, primaryKeys);
@@ -658,7 +658,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         statement.executeUpdate("INSERT INTO t2 VALUES (4, 'four', 40, 400)");
         RowType rowType1 =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                         new String[] {"k", "v1"});
         List<String> primaryKeys1 = Collections.singletonList("k");
         List<String> expected = Arrays.asList("+I[1, one]", "+I[3, three]");
@@ -668,7 +668,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.VARCHAR(10).notNull(),
+                            DataTypes.STRING().notNull(),
                             DataTypes.INT(),
                             DataTypes.BIGINT()
                         },
@@ -684,7 +684,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         List<String> newTablePrimaryKeys = Collections.singletonList("k");
         RowType newTableRowType =
                 RowType.of(
-                        new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                        new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                         new String[] {"k", "v1"});
         int newTableCount = 0;
         String newTableName = getNewTableName(newTableCount);
@@ -778,7 +778,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             RowType rowType =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.INT()
                             },
                             new String[] {"k", "v1", "v2"});
             waitForResult(expectedRecords, newTable, rowType, newTablePrimaryKeys);
@@ -914,7 +914,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
             RowType newTableRowType =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                             new String[] {"k", "v1"});
             List<String> newTablePrimaryKeys = Collections.singletonList("k");
             for (int i = 0; i < newTableCount; i++) {
@@ -956,7 +956,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             RowType rowType =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.VARCHAR(20), DataTypes.BIGINT()
+                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.BIGINT()
                             },
                             new String[] {"k", "v1", "v2"});
             waitForResult(
@@ -983,7 +983,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                                 DataTypes.BIGINT().notNull(),
                                 DataTypes.DOUBLE(),
                                 DataTypes.INT(),
-                                DataTypes.VARCHAR(10)
+                                DataTypes.STRING()
                             },
                             new String[] {"k", "v1", "v2", "v3"});
             waitForResult(
@@ -1004,7 +1004,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             table = getFileStoreTable("t3");
             rowType =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                             new String[] {"k", "v1"});
             waitForResult(
                     Arrays.asList("+I[3, db1_3]", "+I[4, db1_4]"),
@@ -1027,7 +1027,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 table = getFileStoreTable("t4");
                 rowType =
                         RowType.of(
-                                new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                                new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                                 new String[] {"k", "v1"});
                 waitForResult(
                         Arrays.asList("+I[1, db1_1]", "+I[2, db2_2]"),
@@ -1067,7 +1067,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             FileStoreTable table = getFileStoreTable("without_merging_shard_1_t1");
             RowType rowType =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                             new String[] {"k", "v1"});
             waitForResult(
                     Arrays.asList("+I[1, db1_1]", "+I[2, db1_2]"),
@@ -1082,7 +1082,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             rowType =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.VARCHAR(20), DataTypes.BIGINT()
+                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.BIGINT()
                             },
                             new String[] {"k", "v1", "v2"});
             waitForResult(
@@ -1101,7 +1101,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
             rowType =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.DOUBLE()
+                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.DOUBLE()
                             },
                             new String[] {"k", "v1", "v2"});
             waitForResult(
@@ -1127,7 +1127,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 table = getFileStoreTable("without_merging_shard_1_t3");
                 rowType =
                         RowType.of(
-                                new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                                new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                                 new String[] {"k", "v1"});
                 waitForResult(
                         Collections.singletonList("+I[1, test]"),

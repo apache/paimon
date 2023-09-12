@@ -398,7 +398,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
             RowType rowType =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
                             new String[] {"pk", "v1"});
             waitForResult(
                     Collections.singletonList("+I[1, A]"),
@@ -413,7 +413,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
             rowType =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.INT()
                             },
                             new String[] {"pk", "v1", "v2"});
             // Currently we haven't handle default value
