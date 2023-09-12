@@ -24,7 +24,7 @@ import org.apache.paimon.options.Options;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
-import org.junit.After;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -48,7 +48,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
 
     private static final String TABLE = "mock_table";
 
-    @After
+    @AfterEach
     public void tearDown() {
         // clean up all the topics
         try (AdminClient admin = createAdminClient()) {
@@ -157,7 +157,7 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
         tableOptions.set(BOOTSTRAP_SERVERS, bootstrapServers);
 
         if (topic != null) {
-            tableOptions.set(KafkaLogOptions.TOPIC, topic);
+            tableOptions.set(TOPIC, topic);
         }
 
         if (partition != null) {

@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.flink.kafka;
 
-import org.apache.paimon.flink.kafka.KafkaTableTestBase;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.api.common.JobStatus;

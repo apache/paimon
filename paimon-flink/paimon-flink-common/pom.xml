@@ -74,13 +74,6 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-kafka</artifactId>
-            <version>${flink.version}</version>
-            <scope>provided</scope>
-        </dependency>
-
-        <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-common</artifactId>
             <version>${hadoop.version}</version>
@@ -219,14 +212,6 @@ under the License.
             <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
-
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-connector-kafka</artifactId>
-            <version>${flink.version}</version>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
@@ -247,13 +232,6 @@ under the License.
                                     <include>org.apache.paimon:paimon-bundle</include>
                                 </includes>
                             </artifactSet>
-                            <relocations>
-                                <!-- Same as flink-sql-connector-kafka. -->
-                                <relocation>
-                                    <pattern>org.apache.kafka</pattern>
-                                    <shadedPattern>org.apache.flink.kafka.shaded.org.apache.kafka</shadedPattern>
-                                </relocation>
-                            </relocations>
                         </configuration>
                     </execution>
                 </executions>
