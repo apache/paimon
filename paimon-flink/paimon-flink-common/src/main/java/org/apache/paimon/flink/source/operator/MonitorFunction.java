@@ -22,7 +22,6 @@ import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.RichPlan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 
@@ -181,13 +180,12 @@ public class MonitorFunction extends RichSourceFunction<Split>
                     return;
                 }
                 try {
-                    RichPlan plan = scan.plan();
-                    List<Split> splits = plan.splits();
+                    List<Split> splits = scan.plan().splits();
                     isEmpty = splits.isEmpty();
                     splits.forEach(ctx::collect);
 
                     if (emitSnapshotWatermark) {
-                        Long watermark = plan.watermark();
+                        Long watermark = scan.watermark();
                         if (watermark != null) {
                             ctx.emitWatermark(new Watermark(watermark));
                         }
