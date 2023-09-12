@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
@@ -168,23 +167,16 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                         new RichCdcMultiplexRecordEventParser(
                                 schemaBuilder, includingPattern, excludingPattern);
 
-        FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
-                new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
-                        .withInput(
-                                env.fromSource(
-                                                source,
-                                                WatermarkStrategy.noWatermarks(),
-                                                "Kafka Source")
-                                        .flatMap(recordParser))
-                        .withParserFactory(parserFactory)
-                        .withCatalogLoader(catalogLoader())
-                        .withDatabase(database)
-                        .withMode(MultiTablesSinkMode.COMBINED);
-        String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
-        if (sinkParallelism != null) {
-            sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
-        }
-        sinkBuilder.build();
+        new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
+                .withInput(
+                        env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source")
+                                .flatMap(recordParser))
+                .withParserFactory(parserFactory)
+                .withCatalogLoader(catalogLoader())
+                .withDatabase(database)
+                .withMode(MultiTablesSinkMode.COMBINED)
+                .withTableOptions(tableConfig)
+                .build();
     }
 
     private void validateCaseInsensitive() {

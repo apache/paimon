@@ -26,6 +26,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.common.operators.SlotSharingGroup;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.memory.ManagedMemoryUseCase;
@@ -39,6 +40,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.UUID;
 
@@ -46,6 +49,8 @@ import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_CPU;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -199,12 +204,30 @@ public abstract class FlinkSink<T> implements Serializable {
         }
         SingleOutputStreamOperator<?> committed =
                 written.transform(
-                                GLOBAL_COMMITTER_NAME + " : " + table.name(),
-                                new CommittableTypeInfo(),
-                                committerOperator)
-                        .setParallelism(1)
-                        .setMaxParallelism(1);
+                        GLOBAL_COMMITTER_NAME + " : " + table.name(),
+                        new CommittableTypeInfo(),
+                        committerOperator);
+        Options options = Options.fromMap(table.options());
+        configureGlobalCommitter(
+                committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
+    }
+
+    public static void configureGlobalCommitter(
+            SingleOutputStreamOperator<?> committed,
+            @Nullable Double cpuCores,
+            @Nullable MemorySize heapMemory) {
+        committed.setParallelism(1).setMaxParallelism(1);
+        if (heapMemory != null) {
+            SlotSharingGroup slotSharingGroup =
+                    SlotSharingGroup.newBuilder(committed.getName())
+                            .setCpuCores(1)
+                            .setTaskHeapMemory(
+                                    new org.apache.flink.configuration.MemorySize(
+                                            heapMemory.getBytes()))
+                            .build();
+            committed.slotSharingGroup(slotSharingGroup);
+        }
     }
 
     public static void assertStreamingConfiguration(StreamExecutionEnvironment env) {
