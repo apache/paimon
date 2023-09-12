@@ -51,7 +51,7 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
                                 optionalConfigMap(params, "catalog-conf"),
                                 optionalConfigMap(params, "kafka-conf"))
                         .withTableConfig(optionalConfigMap(params, "table-conf"))
-                        .withHiveProperties(optionalConfigMap(params, "hive-table-properties"));
+                        .withHiveProperties(optionalConfigMap(params, "table-conf", true));
 
         if (params.has("partition-keys")) {
             action.withPartitionKeys(params.get("partition-keys").split(","));
@@ -91,8 +91,7 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
                         + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
                         + "[--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
-                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]] "
-                        + "[--hive-table-properties <paimon-table-hive-properties> [--hive-properties <paimon-table-hive-properties> ...]]");
+                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
         System.out.println();
 
         System.out.println("Partition keys syntax:");
@@ -147,8 +146,6 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
                         + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
                         + "    --table-conf bucket=4 \\\n"
                         + "    --table-conf changelog-producer=input \\\n"
-                        + "    --table-conf sink.parallelism=4 \\\n"
-                        + "    --hive-table-properties table description=paimon test table \\\n"
-                        + "    --hive-table-properties technical leader=paimon");
+                        + "    --table-conf sink.parallelism=4");
     }
 }
