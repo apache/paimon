@@ -103,22 +103,41 @@ Or run the following command to submit a compaction job for multiple database.
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact-database \
     --warehouse <warehouse-path> \
-    --database <database-name> \ 
+    --including-databases <database-name|name-regular-expr> \ 
     [--including-tables <paimon-table-name|name-regular-expr>] \
     [--excluding-tables <paimon-table-name|name-regular-expr>] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] 
+    [--mode <compact-mode>] \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--compact-conf <paimon-compact-conf> [--compact-conf <paimon-compact-conf> ...]]
 ```
 
-* `--database` is used to specify which database is to be compacted. In compact mode, you need to specify a database name, in compact-database mode, you could specify multiple database, regular expression is supported.
+* `--including-databases` is used to specify which database is to be compacted. In compact mode, you need to specify a database name, in compact-database mode, you could specify multiple database, regular expression is supported.
 * `--including-tables` is used to specify which source tables are to be compacted, you must use '|' to separate multiple tables, the format is `databaseName.tableName`, regular expression is supported. For example, specifying "--including-tables db1.t1|db2.+" means to compact table 'db1.t1' and all tables in the db2 database.
 * `--excluding-tables`  is used to specify which source tables are not to be compacted. The usage is same as "--including-tables". "--excluding-tables" has higher priority than "--including-tables" if you specified both.
+* `mode` is used to specify compaction mode. Possible values:
+  * "divided" (the default mode if you haven't specified one): start a sink for each table, the compaction of the new table requires restarting the job.
+  * "combined": start a single combined sink for all tables, the new table will be automatically compacted.
 * `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
+* `--compact-conf` is the configuration for compaction in combined mode. Each configuration should be specified in the format `key=value`. Compact configuration is listed below:
+
+| Key                               | Default | Type       | Description                                                                                                                                                                                                 |
+|-----------------------------------|---------|------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| continuous.discovery-interval     | 10 s    | Duration   | The discovery interval of continuous reading.                                                                                                                                                               |
+| sink.parallelism                  | (none)  | Integer    | Defines a custom parallelism for the sink. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration. |
+| sink.use-managed-memory-allocator | false   | Boolean    | If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.                                                                                      |
+| sink.managed.writer-buffer-memory | 256 mb  | MemorySize | Weight of writer buffer in managed memory, Flink will compute the memory size for writer according to the weight, the actual memory used depends on the running environment.                                |
 
 If you submit a batch job (set `execution.runtime-mode: batch` in Flink's configuration), all current table files will be compacted. If you submit a streaming job (set `execution.runtime-mode: streaming` in Flink's configuration), the job will continuously monitor new changes to the table and perform compactions as needed.
 
 {{< hint info >}}
 
 If you only want to submit the compaction job and don't want to wait until the job is done, you should submit in [detached mode](https://nightlies.apache.org/flink/flink-docs-stable/docs/deployment/cli/#submitting-a-job).
+
+{{< /hint >}}
+
+{{< hint info >}}
+
+You can set `--mode combined` to enable compacting newly added tables without restarting job.
 
 {{< /hint >}}
 
@@ -145,10 +164,25 @@ Example2: compact database
     /path/to/paimon-flink-action-{{< version >}}.jar \
     compact-database \
     --warehouse s3:///path/to/warehouse \
-    --database test_db \
+    --including-databases test_db \
     --catalog-conf s3.endpoint=https://****.com \
     --catalog-conf s3.access-key=***** \
     --catalog-conf s3.secret-key=*****
+```
+
+Example3: compact database in combined mode
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact-database \
+    --warehouse s3:///path/to/warehouse \
+    --including-databases test_db \
+    --mode combined \
+    --catalog-conf s3.endpoint=https://****.com \
+    --catalog-conf s3.access-key=***** \
+    --catalog-conf s3.secret-key=***** \
+    --compact-conf continuous.discovery-interval=*****
 ```
 
 For more usage of the compact action, see
