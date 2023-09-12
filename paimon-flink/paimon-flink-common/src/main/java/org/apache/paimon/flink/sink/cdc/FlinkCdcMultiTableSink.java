@@ -62,12 +62,12 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     private final boolean isOverwrite = false;
     private final Catalog.Loader catalogLoader;
-    @Nullable private final Double commitCpuCores;
+    private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
 
     public FlinkCdcMultiTableSink(
             Catalog.Loader catalogLoader,
-            @Nullable Double commitCpuCores,
+            double commitCpuCores,
             @Nullable MemorySize commitHeapMemory) {
         this.catalogLoader = catalogLoader;
         this.commitCpuCores = commitCpuCores;

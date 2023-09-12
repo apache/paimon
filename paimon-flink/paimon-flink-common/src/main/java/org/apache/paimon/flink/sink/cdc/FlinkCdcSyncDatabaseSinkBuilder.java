@@ -64,7 +64,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private List<FileStoreTable> tables = new ArrayList<>();
 
     @Nullable private Integer parallelism;
-    @Nullable private Double committerCpu;
+    private double committerCpu;
     @Nullable private MemorySize committerMemory;
 
     // Paimon catalog used to check and create tables. There will be two

@@ -269,7 +269,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Double> SINK_COMMITTER_CPU =
             ConfigOptions.key("sink.committer-cpu")
                     .doubleType()
-                    .noDefaultValue()
+                    .defaultValue(1.0)
                     .withDescription(
                             "Sink committer cpu to control cpu cores of global committer.");
 

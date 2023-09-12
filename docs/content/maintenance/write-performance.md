@@ -251,5 +251,5 @@ increase the memory of Flink's TaskManager uniformly, which may lead to a waste 
 
 You can use fine-grained-resource-management of Flink to increase committer heap memory only:
 1. Configure Flink Configuration `cluster.fine-grained-resource-management.enabled: true`. (This is default after Flink 1.18)
-2. Configure Paimon Table Options: `sink.committer-cpu` (for example 1.0) and `sink.committer-memory` (for example 300 MB,
-   depends on your `TaskManager`).
+2. Configure Paimon Table Options: `sink.committer-memory`, for example 300 MB, depends on your `TaskManager`.
+   (`sink.committer-cpu` is also supported)

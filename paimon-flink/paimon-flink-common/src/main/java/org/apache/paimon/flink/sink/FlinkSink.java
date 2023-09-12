@@ -215,13 +215,13 @@ public abstract class FlinkSink<T> implements Serializable {
 
     public static void configureGlobalCommitter(
             SingleOutputStreamOperator<?> committed,
-            @Nullable Double cpuCores,
+            double cpuCores,
             @Nullable MemorySize heapMemory) {
         committed.setParallelism(1).setMaxParallelism(1);
         if (heapMemory != null) {
             SlotSharingGroup slotSharingGroup =
                     SlotSharingGroup.newBuilder(committed.getName())
-                            .setCpuCores(1)
+                            .setCpuCores(cpuCores)
                             .setTaskHeapMemory(
                                     new org.apache.flink.configuration.MemorySize(
                                             heapMemory.getBytes()))
