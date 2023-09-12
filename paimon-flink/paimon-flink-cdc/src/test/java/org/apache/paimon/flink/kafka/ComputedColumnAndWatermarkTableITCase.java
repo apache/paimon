@@ -16,9 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
-
-import org.apache.paimon.flink.kafka.KafkaTableTestBase;
+package org.apache.paimon.flink.kafka;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,12 +29,12 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
+import static org.apache.paimon.flink.kafka.KafkaLogTestUtils.createTableWithKafkaLog;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.SCAN_LATEST;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQueryWithTableOptions;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTable;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTableWithKafkaLog;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTemporaryTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertIntoFromTable;
@@ -48,7 +46,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingR
 public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
 
     @BeforeEach
-    public void setUp() throws Exception {
+    public void setUp() {
         init(createAndRegisterTempFile("").toString());
     }
 

@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.flink.kafka;
 
-import org.apache.paimon.flink.kafka.KafkaTableTestBase;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.TableResult;
@@ -33,6 +32,7 @@ import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -320,5 +320,61 @@ public class LogSystemITCase extends KafkaTableTestBase {
                         getBootstrapServers()));
 
         checkTopicExists("T", 2, 1);
+    }
+
+    @Test
+    public void testLogWriteRead() throws Exception {
+        String topic = UUID.randomUUID().toString();
+
+        try {
+            tEnv.executeSql(
+                    String.format(
+                            "CREATE TABLE T (a STRING, b STRING, c STRING) WITH ("
+                                    + "'log.system'='kafka', "
+                                    + "'kafka.bootstrap.servers'='%s',"
+                                    + "'kafka.topic'='%s'"
+                                    + ")",
+                            getBootstrapServers(), topic));
+
+            tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+            BlockingIterator<Row, Row> iterator =
+                    BlockingIterator.of(tEnv.from("T").execute().collect());
+            List<Row> result = iterator.collectAndClose(2);
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
+        } finally {
+            deleteTopicIfExists(topic);
+        }
+    }
+
+    @Test
+    public void testLogWriteReadWithVirtual() throws Exception {
+        String topic = UUID.randomUUID().toString();
+        createTopicIfNotExists(topic, 1);
+
+        try {
+            tEnv.executeSql(
+                    String.format(
+                            "CREATE TABLE T ("
+                                    + "a STRING, "
+                                    + "b STRING, "
+                                    + "c STRING, "
+                                    + "d AS CAST(c as INT) + 1"
+                                    + ") WITH ("
+                                    + "'log.system'='kafka', "
+                                    + "'kafka.bootstrap.servers'='%s',"
+                                    + "'kafka.topic'='%s'"
+                                    + ")",
+                            getBootstrapServers(), topic));
+
+            tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
+            BlockingIterator<Row, Row> iterator =
+                    BlockingIterator.of(tEnv.from("T").execute().collect());
+            List<Row> result = iterator.collectAndClose(2);
+            assertThat(result)
+                    .containsExactlyInAnyOrder(Row.of("1", "2", "3", 4), Row.of("4", "5", "6", 7));
+        } finally {
+            deleteTopicIfExists(topic);
+        }
     }
 }
