@@ -22,7 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.disk.InternalRowBuffer;
+import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.RowDataPartitionKeyExtractor;
@@ -60,7 +60,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
     private final SerializableFunction<T, InternalRow> toRow;
     private final SerializableFunction<InternalRow, T> fromRow;
 
-    private transient InternalRowBuffer bootstrapBuffer;
+    private transient RowBuffer bootstrapBuffer;
 
     public GlobalIndexAssignerOperator(
             Table table,
@@ -89,7 +89,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
         long bufferSize = options.get(CoreOptions.WRITE_BUFFER_SIZE).getBytes();
         long pageSize = options.get(CoreOptions.PAGE_SIZE).getBytes();
         bootstrapBuffer =
-                InternalRowBuffer.getBuffer(
+                RowBuffer.getBuffer(
                         IOManager.create(ioManager.getSpillingDirectoriesPaths()),
                         new HeapMemorySegmentPool(bufferSize, (int) pageSize),
                         new InternalRowSerializer(table.rowType()),
@@ -130,8 +130,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
     private void endBootstrap() throws Exception {
         if (bootstrapBuffer != null) {
             bootstrapBuffer.complete();
-            try (InternalRowBuffer.InternalRowBufferIterator iterator =
-                    bootstrapBuffer.newIterator()) {
+            try (RowBuffer.RowBufferIterator iterator = bootstrapBuffer.newIterator()) {
                 while (iterator.advanceNext()) {
                     assigner.process(fromRow.apply(iterator.getRow()));
                 }

@@ -32,7 +32,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 
 /** Only cache {@link InternalRow}s in memory. */
-public class InMemoryBuffer implements InternalRowBuffer {
+public class InMemoryBuffer implements RowBuffer {
+
     private final AbstractRowDataSerializer<InternalRow> serializer;
     private final ArrayList<MemorySegment> recordBufferSegments;
     private final SimpleCollectingOutputView recordCollector;
@@ -126,7 +127,7 @@ public class InMemoryBuffer implements InternalRowBuffer {
     }
 
     private static class InMemoryBufferIterator
-            implements InternalRowBufferIterator, MutableObjectIterator<BinaryRow> {
+            implements RowBufferIterator, MutableObjectIterator<BinaryRow> {
 
         private final RandomAccessInputView recordBuffer;
         private final AbstractRowDataSerializer<InternalRow> serializer;

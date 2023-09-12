@@ -279,27 +279,12 @@ CREATE TABLE MyTable (
 {{< /tabs >}}
 
 ## Multiple Partitions Write
+
 While writing multiple partitions in a single insert job, we may get an out-of-memory error if
 too many records arrived between two checkpoint.
 
-On 0.6 version, introduced a `write-buffer-for-append` option for append-only table. Setting this
-parameter to true, we will cache the records use Segment Pool to avoid OOM. 
+You can `write-buffer-for-append` option for append-only table. Setting this parameter to true, writer will cache
+the records use Segment Pool to avoid OOM.
 
-### Influence
-If we also set `write-buffer-spillable` to true, we can spill the records to disk by serializer. 
-But this may cause the checkpoint acknowledge delay and have an influence on sink speed.
-
-But if we don't set `write-buffer-spillable`, once we run out of memory in segment poll, we will flush
-them to filesystem as a complete data file. This may cause too many small files, and make more pressure on 
-compaction. We need to trade off carefully.
-
-### Example
-```sql
-CREATE TABLE MyTable (
-    product_id BIGINT,
-    price DOUBLE,
-    sales BIGINT
-) WITH (
-    'write-buffer-for-append' = 'true'
-);
-```
+You can also set `write-buffer-spillable` to true, writer can spill the records to disk. This can reduce small
+files as much as possible.

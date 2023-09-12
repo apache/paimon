@@ -24,7 +24,7 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.disk.InternalRowBuffer;
+import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
@@ -70,7 +70,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
-    private final boolean spillable;
     private final SinkWriter sinkWriter;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
@@ -104,11 +103,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.fileCompression = fileCompression;
-        this.spillable = spillable;
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
 
-        sinkWriter = createSinkWrite(useWriteBuffer);
+        this.sinkWriter =
+                useWriteBuffer ? new BufferedSinkWriter(spillable) : new DirectSinkWriter();
 
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
@@ -190,14 +189,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         sinkWriter.close();
     }
 
-    private SinkWriter createSinkWrite(boolean useWriteBuffer) {
-        if (useWriteBuffer) {
-            return new BufferedSinkWriter();
-        } else {
-            return new DirectSinkWriter();
-        }
-    }
-
     private RowDataRollingFileWriter createRollingRowWriter() {
         return new RowDataRollingFileWriter(
                 fileIO,
@@ -254,7 +245,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     }
 
     @VisibleForTesting
-    InternalRowBuffer getWriteBuffer() {
+    RowBuffer getWriteBuffer() {
         if (sinkWriter instanceof BufferedSinkWriter) {
             return ((BufferedSinkWriter) sinkWriter).writeBuffer;
         } else {
@@ -268,7 +259,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     }
 
     /** Internal interface to Sink Data from input. */
-    interface SinkWriter {
+    private interface SinkWriter {
 
         boolean write(InternalRow data) throws IOException;
 
@@ -287,10 +278,13 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
      */
     private class DirectSinkWriter implements SinkWriter {
 
-        private RowDataRollingFileWriter writer = createRollingRowWriter();
+        private RowDataRollingFileWriter writer;
 
         @Override
         public boolean write(InternalRow data) throws IOException {
+            if (writer == null) {
+                writer = createRollingRowWriter();
+            }
             writer.write(data);
             return true;
         }
@@ -301,7 +295,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             if (writer != null) {
                 writer.close();
                 flushedFiles.addAll(writer.result());
-                writer = createRollingRowWriter();
+                writer = null;
             }
             return flushedFiles;
         }
@@ -331,7 +325,13 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
      */
     private class BufferedSinkWriter implements SinkWriter {
 
-        InternalRowBuffer writeBuffer;
+        private final boolean spillable;
+
+        private RowBuffer writeBuffer;
+
+        private BufferedSinkWriter(boolean spillable) {
+            this.spillable = spillable;
+        }
 
         @Override
         public boolean write(InternalRow data) throws IOException {
@@ -344,8 +344,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             if (writeBuffer != null) {
                 writeBuffer.complete();
                 RowDataRollingFileWriter writer = createRollingRowWriter();
-                try (InternalRowBuffer.InternalRowBufferIterator iterator =
-                        writeBuffer.newIterator()) {
+                try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
                     while (iterator.advanceNext()) {
                         writer.write(iterator.getRow());
                     }
@@ -375,7 +374,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         @Override
         public void setMemoryPool(MemorySegmentPool memoryPool) {
             writeBuffer =
-                    InternalRowBuffer.getBuffer(
+                    RowBuffer.getBuffer(
                             ioManager,
                             memoryPool,
                             new InternalRowSerializer(writeSchema),

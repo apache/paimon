@@ -33,7 +33,7 @@ import java.util.Arrays;
 
 import static org.apache.paimon.memory.MemorySegmentPool.DEFAULT_PAGE_SIZE;
 
-/** Tests for {@link InternalRowBuffer}. */
+/** Tests for {@link RowBuffer}. */
 public class InMemoryBufferTest {
 
     private InternalRowSerializer serializer;
@@ -87,7 +87,7 @@ public class InMemoryBufferTest {
         }
 
         Assertions.assertThat(buffer.size()).isEqualTo(100);
-        try (InternalRowBuffer.InternalRowBufferIterator iterator = buffer.newIterator()) {
+        try (RowBuffer.RowBufferIterator iterator = buffer.newIterator()) {
             while (iterator.advanceNext()) {
                 Assertions.assertThat(iterator.getRow()).isEqualTo(binaryRow);
             }

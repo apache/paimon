@@ -27,7 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.ChannelWithMeta;
 import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.disk.InternalRowBuffer;
+import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
@@ -329,7 +329,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
 
-        InternalRowBuffer buffer = writer.getWriteBuffer();
+        RowBuffer buffer = writer.getWriteBuffer();
         Assertions.assertThat(buffer.size()).isEqualTo(100);
         Assertions.assertThat(buffer.memoryOccupancy()).isLessThanOrEqualTo(16384L);
 
@@ -343,7 +343,7 @@ public class AppendOnlyWriterTest {
         // we give it a small Memory Pool, force it to spill
         writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
 
-        InternalRowBuffer buffer = writer.getWriteBuffer();
+        RowBuffer buffer = writer.getWriteBuffer();
         Assertions.assertThat(buffer).isNull();
 
         writer.close();
