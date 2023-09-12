@@ -168,14 +168,13 @@ public class ExternalBufferTest {
         buffer.put(row);
     }
 
-    private void assertBuffer(List<Long> expected, InternalRowBuffer buffer) {
-        InternalRowBuffer.InternalRowBufferIterator iterator = buffer.newIterator();
+    private void assertBuffer(List<Long> expected, RowBuffer buffer) {
+        RowBuffer.RowBufferIterator iterator = buffer.newIterator();
         assertBuffer(expected, iterator);
         iterator.close();
     }
 
-    private void assertBuffer(
-            List<Long> expected, InternalRowBuffer.InternalRowBufferIterator iterator) {
+    private void assertBuffer(List<Long> expected, RowBuffer.RowBufferIterator iterator) {
         List<Long> values = new ArrayList<>();
         while (iterator.advanceNext()) {
             values.add(iterator.getRow().getLong(0));

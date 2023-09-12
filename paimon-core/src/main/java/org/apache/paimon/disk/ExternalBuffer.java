@@ -38,7 +38,7 @@ import java.util.List;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** An external buffer for storing rows, it will spill the data to disk when the memory is full. */
-public class ExternalBuffer implements InternalRowBuffer {
+public class ExternalBuffer implements RowBuffer {
 
     private static final Logger LOG = LoggerFactory.getLogger(ExternalBuffer.class);
 
@@ -78,6 +78,7 @@ public class ExternalBuffer implements InternalRowBuffer {
                 new InMemoryBuffer(pool, (AbstractRowDataSerializer<InternalRow>) serializer);
     }
 
+    @Override
     public void reset() {
         clearChannels();
         inMemoryBuffer.reset();
@@ -85,6 +86,7 @@ public class ExternalBuffer implements InternalRowBuffer {
         addCompleted = false;
     }
 
+    @Override
     public boolean put(InternalRow row) throws IOException {
         checkState(!addCompleted, "This buffer has add completed.");
         if (!inMemoryBuffer.put(row)) {
@@ -102,12 +104,13 @@ public class ExternalBuffer implements InternalRowBuffer {
         return true;
     }
 
+    @Override
     public void complete() {
         addCompleted = true;
     }
 
     @Override
-    public InternalRowBufferIterator newIterator() {
+    public RowBufferIterator newIterator() {
         checkState(addCompleted, "This buffer has not add completed.");
         return new BufferIterator();
     }
@@ -157,10 +160,12 @@ public class ExternalBuffer implements InternalRowBuffer {
         inMemoryBuffer.reset();
     }
 
+    @Override
     public int size() {
         return numRows;
     }
 
+    @Override
     public long memoryOccupancy() {
         return inMemoryBuffer.memoryOccupancy();
     }
@@ -181,7 +186,7 @@ public class ExternalBuffer implements InternalRowBuffer {
     }
 
     /** Iterator of external buffer. */
-    public class BufferIterator implements InternalRowBufferIterator {
+    public class BufferIterator implements RowBufferIterator {
 
         private MutableObjectIterator<BinaryRow> currentIterator;
         private final BinaryRow reuse = binaryRowSerializer.createInstance();
@@ -216,6 +221,7 @@ public class ExternalBuffer implements InternalRowBuffer {
             closed = true;
         }
 
+        @Override
         public boolean advanceNext() {
             checkValidity();
 
@@ -246,6 +252,7 @@ public class ExternalBuffer implements InternalRowBuffer {
             return true;
         }
 
+        @Override
         public BinaryRow getRow() {
             return row;
         }

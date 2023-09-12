@@ -27,7 +27,7 @@ import java.io.Closeable;
 import java.io.IOException;
 
 /** Cache buffer for {@link InternalRow}. */
-public interface InternalRowBuffer {
+public interface RowBuffer {
 
     boolean put(InternalRow row) throws IOException;
 
@@ -39,10 +39,10 @@ public interface InternalRowBuffer {
 
     void reset();
 
-    InternalRowBufferIterator newIterator();
+    RowBufferIterator newIterator();
 
     /** Iterator to fetch record from buffer. */
-    interface InternalRowBufferIterator extends Closeable {
+    interface RowBufferIterator extends Closeable {
 
         boolean advanceNext();
 
@@ -51,7 +51,7 @@ public interface InternalRowBuffer {
         void close();
     }
 
-    static InternalRowBuffer getBuffer(
+    static RowBuffer getBuffer(
             IOManager ioManager,
             MemorySegmentPool memoryPool,
             AbstractRowDataSerializer<InternalRow> serializer,

@@ -1014,7 +1014,7 @@ public class CoreOptions implements Serializable {
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
     }
 
-    public boolean useWriteBuffer() {
+    public boolean useWriteBufferForAppend() {
         return options.get(WRITE_BUFFER_FOR_APPEND);
     }
 
