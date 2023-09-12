@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.NormalizedKeyComputer;
 import org.apache.paimon.codegen.RecordComparator;
@@ -34,43 +35,51 @@ import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
-
-import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
 
 /** SortOperator to sort the `InternalRow`s by the `KeyType`. */
 public class SortOperator extends TableStreamOperator<InternalRow>
         implements OneInputStreamOperator<InternalRow, InternalRow>, BoundedOneInput {
 
+    private final RowType keyType;
     private final RowType rowType;
     private final long maxMemory;
     private final int pageSize;
     private final int arity;
+    private final int spillSortMaxNumFiles;
     private transient BinaryExternalSortBuffer buffer;
 
-    public SortOperator(RowType rowType, long maxMemory, int pageSize) {
+    public SortOperator(
+            RowType keyType,
+            RowType rowType,
+            long maxMemory,
+            int pageSize,
+            int spillSortMaxNumFiles) {
+        this.keyType = keyType;
         this.rowType = rowType;
         this.maxMemory = maxMemory;
         this.pageSize = pageSize;
         this.arity = rowType.getFieldCount();
+        this.spillSortMaxNumFiles = spillSortMaxNumFiles;
     }
 
     @Override
     public void open() throws Exception {
         super.open();
+        initBuffer();
+    }
 
+    @VisibleForTesting
+    void initBuffer() {
         InternalRowSerializer serializer = InternalSerializers.create(rowType);
         NormalizedKeyComputer normalizedKeyComputer =
                 CodeGenUtils.newNormalizedKeyComputer(
-                        rowType.getFieldTypes(), "MemTableKeyComputer");
+                        keyType.getFieldTypes(), "MemTableKeyComputer");
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(rowType.getFieldTypes(), "MemTableComparator");
+                CodeGenUtils.newRecordComparator(keyType.getFieldTypes(), "MemTableComparator");
 
         MemorySegmentPool memoryPool = new HeapMemorySegmentPool(maxMemory, pageSize);
 
@@ -78,17 +87,18 @@ public class SortOperator extends TableStreamOperator<InternalRow>
                 BinaryInMemorySortBuffer.createBuffer(
                         normalizedKeyComputer, serializer, keyComparator, memoryPool);
 
-        Configuration jobConfig = getContainingTask().getJobConfiguration();
-
         buffer =
                 new BinaryExternalSortBuffer(
                         new BinaryRowSerializer(serializer.getArity()),
                         keyComparator,
                         memoryPool.pageSize(),
                         inMemorySortBuffer,
-                        new IOManagerImpl(splitPaths(jobConfig.get(CoreOptions.TMP_DIRS))),
-                        jobConfig.getInteger(
-                                ExecutionConfigOptions.TABLE_EXEC_SORT_MAX_NUM_FILE_HANDLES));
+                        new IOManagerImpl(
+                                getContainingTask()
+                                        .getEnvironment()
+                                        .getIOManager()
+                                        .getSpillingDirectoriesPaths()),
+                        spillSortMaxNumFiles);
     }
 
     @Override
@@ -103,7 +113,18 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     }
 
     @Override
+    public void close() throws Exception {
+        super.close();
+        buffer.clear();
+    }
+
+    @Override
     public void processElement(StreamRecord<InternalRow> element) throws Exception {
         buffer.write(element.getValue());
+    }
+
+    @VisibleForTesting
+    BinaryExternalSortBuffer getBuffer() {
+        return buffer;
     }
 }

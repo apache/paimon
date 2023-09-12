@@ -28,19 +28,31 @@ import org.slf4j.LoggerFactory;
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_TIMESTAMP} startup mode of a
  * streaming read.
  */
-public class ContinuousFromTimestampStartingScanner implements StartingScanner {
+public class ContinuousFromTimestampStartingScanner extends AbstractStartingScanner {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(ContinuousFromTimestampStartingScanner.class);
 
     private final long startupMillis;
 
-    public ContinuousFromTimestampStartingScanner(long startupMillis) {
+    public ContinuousFromTimestampStartingScanner(
+            SnapshotManager snapshotManager, long startupMillis) {
+        super(snapshotManager);
         this.startupMillis = startupMillis;
+        this.startingSnapshotId = this.snapshotManager.earlierThanTimeMills(this.startupMillis);
     }
 
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
+    public StartingContext startingContext() {
+        if (startingSnapshotId == null) {
+            return StartingContext.EMPTY;
+        } else {
+            return new StartingContext(startingSnapshotId + 1, false);
+        }
+    }
+
+    @Override
+    public Result scan(SnapshotReader snapshotReader) {
         Long startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");

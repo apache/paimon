@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.5-SNAPSHOT</version>
+        <version>0.6-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-flink</artifactId>
@@ -40,6 +40,7 @@ under the License.
         <module>paimon-flink-1.16</module>
         <module>paimon-flink-1.17</module>
         <module>paimon-flink-action</module>
+        <module>paimon-flink-cdc</module>
     </modules>
 
     <dependencies>

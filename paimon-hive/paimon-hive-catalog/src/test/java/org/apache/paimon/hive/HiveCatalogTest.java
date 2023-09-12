@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.hive.utils.CommonTestUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
@@ -28,7 +29,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
@@ -114,5 +117,35 @@ public class HiveCatalogTest extends CatalogTestBase {
     private void cleanUpHiveConfDir() {
         // reset back to default value
         HiveConf.setHiveSiteLocation(HiveConf.class.getClassLoader().getResource("hive-site.xml"));
+    }
+
+    @Test
+    public void testHadoopConfDirFromEnv() {
+        Map<String, String> newEnv = new HashMap<>(System.getenv());
+        newEnv.put("HADOOP_CONF_DIR", HADOOP_CONF_DIR);
+        // add HADOOP_CONF_DIR to system environment
+        CommonTestUtils.setEnv(newEnv, false);
+
+        HiveConf hiveConf = HiveCatalog.createHiveConf(null, null);
+        assertThat(hiveConf.get("fs.defaultFS")).isEqualTo("dummy-fs");
+    }
+
+    @Test
+    public void testHiveConfDirFromEnv() {
+        try {
+            testHiveConfDirFromEnvImpl();
+        } finally {
+            cleanUpHiveConfDir();
+        }
+    }
+
+    private void testHiveConfDirFromEnvImpl() {
+        Map<String, String> newEnv = new HashMap<>(System.getenv());
+        newEnv.put("HIVE_CONF_DIR", HIVE_CONF_DIR);
+        // add HIVE_CONF_DIR to system environment
+        CommonTestUtils.setEnv(newEnv, false);
+
+        HiveConf hiveConf = HiveCatalog.createHiveConf(null, null);
+        assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
     }
 }

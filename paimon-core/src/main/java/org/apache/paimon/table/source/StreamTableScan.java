@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.utils.Restorable;
 
 import javax.annotation.Nullable;
@@ -33,6 +34,8 @@ import javax.annotation.Nullable;
 @Public
 public interface StreamTableScan extends TableScan, Restorable<Long> {
 
+    StartingContext startingContext();
+
     @Override
     RichPlan plan();
 
@@ -41,7 +44,7 @@ public interface StreamTableScan extends TableScan, Restorable<Long> {
     void restore(@Nullable Long nextSnapshotId);
 
     /** Restore from checkpoint next snapshot id with scan kind. */
-    void restore(@Nullable Long nextSnapshotId, ScanMode scanMode);
+    void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot);
 
     /** Checkpoint to return next snapshot id. */
     @Nullable

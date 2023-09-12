@@ -32,6 +32,8 @@ import static org.apache.paimon.options.StructuredOptionsSplitter.escapeWithSing
 /** Utility class for {@link Options} related helper functions. */
 public class OptionsUtils {
 
+    public static final String PAIMON_PREFIX = "paimon.";
+
     // --------------------------------------------------------------------------------------------
     //  Type conversion
     // --------------------------------------------------------------------------------------------

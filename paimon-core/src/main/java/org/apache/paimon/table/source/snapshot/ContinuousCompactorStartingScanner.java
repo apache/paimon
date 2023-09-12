@@ -25,13 +25,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** {@link StartingScanner} used internally for stand-alone streaming compact job sources. */
-public class ContinuousCompactorStartingScanner implements StartingScanner {
+public class ContinuousCompactorStartingScanner extends AbstractStartingScanner {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(ContinuousCompactorStartingScanner.class);
 
+    public ContinuousCompactorStartingScanner(SnapshotManager snapshotManager) {
+        super(snapshotManager);
+        this.startingSnapshotId = snapshotManager.earliestSnapshotId();
+    }
+
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
+    public Result scan(SnapshotReader snapshotReader) {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (latestSnapshotId == null || earliestSnapshotId == null) {

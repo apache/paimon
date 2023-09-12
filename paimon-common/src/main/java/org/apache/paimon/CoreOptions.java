@@ -277,6 +277,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether the write buffer can be spillable. Enabled by default when using object storage.");
 
+    public static final ConfigOption<Boolean> WRITE_BUFFER_FOR_APPEND =
+            key("write-buffer-for-append")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.");
+
     public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
             key("write-manifest-cache")
                     .memoryType()
@@ -857,6 +864,25 @@ public class CoreOptions implements Serializable {
                                     + "Mainly to resolve data skew on primary keys. "
                                     + "We recommend starting with 64 mb when trying out this feature.");
 
+    public static final ConfigOption<Duration> CROSS_PARTITION_UPSERT_INDEX_TTL =
+            key("cross-partition-upsert.index-ttl")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), "
+                                    + "this can avoid maintaining too many indexes and lead to worse and worse performance, "
+                                    + "but please note that this may also cause data duplication.");
+
+    public static final ConfigOption<String> CROSS_PARTITION_UPSERT_BOOTSTRAP_MIN_PARTITION =
+            key("cross-partition-upsert.bootstrap-min-partition")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The min partition bootstrap of rocksdb index for cross partition upsert (primary keys not contain all partition fields), "
+                                    + "bootstrap will only read the partitions above it, and the smaller partitions will not be read into the index. "
+                                    + "This can reduce job startup time and excessive initialization of index, "
+                                    + "but please note that this may also cause data duplication.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -994,6 +1020,10 @@ public class CoreOptions implements Serializable {
     public boolean writeBufferSpillable(boolean usingObjectStore, boolean isStreaming) {
         // if not streaming mode, we turn spillable on by default.
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
+    }
+
+    public boolean useWriteBufferForAppend() {
+        return options.get(WRITE_BUFFER_FOR_APPEND);
     }
 
     public long sortSpillBufferSize() {
@@ -1273,6 +1303,14 @@ public class CoreOptions implements Serializable {
 
     public long localMergeBufferSize() {
         return options.get(LOCAL_MERGE_BUFFER_SIZE).getBytes();
+    }
+
+    public Duration crossPartitionUpsertIndexTtl() {
+        return options.get(CROSS_PARTITION_UPSERT_INDEX_TTL);
+    }
+
+    public String crossPartitionUpsertBootstrapMinPartition() {
+        return options.get(CROSS_PARTITION_UPSERT_BOOTSTRAP_MIN_PARTITION);
     }
 
     /** Specifies the merge engine for table with primary key. */

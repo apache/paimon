@@ -33,6 +33,7 @@ import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
@@ -44,6 +45,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class GlobalIndexAssignerTest extends TableTestBase {
 
     private GlobalIndexAssigner<RowData> createAssigner(MergeEngine mergeEngine) throws Exception {
+        return createAssigner(mergeEngine, false);
+    }
+
+    private GlobalIndexAssigner<RowData> createAssigner(MergeEngine mergeEngine, boolean enableTtl)
+            throws Exception {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(CoreOptions.MERGE_ENGINE, mergeEngine);
@@ -52,6 +58,9 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         }
         options.set(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, 3L);
         options.set(CoreOptions.BUCKET, -1);
+        if (enableTtl) {
+            options.set(CoreOptions.CROSS_PARTITION_UPSERT_INDEX_TTL, Duration.ofSeconds(1000));
+        }
         Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
@@ -67,7 +76,16 @@ public class GlobalIndexAssignerTest extends TableTestBase {
 
     @Test
     public void testBucketAssign() throws Exception {
-        GlobalIndexAssigner<RowData> assigner = createAssigner(MergeEngine.DEDUPLICATE);
+        innerTestBucketAssign(false);
+    }
+
+    @Test
+    public void testEnableTtl() throws Exception {
+        innerTestBucketAssign(true);
+    }
+
+    private void innerTestBucketAssign(boolean enableTtl) throws Exception {
+        GlobalIndexAssigner<RowData> assigner = createAssigner(MergeEngine.DEDUPLICATE, enableTtl);
         List<Integer> output = new ArrayList<>();
         assigner.open(new File(warehouse.getPath()), 2, 0, (row, bucket) -> output.add(bucket));
 

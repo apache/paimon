@@ -131,7 +131,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
                         .option("path", tablePath1.toString())
                         .option(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), 0)
                         .load();
-        assertThat(dataset.collectAsList().isEmpty());
+        assertThat(dataset.collectAsList()).isEmpty();
     }
 
     @Test

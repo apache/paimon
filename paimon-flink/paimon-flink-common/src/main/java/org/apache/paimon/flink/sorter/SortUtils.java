@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -87,8 +88,7 @@ public class SortUtils {
 
         final RowType valueRowType = table.rowType();
         final int parallelism = inputStream.getParallelism();
-        final long maxSortMemory = table.coreOptions().writeBufferSize();
-        final int pageSize = table.coreOptions().pageSize();
+        CoreOptions options = table.coreOptions();
 
         String sinkParallelismValue =
                 table.options().get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -154,7 +154,12 @@ public class SortUtils {
                 .transform(
                         "LOCAL SORT",
                         internalRowType,
-                        new SortOperator(longRowType, maxSortMemory, pageSize))
+                        new SortOperator(
+                                sortKeyType,
+                                longRowType,
+                                options.writeBufferSize(),
+                                options.pageSize(),
+                                options.localSortMaxNumFileHandles()))
                 .setParallelism(sinkParallelism)
                 // remove the key column from every row
                 .map(

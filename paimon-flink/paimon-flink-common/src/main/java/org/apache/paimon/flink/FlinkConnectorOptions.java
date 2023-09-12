@@ -230,8 +230,9 @@ public class FlinkConnectorOptions {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "If true, flink will push down projection, filters, limit to the source. "
-                                    + "The cost is that it is difficult to reuse the source in a job.");
+                            "If true, flink will push down projection, filters, limit to the source. The cost is that it "
+                                    + "is difficult to reuse the source in a job. With flink 1.18 or higher version, it "
+                                    + "is possible to reuse the source even with projection push down.");
 
     public static final ConfigOption<Boolean> SOURCE_CHECKPOINT_ALIGN_ENABLED =
             ConfigOptions.key("source.checkpoint-align.enabled")

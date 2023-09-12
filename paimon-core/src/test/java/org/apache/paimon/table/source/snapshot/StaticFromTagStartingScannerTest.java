@@ -53,9 +53,10 @@ public class StaticFromTagStartingScannerTest extends ScannerTestBase {
 
         table.createTag("tag2", 2);
 
-        StaticFromTagStartingScanner scanner = new StaticFromTagStartingScanner("tag2");
+        StaticFromTagStartingScanner scanner =
+                new StaticFromTagStartingScanner(snapshotManager, "tag2");
         StartingScanner.ScannedResult result =
-                (StartingScanner.ScannedResult) scanner.scan(snapshotManager, snapshotReader);
+                (StartingScanner.ScannedResult) scanner.scan(snapshotReader);
         assertThat(result.currentSnapshotId()).isEqualTo(2);
         assertThat(getResult(table.newRead(), toSplits(result.splits())))
                 .hasSameElementsAs(
@@ -68,8 +69,7 @@ public class StaticFromTagStartingScannerTest extends ScannerTestBase {
     @Test
     public void testNonExistingTag() {
         SnapshotManager snapshotManager = table.snapshotManager();
-        StaticFromTagStartingScanner scanner = new StaticFromTagStartingScanner("non-existing");
-        assertThatThrownBy(() -> scanner.scan(snapshotManager, snapshotReader))
+        assertThatThrownBy(() -> new StaticFromTagStartingScanner(snapshotManager, "non-existing"))
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,

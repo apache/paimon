@@ -21,8 +21,8 @@ package org.apache.paimon.flink.sink.index;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.sink.RowDataPartitionKeyExtractor;
@@ -60,7 +60,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
     private final SerializableFunction<T, InternalRow> toRow;
     private final SerializableFunction<InternalRow, T> fromRow;
 
-    private transient ExternalBuffer bootstrapBuffer;
+    private transient RowBuffer bootstrapBuffer;
 
     public GlobalIndexAssignerOperator(
             Table table,
@@ -89,10 +89,11 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
         long bufferSize = options.get(CoreOptions.WRITE_BUFFER_SIZE).getBytes();
         long pageSize = options.get(CoreOptions.PAGE_SIZE).getBytes();
         bootstrapBuffer =
-                new ExternalBuffer(
+                RowBuffer.getBuffer(
                         IOManager.create(ioManager.getSpillingDirectoriesPaths()),
                         new HeapMemorySegmentPool(bufferSize, (int) pageSize),
-                        new InternalRowSerializer(table.rowType()));
+                        new InternalRowSerializer(table.rowType()),
+                        true);
     }
 
     @Override
@@ -106,7 +107,9 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
                 break;
             case ROW:
                 if (bootstrapBuffer != null) {
-                    bootstrapBuffer.add(toRow.apply(value));
+                    // ignore return value, we must enable spillable for bootstrapBuffer, so return
+                    // is always true
+                    bootstrapBuffer.put(toRow.apply(value));
                 } else {
                     assigner.process(value);
                 }
@@ -127,7 +130,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
     private void endBootstrap() throws Exception {
         if (bootstrapBuffer != null) {
             bootstrapBuffer.complete();
-            try (ExternalBuffer.BufferIterator iterator = bootstrapBuffer.newIterator()) {
+            try (RowBuffer.RowBufferIterator iterator = bootstrapBuffer.newIterator()) {
                 while (iterator.advanceNext()) {
                     assigner.process(fromRow.apply(iterator.getRow()));
                 }

@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
+import org.apache.paimon.flink.RocksDBOptions;
 import org.apache.paimon.flink.lookup.RocksDBStateFactory;
 import org.apache.paimon.flink.lookup.RocksDBValueState;
 import org.apache.paimon.options.Options;
@@ -105,15 +106,17 @@ public class GlobalIndexAssigner<T> implements Serializable {
         // state
         Options options = coreOptions.toConfiguration();
         this.path = new File(tmpDir, "lookup-" + UUID.randomUUID());
-        this.stateFactory = new RocksDBStateFactory(path.toString(), options);
-        long cacheSize = options.get(CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE).getBytes();
+
+        this.stateFactory =
+                new RocksDBStateFactory(
+                        path.toString(), options, coreOptions.crossPartitionUpsertIndexTtl());
         RowType keyType = table.schema().logicalTrimmedPrimaryKeysType();
         this.keyIndex =
                 stateFactory.valueState(
                         "keyIndex",
                         new RowCompactedSerializer(keyType),
                         new PositiveIntIntSerializer(),
-                        cacheSize);
+                        options.get(RocksDBOptions.LOOKUP_CACHE_ROWS));
 
         this.partMapping = new IDMapping<>(BinaryRow::copy);
         this.bucketAssigner = new BucketAssigner();

@@ -47,7 +47,8 @@ public class RocksDBListStateTest {
 
     @Test
     void test() throws Exception {
-        RocksDBStateFactory factory = new RocksDBStateFactory(tempDir.toString(), new Options());
+        RocksDBStateFactory factory =
+                new RocksDBStateFactory(tempDir.toString(), new Options(), null);
 
         RowType keyType = RowType.of(DataTypes.STRING());
         RowType valueType = RowType.of(DataTypes.STRING());

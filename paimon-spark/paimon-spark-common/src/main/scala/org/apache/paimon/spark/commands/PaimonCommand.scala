@@ -27,11 +27,9 @@ import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 import java.io.IOException
 
 /** Helper trait for all paimon commands. */
-trait PaimonCommand {
+trait PaimonCommand extends WithFileStoreTable {
 
   val BUCKET_COL = "_bucket_"
-
-  def table: FileStoreTable
 
   lazy val bucketMode: BucketMode = table match {
     case fileStoreTable: FileStoreTable =>
