@@ -278,24 +278,22 @@ CREATE TABLE MyTable (
 
 {{< /tabs >}}
 
-## Write Options
-Before 0.5 version, we don't have any buffer while writing into append-only table. Which mean
-if too many records (maybe be distributed on several partitions) arrived between two checkpoint,
-we may cost a lot of memory space to cache them. The default cache of OrcWriter/ParquetWriter is 
-extremely large, with too many partition records, it is easily to cause an out-of-memory error.
+## Multiple Partitions Write
+While writing multiple partitions in a single insert job, we may get an out-of-memory error if
+too many records arrived between two checkpoint.
 
 On 0.6 version, introduced a `write-buffer-for-append` option for append-only table. Setting this
 parameter to true, we will cache the records use Segment Pool to avoid OOM. 
 
-If we set this, and also set `write-buffer-spillable` to true, we can spill the records to disk by serializer. 
+### Influence
+If we also set `write-buffer-spillable` to true, we can spill the records to disk by serializer. 
 But this may cause the checkpoint acknowledge delay and have an influence on sink speed.
 
 But if we don't set `write-buffer-spillable`, once we run out of memory in segment poll, we will flush
 them to filesystem as a complete data file. This may cause too many small files, and make more pressure on 
 compaction. We need to trade off carefully.
 
-sql example:
-
+### Example
 ```sql
 CREATE TABLE MyTable (
     product_id BIGINT,
