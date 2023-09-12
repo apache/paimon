@@ -19,8 +19,12 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.InternalRowBuffer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
@@ -28,6 +32,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
+import org.apache.paimon.memory.MemoryOwner;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -38,6 +44,7 @@ import org.apache.paimon.utils.RecordWriter;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -48,7 +55,7 @@ import java.util.concurrent.ExecutionException;
  * A {@link RecordWriter} implementation that only accepts records which are always insert
  * operations and don't have any unique keys or sort keys.
  */
-public class AppendOnlyWriter implements RecordWriter<InternalRow> {
+public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner {
 
     private final FileIO fileIO;
     private final long schemaId;
@@ -63,12 +70,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
+    private final boolean spillable;
+    private final SinkWriter sinkWriter;
     private final FieldStatsCollector.Factory[] statsCollectors;
-
-    private RowDataRollingFileWriter writer;
+    private final IOManager ioManager;
 
     public AppendOnlyWriter(
             FileIO fileIO,
+            IOManager ioManager,
             long schemaId,
             FileFormat fileFormat,
             long targetFileSize,
@@ -78,6 +87,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             boolean forceCompact,
             DataFilePathFactory pathFactory,
             @Nullable CommitIncrement increment,
+            boolean useWriteBuffer,
+            boolean spillable,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors) {
         this.fileIO = fileIO;
@@ -93,9 +104,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.fileCompression = fileCompression;
+        this.spillable = spillable;
+        this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
 
-        this.writer = createRollingRowWriter();
+        sinkWriter = createSinkWrite(useWriteBuffer);
 
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
@@ -110,12 +123,22 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
                 rowData.getRowKind() == RowKind.INSERT,
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",
                 rowData.getRowKind());
-        writer.write(rowData);
+        boolean success = sinkWriter.write(rowData);
+        if (!success) {
+            flush(false, false);
+            success = sinkWriter.write(rowData);
+            if (!success) {
+                // Should not get here, because writeBuffer will throw too big exception out.
+                // But we throw again in case of something unexpected happens. (like someone changed
+                // code in SpillableBuffer.)
+                throw new RuntimeException("Mem table is too small to hold a single element.");
+            }
+        }
     }
 
     @Override
     public void compact(boolean fullCompaction) throws Exception {
-        flushWriter(true, fullCompaction);
+        flush(true, fullCompaction);
     }
 
     @Override
@@ -130,19 +153,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
 
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
-        flushWriter(false, false);
+        flush(false, false);
         trySyncLatestCompaction(waitCompaction || forceCompact);
         return drainIncrement();
     }
 
-    private void flushWriter(boolean waitForLatestCompaction, boolean forcedFullCompaction)
+    private void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction)
             throws Exception {
-        List<DataFileMeta> flushedFiles = new ArrayList<>();
-        if (writer != null) {
-            writer.close();
-            flushedFiles.addAll(writer.result());
-            writer = createRollingRowWriter();
-        }
+        List<DataFileMeta> flushedFiles = sinkWriter.flush();
 
         // add new generated files
         flushedFiles.forEach(compactManager::addNewFile);
@@ -169,9 +187,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
             fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
         }
 
-        if (writer != null) {
-            writer.abort();
-            writer = null;
+        sinkWriter.close();
+    }
+
+    private SinkWriter createSinkWrite(boolean useWriteBuffer) {
+        if (useWriteBuffer) {
+            return new BufferedSinkWriter();
+        } else {
+            return new DirectSinkWriter();
         }
     }
 
@@ -213,5 +236,150 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow> {
         compactAfter.clear();
 
         return new CommitIncrement(newFilesIncrement, compactIncrement);
+    }
+
+    @Override
+    public void setMemoryPool(MemorySegmentPool memoryPool) {
+        sinkWriter.setMemoryPool(memoryPool);
+    }
+
+    @Override
+    public long memoryOccupancy() {
+        return sinkWriter.memoryOccupancy();
+    }
+
+    @Override
+    public void flushMemory() throws Exception {
+        flush(false, false);
+    }
+
+    @VisibleForTesting
+    InternalRowBuffer getWriteBuffer() {
+        if (sinkWriter instanceof BufferedSinkWriter) {
+            return ((BufferedSinkWriter) sinkWriter).writeBuffer;
+        } else {
+            return null;
+        }
+    }
+
+    @VisibleForTesting
+    List<DataFileMeta> getNewFiles() {
+        return newFiles;
+    }
+
+    /** Internal interface to Sink Data from input. */
+    interface SinkWriter {
+
+        boolean write(InternalRow data) throws IOException;
+
+        List<DataFileMeta> flush() throws IOException;
+
+        long memoryOccupancy();
+
+        void close();
+
+        void setMemoryPool(MemorySegmentPool memoryPool);
+    }
+
+    /**
+     * Directly sink data to file, no memory cache here, use OrcWriter/ParquetWrite/etc directly
+     * write data. May cause out-of-memory.
+     */
+    private class DirectSinkWriter implements SinkWriter {
+
+        private RowDataRollingFileWriter writer = createRollingRowWriter();
+
+        @Override
+        public boolean write(InternalRow data) throws IOException {
+            writer.write(data);
+            return true;
+        }
+
+        @Override
+        public List<DataFileMeta> flush() throws IOException {
+            List<DataFileMeta> flushedFiles = new ArrayList<>();
+            if (writer != null) {
+                writer.close();
+                flushedFiles.addAll(writer.result());
+                writer = createRollingRowWriter();
+            }
+            return flushedFiles;
+        }
+
+        @Override
+        public long memoryOccupancy() {
+            return 0;
+        }
+
+        @Override
+        public void close() {
+            if (writer != null) {
+                writer.abort();
+                writer = null;
+            }
+        }
+
+        @Override
+        public void setMemoryPool(MemorySegmentPool memoryPool) {
+            // do nothing
+        }
+    }
+
+    /**
+     * Use buffered writer, segment pooled from segment pool. When spillable, may delay checkpoint
+     * acknowledge time. When non-spillable, may cause too many small files.
+     */
+    private class BufferedSinkWriter implements SinkWriter {
+
+        InternalRowBuffer writeBuffer;
+
+        @Override
+        public boolean write(InternalRow data) throws IOException {
+            return writeBuffer.put(data);
+        }
+
+        @Override
+        public List<DataFileMeta> flush() throws IOException {
+            List<DataFileMeta> flushedFiles = new ArrayList<>();
+            if (writeBuffer != null) {
+                writeBuffer.complete();
+                RowDataRollingFileWriter writer = createRollingRowWriter();
+                try (InternalRowBuffer.InternalRowBufferIterator iterator =
+                        writeBuffer.newIterator()) {
+                    while (iterator.advanceNext()) {
+                        writer.write(iterator.getRow());
+                    }
+                } finally {
+                    writer.close();
+                }
+                flushedFiles.addAll(writer.result());
+                // reuse writeBuffer
+                writeBuffer.reset();
+            }
+            return flushedFiles;
+        }
+
+        @Override
+        public long memoryOccupancy() {
+            return writeBuffer.memoryOccupancy();
+        }
+
+        @Override
+        public void close() {
+            if (writeBuffer != null) {
+                writeBuffer.reset();
+                writeBuffer = null;
+            }
+        }
+
+        @Override
+        public void setMemoryPool(MemorySegmentPool memoryPool) {
+            writeBuffer =
+                    InternalRowBuffer.getBuffer(
+                            ioManager,
+                            memoryPool,
+                            new InternalRowSerializer(writeSchema),
+                            spillable);
+        }
     }
 }

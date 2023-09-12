@@ -52,7 +52,7 @@ import java.util.concurrent.ExecutorService;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 
 /** {@link FileStoreWrite} for {@link AppendOnlyFileStore}. */
-public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow> {
+public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> {
 
     private final FileIO fileIO;
     private final AppendOnlyFileStoreRead read;
@@ -65,6 +65,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
     private final String fileCompression;
+    private final boolean useWriteBuffer;
+    private final boolean spillable;
     private final FieldStatsCollector.Factory[] statsCollectors;
 
     private boolean skipCompaction;
@@ -80,7 +82,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options) {
-        super(commitUser, snapshotManager, scan, null);
+        super(commitUser, snapshotManager, scan, options, null);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
@@ -93,6 +95,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
         this.commitForceCompact = options.commitForceCompact();
         this.skipCompaction = options.writeOnly();
         this.fileCompression = options.fileCompression();
+        this.useWriteBuffer = options.useWriteBuffer();
+        this.spillable = options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
     }
@@ -121,6 +125,7 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
 
         return new AppendOnlyWriter(
                 fileIO,
+                ioManager,
                 schemaId,
                 fileFormat,
                 targetFileSize,
@@ -130,6 +135,8 @@ public class AppendOnlyFileStoreWrite extends AbstractFileStoreWrite<InternalRow
                 commitForceCompact,
                 factory,
                 restoreIncrement,
+                useWriteBuffer,
+                spillable,
                 fileCompression,
                 statsCollectors);
     }

@@ -165,16 +165,17 @@ public class ExternalBufferTest {
         RandomDataGenerator random = new RandomDataGenerator();
         writer.writeString(0, BinaryString.fromString(random.nextHexString(500000)));
         writer.complete();
-        buffer.add(row);
+        buffer.put(row);
     }
 
-    private void assertBuffer(List<Long> expected, ExternalBuffer buffer) {
-        ExternalBuffer.BufferIterator iterator = buffer.newIterator();
+    private void assertBuffer(List<Long> expected, InternalRowBuffer buffer) {
+        InternalRowBuffer.InternalRowBufferIterator iterator = buffer.newIterator();
         assertBuffer(expected, iterator);
         iterator.close();
     }
 
-    private void assertBuffer(List<Long> expected, ExternalBuffer.BufferIterator iterator) {
+    private void assertBuffer(
+            List<Long> expected, InternalRowBuffer.InternalRowBufferIterator iterator) {
         List<Long> values = new ArrayList<>();
         while (iterator.advanceNext()) {
             values.add(iterator.getRow().getLong(0));
@@ -203,7 +204,7 @@ public class ExternalBufferTest {
         writer.reset();
         writer.writeLong(0, l);
         writer.complete();
-        buffer.add(row);
+        buffer.put(row);
         return l;
     }
 }

@@ -277,6 +277,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether the write buffer can be spillable. Enabled by default when using object storage.");
 
+    public static final ConfigOption<Boolean> WRITE_BUFFER_FOR_APPEND =
+            key("write-buffer-for-append")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.");
+
     public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
             key("write-manifest-cache")
                     .memoryType()
@@ -1005,6 +1012,10 @@ public class CoreOptions implements Serializable {
     public boolean writeBufferSpillable(boolean usingObjectStore, boolean isStreaming) {
         // if not streaming mode, we turn spillable on by default.
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
+    }
+
+    public boolean useWriteBuffer() {
+        return options.get(WRITE_BUFFER_FOR_APPEND);
     }
 
     public long sortSpillBufferSize() {
