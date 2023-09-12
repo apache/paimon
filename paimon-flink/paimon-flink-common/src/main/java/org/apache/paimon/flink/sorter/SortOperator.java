@@ -34,15 +34,10 @@ import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
-
-import static org.apache.paimon.disk.IOManagerImpl.splitPaths;
 
 /** SortOperator to sort the `InternalRow`s by the `KeyType`. */
 public class SortOperator extends TableStreamOperator<InternalRow>
@@ -52,13 +47,15 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final long maxMemory;
     private final int pageSize;
     private final int arity;
+    private final int spillSortMaxNumFiles;
     private transient BinaryExternalSortBuffer buffer;
 
-    public SortOperator(RowType rowType, long maxMemory, int pageSize) {
+    public SortOperator(RowType rowType, long maxMemory, int pageSize, int spillSortMaxNumFiles) {
         this.rowType = rowType;
         this.maxMemory = maxMemory;
         this.pageSize = pageSize;
         this.arity = rowType.getFieldCount();
+        this.spillSortMaxNumFiles = spillSortMaxNumFiles;
     }
 
     @Override
@@ -78,17 +75,18 @@ public class SortOperator extends TableStreamOperator<InternalRow>
                 BinaryInMemorySortBuffer.createBuffer(
                         normalizedKeyComputer, serializer, keyComparator, memoryPool);
 
-        Configuration jobConfig = getContainingTask().getJobConfiguration();
-
         buffer =
                 new BinaryExternalSortBuffer(
                         new BinaryRowSerializer(serializer.getArity()),
                         keyComparator,
                         memoryPool.pageSize(),
                         inMemorySortBuffer,
-                        new IOManagerImpl(splitPaths(jobConfig.get(CoreOptions.TMP_DIRS))),
-                        jobConfig.getInteger(
-                                ExecutionConfigOptions.TABLE_EXEC_SORT_MAX_NUM_FILE_HANDLES));
+                        new IOManagerImpl(
+                                getContainingTask()
+                                        .getEnvironment()
+                                        .getIOManager()
+                                        .getSpillingDirectoriesPaths()),
+                        spillSortMaxNumFiles);
     }
 
     @Override
