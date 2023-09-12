@@ -44,6 +44,7 @@ import org.apache.flink.table.runtime.operators.TableStreamOperator;
 public class SortOperator extends TableStreamOperator<InternalRow>
         implements OneInputStreamOperator<InternalRow, InternalRow>, BoundedOneInput {
 
+    private final RowType keyType;
     private final RowType rowType;
     private final long maxMemory;
     private final int pageSize;
@@ -51,7 +52,13 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final int spillSortMaxNumFiles;
     private transient BinaryExternalSortBuffer buffer;
 
-    public SortOperator(RowType rowType, long maxMemory, int pageSize, int spillSortMaxNumFiles) {
+    public SortOperator(
+            RowType keyType,
+            RowType rowType,
+            long maxMemory,
+            int pageSize,
+            int spillSortMaxNumFiles) {
+        this.keyType = keyType;
         this.rowType = rowType;
         this.maxMemory = maxMemory;
         this.pageSize = pageSize;
@@ -70,9 +77,9 @@ public class SortOperator extends TableStreamOperator<InternalRow>
         InternalRowSerializer serializer = InternalSerializers.create(rowType);
         NormalizedKeyComputer normalizedKeyComputer =
                 CodeGenUtils.newNormalizedKeyComputer(
-                        rowType.getFieldTypes(), "MemTableKeyComputer");
+                        keyType.getFieldTypes(), "MemTableKeyComputer");
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(rowType.getFieldTypes(), "MemTableComparator");
+                CodeGenUtils.newRecordComparator(keyType.getFieldTypes(), "MemTableComparator");
 
         MemorySegmentPool memoryPool = new HeapMemorySegmentPool(maxMemory, pageSize);
 
@@ -117,8 +124,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     }
 
     @VisibleForTesting
-    protected Configuration jobConfiguration() {
-        // unit test will override this method to set configurations
-        return getContainingTask().getJobConfiguration();
+    BinaryExternalSortBuffer getBuffer() {
+        return buffer;
     }
 }

@@ -18,64 +18,107 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.MutableObjectIterator;
 
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
-import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collections;
 
 /** Test for {@link SortOperator}. */
 public class SortOperatorTest {
 
-    @TempDir private Path tempDir;
-
-    RowType keyRowType =
-            new RowType(Arrays.asList(new DataField(0, "a", new VarCharType(), "Someone's desc.")));
-
-    RowType valueRowType =
-            new RowType(
-                    Arrays.asList(
-                            new DataField(0, "b", new VarCharType(), "Someone's desc."),
-                            new DataField(1, "c`", new BigIntType())));
-
     @Test
-    public void testCloseSortOprator() throws Exception {
+    public void testSort() throws Exception {
+        RowType keyRowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "a", new BigIntType(), "Someone's desc.")));
+
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new BigIntType()),
+                                new DataField(1, "b", new VarCharType(), "Someone's desc."),
+                                new DataField(2, "c", new VarCharType(), "Someone's desc.")));
+
         SortOperator sortOperator =
                 new SortOperator(
                         keyRowType,
-                        valueRowType,
+                        rowType,
                         MemorySize.parse("10 mb").getBytes(),
-                        (int) MemorySize.parse("16 kb").getBytes()) {
-                    @Override
-                    protected Configuration jobConfiguration() {
-                        Configuration configuration = new Configuration();
-                        configuration.set(CoreOptions.TMP_DIRS, tempDir.toString());
-                        return configuration;
-                    }
-                };
+                        (int) MemorySize.parse("16 kb").getBytes(),
+                        128) {};
+
+        OneInputStreamOperatorTestHarness harness = createTestHarness(sortOperator);
+        harness.open();
+
+        for (int i = 0; i < 10000; i++) {
+            harness.processElement(
+                    new StreamRecord<>(
+                            GenericRow.of(
+                                    (long) 10000 - i,
+                                    BinaryString.fromString(""),
+                                    BinaryString.fromString(""))));
+        }
+
+        BinaryExternalSortBuffer externalSortBuffer = sortOperator.getBuffer();
+        MutableObjectIterator<BinaryRow> iterator = externalSortBuffer.sortedIterator();
+        BinaryRow row;
+        BinaryRow reuse = new BinaryRow(3);
+        long i = 1;
+        while ((row = iterator.next(reuse)) != null) {
+            Assertions.assertThat(row.getLong(0)).isEqualTo(i++);
+        }
+
+        harness.close();
+    }
+
+    @Test
+    public void testCloseSortOprator() throws Exception {
+        RowType keyRowType =
+                new RowType(
+                        Collections.singletonList(
+                                new DataField(0, "a", new VarCharType(), "Someone's desc.")));
+
+        RowType rowType =
+                new RowType(
+                        Arrays.asList(
+                                new DataField(0, "a", new VarCharType(), "Someone's desc."),
+                                new DataField(0, "b", new VarCharType(), "Someone's desc."),
+                                new DataField(1, "c", new BigIntType())));
+
+        SortOperator sortOperator =
+                new SortOperator(
+                        keyRowType,
+                        rowType,
+                        MemorySize.parse("10 mb").getBytes(),
+                        (int) MemorySize.parse("16 kb").getBytes(),
+                        128) {};
+        OneInputStreamOperatorTestHarness harness = createTestHarness(sortOperator);
+        harness.open();
+        File[] files = harness.getEnvironment().getIOManager().getSpillingDirectories();
 
         char[] data = new char[1024];
         for (int i = 0; i < 1024; i++) {
             data[i] = (char) ('a' + i % 26);
         }
 
-        sortOperator.initBuffer();
-
         for (int i = 0; i < 10000; i++) {
-            sortOperator.processElement(
+            harness.processElement(
                     new StreamRecord<>(
                             GenericRow.of(
                                     BinaryString.fromString(String.valueOf(data)),
@@ -83,22 +126,25 @@ public class SortOperatorTest {
                                     (long) i)));
         }
 
-        try {
-            sortOperator.endInput();
-        } catch (NullPointerException e) {
-            // ignore null point exception
+        harness.close();
+        for (File file : files) {
+            assertNoDataFile(file);
         }
-
-        sortOperator.close();
-
-        assertNoDataFile(tempDir.toFile());
     }
 
     private void assertNoDataFile(File fileDir) {
-        Assertions.assertThat(fileDir.isDirectory()).isTrue();
-
-        for (File file : fileDir.listFiles()) {
-            assertNoDataFile(file);
+        if (fileDir.exists()) {
+            Assertions.assertThat(fileDir.isDirectory()).isTrue();
+            for (File file : fileDir.listFiles()) {
+                assertNoDataFile(file);
+            }
         }
+    }
+
+    private OneInputStreamOperatorTestHarness createTestHarness(SortOperator operator)
+            throws Exception {
+        OneInputStreamOperatorTestHarness testHarness =
+                new OneInputStreamOperatorTestHarness(operator);
+        return testHarness;
     }
 }

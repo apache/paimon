@@ -155,6 +155,7 @@ public class SortUtils {
                         "LOCAL SORT",
                         internalRowType,
                         new SortOperator(
+                                sortKeyType,
                                 longRowType,
                                 options.writeBufferSize(),
                                 options.pageSize(),
