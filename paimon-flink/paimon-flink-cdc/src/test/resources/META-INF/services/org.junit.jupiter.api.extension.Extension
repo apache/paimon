@@ -13,15 +13,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-org.apache.paimon.flink.kafka.KafkaLogStoreFactory
-
-### action factories
-org.apache.paimon.flink.action.CompactActionFactory
-org.apache.paimon.flink.action.CompactDatabaseActionFactory
-org.apache.paimon.flink.action.DropPartitionActionFactory
-org.apache.paimon.flink.action.DeleteActionFactory
-org.apache.paimon.flink.action.MergeIntoActionFactory
-org.apache.paimon.flink.action.RollbackToActionFactory
-org.apache.paimon.flink.action.CreateTagActionFactory
-org.apache.paimon.flink.action.DeleteTagActionFactory
-org.apache.paimon.flink.action.ResetConsumerActionFactory
+org.apache.paimon.testutils.junit.TestLoggerExtension
