@@ -93,6 +93,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
     private String includingTables = ".*";
     @Nullable String excludingTables;
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
+    private Map<String, String> tableProperties;
 
     public KafkaSyncDatabaseAction(
             String warehouse,
@@ -140,6 +141,11 @@ public class KafkaSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    public KafkaSyncDatabaseAction withHiveProperties(Map<String, String> tableProperties) {
+        this.tableProperties = tableProperties;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
@@ -179,7 +185,8 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                         .withParserFactory(parserFactory)
                         .withCatalogLoader(catalogLoader())
                         .withDatabase(database)
-                        .withMode(MultiTablesSinkMode.COMBINED);
+                        .withMode(MultiTablesSinkMode.COMBINED)
+                        .withHiveProperties(tableProperties);
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));

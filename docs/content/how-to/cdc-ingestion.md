@@ -88,8 +88,7 @@ To use this feature through `flink run`, run the following shell command.
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]] \
-    [--hive-table-properties <paimon-table-hive-properties> [--hive-table-properties <paimon-table-hive-properties> ...]]
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/mysql_sync_table >}}
@@ -173,8 +172,7 @@ To use this feature through `flink run`, run the following shell command.
     [--type-mapping <option1,option2...>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]] \
-    [--hive-table-properties <paimon-table-hive-properties> [--hive-table-properties <paimon-table-hive-properties> ...]]
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/mysql_sync_database >}}
@@ -348,8 +346,7 @@ To use this feature through `flink run`, run the following shell command.
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]] \
-    [--hive-table-properties <paimon-table-hive-properties> [--hive-table-properties <paimon-table-hive-properties> ...]]
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/kafka_sync_table >}}
@@ -473,8 +470,7 @@ To use this feature through `flink run`, run the following shell command.
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
     [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]] \
-    [--hive-table-properties <paimon-table-hive-properties> [--hive-table-properties <paimon-table-hive-properties> ...]]
+    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/mongodb_sync_table >}}
@@ -615,8 +611,7 @@ To use this feature through `flink run`, run the following shell command.
     [--including-tables <mongodb-table-name|name-regular-expr>] \
     [--excluding-tables <mongodb-table-name|name-regular-expr>] \
     [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
 ```
 
 {{< generated/mongodb_sync_database >}}

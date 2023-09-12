@@ -51,7 +51,8 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
                 .withTablePrefix(params.get("table-prefix"))
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
-                .excludingTables(params.get("excluding-tables"));
+                .excludingTables(params.get("excluding-tables"))
+                .withHiveProperties(optionalConfigMap(params, "table-conf",true));
 
         if (params.has("type-mapping")) {
             String[] options = params.get("type-mapping").split(",");
