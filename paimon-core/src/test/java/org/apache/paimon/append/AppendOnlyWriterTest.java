@@ -25,8 +25,9 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.ChannelWithMeta;
+import org.apache.paimon.disk.ExternalBuffer;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.disk.SpillableBuffer;
+import org.apache.paimon.disk.InternalRowBuffer;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
@@ -328,7 +329,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
 
-        SpillableBuffer buffer = writer.getWriteBuffer();
+        InternalRowBuffer buffer = writer.getWriteBuffer();
         Assertions.assertThat(buffer.size()).isEqualTo(100);
         Assertions.assertThat(buffer.memoryOccupancy()).isLessThanOrEqualTo(16384L);
 
@@ -342,7 +343,7 @@ public class AppendOnlyWriterTest {
         // we give it a small Memory Pool, force it to spill
         writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
 
-        SpillableBuffer buffer = writer.getWriteBuffer();
+        InternalRowBuffer buffer = writer.getWriteBuffer();
         Assertions.assertThat(buffer).isNull();
 
         writer.close();
@@ -367,7 +368,8 @@ public class AppendOnlyWriterTest {
         Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
         Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
         Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(0);
-        long rowCount = writer.getNewFiles().stream().map(t -> t.rowCount()).reduce(0L, Long::sum);
+        long rowCount =
+                writer.getNewFiles().stream().map(DataFileMeta::rowCount).reduce(0L, Long::sum);
         Assertions.assertThat(rowCount).isEqualTo(100);
 
         for (int j = 0; j < 100; j++) {
@@ -378,7 +380,7 @@ public class AppendOnlyWriterTest {
         Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
         Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
         Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(1);
-        rowCount = writer.getNewFiles().stream().map(t -> t.rowCount()).reduce(0L, Long::sum);
+        rowCount = writer.getNewFiles().stream().map(DataFileMeta::rowCount).reduce(0L, Long::sum);
         Assertions.assertThat(rowCount).isEqualTo(200);
     }
 
@@ -397,8 +399,8 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
 
-        SpillableBuffer spillableBuffer = writer.getWriteBuffer();
-        List<ChannelWithMeta> channel = spillableBuffer.getSpillChannels();
+        ExternalBuffer externalBuffer = (ExternalBuffer) writer.getWriteBuffer();
+        List<ChannelWithMeta> channel = externalBuffer.getSpillChannels();
 
         writer.close();
 
@@ -424,7 +426,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
         // we got only one file after commit
-        Assertions.assertThat(writer.prepareCommit(false).newFilesIncrement().newFiles().size())
+        Assertions.assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
                 .isEqualTo(1);
         writer.close();
 
@@ -438,7 +440,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
         // we got 100 files
-        Assertions.assertThat(writer.prepareCommit(false).newFilesIncrement().newFiles().size())
+        Assertions.assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
                 .isEqualTo(100);
         writer.close();
     }

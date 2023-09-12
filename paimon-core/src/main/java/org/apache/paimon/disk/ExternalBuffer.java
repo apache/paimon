@@ -20,8 +20,6 @@ package org.apache.paimon.disk;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.RandomAccessInputView;
-import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.memory.Buffer;
@@ -32,8 +30,6 @@ import org.apache.paimon.utils.MutableObjectIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
-import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -42,9 +38,9 @@ import java.util.List;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** An external buffer for storing rows, it will spill the data to disk when the memory is full. */
-public class SpillableBuffer {
+public class ExternalBuffer implements InternalRowBuffer {
 
-    private static final Logger LOG = LoggerFactory.getLogger(SpillableBuffer.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ExternalBuffer.class);
 
     private final IOManager ioManager;
     private final MemorySegmentPool pool;
@@ -53,18 +49,14 @@ public class SpillableBuffer {
 
     // The size of each segment
     private final int segmentSize;
-    private final boolean spillable;
 
     private final List<ChannelWithMeta> spilledChannelIDs;
     private int numRows;
 
     private boolean addCompleted;
 
-    public SpillableBuffer(
-            IOManager ioManager,
-            MemorySegmentPool pool,
-            AbstractRowDataSerializer<?> serializer,
-            boolean spillable) {
+    ExternalBuffer(
+            IOManager ioManager, MemorySegmentPool pool, AbstractRowDataSerializer<?> serializer) {
         this.ioManager = ioManager;
         this.pool = pool;
 
@@ -75,7 +67,6 @@ public class SpillableBuffer {
 
         this.segmentSize = pool.pageSize();
 
-        this.spillable = spillable;
         this.spilledChannelIDs = new ArrayList<>();
 
         this.numRows = 0;
@@ -84,7 +75,7 @@ public class SpillableBuffer {
 
         //noinspection unchecked
         this.inMemoryBuffer =
-                new InMemoryBuffer((AbstractRowDataSerializer<InternalRow>) serializer);
+                new InMemoryBuffer(pool, (AbstractRowDataSerializer<InternalRow>) serializer);
     }
 
     public void reset() {
@@ -94,18 +85,15 @@ public class SpillableBuffer {
         addCompleted = false;
     }
 
-    public boolean add(InternalRow row) throws IOException {
+    public boolean put(InternalRow row) throws IOException {
         checkState(!addCompleted, "This buffer has add completed.");
-        if (!inMemoryBuffer.write(row)) {
+        if (!inMemoryBuffer.put(row)) {
             // Check if record is too big.
             if (inMemoryBuffer.getCurrentDataBufferOffset() == 0) {
                 throwTooBigException(row);
             }
-            if (!spillable) {
-                return false;
-            }
             spill();
-            if (!inMemoryBuffer.write(row)) {
+            if (!inMemoryBuffer.put(row)) {
                 throwTooBigException(row);
             }
         }
@@ -118,13 +106,14 @@ public class SpillableBuffer {
         addCompleted = true;
     }
 
-    public BufferIterator newIterator() {
+    @Override
+    public InternalRowBufferIterator newIterator() {
         checkState(addCompleted, "This buffer has not add completed.");
         return new BufferIterator();
     }
 
     private void throwTooBigException(InternalRow row) throws IOException {
-        int rowSize = inMemoryBuffer.serializer.toBinaryRow(row).toBytes().length;
+        int rowSize = inMemoryBuffer.getSerializer().toBinaryRow(row).toBytes().length;
         throw new IOException(
                 "Record is too big, it can't be added to a empty InMemoryBuffer! "
                         + "Record size: "
@@ -151,7 +140,7 @@ public class SpillableBuffer {
             }
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
-                    inMemoryBuffer.numRecords,
+                    inMemoryBuffer.size(),
                     writer.getSize());
             writer.close();
         } catch (IOException e) {
@@ -173,7 +162,7 @@ public class SpillableBuffer {
     }
 
     public long memoryOccupancy() {
-        return inMemoryBuffer.currentDataBufferOffset;
+        return inMemoryBuffer.memoryOccupancy();
     }
 
     private int memorySize() {
@@ -192,7 +181,7 @@ public class SpillableBuffer {
     }
 
     /** Iterator of external buffer. */
-    public class BufferIterator implements Closeable {
+    public class BufferIterator implements InternalRowBufferIterator {
 
         private MutableObjectIterator<BinaryRow> currentIterator;
         private final BinaryRow reuse = binaryRowSerializer.createInstance();
@@ -290,107 +279,5 @@ public class SpillableBuffer {
     @VisibleForTesting
     public List<ChannelWithMeta> getSpillChannels() {
         return spilledChannelIDs;
-    }
-
-    private class InMemoryBuffer {
-
-        private final AbstractRowDataSerializer<InternalRow> serializer;
-        private final ArrayList<MemorySegment> recordBufferSegments;
-        private final SimpleCollectingOutputView recordCollector;
-
-        private long currentDataBufferOffset;
-        private int numBytesInLastBuffer;
-        private int numRecords = 0;
-
-        private InMemoryBuffer(AbstractRowDataSerializer<InternalRow> serializer) {
-            // serializer has states, so we must duplicate
-            this.serializer = (AbstractRowDataSerializer<InternalRow>) serializer.duplicate();
-            this.recordBufferSegments = new ArrayList<>();
-            this.recordCollector =
-                    new SimpleCollectingOutputView(this.recordBufferSegments, pool, segmentSize);
-        }
-
-        private void reset() {
-            this.currentDataBufferOffset = 0;
-            this.numRecords = 0;
-            returnToSegmentPool();
-            this.recordCollector.reset();
-        }
-
-        private void returnToSegmentPool() {
-            pool.returnAll(this.recordBufferSegments);
-            this.recordBufferSegments.clear();
-        }
-
-        public boolean write(InternalRow row) throws IOException {
-            try {
-                this.serializer.serializeToPages(row, this.recordCollector);
-                currentDataBufferOffset = this.recordCollector.getCurrentOffset();
-                numBytesInLastBuffer = this.recordCollector.getCurrentPositionInSegment();
-                numRecords++;
-                return true;
-            } catch (EOFException e) {
-                return false;
-            }
-        }
-
-        private ArrayList<MemorySegment> getRecordBufferSegments() {
-            return recordBufferSegments;
-        }
-
-        private long getCurrentDataBufferOffset() {
-            return currentDataBufferOffset;
-        }
-
-        private int getNumRecordBuffers() {
-            int result = (int) (currentDataBufferOffset / segmentSize);
-            long mod = currentDataBufferOffset % segmentSize;
-            if (mod != 0) {
-                result += 1;
-            }
-            return result;
-        }
-
-        private int getNumBytesInLastBuffer() {
-            return numBytesInLastBuffer;
-        }
-
-        private InMemoryBufferIterator newIterator() {
-            RandomAccessInputView recordBuffer =
-                    new RandomAccessInputView(
-                            this.recordBufferSegments, segmentSize, numBytesInLastBuffer);
-            return new InMemoryBufferIterator(recordBuffer, serializer);
-        }
-    }
-
-    private static class InMemoryBufferIterator
-            implements MutableObjectIterator<BinaryRow>, Closeable {
-
-        private final RandomAccessInputView recordBuffer;
-        private final AbstractRowDataSerializer<InternalRow> serializer;
-
-        private InMemoryBufferIterator(
-                RandomAccessInputView recordBuffer,
-                AbstractRowDataSerializer<InternalRow> serializer) {
-            this.recordBuffer = recordBuffer;
-            this.serializer = serializer;
-        }
-
-        @Override
-        public BinaryRow next(BinaryRow reuse) throws IOException {
-            try {
-                return (BinaryRow) serializer.mapFromPages(reuse, recordBuffer);
-            } catch (EOFException e) {
-                return null;
-            }
-        }
-
-        @Override
-        public BinaryRow next() throws IOException {
-            throw new RuntimeException("Not support!");
-        }
-
-        @Override
-        public void close() {}
     }
 }

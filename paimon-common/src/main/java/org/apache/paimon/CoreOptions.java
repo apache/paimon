@@ -277,8 +277,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Whether the write buffer can be spillable. Enabled by default when using object storage.");
 
-    public static final ConfigOption<Boolean> USE_WRITE_BUFFER =
-            key("use-write-buffer")
+    public static final ConfigOption<Boolean> WRITE_BUFFER_FOR_APPEND =
+            key("write-buffer-for-append")
                     .booleanType()
                     .defaultValue(false)
                     .withDescription(
@@ -996,7 +996,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean useWriteBuffer() {
-        return options.get(USE_WRITE_BUFFER);
+        return options.get(WRITE_BUFFER_FOR_APPEND);
     }
 
     public long sortSpillBufferSize() {
