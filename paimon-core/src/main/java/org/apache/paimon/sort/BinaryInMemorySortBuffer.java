@@ -183,6 +183,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
 
         writeIndexAndNormalizedKey(record, currOffset);
 
+        this.sortIndexBytes += this.indexEntrySize;
         this.currentDataBufferOffset = newOffset;
 
         return true;
