@@ -74,7 +74,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @TestTemplate
-    public void testSourceReuse() {
+    public void testSourceReuseWithoutScanPushDown() {
         sEnv.executeSql("CREATE TEMPORARY TABLE print1 (a STRING) WITH ('connector'='print')");
         sEnv.executeSql("CREATE TEMPORARY TABLE print2 (b STRING) WITH ('connector'='print')");
 
@@ -86,8 +86,45 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         assertThat(statementSet.compilePlan().explain()).contains("Reused");
 
         statementSet = sEnv.createStatementSet();
+        statementSet.addInsertSql(
+                "INSERT INTO print1 SELECT a FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */ WHERE b = 'Apache'");
+        statementSet.addInsertSql(
+                "INSERT INTO print2 SELECT b FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */ WHERE a = 'Paimon'");
+        assertThat(statementSet.compilePlan().explain()).contains("Reused");
+
+        statementSet = sEnv.createStatementSet();
+        statementSet.addInsertSql(
+                "INSERT INTO print1 SELECT a FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */ WHERE b = 'Apache' LIMIT 5");
+        statementSet.addInsertSql(
+                "INSERT INTO print2 SELECT b FROM T1 /*+ OPTIONS('scan.push-down' = 'false') */ WHERE a = 'Paimon' LIMIT 10");
+        assertThat(statementSet.compilePlan().explain()).contains("Reused");
+    }
+
+    @TestTemplate
+    public void testSourceReuseWithScanPushDown() {
+        // source can be reused with projection applied
+        sEnv.executeSql("CREATE TEMPORARY TABLE print1 (a STRING) WITH ('connector'='print')");
+        sEnv.executeSql("CREATE TEMPORARY TABLE print2 (b STRING) WITH ('connector'='print')");
+
+        StatementSet statementSet = sEnv.createStatementSet();
         statementSet.addInsertSql("INSERT INTO print1 SELECT a FROM T1");
         statementSet.addInsertSql("INSERT INTO print2 SELECT b FROM T1");
+        assertThat(statementSet.compilePlan().explain()).contains("Reused");
+
+        // source cannot be reused with filter or limit applied
+        sEnv.executeSql(
+                "CREATE TEMPORARY TABLE new_print1 (a STRING, b STRING, c STRING) WITH ('connector'='print')");
+        sEnv.executeSql(
+                "CREATE TEMPORARY TABLE new_print2 (a STRING, b STRING, c STRING) WITH ('connector'='print')");
+
+        statementSet = sEnv.createStatementSet();
+        statementSet.addInsertSql("INSERT INTO new_print1 SELECT * FROM T1 WHERE a = 'Apache'");
+        statementSet.addInsertSql("INSERT INTO new_print2 SELECT * FROM T1");
+        assertThat(statementSet.compilePlan().explain()).doesNotContain("Reused");
+
+        statementSet = sEnv.createStatementSet();
+        statementSet.addInsertSql("INSERT INTO new_print1 SELECT * FROM T1 LIMIT 5");
+        statementSet.addInsertSql("INSERT INTO new_print2 SELECT * FROM T1");
         assertThat(statementSet.compilePlan().explain()).doesNotContain("Reused");
     }
 

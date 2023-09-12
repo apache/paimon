@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -62,6 +63,7 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
+import org.apache.flink.table.catalog.exceptions.ProcedureNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
@@ -69,6 +71,7 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.procedures.Procedure;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -111,6 +114,7 @@ public class FlinkCatalog extends AbstractCatalog {
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
+    private final String name;
     private final boolean logStoreAutoRegister;
 
     private final Duration logStoreAutoRegisterTimeout;
@@ -125,6 +129,7 @@ public class FlinkCatalog extends AbstractCatalog {
             Options options) {
         super(name, defaultDatabase);
         this.catalog = catalog;
+        this.name = name;
         this.classLoader = classLoader;
         this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);
         this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
@@ -865,5 +870,21 @@ public class FlinkCatalog extends AbstractCatalog {
             boolean ignoreIfNotExists)
             throws CatalogException {
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.17-.
+     */
+    public List<String> listProcedures(String dbName) throws CatalogException {
+        return ProcedureUtil.listProcedures(dbName);
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.17-.
+     */
+    public Procedure getProcedure(ObjectPath procedurePath)
+            throws ProcedureNotExistException, CatalogException {
+        return ProcedureUtil.getProcedure(procedurePath)
+                .orElseThrow(() -> new ProcedureNotExistException(name, procedurePath));
     }
 }
