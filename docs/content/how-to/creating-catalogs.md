@@ -163,3 +163,16 @@ You can set location in the properties of table/database by the config of `locat
 By default, Paimon does not synchronize newly created partitions into Hive metastore. Users will see an unpartitioned table in Hive. Partition push-down will be carried out by filter push-down instead.
 
 If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore, please set the table property `metastore.partitioned-table` to true. Also see [CoreOptions]({{< ref "maintenance/configurations#CoreOptions" >}}).
+
+### Adding Properties to a Hive Table
+
+Using the `--table-conf` parameter allows for the convenient definition of Hive Table properties. When you utilize configurations
+that start with “hive.”, these configurations will be defined in the `TBLPROPERTIES` of the Hive Table, thereby specifying the table's attributes.
+for example:
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    .... \
+    --table-conf hive.table.owner=Jon
+```
+In the command mentioned above, `table.owner=Jon` will be used to add to the Hive table attributes during automatic table creation.

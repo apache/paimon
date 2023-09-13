@@ -692,16 +692,6 @@ you can specify type mapping option `tinyint1-not-bool` (Use `--type-mapping`), 
 6. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it 
 should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
 
-## Adding Properties to a Hive Table
-
-Using the --table-conf parameter allows for the convenient definition of Hive Table properties. When you utilize configurations
-that start with “hive.”, these configurations will be defined in the “TBLPROPERTIES” of the Hive Table, thereby specifying the table's attributes.
-for example:
-```bash
---table-conf hive.table.owner=Jon
-```
-In the command mentioned above, hive.table.owner=Jon will be used to add to the Hive table attributes during automatic table creation.
-
 ## FAQ
 1. Chinese characters in records ingested from MySQL are garbled.
 * Try to set `env.java.opts: -Dfile.encoding=UTF-8` in `flink-conf.yaml`
