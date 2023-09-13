@@ -86,12 +86,6 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                     }
 
                     @Override
-                    public ScanMode scanMode() {
-                        // TODO introduce a new mode
-                        throw new UnsupportedOperationException();
-                    }
-
-                    @Override
                     public List<Split> splits() {
                         return (List) result;
                     }
