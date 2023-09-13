@@ -73,6 +73,7 @@ public class MongoDBSyncTableAction extends ActionBase {
     private final Configuration mongodbConfig;
     private List<String> partitionKeys = new ArrayList<>();
     private Map<String, String> tableConfig = new HashMap<>();
+    private Map<String, String> tableProperties = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
 
     public MongoDBSyncTableAction(
@@ -103,6 +104,11 @@ public class MongoDBSyncTableAction extends ActionBase {
 
     public MongoDBSyncTableAction withComputedColumnArgs(List<String> computedColumnArgs) {
         this.computedColumnArgs = computedColumnArgs;
+        return this;
+    }
+
+    public MongoDBSyncTableAction withHiveProperties(Map<String, String> tableProperties) {
+        this.tableProperties = tableProperties;
         return this;
     }
 

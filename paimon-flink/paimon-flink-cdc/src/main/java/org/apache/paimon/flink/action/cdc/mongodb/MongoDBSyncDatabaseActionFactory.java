@@ -46,6 +46,7 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
                         optionalConfigMap(params, "mongodb-conf"));
 
         action.withTableConfig(optionalConfigMap(params, "table-conf"))
+                .withHiveProperties(optionalConfigMap(params, "table-conf", true))
                 .withTablePrefix(params.get("table-prefix"))
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))

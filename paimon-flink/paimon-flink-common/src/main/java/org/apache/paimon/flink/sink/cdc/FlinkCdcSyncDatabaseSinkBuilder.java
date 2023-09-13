@@ -120,7 +120,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withHiveProperties(Map<String, String> tableProperties) {
+    public FlinkCdcSyncDatabaseSinkBuilder<T> withHiveProperties(
+            Map<String, String> tableProperties) {
         this.tableProperties = tableProperties;
         return this;
     }
@@ -143,7 +144,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 input.forward()
                         .process(
                                 new CdcDynamicTableParsingProcessFunction<>(
-                                        database, catalogLoader, parserFactory,tableProperties))
+                                        database, catalogLoader, parserFactory, tableProperties))
                         .setParallelism(input.getParallelism());
 
         // for newly-added tables, create a multiplexing operator that handles all their records

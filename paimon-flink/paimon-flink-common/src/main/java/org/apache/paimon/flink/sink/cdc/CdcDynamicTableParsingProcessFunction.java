@@ -70,7 +70,10 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
     private transient Catalog catalog;
 
     public CdcDynamicTableParsingProcessFunction(
-            String database, Catalog.Loader catalogLoader, EventParser.Factory<T> parserFactory, Map<String, String> tableProperties) {
+            String database,
+            Catalog.Loader catalogLoader,
+            EventParser.Factory<T> parserFactory,
+            Map<String, String> tableProperties) {
         // for now, only support single database
         this.database = database;
         this.catalogLoader = catalogLoader;

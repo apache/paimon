@@ -70,6 +70,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     private final String database;
     private final Configuration mongodbConfig;
     private Map<String, String> tableConfig = new HashMap<>();
+    private Map<String, String> tableProperties = new HashMap<>();
     private String tablePrefix = "";
     private String tableSuffix = "";
     private String includingTables = ".*";
@@ -116,6 +117,11 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    public MongoDBSyncDatabaseAction withHiveProperties(Map<String, String> tableProperties) {
+        this.tableProperties = tableProperties;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
@@ -158,6 +164,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
                 .withDatabase(database)
                 .withMode(MultiTablesSinkMode.COMBINED)
                 .withTableOptions(tableConfig)
+                .withHiveProperties(tableProperties)
                 .build();
     }
 
