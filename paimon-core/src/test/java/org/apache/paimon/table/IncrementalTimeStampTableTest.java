@@ -19,6 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -130,6 +131,101 @@ public class IncrementalTimeStampTableTest extends TableTestBase {
                         GenericRow.of(1, 2, 4),
                         GenericRow.of(2, 1, 4),
                         GenericRow.of(2, 2, 1));
+    }
+
+    @Test
+    public void testPrimaryKeyTableTotalRecordCountWithOnePartition() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+
+        // snapshot 1: append
+        write(table, GenericRow.of(1, 1, 1), GenericRow.of(1, 2, 1), GenericRow.of(1, 3, 1));
+        Snapshot snapshot1 = snapshotManager.snapshot(1);
+        assertThat(snapshot1.totalRecordCount()).isEqualTo(snapshot1.deltaRecordCount());
+        assertThat(snapshot1.totalRecordCount()).isEqualTo(3L);
+        assertThat(snapshot1.deltaRecordCount()).isEqualTo(3L);
+        // snapshot 2: append
+        write(table, GenericRow.of(1, 1, 2), GenericRow.of(1, 2, 2), GenericRow.of(1, 4, 1));
+        Snapshot snapshot2 = snapshotManager.snapshot(2);
+        assertThat(snapshot2.totalRecordCount()).isGreaterThan(snapshot2.deltaRecordCount());
+        assertThat(snapshot2.totalRecordCount()).isEqualTo(6L);
+        assertThat(snapshot2.deltaRecordCount()).isEqualTo(3L);
+        // snapshot 3: compact
+        compact(table, row(1), 0);
+        Snapshot snapshot3 = snapshotManager.snapshot(3);
+        assertThat(snapshot3.totalRecordCount()).isGreaterThan(snapshot3.deltaRecordCount());
+        assertThat(snapshot3.totalRecordCount()).isEqualTo(4L);
+        assertThat(snapshot3.deltaRecordCount()).isEqualTo(-2L);
+        System.out.println(snapshot3);
+    }
+
+    @Test
+    public void testPrimaryKeyTableTotalRecordCountWithMultiPartition() throws Exception {
+        Identifier identifier = identifier("T");
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pt", DataTypes.INT())
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .partitionKeys("pt")
+                        .primaryKey("pk", "pt")
+                        .build();
+        catalog.createTable(identifier, schema, true);
+        Table table = catalog.getTable(identifier);
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        SnapshotManager snapshotManager = new SnapshotManager(LocalFileIO.create(), tablePath);
+
+        // snapshot 1: append
+        write(
+                table,
+                GenericRow.of(1, 1, 1),
+                GenericRow.of(1, 2, 1),
+                GenericRow.of(1, 3, 1),
+                GenericRow.of(2, 1, 1),
+                GenericRow.of(2, 2, 1));
+        Snapshot snapshot1 = snapshotManager.snapshot(1);
+        assertThat(snapshot1.totalRecordCount()).isEqualTo(snapshot1.deltaRecordCount());
+        assertThat(snapshot1.totalRecordCount()).isEqualTo(5L);
+        assertThat(snapshot1.deltaRecordCount()).isEqualTo(5L);
+        // snapshot 2: append
+        write(
+                table,
+                GenericRow.of(1, 1, 2),
+                GenericRow.of(1, 2, 2),
+                GenericRow.of(1, 4, 1),
+                GenericRow.of(2, 2, 2),
+                GenericRow.of(2, 3, 1));
+        Snapshot snapshot2 = snapshotManager.snapshot(2);
+        assertThat(snapshot2.totalRecordCount()).isGreaterThan(snapshot2.deltaRecordCount());
+        assertThat(snapshot2.totalRecordCount()).isEqualTo(10L);
+        assertThat(snapshot2.deltaRecordCount()).isEqualTo(5L);
+        // snapshot 3: compact
+        compact(table, row(1), 0);
+
+        Snapshot snapshot3 = snapshotManager.snapshot(3);
+
+        assertThat(snapshot3.totalRecordCount()).isGreaterThan(snapshot3.deltaRecordCount());
+        assertThat(snapshot3.totalRecordCount()).isEqualTo(8L);
+        assertThat(snapshot3.deltaRecordCount()).isEqualTo(-2L);
+        // snapshot 4: compact
+        compact(table, row(2), 0);
+
+        Snapshot snapshot4 = snapshotManager.snapshot(4);
+
+        assertThat(snapshot4.totalRecordCount()).isGreaterThan(snapshot4.deltaRecordCount());
+        assertThat(snapshot4.totalRecordCount()).isEqualTo(7L);
+        assertThat(snapshot4.deltaRecordCount()).isEqualTo(-1L);
     }
 
     @Test
