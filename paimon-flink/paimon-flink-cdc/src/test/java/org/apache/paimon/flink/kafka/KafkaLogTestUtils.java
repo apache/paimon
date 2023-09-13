@@ -20,6 +20,7 @@ package org.apache.paimon.flink.kafka;
 
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -56,11 +57,17 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
+import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
+import static org.apache.paimon.flink.kafka.KafkaTableTestBase.createTopicIfNotExists;
+import static org.apache.paimon.flink.kafka.KafkaTableTestBase.getBootstrapServers;
+import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTable;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 
 /** Utils for the test of {@link KafkaLogStoreFactory}. */
@@ -205,5 +212,33 @@ public class KafkaLogTestUtils {
                 bucket,
                 hasPk ? row(pk) : EMPTY_ROW,
                 GenericRow.ofKind(rowKind, pk, value));
+    }
+
+    static String createTableWithKafkaLog(
+            List<String> fieldsSpec,
+            List<String> primaryKeys,
+            List<String> partitionKeys,
+            boolean manuallyCreateLogTable) {
+        String topic = "topic_" + UUID.randomUUID();
+        String table =
+                createTable(
+                        fieldsSpec,
+                        primaryKeys,
+                        partitionKeys,
+                        new HashMap<String, String>() {
+                            {
+                                put(LOG_SYSTEM.key(), "kafka");
+                                put(BOOTSTRAP_SERVERS.key(), getBootstrapServers());
+                                put(TOPIC.key(), topic);
+                                put(DYNAMIC_PARTITION_OVERWRITE.key(), "false");
+                                put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
+                            }
+                        });
+
+        if (manuallyCreateLogTable) {
+            createTopicIfNotExists(topic, 1);
+        }
+
+        return table;
     }
 }

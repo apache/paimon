@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.procedure.ProcedureUtil;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -62,6 +63,7 @@ import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
+import org.apache.flink.table.catalog.exceptions.ProcedureNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
@@ -69,6 +71,7 @@ import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
+import org.apache.flink.table.procedures.Procedure;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 
@@ -91,6 +94,7 @@ import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
@@ -110,9 +114,12 @@ public class FlinkCatalog extends AbstractCatalog {
     private final ClassLoader classLoader;
 
     private final Catalog catalog;
+    private final String name;
     private final boolean logStoreAutoRegister;
 
     private final Duration logStoreAutoRegisterTimeout;
+
+    private final boolean disableCreateTableInDefaultDatabase;
 
     public FlinkCatalog(
             Catalog catalog,
@@ -122,9 +129,11 @@ public class FlinkCatalog extends AbstractCatalog {
             Options options) {
         super(name, defaultDatabase);
         this.catalog = catalog;
+        this.name = name;
         this.classLoader = classLoader;
         this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);
         this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
+        this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
         try {
             this.catalog.createDatabase(defaultDatabase, true);
         } catch (Catalog.DatabaseAlreadyExistException ignore) {
@@ -251,6 +260,13 @@ public class FlinkCatalog extends AbstractCatalog {
             throw new UnsupportedOperationException(
                     "Only support CatalogTable, but is: " + table.getClass());
         }
+
+        if (getDefaultDatabase().equals(tablePath.getDatabaseName())
+                && disableCreateTableInDefaultDatabase) {
+            throw new UnsupportedOperationException(
+                    "Creating table in default database is disabled, please specify a database name.");
+        }
+
         CatalogTable catalogTable = (CatalogTable) table;
         Map<String, String> options = table.getOptions();
         String connector = options.get(CONNECTOR.key());
@@ -854,5 +870,26 @@ public class FlinkCatalog extends AbstractCatalog {
             boolean ignoreIfNotExists)
             throws CatalogException {
         throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.17-.
+     */
+    public List<String> listProcedures(String dbName)
+            throws DatabaseNotExistException, CatalogException {
+        if (!databaseExists(dbName)) {
+            throw new DatabaseNotExistException(name, dbName);
+        }
+
+        return ProcedureUtil.listProcedures();
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.17-.
+     */
+    public Procedure getProcedure(ObjectPath procedurePath)
+            throws ProcedureNotExistException, CatalogException {
+        return ProcedureUtil.getProcedure(procedurePath.getObjectName())
+                .orElseThrow(() -> new ProcedureNotExistException(name, procedurePath));
     }
 }

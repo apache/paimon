@@ -68,7 +68,7 @@ public class CompactDatabaseAction extends ActionBase {
 
     private final Map<String, Table> tableMap = new HashMap<>();
 
-    private Options compactOptions = new Options();
+    private Options tableOptions = new Options();
 
     public CompactDatabaseAction(String warehouse, Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
@@ -98,8 +98,8 @@ public class CompactDatabaseAction extends ActionBase {
         return this;
     }
 
-    public CompactDatabaseAction withCompactOptions(Map<String, String> compactOptions) {
-        this.compactOptions = Options.fromMap(compactOptions);
+    public CompactDatabaseAction withTableOptions(Map<String, String> tableOptions) {
+        this.tableOptions = Options.fromMap(tableOptions);
         return this;
     }
 
@@ -200,7 +200,7 @@ public class CompactDatabaseAction extends ActionBase {
                         databasePattern,
                         includingPattern,
                         excludingPattern,
-                        compactOptions.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis());
+                        tableOptions.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis());
         DataStream<RowData> source =
                 sourceBuilder.withEnv(env).withContinuousMode(isStreaming).build();
 
@@ -208,8 +208,8 @@ public class CompactDatabaseAction extends ActionBase {
                 partition(
                         source,
                         new BucketsRowChannelComputer(),
-                        compactOptions.get(FlinkConnectorOptions.SINK_PARALLELISM));
-        new MultiTablesCompactorSink(catalogLoader(), compactOptions).sinkFrom(partitioned);
+                        tableOptions.get(FlinkConnectorOptions.SINK_PARALLELISM));
+        new MultiTablesCompactorSink(catalogLoader(), tableOptions).sinkFrom(partitioned);
     }
 
     private void buildForTraditionalCompaction(

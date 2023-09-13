@@ -24,8 +24,6 @@ import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.FlinkRowData;
-import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.compact.MergeFunction;
@@ -43,14 +41,13 @@ import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.data.RowData;
 
 /**
  * {@link AbstractStreamOperator} which buffer input record and apply merge function when the buffer
  * is full. Mainly to resolve data skew on primary keys.
  */
-public class LocalMergeOperator extends AbstractStreamOperator<RowData>
-        implements OneInputStreamOperator<RowData, RowData>, BoundedOneInput {
+public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
+        implements OneInputStreamOperator<InternalRow, InternalRow>, BoundedOneInput {
 
     private static final long serialVersionUID = 1L;
 
@@ -66,7 +63,6 @@ public class LocalMergeOperator extends AbstractStreamOperator<RowData>
     private transient SortBufferWriteBuffer buffer;
     private transient long currentWatermark;
 
-    private transient FlinkRowData reusedRowData;
     private transient boolean endOfInput;
 
     public LocalMergeOperator(TableSchema schema) {
@@ -106,14 +102,13 @@ public class LocalMergeOperator extends AbstractStreamOperator<RowData>
                         null);
         currentWatermark = Long.MIN_VALUE;
 
-        reusedRowData = new FlinkRowData(null);
         endOfInput = false;
     }
 
     @Override
-    public void processElement(StreamRecord<RowData> record) throws Exception {
+    public void processElement(StreamRecord<InternalRow> record) throws Exception {
         recordCount++;
-        InternalRow row = new FlinkRowWrapper(record.getValue());
+        InternalRow row = record.getValue();
 
         RowKind rowKind = row.getRowKind();
         // row kind must be INSERT when it is divided into key and value
@@ -133,7 +128,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<RowData>
     }
 
     @Override
-    public void processWatermark(Watermark mark) throws Exception {
+    public void processWatermark(Watermark mark) {
         // don't emit watermark immediately, emit them after flushing buffer
         currentWatermark = mark.getTimestamp();
     }
@@ -173,7 +168,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<RowData>
                 kv -> {
                     InternalRow row = kv.value();
                     row.setRowKind(kv.valueKind());
-                    output.collect(new StreamRecord<>(reusedRowData.replace(row)));
+                    output.collect(new StreamRecord<>(row));
                 });
         buffer.clear();
 

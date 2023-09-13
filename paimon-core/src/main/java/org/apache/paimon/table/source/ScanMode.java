@@ -18,14 +18,7 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.annotation.Public;
-
-/**
- * Scan which part of the snapshot.
- *
- * @since 0.6.0
- */
-@Public
+/** Scan which part of the snapshot. */
 public enum ScanMode {
 
     /** Scan complete data files of a snapshot. */

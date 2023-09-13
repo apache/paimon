@@ -1,9 +1,9 @@
 ---
-title: "Multiple Writers"
+title: "Dedicated Compaction"
 weight: 3
 type: docs
 aliases:
-- /maintenance/multiple-writers.html
+- /maintenance/dedicated-compaction.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,7 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Multiple Writers
+# Dedicated Compaction
 
 Paimon's snapshot management supports writing with multiple writers.
 
@@ -96,7 +96,41 @@ Run the following command to submit a compaction job for the table.
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
 ```
 
-Or run the following command to submit a compaction job for multiple database.
+Example: compact table
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-0.6-SNAPSHOT.jar \
+    compact \
+    --warehouse s3:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --partition dt=20221126,hh=08 \
+    --partition dt=20221127,hh=09 \
+    --catalog-conf s3.endpoint=https://****.com \
+    --catalog-conf s3.access-key=***** \
+    --catalog-conf s3.secret-key=*****
+```
+
+For more usage of the compact action, see
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    compact --help
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
+## Database Compaction Job
+
+You can run the following command to submit a compaction job for multiple database.
+
+{{< tabs "database-compaction-job" >}}
+
+{{< tab "Flink" >}}
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -108,7 +142,7 @@ Or run the following command to submit a compaction job for multiple database.
     [--excluding-tables <paimon-table-name|name-regular-expr>] \
     [--mode <compact-mode>] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--compact-conf <paimon-compact-conf> [--compact-conf <paimon-compact-conf> ...]]
+    [--table-conf <paimon-table-conf> [--table-conf <paimon-table-conf> ...]]
 ```
 
 * `--including-databases` is used to specify which database is to be compacted. In compact mode, you need to specify a database name, in compact-database mode, you could specify multiple database, regular expression is supported.
@@ -118,14 +152,12 @@ Or run the following command to submit a compaction job for multiple database.
   * "divided" (the default mode if you haven't specified one): start a sink for each table, the compaction of the new table requires restarting the job.
   * "combined": start a single combined sink for all tables, the new table will be automatically compacted.
 * `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
-* `--compact-conf` is the configuration for compaction in combined mode. Each configuration should be specified in the format `key=value`. Compact configuration is listed below:
+* `--table-conf` is the configuration for compaction. Each configuration should be specified in the format `key=value`. Pivotal configuration is listed below:
 
 | Key                               | Default | Type       | Description                                                                                                                                                                                                 |
 |-----------------------------------|---------|------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | continuous.discovery-interval     | 10 s    | Duration   | The discovery interval of continuous reading.                                                                                                                                                               |
 | sink.parallelism                  | (none)  | Integer    | Defines a custom parallelism for the sink. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration. |
-| sink.use-managed-memory-allocator | false   | Boolean    | If true, flink sink will use managed memory for merge tree; otherwise, it will create an independent memory allocator.                                                                                      |
-| sink.managed.writer-buffer-memory | 256 mb  | MemorySize | Weight of writer buffer in managed memory, Flink will compute the memory size for writer according to the weight, the actual memory used depends on the running environment.                                |
 
 If you submit a batch job (set `execution.runtime-mode: batch` in Flink's configuration), all current table files will be compacted. If you submit a streaming job (set `execution.runtime-mode: streaming` in Flink's configuration), the job will continuously monitor new changes to the table and perform compactions as needed.
 
@@ -141,23 +173,7 @@ You can set `--mode combined` to enable compacting newly added tables without re
 
 {{< /hint >}}
 
-Example1: compact table
-
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-{{< version >}}.jar \
-    compact \
-    --warehouse s3:///path/to/warehouse \
-    --database test_db \
-    --table test_table \
-    --partition dt=20221126,hh=08 \
-    --partition dt=20221127,hh=09 \
-    --catalog-conf s3.endpoint=https://****.com \
-    --catalog-conf s3.access-key=***** \
-    --catalog-conf s3.secret-key=*****
-```
-
-Example2: compact database
+Example1: compact database
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -170,7 +186,7 @@ Example2: compact database
     --catalog-conf s3.secret-key=*****
 ```
 
-Example3: compact database in combined mode
+Example2: compact database in combined mode
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -182,17 +198,10 @@ Example3: compact database in combined mode
     --catalog-conf s3.endpoint=https://****.com \
     --catalog-conf s3.access-key=***** \
     --catalog-conf s3.secret-key=***** \
-    --compact-conf continuous.discovery-interval=*****
+    --table-conf continuous.discovery-interval=*****
 ```
 
-For more usage of the compact action, see
-
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-{{< version >}}.jar \
-    compact --help
-```
-or
+For more usage of the compact-database action, see
 
 ```bash
 <FLINK_HOME>/bin/flink run \

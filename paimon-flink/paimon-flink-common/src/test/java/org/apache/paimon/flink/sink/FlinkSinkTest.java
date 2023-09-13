@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
@@ -48,7 +48,6 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
-import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -82,10 +81,10 @@ public class FlinkSinkTest {
     private boolean testSpillable(
             StreamExecutionEnvironment streamExecutionEnvironment, FileStoreTable fileStoreTable)
             throws Exception {
-        DataStreamSource<RowData> source =
+        DataStreamSource<InternalRow> source =
                 streamExecutionEnvironment.fromCollection(
-                        Collections.singletonList(new FlinkRowData(GenericRow.of(1, 1))));
-        FlinkSink<RowData> flinkSink = new FileStoreSink(fileStoreTable, null, null);
+                        Collections.singletonList(GenericRow.of(1, 1)));
+        FlinkSink<InternalRow> flinkSink = new FileStoreSink(fileStoreTable, null, null);
         SingleOutputStreamOperator<Committable> written = flinkSink.doWrite(source, "123", 1);
         RowDataStoreWriteOperator operator =
                 ((RowDataStoreWriteOperator)

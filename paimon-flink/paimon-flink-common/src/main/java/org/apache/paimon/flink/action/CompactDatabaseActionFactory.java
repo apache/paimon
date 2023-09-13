@@ -43,7 +43,7 @@ public class CompactDatabaseActionFactory implements ActionFactory {
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
                 .withDatabaseCompactMode(params.get("mode"))
-                .withCompactOptions(optionalConfigMap(params, "compact-conf"));
+                .withTableOptions(optionalConfigMap(params, "table-conf"));
 
         return Optional.of(action);
     }

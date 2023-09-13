@@ -21,17 +21,17 @@ package org.apache.paimon.flink.sink.index;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.table.data.RowData;
 
 import java.util.List;
 
 /** A {@link ChannelComputer} for KeyPartOrRow and row. */
-public class KeyPartRowChannelComputer implements ChannelComputer<Tuple2<KeyPartOrRow, RowData>> {
+public class KeyPartRowChannelComputer
+        implements ChannelComputer<Tuple2<KeyPartOrRow, InternalRow>> {
 
     private static final long serialVersionUID = 1L;
 
@@ -58,10 +58,9 @@ public class KeyPartRowChannelComputer implements ChannelComputer<Tuple2<KeyPart
     }
 
     @Override
-    public int channel(Tuple2<KeyPartOrRow, RowData> record) {
+    public int channel(Tuple2<KeyPartOrRow, InternalRow> record) {
         BinaryRow key =
-                (record.f0 == KeyPartOrRow.KEY_PART ? keyPartProject : rowProject)
-                        .apply(new FlinkRowWrapper(record.f1));
+                (record.f0 == KeyPartOrRow.KEY_PART ? keyPartProject : rowProject).apply(record.f1);
         return Math.abs(key.hashCode() % numChannels);
     }
 

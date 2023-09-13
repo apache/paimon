@@ -16,32 +16,30 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.flink.table.procedures.Procedure;
 
-import javax.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
-/**
- * Rich Plan of scan.
- *
- * @since 0.6.0
- */
-@Public
-public interface RichPlan extends TableScan.Plan {
+/** Utility methods for {@link Procedure}. */
+public class ProcedureUtil {
 
-    /** Current watermark for consumed snapshot. */
-    @Nullable
-    Long watermark();
+    private ProcedureUtil() {}
 
-    /**
-     * Snapshot id of this plan.
-     *
-     * @return null if the table is empty.
-     */
-    @Nullable
-    Long snapshotId();
+    private static final List<String> SYSTEM_PROCEDURES = new ArrayList<>();
+    private static final Map<String, Procedure> SYSTEM_PROCEDURES_MAP = new HashMap<>();
 
-    /** Scan which part of the snapshot. */
-    ScanMode scanMode();
+    public static List<String> listProcedures() {
+        return Collections.unmodifiableList(SYSTEM_PROCEDURES);
+    }
+
+    public static Optional<Procedure> getProcedure(String procedureName) {
+        return Optional.ofNullable(SYSTEM_PROCEDURES_MAP.get(procedureName));
+    }
 }

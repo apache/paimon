@@ -19,13 +19,13 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
-import org.apache.flink.table.data.RowData;
-
-/** {@link ChannelComputer} for {@link RowData}. */
-public class RowDataChannelComputer implements ChannelComputer<RowData> {
+/** {@link ChannelComputer} for {@link InternalRow}. */
+public class RowDataChannelComputer implements ChannelComputer<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
@@ -33,7 +33,7 @@ public class RowDataChannelComputer implements ChannelComputer<RowData> {
     private final boolean hasLogSink;
 
     private transient int numChannels;
-    private transient KeyAndBucketExtractor<RowData> extractor;
+    private transient KeyAndBucketExtractor<InternalRow> extractor;
 
     public RowDataChannelComputer(TableSchema schema, boolean hasLogSink) {
         this.schema = schema;
@@ -43,11 +43,11 @@ public class RowDataChannelComputer implements ChannelComputer<RowData> {
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.extractor = new RowDataKeyAndBucketExtractor(schema);
+        this.extractor = new FixedBucketRowKeyExtractor(schema);
     }
 
     @Override
-    public int channel(RowData record) {
+    public int channel(InternalRow record) {
         extractor.setRecord(record);
         return channel(extractor.partition(), extractor.bucket());
     }

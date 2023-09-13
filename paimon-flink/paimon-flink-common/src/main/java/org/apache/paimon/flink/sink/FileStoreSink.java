@@ -18,17 +18,17 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
 
 /** {@link FlinkSink} for writing records into paimon. */
-public class FileStoreSink extends FlinkWriteSink<RowData> {
+public class FileStoreSink extends FlinkWriteSink<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
@@ -43,7 +43,7 @@ public class FileStoreSink extends FlinkWriteSink<RowData> {
     }
 
     @Override
-    protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
+    protected OneInputStreamOperator<InternalRow, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser);
     }

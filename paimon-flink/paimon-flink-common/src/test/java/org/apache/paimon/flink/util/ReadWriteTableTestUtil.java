@@ -19,9 +19,7 @@
 package org.apache.paimon.flink.util;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.flink.ReadWriteTableITCase;
-import org.apache.paimon.flink.StreamingReadWriteTableWithKafkaLogITCase;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -48,17 +46,9 @@ import java.util.concurrent.TimeoutException;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.registerData;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
-import static org.apache.paimon.CoreOptions.WRITE_MODE;
-import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
-import static org.apache.paimon.flink.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
-import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
-import static org.apache.paimon.flink.kafka.KafkaTableTestBase.createTopicIfNotExists;
-import static org.apache.paimon.flink.kafka.KafkaTableTestBase.getBootstrapServers;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Test util for {@link ReadWriteTableITCase} and {@link StreamingReadWriteTableWithKafkaLogITCase}.
- */
+/** Test util for {@link ReadWriteTableITCase}. */
 public class ReadWriteTableTestUtil {
 
     private static final Time TIME_OUT = Time.seconds(10);
@@ -132,34 +122,6 @@ public class ReadWriteTableTestUtil {
         // "-" is not allowed in the table name.
         String table = ("MyTable_" + UUID.randomUUID()).replace("-", "_");
         sEnv.executeSql(buildDdl(table, fieldsSpec, primaryKeys, partitionKeys, options));
-        return table;
-    }
-
-    public static String createTableWithKafkaLog(
-            List<String> fieldsSpec,
-            List<String> primaryKeys,
-            List<String> partitionKeys,
-            boolean manuallyCreateLogTable) {
-        String topic = "topic_" + UUID.randomUUID();
-        String table =
-                createTable(
-                        fieldsSpec,
-                        primaryKeys,
-                        partitionKeys,
-                        new HashMap<String, String>() {
-                            {
-                                put(LOG_SYSTEM.key(), "kafka");
-                                put(BOOTSTRAP_SERVERS.key(), getBootstrapServers());
-                                put(TOPIC.key(), topic);
-                                put(CoreOptions.DYNAMIC_PARTITION_OVERWRITE.key(), "false");
-                                put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
-                            }
-                        });
-
-        if (manuallyCreateLogTable) {
-            createTopicIfNotExists(topic, 1);
-        }
-
         return table;
     }
 

@@ -16,10 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.flink.kafka;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.kafka.KafkaTableTestBase;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
@@ -35,13 +34,13 @@ import java.util.Map;
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.flink.kafka.KafkaLogTestUtils.createTableWithKafkaLog;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.SCAN_LATEST;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.assertNoMoreRecords;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildQueryWithTableOptions;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.checkFileStorePath;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTableWithKafkaLog;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTemporaryTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertInto;

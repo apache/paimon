@@ -97,7 +97,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
 
-        Map<String, String> compactOptions = new HashMap<>();
+        Map<String, String> tableOptions = new HashMap<>();
 
         List<FileStoreTable> tables = new ArrayList<>();
 
@@ -149,7 +149,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     .includingTables(null)
                     .excludingTables(null)
                     .withDatabaseCompactMode("combined")
-                    .withCompactOptions(compactOptions)
+                    .withTableOptions(tableOptions)
                     .build(env);
         }
 
@@ -184,10 +184,10 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
 
-        Map<String, String> compactOptions = new HashMap<>();
+        Map<String, String> tableOptions = new HashMap<>();
         // if CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() use default value, the cost time in
         // combined mode will be over 1mins
-        compactOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
 
         List<FileStoreTable> tables = new ArrayList<>();
         for (String dbName : DATABASE_NAMES) {
@@ -241,7 +241,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     .includingTables(null)
                     .excludingTables(null)
                     .withDatabaseCompactMode("combined")
-                    .withCompactOptions(compactOptions)
+                    .withTableOptions(tableOptions)
                     .build(env);
         }
         JobClient client = env.executeAsync();
@@ -442,8 +442,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
 
-        Map<String, String> compactOptions = new HashMap<>();
-        compactOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
+        Map<String, String> tableOptions = new HashMap<>();
+        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
 
         List<FileStoreTable> compactionTables = new ArrayList<>();
         List<FileStoreTable> noCompactionTables = new ArrayList<>();
@@ -502,7 +502,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     .includingTables(includingPattern)
                     .excludingTables(excludesPattern)
                     .withDatabaseCompactMode("combined")
-                    .withCompactOptions(compactOptions)
+                    .withTableOptions(tableOptions)
                     .build(env);
         }
         env.execute();
