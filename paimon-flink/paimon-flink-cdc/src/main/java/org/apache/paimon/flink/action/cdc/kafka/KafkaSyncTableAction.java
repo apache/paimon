@@ -36,10 +36,14 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
+import org.apache.flink.util.Collector;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -95,6 +99,7 @@ public class KafkaSyncTableAction extends ActionBase {
     private Map<String, String> tableConfig = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
+    @Nullable String schemaRegistryUrl;
 
     public KafkaSyncTableAction(
             String warehouse,
@@ -141,17 +146,20 @@ public class KafkaSyncTableAction extends ActionBase {
         return this;
     }
 
+    public KafkaSyncTableAction withSchemaRegistry(String schemaRegistryUrl) {
+        this.schemaRegistryUrl = schemaRegistryUrl;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
-        KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
-        String topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
-
         catalog.createDatabase(database, true);
         boolean caseSensitive = catalog.caseSensitive();
-        Schema kafkaSchema =
-                KafkaSchemaUtils.getKafkaSchema(kafkaConfig, topic, typeMapping, caseSensitive);
-
         Identifier identifier = new Identifier(database, table);
+        String topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
+        Schema kafkaSchema =
+                KafkaSchemaUtils.getKafkaSchema(
+                        kafkaConfig, topic, typeMapping, caseSensitive, schemaRegistryUrl);
         FileStoreTable table;
         List<ComputedColumn> computedColumns =
                 buildComputedColumns(computedColumnArgs, kafkaSchema);
@@ -168,7 +176,10 @@ public class KafkaSyncTableAction extends ActionBase {
         }
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);
         RecordParser recordParser =
-                format.createParser(caseSensitive, typeMapping, computedColumns);
+                format.createParser(caseSensitive, typeMapping, computedColumns, schemaRegistryUrl);
+        KafkaSource<List<RichCdcMultiplexRecord>> source =
+                KafkaActionUtils.buildKafkaSource(kafkaConfig, recordParser);
+
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
                 () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
 
@@ -179,7 +190,18 @@ public class KafkaSyncTableAction extends ActionBase {
                                                 source,
                                                 WatermarkStrategy.noWatermarks(),
                                                 "Kafka Source")
-                                        .flatMap(recordParser))
+                                        .flatMap(
+                                                new FlatMapFunction<
+                                                        List<RichCdcMultiplexRecord>,
+                                                        RichCdcMultiplexRecord>() {
+                                                    @Override
+                                                    public void flatMap(
+                                                            List<RichCdcMultiplexRecord> value,
+                                                            Collector<RichCdcMultiplexRecord> out)
+                                                            throws Exception {
+                                                        value.forEach(out::collect);
+                                                    }
+                                                }))
                         .withParserFactory(parserFactory)
                         .withTable(table)
                         .withIdentifier(identifier)

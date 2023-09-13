@@ -31,7 +31,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 
 import java.time.Duration;
 import java.util.Collection;
@@ -52,20 +52,23 @@ public class KafkaSchemaUtils {
     private static final int MAX_RETRY = 5;
     private static final int POLL_TIMEOUT_MILLIS = 1000;
 
-    private static KafkaConsumer<String, String> getKafkaEarliestConsumer(
+    private static KafkaConsumer<byte[], byte[]> getKafkaEarliestConsumer(
             Configuration kafkaConfig, String topic) {
         Properties props = new Properties();
         props.put(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
                 kafkaConfig.get(KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS));
         props.put(ConsumerConfig.GROUP_ID_CONFIG, kafkaPropertiesGroupId(kafkaConfig));
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+                ByteArrayDeserializer.class.getName());
+        props.put(
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                ByteArrayDeserializer.class.getName());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
 
-        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+        KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(props);
 
         List<PartitionInfo> partitionInfos = consumer.partitionsFor(topic);
         if (partitionInfos.isEmpty()) {
@@ -92,25 +95,34 @@ public class KafkaSchemaUtils {
      * @throws KafkaSchemaRetrievalException If unable to retrieve the schema after max retries.
      */
     public static Schema getKafkaSchema(
-            Configuration kafkaConfig, String topic, TypeMapping typeMapping, boolean caseSensitive)
+            Configuration kafkaConfig,
+            String topic,
+            TypeMapping typeMapping,
+            boolean caseSensitive,
+            String schemaRegistryUrl)
             throws KafkaSchemaRetrievalException {
-        KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig, topic);
+        KafkaConsumer<byte[], byte[]> consumer = getKafkaEarliestConsumer(kafkaConfig, topic);
         int retry = 0;
         int retryInterval = 1000;
 
         DataFormat format = getDataFormat(kafkaConfig);
-        RecordParser recordParser = format.createParser(true, typeMapping, Collections.emptyList());
+        RecordParser recordParser =
+                format.createParser(true, typeMapping, Collections.emptyList(), schemaRegistryUrl);
+        recordParser.open();
 
         while (true) {
-            ConsumerRecords<String, String> consumerRecords =
+            ConsumerRecords<byte[], byte[]> consumerRecords =
                     consumer.poll(Duration.ofMillis(POLL_TIMEOUT_MILLIS));
-            Iterable<ConsumerRecord<String, String>> records = consumerRecords.records(topic);
-            Stream<ConsumerRecord<String, String>> recordStream =
+            Iterable<ConsumerRecord<byte[], byte[]>> records = consumerRecords.records(topic);
+            Stream<ConsumerRecord<byte[], byte[]>> recordStream =
                     StreamSupport.stream(records.spliterator(), false);
 
             Optional<Schema> kafkaSchema =
                     recordStream
-                            .map(record -> recordParser.getKafkaSchema(record.value()))
+                            .map(
+                                    record ->
+                                            recordParser.getKafkaSchema(
+                                                    record.topic(), record.key(), record.value()))
                             .filter(Objects::nonNull)
                             .findFirst();
 

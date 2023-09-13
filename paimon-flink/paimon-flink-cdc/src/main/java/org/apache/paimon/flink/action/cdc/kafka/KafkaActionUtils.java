@@ -18,9 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
@@ -54,48 +55,57 @@ class KafkaActionUtils {
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
 
-    static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
+    static KafkaSource<List<RichCdcMultiplexRecord>> buildKafkaSource(
+            Configuration kafkaConfig, RecordParser recordParser) {
         validateKafkaConfig(kafkaConfig);
-        KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
-
         List<String> topics =
                 kafkaConfig.get(KafkaConnectorOptions.TOPIC).stream()
                         .flatMap(topic -> Arrays.stream(topic.split(",")))
                         .collect(Collectors.toList());
-
+        Properties properties = subset(kafkaConfig, PROPERTIES_PREFIX, true);
+        KafkaSourceBuilder<List<RichCdcMultiplexRecord>> kafkaSourceBuilder = KafkaSource.builder();
         kafkaSourceBuilder
                 .setTopics(topics)
-                .setValueOnlyDeserializer(new SimpleStringSchema())
+                .setDeserializer(new KafkaCdcRecordDeserializationSchema(recordParser))
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
+        kafkaSourceBuilder.setStartingOffsets(getStartingOffsets(kafkaConfig, properties));
+        kafkaSourceBuilder.setProperties(properties);
+
+        return kafkaSourceBuilder.build();
+    }
+
+    private static Properties subset(
+            Configuration kafkaConfig, String prefix, boolean removePrefix) {
         Properties properties = new Properties();
         for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
             String key = entry.getKey();
             String value = entry.getValue();
-            if (key.startsWith(PROPERTIES_PREFIX)) {
-                properties.put(key.substring(PROPERTIES_PREFIX.length()), value);
+            if (key.startsWith(prefix)) {
+                key = removePrefix ? key.substring(prefix.length()) : key;
+                properties.put(key, value);
             }
         }
+        return properties;
+    }
 
+    private static OffsetsInitializer getStartingOffsets(
+            Configuration kafkaConfig, Properties properties) {
         StartupMode startupMode =
                 fromOption(kafkaConfig.get(KafkaConnectorOptions.SCAN_STARTUP_MODE));
         // see
         // https://github.com/apache/flink/blob/f32052a12309cfe38f66344cf6d4ab39717e44c8/flink-connectors/flink-connector-kafka/src/main/java/org/apache/flink/streaming/connectors/kafka/table/KafkaDynamicSource.java#L434
         switch (startupMode) {
             case EARLIEST:
-                kafkaSourceBuilder.setStartingOffsets(OffsetsInitializer.earliest());
-                break;
+                return OffsetsInitializer.earliest();
             case LATEST:
-                kafkaSourceBuilder.setStartingOffsets(OffsetsInitializer.latest());
-                break;
+                return OffsetsInitializer.latest();
             case GROUP_OFFSETS:
                 String offsetResetConfig =
                         properties.getProperty(
                                 ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,
                                 OffsetResetStrategy.NONE.name());
                 OffsetResetStrategy offsetResetStrategy = getResetStrategy(offsetResetConfig);
-                kafkaSourceBuilder.setStartingOffsets(
-                        OffsetsInitializer.committedOffsets(offsetResetStrategy));
-                break;
+                return OffsetsInitializer.committedOffsets(offsetResetStrategy);
             case SPECIFIC_OFFSETS:
                 Map<TopicPartition, Long> offsets = new HashMap<>();
                 String topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
@@ -111,19 +121,17 @@ class KafkaActionUtils {
                             offsets.put(topicPartition, offset);
                         });
 
-                kafkaSourceBuilder.setStartingOffsets(OffsetsInitializer.offsets(offsets));
-                break;
+                return OffsetsInitializer.offsets(offsets);
             case TIMESTAMP:
                 long startupTimestampMillis =
                         kafkaConfig.get(KafkaConnectorOptions.SCAN_STARTUP_TIMESTAMP_MILLIS);
-                kafkaSourceBuilder.setStartingOffsets(
-                        OffsetsInitializer.timestamp(startupTimestampMillis));
-                break;
+                return OffsetsInitializer.timestamp(startupTimestampMillis);
+            default:
+                throw new IllegalArgumentException(
+                        String.format(
+                                "kafka-conf [%s] value [%s] is not supported.",
+                                KafkaConnectorOptions.SCAN_STARTUP_MODE.key(), startupMode));
         }
-
-        kafkaSourceBuilder.setProperties(properties);
-
-        return kafkaSourceBuilder.build();
     }
 
     /**

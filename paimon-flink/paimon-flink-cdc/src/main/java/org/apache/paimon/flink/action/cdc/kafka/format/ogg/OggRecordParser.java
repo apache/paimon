@@ -20,11 +20,14 @@ package org.apache.paimon.flink.action.cdc.kafka.format.ogg;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.kafka.format.AbstractRecordParser;
 import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,21 +50,23 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * providing a way to understand the structure of the incoming records and their corresponding field
  * types.
  */
-public class OggRecordParser extends RecordParser {
+public class OggRecordParser extends AbstractRecordParser {
 
-    private static final String FIELD_BEFORE = "before";
     private static final String FIELD_TYPE = "op_type";
     private static final String OP_UPDATE = "U";
     private static final String OP_INSERT = "I";
     private static final String OP_DELETE = "D";
 
     public OggRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+            boolean caseSensitive,
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            @Nullable String schemaRegistryUrl) {
+        super(caseSensitive, typeMapping, computedColumns, schemaRegistryUrl);
     }
 
     @Override
-    public List<RichCdcMultiplexRecord> extractRecords() {
+    protected List<RichCdcMultiplexRecord> doExtractRecords() {
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         String operation = extractStringFromRootJson(FIELD_TYPE);
         switch (operation) {
@@ -82,7 +87,7 @@ public class OggRecordParser extends RecordParser {
     }
 
     @Override
-    protected void validateFormat() {
+    public void validateFormat() {
         String errorMessageTemplate =
                 "Didn't find '%s' node in json. Please make sure your topic's format is correct.";
 
@@ -120,12 +125,12 @@ public class OggRecordParser extends RecordParser {
     }
 
     @Override
-    protected void setPrimaryField() {
+    public void setPrimaryField() {
         fieldPrimaryKeys = "primary_keys";
     }
 
     @Override
-    protected void setDataField() {
+    public void setDataField() {
         fieldData = "after";
     }
 

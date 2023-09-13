@@ -33,14 +33,16 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordSchemaBuilder;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.util.Collector;
 
 import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -92,6 +94,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
     private String includingTables = ".*";
     @Nullable String excludingTables;
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
+    @Nullable String schemaRegistryUrl;
 
     public KafkaSyncDatabaseAction(
             String warehouse,
@@ -139,6 +142,11 @@ public class KafkaSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    public KafkaSyncDatabaseAction withSchemaRegistry(String schemaRegistryUrl) {
+        this.schemaRegistryUrl = schemaRegistryUrl;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
@@ -149,11 +157,10 @@ public class KafkaSyncDatabaseAction extends ActionBase {
 
         catalog.createDatabase(database, true);
 
-        KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
-
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);
         RecordParser recordParser =
-                format.createParser(caseSensitive, typeMapping, Collections.emptyList());
+                format.createParser(
+                        caseSensitive, typeMapping, Collections.emptyList(), schemaRegistryUrl);
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
                 new RichCdcMultiplexRecordSchemaBuilder(tableConfig, caseSensitive);
         Pattern includingPattern = Pattern.compile(includingTables);
@@ -171,8 +178,23 @@ public class KafkaSyncDatabaseAction extends ActionBase {
 
         new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
                 .withInput(
-                        env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source")
-                                .flatMap(recordParser))
+                        env.fromSource(
+                                        KafkaActionUtils.buildKafkaSource(
+                                                kafkaConfig, recordParser),
+                                        WatermarkStrategy.noWatermarks(),
+                                        "Kafka Source")
+                                .flatMap(
+                                        new FlatMapFunction<
+                                                List<RichCdcMultiplexRecord>,
+                                                RichCdcMultiplexRecord>() {
+                                            @Override
+                                            public void flatMap(
+                                                    List<RichCdcMultiplexRecord> value,
+                                                    Collector<RichCdcMultiplexRecord> out)
+                                                    throws Exception {
+                                                value.forEach(out::collect);
+                                            }
+                                        }))
                 .withParserFactory(parserFactory)
                 .withCatalogLoader(catalogLoader())
                 .withDatabase(database)

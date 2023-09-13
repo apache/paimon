@@ -20,11 +20,14 @@ package org.apache.paimon.flink.action.cdc.kafka.format.maxwell;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.kafka.format.AbstractRecordParser;
 import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,7 +47,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * <p>Validation is performed to ensure that the JSON records contain all necessary fields, and the
  * class also supports schema extraction for the Kafka topic.
  */
-public class MaxwellRecordParser extends RecordParser {
+public class MaxwellRecordParser extends AbstractRecordParser {
 
     private static final String FIELD_OLD = "old";
     private static final String FIELD_TYPE = "type";
@@ -53,12 +56,15 @@ public class MaxwellRecordParser extends RecordParser {
     private static final String OP_DELETE = "delete";
 
     public MaxwellRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+            boolean caseSensitive,
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            @Nullable String schemaRegistryUrl) {
+        super(caseSensitive, typeMapping, computedColumns, schemaRegistryUrl);
     }
 
     @Override
-    public List<RichCdcMultiplexRecord> extractRecords() {
+    protected List<RichCdcMultiplexRecord> doExtractRecords() {
         String operation = extractStringFromRootJson(FIELD_TYPE);
         JsonNode data = root.get(fieldData);
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
@@ -80,7 +86,7 @@ public class MaxwellRecordParser extends RecordParser {
     }
 
     @Override
-    protected void validateFormat() {
+    public void validateFormat() {
         String errorMessageTemplate =
                 "Didn't find '%s' node in json. Please make sure your topic's format is correct.";
         checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
@@ -91,12 +97,12 @@ public class MaxwellRecordParser extends RecordParser {
     }
 
     @Override
-    protected void setPrimaryField() {
+    public void setPrimaryField() {
         fieldPrimaryKeys = "primary_key_columns";
     }
 
     @Override
-    protected void setDataField() {
+    public void setDataField() {
         fieldData = "data";
     }
 }

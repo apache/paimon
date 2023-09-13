@@ -56,7 +56,8 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
                         Configuration.fromMap(kafkaConfig),
                         topic,
                         TypeMapping.defaultMapping(),
-                        true);
+                        true,
+                        null);
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "pt", DataTypes.INT()));
         fields.add(new DataField(1, "_id", DataTypes.INT().notNull()));

@@ -21,11 +21,14 @@ package org.apache.paimon.flink.action.cdc.kafka.format;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.format.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.debezium.DebeziumAvroRecordParser;
 import org.apache.paimon.flink.action.cdc.kafka.format.maxwell.MaxwellRecordParser;
 import org.apache.paimon.flink.action.cdc.kafka.format.ogg.OggRecordParser;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
+
+import javax.annotation.Nullable;
 
 import java.util.List;
 
@@ -39,7 +42,8 @@ import java.util.List;
 public enum DataFormat {
     CANAL_JSON(CanalRecordParser::new),
     OGG_JSON(OggRecordParser::new),
-    MAXWELL_JSON(MaxwellRecordParser::new);
+    MAXWELL_JSON(MaxwellRecordParser::new),
+    DEBEZIUM_AVRO(DebeziumAvroRecordParser::new);
     // Add more data formats here if needed
 
     private final RecordParserFactory parser;
@@ -57,8 +61,11 @@ public enum DataFormat {
      * @return A new instance of {@link RecordParser}.
      */
     public RecordParser createParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        return parser.createParser(caseSensitive, typeMapping, computedColumns);
+            boolean caseSensitive,
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            @Nullable String schemaRegistryUrl) {
+        return parser.createParser(caseSensitive, typeMapping, computedColumns, schemaRegistryUrl);
     }
 
     /**

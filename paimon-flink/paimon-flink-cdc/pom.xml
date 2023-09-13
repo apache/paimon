@@ -41,6 +41,7 @@ under the License.
         <geometry.version>2.2.0</geometry.version>
         <json-path.version>2.8.0</json-path.version>
         <mongodb.testcontainers.version>1.18.3</mongodb.testcontainers.version>
+        <confluent.platform.version>7.5.0</confluent.platform.version>
     </properties>
 
     <dependencies>
@@ -119,6 +120,19 @@ under the License.
             <groupId>org.apache.avro</groupId>
             <artifactId>avro</artifactId>
             <version>${avro.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-avro-serializer</artifactId>
+            <version>${confluent.platform.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.apache.avro</groupId>
+                    <artifactId>avro</artifactId>
+                </exclusion>
+            </exclusions>
             <scope>provided</scope>
         </dependency>
 
@@ -276,6 +290,13 @@ under the License.
             <version>${mongodb.testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
+
+<!--        <dependency>-->
+<!--            <groupId>io.confluent</groupId>-->
+<!--            <artifactId>kafka-avro-serializer</artifactId>-->
+<!--            <version>${confluent.platform.version}</version>-->
+<!--            <scope>test</scope>-->
+<!--        </dependency>-->
     </dependencies>
 
     <build>
@@ -303,7 +324,6 @@ under the License.
                 </executions>
             </plugin>
 
-
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
@@ -317,4 +337,11 @@ under the License.
             </plugin>
         </plugins>
     </build>
+
+    <repositories>
+        <repository>
+            <id>confluent</id>
+            <url>https://packages.confluent.io/maven/</url>
+        </repository>
+    </repositories>
 </project>

@@ -21,15 +21,17 @@ package org.apache.paimon.flink.action.cdc.kafka.format;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /**
- * Represents a factory for creating instances of {@link RecordParser}.
+ * Represents a factory for creating instances of {@link AbstractRecordParser}.
  *
  * <p>This interface provides a method to create a new RecordParser with specific configurations
  * such as case sensitivity, table name conversion, and computed columns.
  *
- * @see RecordParser
+ * @see AbstractRecordParser
  */
 @FunctionalInterface
 public interface RecordParserFactory {
@@ -40,8 +42,12 @@ public interface RecordParserFactory {
      * @param caseSensitive Indicates whether the parser should be case-sensitive.
      * @param typeMapping Data type mapping options.
      * @param computedColumns List of computed columns to be considered by the parser.
+     * @param schemaRegistryUrl Schema registry service to manage the kafka topic message schema
      * @return A new instance of {@link RecordParser}.
      */
     RecordParser createParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns);
+            boolean caseSensitive,
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            @Nullable String schemaRegistryUrl);
 }

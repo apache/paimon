@@ -70,6 +70,10 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
             action.withTypeMapping(TypeMapping.parse(options));
         }
 
+        if (params.has("schema-registry-url")) {
+            action.withSchemaRegistry(params.get("schema-registry-url"));
+        }
+
         return Optional.of(action);
     }
 

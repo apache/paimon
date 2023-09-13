@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action.cdc.kafka.format.canal;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.AbstractRecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
@@ -31,9 +31,10 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeRefe
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
+import javax.annotation.Nullable;
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,7 +57,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * <p>Additionally, the parser supports schema extraction, which can be used to understand the
  * structure of the incoming data and its corresponding field types.
  */
-public class CanalRecordParser extends RecordParser {
+public class CanalRecordParser extends AbstractRecordParser {
 
     private static final String FIELD_IS_DDL = "isDdl";
     private static final String FIELD_MYSQL_TYPE = "mysqlType";
@@ -72,29 +73,29 @@ public class CanalRecordParser extends RecordParser {
     }
 
     public CanalRecordParser(
-            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, computedColumns);
+            boolean caseSensitive,
+            TypeMapping typeMapping,
+            List<ComputedColumn> computedColumns,
+            @Nullable String schemaRegistryUrl) {
+        super(caseSensitive, typeMapping, computedColumns, schemaRegistryUrl);
     }
 
     @Override
     protected void extractFieldTypesFromDatabaseSchema() {
         JsonNode schema = root.get(FIELD_MYSQL_TYPE);
-        LinkedHashMap<String, String> fieldTypes = new LinkedHashMap<>();
+        LinkedHashMap<String, String> originFieldTypes = new LinkedHashMap<>();
 
         schema.fieldNames()
                 .forEachRemaining(
                         fieldName -> {
                             String fieldType = schema.get(fieldName).asText();
-                            fieldTypes.put(fieldName, fieldType);
+                            originFieldTypes.put(applyCaseSensitiveFieldName(fieldName), fieldType);
                         });
-        this.fieldTypes = fieldTypes;
+        this.originFieldTypes = originFieldTypes;
     }
 
     @Override
-    public List<RichCdcMultiplexRecord> extractRecords() {
-        if (extractBooleanFromRootJson(FIELD_IS_DDL)) {
-            return Collections.emptyList();
-        }
+    protected List<RichCdcMultiplexRecord> doExtractRecords() {
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         ArrayNode arrayData = JsonSerdeUtil.getNodeAs(root, fieldData, ArrayNode.class);
         String type = extractStringFromRootJson(FIELD_TYPE);
@@ -125,7 +126,7 @@ public class CanalRecordParser extends RecordParser {
     @Override
     protected LinkedHashMap<String, DataType> setPaimonFieldType() {
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
-        fieldTypes.forEach(
+        originFieldTypes.forEach(
                 (name, type) ->
                         paimonFieldTypes.put(
                                 applyCaseSensitiveFieldName(name),
@@ -134,7 +135,7 @@ public class CanalRecordParser extends RecordParser {
     }
 
     @Override
-    protected void validateFormat() {
+    public void validateFormat() {
         String errorMessageTemplate =
                 "Didn't find '%s' node in json. Only supports canal-json format,"
                         + "please make sure your topic's format is correct.";
@@ -152,23 +153,19 @@ public class CanalRecordParser extends RecordParser {
     }
 
     @Override
-    protected void setPrimaryField() {
+    public void setPrimaryField() {
         fieldPrimaryKeys = "pkNames";
     }
 
     @Override
-    protected void setDataField() {
+    public void setDataField() {
         fieldData = "data";
     }
 
     @Override
     protected Map<String, String> extractRowData(
             JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        fieldTypes.forEach(
-                (name, type) ->
-                        paimonFieldTypes.put(
-                                applyCaseSensitiveFieldName(name),
-                                MySqlTypeUtils.toDataType(type, typeMapping)));
+        paimonFieldTypes.putAll(setPaimonFieldType());
         Map<String, Object> jsonMap =
                 OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
         if (jsonMap == null) {
@@ -176,7 +173,7 @@ public class CanalRecordParser extends RecordParser {
         }
 
         Map<String, String> resultMap =
-                fieldTypes.entrySet().stream()
+                originFieldTypes.entrySet().stream()
                         .filter(entry -> jsonMap.get(entry.getKey()) != null)
                         .collect(
                                 Collectors.toMap(

@@ -213,6 +213,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         protected final List<String> primaryKeys = new ArrayList<>();
         protected final List<String> computedColumnArgs = new ArrayList<>();
         protected final List<String> typeMappingModes = new ArrayList<>();
+        @Nullable protected String schemaRegistryUrl;
 
         public SyncTableActionBuilder(Map<String, String> sourceConfig) {
             this.sourceConfig = sourceConfig;
@@ -252,6 +253,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncTableActionBuilder<T> withSchemaRegistry(String schemaRegistryUrl) {
+            this.schemaRegistryUrl = schemaRegistryUrl;
+            return this;
+        }
+
         public abstract T build();
     }
 
@@ -269,6 +275,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         @Nullable protected String includingTables;
         @Nullable protected String excludingTables;
         @Nullable protected String mode;
+        @Nullable protected String schemaRegistryUrl;
         protected final List<String> typeMappingModes = new ArrayList<>();
 
         public SyncDatabaseActionBuilder(Map<String, String> sourceConfig) {
@@ -317,6 +324,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
         public SyncDatabaseActionBuilder<T> withMode(String mode) {
             this.mode = mode;
+            return this;
+        }
+
+        public SyncDatabaseActionBuilder<T> withSchemaRegistry(String schemaRegistryUrl) {
+            this.schemaRegistryUrl = schemaRegistryUrl;
             return this;
         }
 
