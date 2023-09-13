@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
@@ -59,7 +60,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.RocksDBOptions.LOOKUP_CACHE_ROWS;
-import static org.apache.paimon.flink.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A lookup {@link TableFunction} for file store. */
@@ -123,7 +123,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     private void open() throws Exception {
         Options options = Options.fromMap(table.options());
-        this.refreshInterval = options.get(LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL);
+        this.refreshInterval = options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL);
         this.stateFactory = new RocksDBStateFactory(path.toString(), options, null);
 
         List<String> fieldNames = table.rowType().getFieldNames();
@@ -194,8 +194,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
         if (nextLoadTime > 0) {
             LOG.info(
-                    "Lookup table {} has refreshed after {} second(s), refreshing",
-                    table.name(),
+                    "Lookup table has refreshed after {} second(s), refreshing",
                     refreshInterval.toMillis() / 1000);
         }
 

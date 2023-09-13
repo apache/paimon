@@ -35,7 +35,6 @@ import org.rocksdb.PlainTableConfig;
 import org.rocksdb.TableFormatConfig;
 
 import java.io.File;
-import java.time.Duration;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.LinkElement.link;
@@ -55,12 +54,6 @@ public class RocksDBOptions {
                     .longType()
                     .defaultValue(10_000L)
                     .withDescription("The maximum number of rows to store in the cache.");
-
-    public static final ConfigOption<Duration> LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL =
-            key("lookup.continuous.discovery-interval")
-                    .durationType()
-                    .defaultValue(Duration.ofSeconds(10))
-                    .withDescription("The discovery interval of lookup continuous reading.");
 
     // --------------------------------------------------------------------------
     // Provided configurable DBOptions within Flink
