@@ -67,73 +67,42 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class MongoDBSyncTableAction extends ActionBase {
 
-    private final Configuration mongodbConfig;
     private final String database;
     private final String table;
-    private final List<String> partitionKeys;
-    private final Map<String, String> tableConfig;
-    private final List<String> computedColumnArgs;
+    private final Configuration mongodbConfig;
+    private List<String> partitionKeys = new ArrayList<>();
+    private Map<String, String> tableConfig = new HashMap<>();
+    private List<String> computedColumnArgs = new ArrayList<>();
 
-    private MongoDBSyncTableAction(Builder builder) {
-        super(builder.warehouse, builder.catalogConfig);
-        this.mongodbConfig = builder.mongodbConfig;
-        this.database = builder.database;
-        this.table = builder.table;
-        this.partitionKeys = builder.partitionKeys;
-        this.tableConfig = builder.tableConfig;
-        this.computedColumnArgs = builder.computedColumnArgs;
+    public MongoDBSyncTableAction(
+            String warehouse,
+            String database,
+            String table,
+            Map<String, String> catalogConfig,
+            Map<String, String> mongodbConfig) {
+        super(warehouse, catalogConfig);
+        this.database = database;
+        this.table = table;
+        this.mongodbConfig = Configuration.fromMap(mongodbConfig);
     }
 
-    /**
-     * Builder class for constructing MongoDBSyncTableAction instances. This class follows the
-     * Builder design pattern, allowing for a more readable and maintainable way to set up complex
-     * objects.
-     */
-    public static class Builder {
-        private final String warehouse;
-        private final String database;
-        private final String table;
-        private final Configuration mongodbConfig;
-        private final Map<String, String> catalogConfig;
-        private List<String> partitionKeys = new ArrayList<>();
-        private Map<String, String> tableConfig = new HashMap<>();
-        private List<String> computedColumnArgs = new ArrayList<>();
+    public MongoDBSyncTableAction withPartitionKeys(List<String> partitionKeys) {
+        this.partitionKeys = partitionKeys;
+        return this;
+    }
 
-        public Builder(
-                String warehouse,
-                String database,
-                String table,
-                Map<String, String> catalogConfig,
-                Map<String, String> mongodbConfig) {
-            this.warehouse = warehouse;
-            this.database = database;
-            this.table = table;
-            this.catalogConfig = catalogConfig;
-            this.mongodbConfig = Configuration.fromMap(mongodbConfig);
-        }
+    public MongoDBSyncTableAction withPartitionKeys(String... partitionKeys) {
+        return withPartitionKeys(Arrays.asList(partitionKeys));
+    }
 
-        public Builder withPartitionKeys(List<String> partitionKeys) {
-            this.partitionKeys = partitionKeys;
-            return this;
-        }
+    public MongoDBSyncTableAction withTableConfig(Map<String, String> tableConfig) {
+        this.tableConfig = tableConfig;
+        return this;
+    }
 
-        public Builder withPartitionKeys(String... partitionKeys) {
-            return withPartitionKeys(Arrays.asList(partitionKeys));
-        }
-
-        public Builder withTableConfig(Map<String, String> tableConfig) {
-            this.tableConfig = tableConfig;
-            return this;
-        }
-
-        public Builder withComputedColumnArgs(List<String> computedColumnArgs) {
-            this.computedColumnArgs = computedColumnArgs;
-            return this;
-        }
-
-        public MongoDBSyncTableAction buildAction() {
-            return new MongoDBSyncTableAction(this);
-        }
+    public MongoDBSyncTableAction withComputedColumnArgs(List<String> computedColumnArgs) {
+        this.computedColumnArgs = computedColumnArgs;
+        return this;
     }
 
     @Override
