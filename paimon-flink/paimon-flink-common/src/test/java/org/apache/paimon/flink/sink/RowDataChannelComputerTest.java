@@ -19,17 +19,18 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -70,11 +71,10 @@ public class RowDataChannelComputerTest {
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numInputs = random.nextInt(1000) + 1;
-        List<RowData> input = new ArrayList<>();
+        List<InternalRow> input = new ArrayList<>();
         for (int i = 0; i < numInputs; i++) {
             input.add(
-                    GenericRowData.of(
-                            random.nextInt(10) + 1, random.nextLong(), random.nextDouble()));
+                    GenericRow.of(random.nextInt(10) + 1, random.nextLong(), random.nextDouble()));
         }
 
         testImpl(schema, input);
@@ -100,17 +100,17 @@ public class RowDataChannelComputerTest {
 
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int numInputs = random.nextInt(1000) + 1;
-        List<RowData> input = new ArrayList<>();
+        List<InternalRow> input = new ArrayList<>();
         for (int i = 0; i < numInputs; i++) {
-            input.add(GenericRowData.of(random.nextLong(), random.nextDouble()));
+            input.add(GenericRow.of(random.nextLong(), random.nextDouble()));
         }
 
         testImpl(schema, input);
     }
 
-    private void testImpl(TableSchema schema, List<RowData> input) {
+    private void testImpl(TableSchema schema, List<InternalRow> input) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        RowDataKeyAndBucketExtractor extractor = new RowDataKeyAndBucketExtractor(schema);
+        FixedBucketRowKeyExtractor extractor = new FixedBucketRowKeyExtractor(schema);
 
         int numChannels = random.nextInt(10) + 1;
         boolean hasLogSink = random.nextBoolean();
@@ -119,7 +119,7 @@ public class RowDataChannelComputerTest {
 
         // assert that channel(record) and channel(partition, bucket) gives the same result
 
-        for (RowData rowData : input) {
+        for (InternalRow rowData : input) {
             extractor.setRecord(rowData);
             BinaryRow partition = extractor.partition();
             int bucket = extractor.bucket();
@@ -156,7 +156,7 @@ public class RowDataChannelComputerTest {
 
         if (hasLogSink) {
             Map<Integer, Set<Integer>> channelsPerBucket = new HashMap<>();
-            for (RowData rowData : input) {
+            for (InternalRow rowData : input) {
                 extractor.setRecord(rowData);
                 int bucket = extractor.bucket();
                 channelsPerBucket
