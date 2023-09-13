@@ -38,6 +38,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Arrays;
 
+import scala.Option;
 import scala.collection.JavaConverters;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,7 +53,11 @@ public class CallStatementParserTest {
     @BeforeEach
     public void startSparkSession() {
         // Stops and clears active session to avoid loading previous non-stopped session.
-        SparkSession.getActiveSession().orElse(SparkSession::getDefaultSession).get().stop();
+        Option<SparkSession> optionalSession =
+                SparkSession.getActiveSession().orElse(SparkSession::getDefaultSession);
+        if (!optionalSession.isEmpty()) {
+            optionalSession.get().stop();
+        }
         SparkSession.clearActiveSession();
         spark =
                 SparkSession.builder()
