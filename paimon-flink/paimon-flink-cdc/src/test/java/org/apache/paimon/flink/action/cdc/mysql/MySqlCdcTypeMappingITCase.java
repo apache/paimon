@@ -36,7 +36,10 @@ import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.*;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.CHAR_TO_STRING;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT test for {@link TypeMapping} in MySQL CDC. */
