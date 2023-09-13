@@ -45,8 +45,6 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testWriteRead() {
-        setParallelism(1);
-
         sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
         assertThat(sql("SELECT * FROM T"))
                 .containsExactlyInAnyOrder(

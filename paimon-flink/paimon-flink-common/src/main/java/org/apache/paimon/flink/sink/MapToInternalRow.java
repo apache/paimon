@@ -32,6 +32,7 @@ public class MapToInternalRow {
 
     public static DataStream<InternalRow> map(DataStream<RowData> input, RowType rowType) {
         return input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
+                .setParallelism(input.getParallelism())
                 .returns(InternalTypeInfo.fromRowType(rowType));
     }
 }
