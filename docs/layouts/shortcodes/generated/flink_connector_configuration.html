@@ -129,6 +129,18 @@ under the License.
             <td>If no records flow in a partition of a stream for that amount of time, then that partition is considered "idle" and will not hold back the progress of watermarks in downstream operators.</td>
         </tr>
         <tr>
+            <td><h5>sink.committer-cpu</h5></td>
+            <td style="word-wrap: break-word;">1.0</td>
+            <td>Double</td>
+            <td>Sink committer cpu to control cpu cores of global committer.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.committer-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Sink committer memory to control heap memory of global committer.</td>
+        </tr>
+        <tr>
             <td><h5>sink.managed.writer-buffer-memory</h5></td>
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>
