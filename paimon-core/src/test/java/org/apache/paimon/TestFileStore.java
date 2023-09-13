@@ -139,7 +139,6 @@ public class TestFileStore extends KeyValueFileStore {
                 snapshotManager(),
                 newSnapshotDeletion(),
                 new TagManager(fileIO, options.path()),
-                ioExecutor(),
                 Integer.MAX_VALUE);
     }
 

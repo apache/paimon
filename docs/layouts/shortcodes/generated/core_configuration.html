@@ -479,11 +479,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Enum</td>
             <td>Specifies the execution mode of expire.<br /><br />Possible values:<ul><li>"sync": Execute expire synchronously. If there are too many files, it may take a long time and block stream processing.</li><li>"async": Execute expire asynchronously. If the generation of snapshots is greater than the deletion, there will be a backlog of files.</li></ul></td>
         </tr>
-        <tr>
-            <td><h5>snapshot.expire.io.threadpool.size</h5></td>
-            <td style="word-wrap: break-word;">4</td>
-            <td>Integer</td>
-            <td>Thread pool size for asynchronously deleting expired snapshot files.</td>
         </tr>
         <tr>
             <td><h5>snapshot.expire.limit</h5></td>

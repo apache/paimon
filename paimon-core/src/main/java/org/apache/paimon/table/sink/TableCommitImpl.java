@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
@@ -73,6 +74,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private boolean batchCommitted = false;
 
     private ExecutorService expireMainExecutor;
+    private AtomicReference<Throwable> expireError;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -108,6 +110,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         : Executors.newSingleThreadExecutor(
                                 new ExecutorThreadFactory(
                                         Thread.currentThread().getName() + "expire-main-thread"));
+        this.expireError = new AtomicReference<>(null);
     }
 
     @Override
@@ -217,12 +220,17 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     private void expire(long partitionExpireIdentifier, ExecutorService executor) {
+        if (expireError.get() != null) {
+            throw new RuntimeException(expireError.get());
+        }
+
         executor.execute(
                 () -> {
                     try {
                         expire(partitionExpireIdentifier);
                     } catch (Throwable t) {
-                        LOG.warn("Executing expire encountered an error.", t);
+                        LOG.error("Executing expire encountered an error.", t);
+                        expireError.compareAndSet(null, t);
                     }
                 });
     }
@@ -252,11 +260,7 @@ public class TableCommitImpl implements InnerTableCommit {
             IOUtils.closeQuietly(commitCallback);
         }
         IOUtils.closeQuietly(lock);
-
         expireMainExecutor.shutdownNow();
-        if (expire != null) {
-            expire.close();
-        }
     }
 
     @Override
@@ -265,8 +269,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @VisibleForTesting
-    public void resetExpireMainExecutor(ExecutorService executor) {
-        this.expireMainExecutor.shutdownNow();
-        this.expireMainExecutor = executor;
+    public ExecutorService getExpireMainExecutor() {
+        return expireMainExecutor;
     }
 }

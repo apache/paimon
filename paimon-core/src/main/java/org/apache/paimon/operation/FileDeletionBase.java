@@ -30,6 +30,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
 
@@ -75,8 +76,7 @@ public abstract class FileDeletionBase {
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
-            IndexFileHandler indexFileHandler,
-            Executor ioExecutor) {
+            IndexFileHandler indexFileHandler) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFile;
@@ -84,7 +84,7 @@ public abstract class FileDeletionBase {
         this.indexFileHandler = indexFileHandler;
 
         this.deletionBuckets = new HashMap<>();
-        this.ioExecutor = ioExecutor;
+        this.ioExecutor = FileUtils.COMMON_IO_FORK_JOIN_POOL;
     }
 
     /**

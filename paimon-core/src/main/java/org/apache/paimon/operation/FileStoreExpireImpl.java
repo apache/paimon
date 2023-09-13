@@ -29,13 +29,10 @@ import org.apache.paimon.utils.TagManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nonnull;
-
 import java.util.List;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -60,7 +57,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final SnapshotDeletion snapshotDeletion;
 
     private final TagManager tagManager;
-    @Nonnull private final ExecutorService ioExecutor;
     private final int expireLimit;
 
     private Lock lock;
@@ -72,7 +68,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager,
-            @Nonnull ExecutorService ioExecutor,
             int expireLimit) {
         Preconditions.checkArgument(
                 numRetainedMin >= 1,
@@ -91,7 +86,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
-        this.ioExecutor = ioExecutor;
         this.expireLimit = expireLimit;
     }
 
@@ -247,10 +241,5 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     @VisibleForTesting
     SnapshotDeletion snapshotDeletion() {
         return snapshotDeletion;
-    }
-
-    @Override
-    public void close() throws Exception {
-        ioExecutor.shutdownNow();
     }
 }

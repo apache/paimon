@@ -37,6 +37,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
+import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.FileStoreTestUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -63,7 +64,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.ManuallyTriggeredScheduledExecutorService;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -71,6 +71,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -89,6 +90,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -918,18 +921,29 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
+    @Timeout(120)
     public void testAsyncExpireExecutionMode() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        ManuallyTriggeredScheduledExecutorService executor =
-                new ManuallyTriggeredScheduledExecutorService();
 
         Map<String, String> options = new HashMap<>();
         options.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
         options.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
         options.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
 
         TableCommitImpl commit = table.copy(options).newCommit(commitUser);
-        commit.resetExpireMainExecutor(executor);
+        ExecutorService executor = commit.getExpireMainExecutor();
+        CountDownLatch before = new CountDownLatch(1);
+        CountDownLatch after = new CountDownLatch(1);
+
+        executor.execute(
+                () -> {
+                    try {
+                        before.await();
+                    } catch (Exception ignore) {
+                        // ignore
+                    }
+                });
 
         try (StreamTableWrite write = table.newWrite(commitUser)) {
             for (int i = 0; i < 10; i++) {
@@ -937,6 +951,8 @@ public abstract class FileStoreTableTestBase {
                 commit.commit(i, write.prepareCommit(false, i));
             }
         }
+
+        executor.execute(after::countDown);
 
         SnapshotManager snapshotManager = table.snapshotManager();
         long latestSnapshotId = snapshotManager.latestSnapshotId();
@@ -970,8 +986,10 @@ public abstract class FileStoreTableTestBase {
             FileStoreTestUtils.assertPathExists(table.fileIO(), file);
         }
 
-        // trigger all expire, only keeping files in use.
-        executor.triggerAll();
+        // waiting for all expire, only keeping files in use.
+        before.countDown();
+        after.await();
+
         for (int i = 1; i < latestSnapshotId - 1; i++) {
             assertThat(snapshotManager.snapshotExists(i)).isFalse();
         }
@@ -986,10 +1004,9 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
+    @Timeout(120)
     public void testExpireWithLimit() throws Exception {
         FileStoreTable table = createFileStoreTable();
-        ManuallyTriggeredScheduledExecutorService executor =
-                new ManuallyTriggeredScheduledExecutorService();
 
         Map<String, String> options = new HashMap<>();
         options.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
@@ -997,8 +1014,11 @@ public abstract class FileStoreTableTestBase {
         options.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
         options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
 
-        TableCommitImpl commit = table.copy(options).newCommit(commitUser);
-        commit.resetExpireMainExecutor(executor);
+        table = table.copy(options);
+        TableCommitImpl commit =
+                table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true"))
+                        .newCommit(commitUser);
+        FileStoreExpire expire = table.store().newExpire();
 
         try (StreamTableWrite write = table.newWrite(commitUser)) {
             for (int i = 0; i < 10; i++) {
@@ -1014,23 +1034,30 @@ public abstract class FileStoreTableTestBase {
         int index = 0;
 
         // trigger the first expire and the first two snapshots expired
-        executor.trigger();
+        expire.expire();
         assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
         assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
         for (int i = index; i < remainingSnapshot.size(); i++) {
             assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(i).id())).isTrue();
         }
+        assertThat(snapshotManager.earliestSnapshotId())
+                .isEqualTo(remainingSnapshot.get(index).id());
 
         // trigger the second expire and the second two snapshots expired
-        executor.trigger();
+        expire.expire();
         assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
         assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
         for (int i = index; i < remainingSnapshot.size(); i++) {
             assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(i).id())).isTrue();
         }
+        assertThat(snapshotManager.earliestSnapshotId())
+                .isEqualTo(remainingSnapshot.get(index).id());
 
         // trigger all remaining expires and only the last snapshot remaining
-        executor.triggerAll();
+        for (int i = 0; i < 5; i++) {
+            expire.expire();
+        }
+
         for (int i = 0; i < remainingSnapshot.size() - 1; i++) {
             assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(i).id())).isFalse();
         }

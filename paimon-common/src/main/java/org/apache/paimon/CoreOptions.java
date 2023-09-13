@@ -200,13 +200,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(ExpireExecutionMode.SYNC)
                     .withDescription("Specifies the execution mode of expire.");
 
-    public static final ConfigOption<Integer> SNAPSHOT_EXPIRE_IO_THREADPOOL_SIZE =
-            key("snapshot.expire.io.threadpool.size")
-                    .intType()
-                    .defaultValue(4)
-                    .withDescription(
-                            "Thread pool size for asynchronously deleting expired snapshot files.");
-
     public static final ConfigOption<Integer> SNAPSHOT_EXPIRE_LIMIT =
             key("snapshot.expire.limit")
                     .intType()
@@ -971,10 +964,6 @@ public class CoreOptions implements Serializable {
 
     public ExpireExecutionMode snapshotExpireExecutionMode() {
         return options.get(SNAPSHOT_EXPIRE_EXECUTION_MODE);
-    }
-
-    public int snapshotExpireIoThreadPoolSize() {
-        return options.get(SNAPSHOT_EXPIRE_IO_THREADPOOL_SIZE);
     }
 
     public int snapshotExpireLimit() {

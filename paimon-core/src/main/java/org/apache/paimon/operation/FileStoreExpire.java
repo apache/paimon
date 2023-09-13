@@ -19,7 +19,7 @@
 package org.apache.paimon.operation;
 
 /** Expire operation which provides snapshots expire. */
-public interface FileStoreExpire extends AutoCloseable {
+public interface FileStoreExpire {
 
     /** With global lock. */
     FileStoreExpire withLock(Lock lock);

@@ -37,7 +37,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.Executor;
 import java.util.function.Predicate;
 
 /** Delete snapshot files. */
@@ -54,9 +53,8 @@ public class SnapshotDeletion extends FileDeletionBase {
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
-            IndexFileHandler indexFileHandler,
-            Executor ioExecutor) {
-        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler, ioExecutor);
+            IndexFileHandler indexFileHandler) {
+        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler);
     }
 
     @Override
