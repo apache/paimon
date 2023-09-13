@@ -45,8 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.*;
 
 /** Converts from MySQL type to {@link DataType}. */
 public class MySqlTypeUtils {
@@ -153,16 +152,8 @@ public class MySqlTypeUtils {
             TypeMapping typeMapping) {
         if (typeMapping.containsMode(TO_STRING)) {
             return DataTypes.STRING();
-        } else {
-            return toDataType(type, length, scale, typeMapping.containsMode(TINYINT1_NOT_BOOL));
         }
-    }
 
-    private static DataType toDataType(
-            String type,
-            @Nullable Integer length,
-            @Nullable Integer scale,
-            boolean tinyInt1NotBool) {
         switch (type.toUpperCase()) {
             case BIT:
                 if (length == null || length == 1) {
@@ -180,7 +171,7 @@ public class MySqlTypeUtils {
                 // Mybatis and mysql-connector-java map tinyint(1) to boolean by default, we behave
                 // the same way by default. To store number (-128~127), user can set the type
                 // mapping option 'tinyint1-not-bool' then tinyint(1) will be mapped to tinyint.
-                return length != null && length == 1 && !tinyInt1NotBool
+                return length != null && length == 1 && !typeMapping.containsMode(TINYINT1_NOT_BOOL)
                         ? DataTypes.BOOLEAN()
                         : DataTypes.TINYINT();
             case TINYINT_UNSIGNED:
@@ -258,7 +249,13 @@ public class MySqlTypeUtils {
                 }
                 // because tidb ddl event does not contain field precision
             case CHAR:
+                return length == null || length == 0 || typeMapping.containsMode(CHAR_TO_STRING)
+                        ? DataTypes.STRING()
+                        : DataTypes.CHAR(length);
             case VARCHAR:
+                return length == null || length == 0 || typeMapping.containsMode(CHAR_TO_STRING)
+                        ? DataTypes.STRING()
+                        : DataTypes.VARCHAR(length);
             case TINYTEXT:
             case TEXT:
             case MEDIUMTEXT:

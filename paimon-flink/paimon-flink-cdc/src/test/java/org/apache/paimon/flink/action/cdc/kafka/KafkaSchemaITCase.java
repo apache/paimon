@@ -56,7 +56,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         Map<String, DataType> fields = new LinkedHashMap<>();
         fields.put("pt", DataTypes.INT());
         fields.put("_id", DataTypes.INT());
-        fields.put("v1", DataTypes.STRING());
+        fields.put("v1", DataTypes.VARCHAR(10));
         String tableName = "schema_evolution_1";
         String databasesName = "paimon_sync_table";
         assertThat(kafkaSchema.fields()).isEqualTo(fields);

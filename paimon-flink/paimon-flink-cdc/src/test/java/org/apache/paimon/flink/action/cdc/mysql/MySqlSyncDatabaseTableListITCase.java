@@ -87,7 +87,7 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
                         Collections.singletonList("+I[1, A]"),
                         getFileStoreTable("shard_1_t2"),
                         RowType.of(
-                                new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
+                                new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(100)},
                                 new String[] {"k", "name"}),
                         Collections.singletonList("k"));
 

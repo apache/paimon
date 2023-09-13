@@ -19,16 +19,9 @@
 package org.apache.paimon.flink.action.cdc;
 
 import java.io.Serializable;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
 /** Utility that holds data type mapping options. */
 public class TypeMapping implements Serializable {
@@ -50,31 +43,12 @@ public class TypeMapping implements Serializable {
     }
 
     public static TypeMapping parse(String[] rawOptions) {
-        List<String> options =
+        Set<TypeMappingMode> typeMappingModes =
                 Arrays.stream(rawOptions)
                         .map(String::trim)
                         .map(String::toLowerCase)
-                        .collect(Collectors.toList());
-
-        Set<TypeMappingMode> typeMappingModes = new HashSet<>();
-
-        for (String option : options) {
-            switch (option.toLowerCase()) {
-                case "tinyint1-not-bool":
-                    typeMappingModes.add(TINYINT1_NOT_BOOL);
-                    break;
-                case "to-nullable":
-                    typeMappingModes.add(TO_NULLABLE);
-                    break;
-                case "to-string":
-                    typeMappingModes.add(TO_STRING);
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unsupported type mapping option: " + option);
-            }
-        }
-
+                        .map(TypeMappingMode::mode)
+                        .collect(Collectors.toSet());
         return new TypeMapping(typeMappingModes);
     }
 
@@ -86,12 +60,29 @@ public class TypeMapping implements Serializable {
      *   <li>TINYINT1_NOT_BOOL: maps MySQL TINYINT(1) to TINYINT instead of BOOLEAN.
      *   <li>TO_NULLABLE: ignores all NOT NULL constraints (except for primary keys).
      *   <li>TO_STRING: maps all MySQL types to STRING.
+     *   <li>CHAR_TO_STRING: maps MySQL CHAR(length)/VARCHAR(length) types to STRING.
      * </ul>
      */
     public enum TypeMappingMode {
         TINYINT1_NOT_BOOL,
         TO_NULLABLE,
-        TO_STRING;
+        TO_STRING,
+        CHAR_TO_STRING;
+
+        private static final Map<String, TypeMappingMode> TYPE_MAPPING_OPTIONS =
+                Arrays.stream(TypeMappingMode.values())
+                        .collect(
+                                Collectors.toMap(
+                                        TypeMappingMode::configString, Function.identity()));
+
+        public static TypeMappingMode mode(String option) {
+            TypeMappingMode typeMappingMode = TYPE_MAPPING_OPTIONS.get(option);
+            if (typeMappingMode == null) {
+                throw new UnsupportedOperationException(
+                        "Unsupported type mapping option: " + option);
+            }
+            return typeMappingMode;
+        }
 
         public String configString() {
             return name().toLowerCase().replace("_", "-");

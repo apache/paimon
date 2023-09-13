@@ -36,9 +36,7 @@ import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.*;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT test for {@link TypeMapping} in MySQL CDC. */
@@ -398,7 +396,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
             RowType rowType =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.VARCHAR(10)},
                             new String[] {"pk", "v1"});
             waitForResult(
                     Collections.singletonList("+I[1, A]"),
@@ -413,7 +411,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
             rowType =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.INT()
+                                DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
                             },
                             new String[] {"pk", "v1", "v2"});
             // Currently we haven't handle default value
@@ -430,6 +428,69 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
             waitingTables("_new_table");
             assertThat(getFileStoreTable("_new_table").rowType().getTypeAt(1).isNullable())
                     .isTrue();
+        }
+    }
+
+    // --------------------------------------- char-to-string
+    // ---------------------------------------
+
+    @Test
+    @Timeout(60)
+    public void testCharToString() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "char_to_string_test");
+
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withMode(COMBINED.configString())
+                        .withTypeMappingModes(CHAR_TO_STRING.configString())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable("t1");
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE char_to_string_test");
+
+            // test schema evolution
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
+                            new String[] {"pk", "v1"});
+            waitForResult(
+                    Collections.singletonList("+I[1, 1]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
+
+            statement.executeUpdate("ALTER TABLE t1 ADD COLUMN v2 CHAR(1)");
+            statement.executeUpdate("INSERT INTO t1 VALUES (2, '2', 'A'), (3, '3', 'B')");
+
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                            },
+                            new String[] {"pk", "v1", "v2"});
+            waitForResult(
+                    Arrays.asList("+I[1, 1, NULL]", "+I[2, 2, A]", "+I[3, 3, B]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
+
+            // test newly created table
+            statement.executeUpdate(
+                    "CREATE TABLE _new_table (pk INT, v VARCHAR(10), PRIMARY KEY (pk))");
+            statement.executeUpdate("INSERT INTO _new_table VALUES (1, 'Paimon')");
+
+            waitingTables("_new_table");
+            waitForResult(
+                    Collections.singletonList("+I[1, Paimon]"),
+                    getFileStoreTable("_new_table"),
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
+                            new String[] {"pk", "v"}),
+                    Collections.singletonList("pk"));
         }
     }
 }

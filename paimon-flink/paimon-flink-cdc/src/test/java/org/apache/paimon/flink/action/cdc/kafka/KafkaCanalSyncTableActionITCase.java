@@ -84,7 +84,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.INT().notNull(), DataTypes.STRING()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
@@ -103,7 +105,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.INT()
                         },
                         new String[] {"pt", "_id", "v1", "v2"});
@@ -129,7 +131,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.BIGINT()
                         },
                         new String[] {"pt", "_id", "v1", "v2"});
@@ -156,7 +158,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(20),
                             DataTypes.BIGINT(),
                             DataTypes.DECIMAL(8, 3),
                             DataTypes.VARBINARY(10),
@@ -187,7 +189,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         new DataType[] {
                             DataTypes.INT().notNull(),
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(20),
                             DataTypes.BIGINT(),
                             DataTypes.DECIMAL(8, 3),
                             DataTypes.VARBINARY(20),
@@ -238,9 +240,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.INT(),
-                            DataTypes.STRING()
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"_id", "v1", "v2", "v3"});
         List<String> primaryKeys = Collections.singletonList("_id");
@@ -257,13 +259,13 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 RowType.of(
                         new DataType[] {
                             DataTypes.INT().notNull(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(20),
                             DataTypes.BIGINT(),
-                            DataTypes.STRING(),
+                            DataTypes.VARCHAR(10),
                             DataTypes.INT(),
                             DataTypes.DOUBLE(),
                             DataTypes.DECIMAL(5, 3),
-                            DataTypes.STRING()
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"_id", "v1", "v2", "v3", "v4", "v5", "v6", "$% ^,& *("});
         expected =
@@ -365,8 +367,8 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                             DataTypes.TIMESTAMP(2), // _datetime_p2
                             DataTypes.TIMESTAMP(6), // _timestamp
                             DataTypes.TIMESTAMP(0), // _timestamp0
-                            DataTypes.STRING(), // _char
-                            DataTypes.STRING(), // _varchar
+                            DataTypes.CHAR(10), // _char
+                            DataTypes.VARCHAR(20), // _varchar
                             DataTypes.STRING(), // _tinytext
                             DataTypes.STRING(), // _text
                             DataTypes.STRING(), // _mediumtext
@@ -643,7 +645,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                                 IllegalArgumentException.class,
                                 "Paimon schema and source table schema are not compatible.\n"
                                         + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
-                                        + "Source table fields are: [`pt` INT NOT NULL, `_id` INT NOT NULL, `v1` STRING]"));
+                                        + "Source table fields are: [`pt` INT NOT NULL, `_id` INT NOT NULL, `v1` VARCHAR(10)]"));
     }
 
     @Test
@@ -676,7 +678,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.INT().notNull(), DataTypes.STRING()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
@@ -719,7 +723,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.INT().notNull(), DataTypes.STRING()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
@@ -764,7 +770,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.INT().notNull(), DataTypes.STRING()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
@@ -807,7 +815,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.INT().notNull(), DataTypes.STRING()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
@@ -852,7 +862,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), DataTypes.INT().notNull(), DataTypes.STRING()
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
                         },
                         new String[] {"pt", "_id", "v1"});
         List<String> primaryKeys = Arrays.asList("pt", "_id");
