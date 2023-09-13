@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : Common</name>
 
     <properties>
-        <flink.version>1.17.1</flink.version>
+        <flink.version>1.18-SNAPSHOT</flink.version>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
     </properties>
 
