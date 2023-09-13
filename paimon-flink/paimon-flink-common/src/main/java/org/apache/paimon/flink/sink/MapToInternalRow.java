@@ -18,30 +18,20 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowWrapper;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.PartitionKeyExtractor;
-import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
+import org.apache.paimon.flink.utils.InternalTypeInfo;
+import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.common.functions.MapFunction;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.data.RowData;
 
-/** A {@link PartitionKeyExtractor} to {@link RowData}. */
-public class RowDataPartitionKeyExtractor implements PartitionKeyExtractor<RowData> {
+/** An util to convert {@link RowData} stream to {@link InternalRow} stream. */
+public class MapToInternalRow {
 
-    private final RowPartitionKeyExtractor extractor;
-
-    public RowDataPartitionKeyExtractor(TableSchema schema) {
-        this.extractor = new RowPartitionKeyExtractor(schema);
-    }
-
-    @Override
-    public BinaryRow partition(RowData record) {
-        return extractor.partition(new FlinkRowWrapper(record));
-    }
-
-    @Override
-    public BinaryRow trimmedPrimaryKey(RowData record) {
-        return extractor.trimmedPrimaryKey(new FlinkRowWrapper(record));
+    public static DataStream<InternalRow> map(DataStream<RowData> input, RowType rowType) {
+        return input.map((MapFunction<RowData, InternalRow>) FlinkRowWrapper::new)
+                .returns(InternalTypeInfo.fromRowType(rowType));
     }
 }

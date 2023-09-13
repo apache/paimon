@@ -18,16 +18,18 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.DynamicBucketRow;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
-import org.apache.flink.table.data.RowData;
 
-/** A {@link PrepareCommitOperator} to write {@link RowData} with bucket. Record schema is fixed. */
-public class DynamicBucketRowWriteOperator extends TableWriteOperator<Tuple2<RowData, Integer>> {
+/**
+ * A {@link PrepareCommitOperator} to write {@link InternalRow} with bucket. Record schema is fixed.
+ */
+public class DynamicBucketRowWriteOperator
+        extends TableWriteOperator<Tuple2<InternalRow, Integer>> {
 
     private static final long serialVersionUID = 1L;
 
@@ -44,9 +46,9 @@ public class DynamicBucketRowWriteOperator extends TableWriteOperator<Tuple2<Row
     }
 
     @Override
-    public void processElement(StreamRecord<Tuple2<RowData, Integer>> element) throws Exception {
-        FlinkRowWrapper internalRow = new FlinkRowWrapper(element.getValue().f0);
-        DynamicBucketRow row = new DynamicBucketRow(internalRow, element.getValue().f1);
+    public void processElement(StreamRecord<Tuple2<InternalRow, Integer>> element)
+            throws Exception {
+        DynamicBucketRow row = new DynamicBucketRow(element.getValue().f0, element.getValue().f1);
         write.write(row);
     }
 }

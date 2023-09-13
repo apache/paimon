@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 
@@ -25,7 +26,6 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
-import org.apache.flink.table.data.RowData;
 
 import java.util.Map;
 
@@ -53,7 +53,7 @@ public class UnawareBucketWriteSink extends FileStoreSink {
     }
 
     @Override
-    public DataStreamSink<?> sinkFrom(DataStream<RowData> input, String initialCommitUser) {
+    public DataStreamSink<?> sinkFrom(DataStream<InternalRow> input, String initialCommitUser) {
         // do the actually writing action, no snapshot generated in this stage
         DataStream<Committable> written = doWrite(input, initialCommitUser, parallelism);
 

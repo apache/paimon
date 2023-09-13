@@ -18,19 +18,21 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 
 import org.apache.flink.table.data.RowData;
 
 /** Hash key of a {@link RowData}. */
-public class RowHashKeyChannelComputer implements ChannelComputer<RowData> {
+public class RowHashKeyChannelComputer implements ChannelComputer<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
 
     private transient int numChannels;
-    private transient RowDataPartitionKeyExtractor extractor;
+    private transient RowPartitionKeyExtractor extractor;
 
     public RowHashKeyChannelComputer(TableSchema schema) {
         this.schema = schema;
@@ -39,11 +41,11 @@ public class RowHashKeyChannelComputer implements ChannelComputer<RowData> {
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.extractor = new RowDataPartitionKeyExtractor(schema);
+        this.extractor = new RowPartitionKeyExtractor(schema);
     }
 
     @Override
-    public int channel(RowData record) {
+    public int channel(InternalRow record) {
         int hash = extractor.trimmedPrimaryKey(record).hashCode();
         return Math.abs(hash % numChannels);
     }

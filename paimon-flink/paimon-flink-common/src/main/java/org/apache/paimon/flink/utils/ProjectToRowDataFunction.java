@@ -19,39 +19,34 @@
 package org.apache.paimon.flink.utils;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkRowData;
-import org.apache.paimon.flink.LogicalTypeConversion;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SerBiFunction;
-
-import org.apache.flink.table.data.GenericRowData;
-import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.types.logical.LogicalType;
 
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.flink.table.data.RowData.createFieldGetter;
+import static org.apache.paimon.data.InternalRow.createFieldGetter;
 
-/** Project {@link BinaryRow} fields into {@link RowData}. */
-public class ProjectToRowDataFunction implements SerBiFunction<RowData, BinaryRow, RowData> {
+/** Project {@link BinaryRow} fields into {@link InternalRow}. */
+public class ProjectToRowDataFunction
+        implements SerBiFunction<InternalRow, BinaryRow, InternalRow> {
 
-    private final RowData.FieldGetter[] fieldGetters;
+    private final InternalRow.FieldGetter[] fieldGetters;
 
     private final Map<Integer, Integer> projectMapping;
-    private final RowData.FieldGetter[] projectGetters;
+    private final InternalRow.FieldGetter[] projectGetters;
 
     public ProjectToRowDataFunction(RowType rowType, List<String> projectFields) {
-        LogicalType[] types =
-                LogicalTypeConversion.toLogicalType(rowType)
-                        .getChildren()
-                        .toArray(new LogicalType[0]);
+        DataType[] types = rowType.getFieldTypes().toArray(new DataType[0]);
         this.fieldGetters =
                 IntStream.range(0, types.length)
                         .mapToObj(i -> createFieldGetter(types[i], i))
-                        .toArray(RowData.FieldGetter[]::new);
+                        .toArray(InternalRow.FieldGetter[]::new);
 
         List<String> fieldNames = rowType.getFieldNames();
         this.projectMapping =
@@ -64,17 +59,16 @@ public class ProjectToRowDataFunction implements SerBiFunction<RowData, BinaryRo
                                         createFieldGetter(
                                                 types[rowType.getFieldIndex(field)],
                                                 projectFields.indexOf(field)))
-                        .toArray(RowData.FieldGetter[]::new);
+                        .toArray(InternalRow.FieldGetter[]::new);
     }
 
     @Override
-    public RowData apply(RowData input, BinaryRow project) {
-        GenericRowData newRow = new GenericRowData(fieldGetters.length);
-        FlinkRowData partRow = new FlinkRowData(project);
+    public InternalRow apply(InternalRow input, BinaryRow project) {
+        GenericRow newRow = new GenericRow(fieldGetters.length);
         for (int i = 0; i < fieldGetters.length; i++) {
             Object field =
                     projectMapping.containsKey(i)
-                            ? projectGetters[projectMapping.get(i)].getFieldOrNull(partRow)
+                            ? projectGetters[projectMapping.get(i)].getFieldOrNull(project)
                             : fieldGetters[i].getFieldOrNull(input);
             newRow.setField(i, field);
         }
