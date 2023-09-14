@@ -28,10 +28,6 @@ on:
 env:
   JDK_VERSION: 11
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.number || github.run_id }}
-  cancel-in-progress: true
-
 jobs:
   build:
     if: |
