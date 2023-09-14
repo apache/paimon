@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.SnapshotManager;
@@ -46,6 +47,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -61,26 +63,36 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
                 SetupableStreamOperator,
                 BoundedOneInput {
     @VisibleForTesting public static final String SAVEPOINT_TAG_PREFIX = "savepoint-";
+
+    private static final String COMMIT_FIELD_NAME = "commit";
+
+    private static final String TAG_AUTO_CREATION_FIELD_NAME = "tagAutoCreation";
+
     private static final long serialVersionUID = 1L;
+
     private final CommitterOperator<CommitT, GlobalCommitT> commitOperator;
+
     private final SerializableSupplier<SnapshotManager> snapshotManagerFactory;
+
     private final SerializableSupplier<TagManager> tagManagerFactory;
-    private final SerializableSupplier<TagAutoCreation> tagAutoCreationFactory;
+
     private final Set<Long> identifiersForTags;
+
     private SnapshotManager snapshotManager;
+
     private TagManager tagManager;
+
     private TagAutoCreation tagAutoCreation;
+
     private transient ListState<Long> identifiersForTagsState;
 
     public AutoTagForSavepointCommitterOperator(
             CommitterOperator<CommitT, GlobalCommitT> commitOperator,
             SerializableSupplier<SnapshotManager> snapshotManagerFactory,
-            SerializableSupplier<TagManager> tagManagerFactory,
-            SerializableSupplier<TagAutoCreation> tagAutoCreationFactory) {
+            SerializableSupplier<TagManager> tagManagerFactory) {
         this.commitOperator = commitOperator;
         this.tagManagerFactory = tagManagerFactory;
         this.snapshotManagerFactory = snapshotManagerFactory;
-        this.tagAutoCreationFactory = tagAutoCreationFactory;
         this.identifiersForTags = new HashSet<>();
     }
 
@@ -90,9 +102,22 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         try {
             commitOperator.initializeState(streamTaskStateManager);
         } finally {
+            Committer<CommitT, GlobalCommitT> committer = commitOperator.committer;
+
+            Class<?> storeCommitterClass = StoreCommitter.class;
+            Class<?> tableCommitImplClass = TableCommitImpl.class;
+
+            Field commitField = storeCommitterClass.getDeclaredField(COMMIT_FIELD_NAME);
+            commitField.setAccessible(true);
+            Object commit = commitField.get(committer);
+
+            Field tagAutoCreationField =
+                    tableCommitImplClass.getDeclaredField(TAG_AUTO_CREATION_FIELD_NAME);
+            tagAutoCreationField.setAccessible(true);
+            tagAutoCreation = (TagAutoCreation) tagAutoCreationField.get(commit);
+
             snapshotManager = snapshotManagerFactory.get();
             tagManager = tagManagerFactory.get();
-            tagAutoCreation = tagAutoCreationFactory.get();
             identifiersForTagsState =
                     commitOperator
                             .getOperatorStateBackend()
@@ -129,7 +154,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
             createTagForIdentifiers(Collections.singletonList(checkpointId));
         }
         if (tagAutoCreation != null) {
-            tagAutoCreation.refreshTags();
+            tagAutoCreation.run();
         }
     }
 

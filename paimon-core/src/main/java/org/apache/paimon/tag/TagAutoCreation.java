@@ -114,27 +114,26 @@ public class TagAutoCreation {
         }
     }
 
-    public void refreshTags() {
-        Long snapshotId = Optional.ofNullable(snapshotManager.latestSnapshotId()).orElse(1L);
+    public void run() {
+        long snapshotId = Optional.ofNullable(snapshotManager.latestSnapshotId()).orElse(1L);
         LocalDateTime currentTime =
                 Instant.ofEpochMilli(System.currentTimeMillis())
                         .atZone(ZoneId.systemDefault())
                         .toLocalDateTime();
-        processTags(snapshotManager.snapshot(snapshotId), Optional.of(currentTime));
-    }
 
-    public void run() {
         while (true) {
             if (snapshotManager.snapshotExists(nextSnapshot)) {
                 Snapshot snapshot = snapshotManager.snapshot(nextSnapshot);
                 processTags(snapshot, timeExtractor.extract(snapshot));
                 nextSnapshot++;
             } else {
-                // avoid snapshot has been expired
                 Long earliest = snapshotManager.earliestSnapshotId();
                 if (earliest != null && earliest > nextSnapshot) {
                     nextSnapshot = earliest;
                 } else {
+                    if (snapshotManager.snapshotExists(snapshotId)) {
+                        processTags(snapshotManager.snapshot(snapshotId), Optional.of(currentTime));
+                    }
                     break;
                 }
             }

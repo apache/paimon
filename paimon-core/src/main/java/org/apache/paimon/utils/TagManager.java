@@ -61,9 +61,7 @@ public class TagManager {
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(Snapshot snapshot, String tagName) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
-        if (tagExists(tagName)) {
-            return;
-        }
+        checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
         checkArgument(
                 !tagName.chars().allMatch(Character::isDigit),
                 "Tag name cannot be pure numeric string but is '%s'.",
