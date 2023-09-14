@@ -267,3 +267,18 @@ CREATE TABLE t1 (
 );
 
 INSERT INTO t1 VALUES (1, 'A');
+
+-- ################################################################################
+--  testCharToString
+-- ################################################################################
+
+CREATE DATABASE char_to_string_test;
+USE char_to_string_test;
+
+CREATE TABLE t1 (
+    pk INT,
+    v1 VARCHAR(10) NOT NULL,
+    PRIMARY KEY (pk)
+);
+
+INSERT INTO t1 VALUES (1, '1');
