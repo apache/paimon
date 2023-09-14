@@ -56,7 +56,6 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                         Collections.emptyList(),
                         Collections.singletonList("k"),
                         Collections.emptyMap());
-        snapshotManager = table.snapshotManager();
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = writeBuilder.newWrite();
         commit = writeBuilder.newCommit();
@@ -83,7 +82,6 @@ public class RollbackToActionITCase extends ActionITCaseBase {
                         Collections.emptyList(),
                         Collections.singletonList("k"),
                         Collections.emptyMap());
-        snapshotManager = table.snapshotManager();
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = writeBuilder.newWrite();
         commit = writeBuilder.newCommit();

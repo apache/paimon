@@ -18,13 +18,14 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.flink.action.CompactActionFactory;
+
 import org.apache.flink.table.procedures.Procedure;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /** Utility methods for {@link Procedure}. */
@@ -33,13 +34,21 @@ public class ProcedureUtil {
     private ProcedureUtil() {}
 
     private static final List<String> SYSTEM_PROCEDURES = new ArrayList<>();
-    private static final Map<String, Procedure> SYSTEM_PROCEDURES_MAP = new HashMap<>();
+
+    static {
+        SYSTEM_PROCEDURES.add(CompactActionFactory.IDENTIFIER);
+    }
 
     public static List<String> listProcedures() {
         return Collections.unmodifiableList(SYSTEM_PROCEDURES);
     }
 
-    public static Optional<Procedure> getProcedure(String procedureName) {
-        return Optional.ofNullable(SYSTEM_PROCEDURES_MAP.get(procedureName));
+    public static Optional<Procedure> getProcedure(Catalog catalog, String procedureName) {
+        switch (procedureName) {
+            case CompactActionFactory.IDENTIFIER:
+                return Optional.of(new CompactProcedure(catalog.warehouse(), catalog.options()));
+            default:
+                return Optional.empty();
+        }
     }
 }

@@ -27,6 +27,7 @@ import org.apache.paimon.table.Table;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -211,6 +212,12 @@ public interface Catalog extends AutoCloseable {
     default boolean caseSensitive() {
         return true;
     }
+
+    /** Return the warehouse path. */
+    String warehouse();
+
+    /** Return the catalog options. */
+    Map<String, String> options();
 
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {

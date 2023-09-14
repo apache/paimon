@@ -24,7 +24,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -37,6 +36,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.core.execution.JobClient;
@@ -75,17 +75,15 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     private FileStoreTable createTable(
             String databaseName,
             String tableName,
-            RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
-
         Identifier identifier = Identifier.create(databaseName, tableName);
         catalog.createDatabase(databaseName, true);
         catalog.createTable(
                 identifier,
-                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
+                new Schema(ROW_TYPE.getFields(), partitionKeys, primaryKeys, options, ""),
                 false);
         return (FileStoreTable) catalog.getTable(identifier);
     }
@@ -107,12 +105,11 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         createTable(
                                 dbName,
                                 tableName,
-                                ROW_TYPE,
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
                 tables.add(table);
-                snapshotManager = table.snapshotManager();
+                SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 write = streamWriteBuilder.newWrite();
@@ -156,7 +153,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.execute();
 
         for (FileStoreTable table : tables) {
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             Snapshot snapshot =
                     table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
             assertThat(snapshot.id()).isEqualTo(3);
@@ -196,12 +193,11 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         createTable(
                                 dbName,
                                 tableName,
-                                ROW_TYPE,
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
                 tables.add(table);
-                snapshotManager = table.snapshotManager();
+                SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 write = streamWriteBuilder.newWrite();
@@ -259,7 +255,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                             "+I[1, 100, 16, 20221208]"),
                     60_000);
 
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             StreamWriteBuilder streamWriteBuilder =
                     table.newStreamWriteBuilder().withCommitUser(commitUser);
             write = streamWriteBuilder.newWrite();
@@ -306,12 +302,11 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                             createTable(
                                     dbName,
                                     tableName,
-                                    ROW_TYPE,
                                     Arrays.asList("dt", "hh"),
                                     Arrays.asList("dt", "hh", "k"),
                                     options);
                     newtables.add(table);
-                    snapshotManager = table.snapshotManager();
+                    SnapshotManager snapshotManager = table.snapshotManager();
                     StreamWriteBuilder streamWriteBuilder =
                             table.newStreamWriteBuilder().withCommitUser(commitUser);
                     write = streamWriteBuilder.newWrite();
@@ -346,7 +341,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                                 "+I[1, 100, 16, 20221208]"),
                         60_000);
 
-                snapshotManager = table.snapshotManager();
+                SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 write = streamWriteBuilder.newWrite();
@@ -454,7 +449,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         createTable(
                                 dbName,
                                 tableName,
-                                ROW_TYPE,
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
@@ -464,7 +458,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     noCompactionTables.add(table);
                 }
 
-                snapshotManager = table.snapshotManager();
+                SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 write = streamWriteBuilder.newWrite();
@@ -508,7 +502,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.execute();
 
         for (FileStoreTable table : compactionTables) {
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             Snapshot snapshot =
                     table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
 
@@ -523,7 +517,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         for (FileStoreTable table : noCompactionTables) {
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             Snapshot snapshot =
                     table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
 
@@ -553,12 +547,11 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     createTable(
                             database,
                             tableName,
-                            ROW_TYPE,
-                            Arrays.asList("k"),
+                            Collections.singletonList("k"),
                             Collections.emptyList(),
                             options);
             tables.add(table);
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             StreamWriteBuilder streamWriteBuilder =
                     table.newStreamWriteBuilder().withCommitUser(commitUser);
             write = streamWriteBuilder.newWrite();
@@ -593,16 +586,13 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         JobClient client = env.executeAsync();
 
         for (FileStoreTable table : tables) {
-            FileStoreScan storeScan = table.store().newScan();
-
-            snapshotManager = table.snapshotManager();
             StreamWriteBuilder streamWriteBuilder =
                     table.newStreamWriteBuilder().withCommitUser(commitUser);
             write = streamWriteBuilder.newWrite();
             commit = streamWriteBuilder.newCommit();
 
             // first compaction, snapshot will be 3
-            checkFileAndRowSize(storeScan, 3L, 30_000L, 1, 6);
+            checkFileAndRowSize(table, 3L, 30_000L, 1, 6);
 
             writeData(
                     rowData(1, 101, 15, BinaryString.fromString("20221208")),
@@ -610,7 +600,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     rowData(1, 101, 15, BinaryString.fromString("20221209")));
 
             // second compaction, snapshot will be 5
-            checkFileAndRowSize(storeScan, 5L, 30_000L, 1, 9);
+            checkFileAndRowSize(table, 5L, 30_000L, 1, 9);
         }
 
         client.cancel().get();
@@ -630,12 +620,11 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     createTable(
                             database,
                             tableName,
-                            ROW_TYPE,
                             Collections.singletonList("k"),
                             Collections.emptyList(),
                             options);
             tables.add(table);
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             StreamWriteBuilder streamWriteBuilder =
                     table.newStreamWriteBuilder().withCommitUser(commitUser);
             write = streamWriteBuilder.newWrite();
@@ -668,10 +657,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         env.execute();
 
         for (FileStoreTable table : tables) {
-            FileStoreScan storeScan = table.store().newScan();
-            snapshotManager = table.snapshotManager();
             // first compaction, snapshot will be 3.
-            checkFileAndRowSize(storeScan, 3L, 0L, 1, 6);
+            checkFileAndRowSize(table, 3L, 0L, 1, 6);
         }
     }
 

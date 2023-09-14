@@ -35,10 +35,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -55,10 +52,8 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     protected String database;
     protected String tableName;
     protected String commitUser;
-    protected SnapshotManager snapshotManager;
     protected StreamTableWrite write;
     protected StreamTableCommit commit;
-    protected StreamExecutionEnvironment env;
     protected Catalog catalog;
     private long incrementalIdentifier;
 
@@ -69,11 +64,6 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         tableName = "test_table_" + UUID.randomUUID();
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
-        env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
         catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
     }
 
@@ -81,11 +71,12 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     public void after() throws Exception {
         if (write != null) {
             write.close();
+            write = null;
         }
         if (commit != null) {
             commit.close();
+            commit = null;
         }
-        env.close();
         catalog.close();
     }
 
@@ -111,6 +102,11 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
                 identifier,
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
                 false);
+        return (FileStoreTable) catalog.getTable(identifier);
+    }
+
+    protected FileStoreTable getFileStoreTable(String tableName) throws Exception {
+        Identifier identifier = Identifier.create(database, tableName);
         return (FileStoreTable) catalog.getTable(identifier);
     }
 

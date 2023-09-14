@@ -43,9 +43,7 @@ import java.util.stream.Collectors;
 /** Abstract base of {@link Action} for table. */
 public abstract class ActionBase implements Action {
 
-    private final Options catalogOptions;
-
-    protected final Map<String, String> catalogConfig;
+    protected final Options catalogOptions;
     protected final Catalog catalog;
     protected final FlinkCatalog flinkCatalog;
     protected final String catalogName = "paimon-" + UUID.randomUUID();
@@ -53,7 +51,6 @@ public abstract class ActionBase implements Action {
     protected final StreamTableEnvironment batchTEnv;
 
     public ActionBase(String warehouse, Map<String, String> catalogConfig) {
-        this.catalogConfig = catalogConfig;
         catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
 

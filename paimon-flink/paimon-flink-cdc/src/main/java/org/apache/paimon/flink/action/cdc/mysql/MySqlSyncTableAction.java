@@ -282,7 +282,7 @@ public class MySqlSyncTableAction extends ActionBase {
 
     @VisibleForTesting
     public Map<String, String> catalogConfig() {
-        return catalogConfig;
+        return catalogOptions.toMap();
     }
 
     // ------------------------------------------------------------------------

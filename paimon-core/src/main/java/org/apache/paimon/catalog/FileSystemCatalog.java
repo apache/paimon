@@ -231,7 +231,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     public void close() throws Exception {}
 
     @Override
-    protected String warehouse() {
+    public String warehouse() {
         return warehouse.toString();
     }
 }

@@ -203,7 +203,7 @@ public class MongoDBSyncTableAction extends ActionBase {
 
     @VisibleForTesting
     public Map<String, String> catalogConfig() {
-        return catalogConfig;
+        return catalogOptions.toMap();
     }
 
     // ------------------------------------------------------------------------

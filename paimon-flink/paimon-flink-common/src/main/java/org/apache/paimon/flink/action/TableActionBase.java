@@ -56,8 +56,6 @@ public abstract class TableActionBase extends ActionBase {
         try {
             table = catalog.getTable(identifier);
         } catch (Catalog.TableNotExistException e) {
-            LOG.error("Table doesn't exist in given path.", e);
-            System.err.println("Table doesn't exist in given path.");
             throw new RuntimeException(e);
         }
     }
