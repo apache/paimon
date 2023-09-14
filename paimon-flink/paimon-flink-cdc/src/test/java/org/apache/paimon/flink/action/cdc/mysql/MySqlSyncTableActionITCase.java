@@ -716,7 +716,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "_date_format_timestamp=date_format(_timestamp,yyyyMMdd)",
                         "_substring_date1=substring(_date,2)",
                         "_substring_date2=substring(_timestamp,5,10)",
-                        "_truncate_date=truncate(pk,2)");
+                        "_truncate_date=trUNcate(pk,2)"); // test case-insensitive too
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
