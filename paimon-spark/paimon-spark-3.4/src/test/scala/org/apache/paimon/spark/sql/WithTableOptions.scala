@@ -15,21 +15,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.plans.logical
+package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.procedure.Procedure
+import org.apache.paimon.WriteMode
+import org.apache.paimon.WriteMode._
 
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
-import org.apache.spark.sql.catalyst.util.truncatedString
+trait WithTableOptions {
 
-/** A CALL command that resolves stored procedure from SQL. */
-case class CallCommand(procedure: Procedure, args: Seq[Expression]) extends LeafCommand {
+  // 3: fixed bucket, -1: dynamic bucket
+  protected val bucketModes: Seq[Int] = Seq(3, -1)
 
-  override lazy val output: Seq[Attribute] =
-    procedure.outputType.map(
-      field => AttributeReference(field.name, field.dataType, field.nullable, field.metadata)())
+  protected val writeModes: Seq[WriteMode] = Seq(CHANGE_LOG, APPEND_ONLY)
 
-  override def simpleString(maxFields: Int): String = {
-    s"Call${truncatedString(output, "[", ", ", "]", maxFields)} ${procedure.description}"
-  }
 }
