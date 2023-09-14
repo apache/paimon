@@ -112,7 +112,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
     }
 
     /** Tests for {@link SortMergeReader} with {@link ValueCountMergeFunction}. */
-    public static class WithValueRecordMergeFunctionTest extends SortMergeReaderTestBase {
+    public static class WithValueCountMergeFunctionTest extends SortMergeReaderTestBase {
 
         @Override
         protected boolean addOnly() {

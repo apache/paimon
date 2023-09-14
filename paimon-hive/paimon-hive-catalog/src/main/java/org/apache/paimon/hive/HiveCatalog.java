@@ -660,6 +660,14 @@ public class HiveCatalog extends AbstractCatalog {
 
     public static HiveConf createHiveConf(
             @Nullable String hiveConfDir, @Nullable String hadoopConfDir) {
+        // try to load from system env.
+        if (isNullOrWhitespaceOnly(hiveConfDir)) {
+            hiveConfDir = possibleHiveConfPath();
+        }
+        if (isNullOrWhitespaceOnly(hadoopConfDir)) {
+            hadoopConfDir = possibleHadoopConfPath();
+        }
+
         // create HiveConf from hadoop configuration with hadoop conf directory configured.
         Configuration hadoopConf = null;
         if (!isNullOrWhitespaceOnly(hadoopConfDir)) {
@@ -750,5 +758,25 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
         return null;
+    }
+
+    public static String possibleHadoopConfPath() {
+        String possiblePath = null;
+        if (System.getenv("HADOOP_CONF_DIR") != null) {
+            possiblePath = System.getenv("HADOOP_CONF_DIR");
+        } else if (System.getenv("HADOOP_HOME") != null) {
+            String possiblePath1 = System.getenv("HADOOP_HOME") + "/conf";
+            String possiblePath2 = System.getenv("HADOOP_HOME") + "/etc/hadoop";
+            if (new File(possiblePath1).exists()) {
+                possiblePath = possiblePath1;
+            } else if (new File(possiblePath2).exists()) {
+                possiblePath = possiblePath2;
+            }
+        }
+        return possiblePath;
+    }
+
+    public static String possibleHiveConfPath() {
+        return System.getenv("HIVE_CONF_DIR");
     }
 }

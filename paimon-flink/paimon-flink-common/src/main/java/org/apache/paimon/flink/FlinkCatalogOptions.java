@@ -47,4 +47,10 @@ public class FlinkCatalogOptions {
                     .defaultValue(Duration.ofMinutes(1))
                     .withDescription(
                             "The timeout for register to create or delete topic in log system.");
+    public static final ConfigOption<Boolean> DISABLE_CREATE_TABLE_IN_DEFAULT_DB =
+            ConfigOptions.key("disable-create-table-in-default-db")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, creating table in default database is not allowed. Default is false.");
 }

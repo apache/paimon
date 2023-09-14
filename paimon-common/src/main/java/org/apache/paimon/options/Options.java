@@ -152,6 +152,10 @@ public class Options implements Serializable {
         return new Options(newData);
     }
 
+    public synchronized void remove(String key) {
+        data.remove(key);
+    }
+
     public synchronized boolean containsKey(String key) {
         return data.containsKey(key);
     }

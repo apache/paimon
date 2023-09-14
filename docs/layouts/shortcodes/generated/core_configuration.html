@@ -117,6 +117,18 @@ under the License.
             <td>The discovery interval of continuous reading.</td>
         </tr>
         <tr>
+            <td><h5>cross-partition-upsert.bootstrap-min-partition</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The min partition bootstrap of rocksdb index for cross partition upsert (primary keys not contain all partition fields), bootstrap will only read the partitions above it, and the smaller partitions will not be read into the index. This can reduce job startup time and excessive initialization of index, but please note that this may also cause data duplication.</td>
+        </tr>
+        <tr>
+            <td><h5>cross-partition-upsert.index-ttl</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>The TTL in rocksdb index for cross partition upsert (primary keys not contain all partition fields), this can avoid maintaining too many indexes and lead to worse and worse performance, but please note that this may also cause data duplication.</td>
+        </tr>
+        <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -169,6 +181,12 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
             <td>Read incremental changes between start snapshot (exclusive) and end snapshot, for example, '5,10' means changes between snapshot 5 and snapshot 10.</td>
+        </tr>
+        <tr>
+            <td><h5>incremental-between-scan-mode</h5></td>
+            <td style="word-wrap: break-word;">delta</td>
+            <td><p>Enum</p></td>
+            <td>Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot, 'delta' for scan newly changed files between snapshots, 'changelog' scan changelog files between snapshots.<br /><br />Possible values:<ul><li>"delta": Scan newly changed files between snapshots.</li><li>"changelog": Scan changelog files between snapshots.</li></ul></td>
         </tr>
         <tr>
             <td><h5>incremental-between-timestamp</h5></td>
@@ -544,6 +562,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
             <td>Target size of a file.</td>
+        </tr>
+        <tr>
+            <td><h5>write-buffer-for-append</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.</td>
         </tr>
         <tr>
             <td><h5>write-buffer-size</h5></td>

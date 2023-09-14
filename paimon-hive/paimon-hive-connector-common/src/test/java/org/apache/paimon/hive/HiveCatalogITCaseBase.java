@@ -329,6 +329,50 @@ public abstract class HiveCatalogITCaseBase {
                         "Cannot find table '`my_hive`.`test_db`.`hive_table`' in any of the catalogs [default_catalog, my_hive], nor as a temporary table.");
     }
 
+    /**
+     * Test flink writing and hive reading to compare partitions and non-partitions table results.
+     */
+    @Test
+    public void testFlinkWriteAndHiveReadToCompare() throws Exception {
+        // Use flink to create a partitioned table and write data, hive read.
+        tEnv.executeSql(
+                        "create table students\n"
+                                + "(id decimal(20,0)\n"
+                                + ",upload_insert TIMESTAMP\n"
+                                + ",dt string\n"
+                                + ",PRIMARY KEY(id,dt) NOT ENFORCED\n"
+                                + ") PARTITIONED BY (dt)\n"
+                                + "WITH (\n"
+                                + "'bucket' = '-1',\n"
+                                + "'file.format' = 'parquet',\n"
+                                + "'metastore.partitioned-table' = 'true'\n"
+                                + ");")
+                .await();
+        tEnv.executeSql(
+                        "insert into students select cast(1 as decimal(20,0)) as id,to_timestamp('2023-08-01 14:03:00.123456') as upload_insert,'20230801' as dt;")
+                .await();
+        List<String> partitionedTableResult = hiveShell.executeQuery("SELECT * from students");
+
+        // Use flink to create a non-partitioned table and write data, hive read.
+        tEnv.executeSql(
+                        "create table students1\n"
+                                + "(id decimal(20,0)\n"
+                                + ",upload_insert TIMESTAMP\n"
+                                + ",dt string\n"
+                                + ",PRIMARY KEY(id,dt) NOT ENFORCED\n"
+                                + ") PARTITIONED BY (dt)\n"
+                                + "WITH (\n"
+                                + "'bucket' = '-1',\n"
+                                + "'file.format' = 'parquet'\n"
+                                + ");")
+                .await();
+        tEnv.executeSql(
+                        "insert into students1 select cast(1 as decimal(20,0)) as id,to_timestamp('2023-08-01 14:03:00.123456') as upload_insert,'20230801' as dt;")
+                .await();
+        List<String> nonPartitionedTableResult = hiveShell.executeQuery("SELECT * from students1");
+        assertThat(partitionedTableResult).containsAll(nonPartitionedTableResult);
+    }
+
     @Test
     public void testHiveCreateAndFlinkRead() throws Exception {
         hiveShell.execute("SET hive.metastore.warehouse.dir=" + path);

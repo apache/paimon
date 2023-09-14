@@ -39,12 +39,12 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.RichPlan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -308,7 +308,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public RichPlan plan() {
+        public StartingContext startingContext() {
+            return streamScan.startingContext();
+        }
+
+        @Override
+        public Plan plan() {
             return streamScan.plan();
         }
 
@@ -323,14 +328,20 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return streamScan.checkpoint();
         }
 
+        @Nullable
+        @Override
+        public Long watermark() {
+            return streamScan.watermark();
+        }
+
         @Override
         public void restore(@Nullable Long nextSnapshotId) {
             streamScan.restore(nextSnapshotId);
         }
 
         @Override
-        public void restore(@Nullable Long nextSnapshotId, ScanMode scanMode) {
-            streamScan.restore(nextSnapshotId, scanMode);
+        public void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot) {
+            streamScan.restore(nextSnapshotId, scanAllSnapshot);
         }
 
         @Override

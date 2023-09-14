@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.manifest.ManifestCommittable;
@@ -32,6 +33,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,13 +56,24 @@ public class StoreMultiCommitter
     //    referenced by table id.
     private final Map<Identifier, StoreCommitter> tableCommitters;
 
+    // compact job needs set "write-only" of a table to false
+    private final boolean isCompactJob;
+
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader, String commitUser, @Nullable CommitterMetrics metrics) {
+        this(catalogLoader, commitUser, metrics, false);
+    }
+
+    public StoreMultiCommitter(
+            Catalog.Loader catalogLoader,
+            String commitUser,
+            @Nullable CommitterMetrics metrics,
+            boolean isCompactJob) {
         this.catalog = catalogLoader.load();
         this.commitUser = commitUser;
         this.metrics = metrics;
-
         this.tableCommitters = new HashMap<>();
+        this.isCompactJob = isCompactJob;
     }
 
     @Override
@@ -148,6 +161,12 @@ public class StoreMultiCommitter
             FileStoreTable table;
             try {
                 table = (FileStoreTable) catalog.getTable(tableId);
+                if (isCompactJob) {
+                    table =
+                            table.copy(
+                                    Collections.singletonMap(
+                                            CoreOptions.WRITE_ONLY.key(), "false"));
+                }
             } catch (Catalog.TableNotExistException e) {
                 throw new RuntimeException(
                         String.format(
@@ -156,7 +175,7 @@ public class StoreMultiCommitter
             }
             committer =
                     new StoreCommitter(
-                            table.newCommit(commitUser).ignoreEmptyCommit(false), metrics);
+                            table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob), metrics);
             tableCommitters.put(tableId, committer);
         }
 

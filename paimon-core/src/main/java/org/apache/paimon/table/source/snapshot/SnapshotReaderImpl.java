@@ -208,11 +208,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
 
             @Override
-            public ScanMode scanMode() {
-                return plan.scanMode();
-            }
-
-            @Override
             public List<Split> splits() {
                 return (List) splits;
             }
@@ -312,12 +307,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
             @Override
             public Long snapshotId() {
                 return plan.snapshotId();
-            }
-
-            @Override
-            public ScanMode scanMode() {
-                // TODO introduce a new mode
-                throw new UnsupportedOperationException();
             }
 
             @Override

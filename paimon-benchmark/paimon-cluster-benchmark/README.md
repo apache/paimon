@@ -7,7 +7,7 @@ This is the cluster benchmark module for Paimon. Inspired by [Nexmark](https://g
 * This benchmark only runs on Linux. You'll need a Linux environment (preferably an EMR cluster). For a more reasonable result, we recommend this cluster to have:
   * One master node with 8 cores and 16GB RAM.
   * Two worker nodes with 16 cores and 64GB RAM.
-* This benchmark runs on a standalone Flink cluster. Download Flink >= 1.15 from the [Apache Flink's website](https://flink.apache.org/downloads.html#apache-flink-1160) and setup a standalone cluster. Flink's job manager must be on the master node of your EMR cluster. We recommend the following Flink configurations:
+* This benchmark runs on a standalone Flink cluster. Download Flink >= 1.15 from the [Apache Flink's website](https://flink.apache.org/downloads.html#apache-flink-1160) and set up a standalone cluster. Flink's job manager must be on the master node of your EMR cluster. We recommend the following Flink configurations:
     ```yaml
     jobmanager.memory.process.size: 4096m
     taskmanager.memory.process.size: 4096m
@@ -21,13 +21,13 @@ This is the cluster benchmark module for Paimon. Inspired by [Nexmark](https://g
 * This benchmark needs the `FLINK_HOME` environment variable. Set `FLINK_HOME` to your Flink directory.
 
 ### Setup Benchmark
-* Build this module with command `mvn clean package`.
-* Copy `target/paimon-benchmark-bin/paimon-benchmark` to the master node of your EMR cluster.
-* Modify `paimon-benchmark/conf/benchmark.yaml` on the master node. You must change these config options:
-  * `benchmark.metric.reporter.host` and `flink.rest.address`: set these to the address of master node of your EMR cluster.
-  *  `benchmark.sink.path` is the path to which queries insert records. This should point to a non-existing path. Contents of this path will be removed before each test.
-* Copy `paimon-benchmark` to every worker node of your EMR cluster.
-* Run `paimon-benchmark/bin/setup_cluster.sh` in master node. This activates the CPU metrics collector in worker nodes. Note that if you restart your Flink cluster, you must also restart the CPU metrics collectors. To stop CPU metrics collectors, run `paimon-benchmark/bin/shutdown_cluster.sh` in master node.
+1. Build this module with command `mvn clean package -DskipTests -pl paimon-benchmark/paimon-cluster-benchmark/ -am`.
+2. Copy `paimon-benchmark/paimon-cluster-benchmark/target/paimon-benchmark-bin/paimon-benchmark` to the master node of your EMR cluster.
+3. Modify `paimon-benchmark/conf/benchmark.yaml` on the master node. You must change these config options:
+   * `benchmark.metric.reporter.host` and `flink.rest.address`: set these to the address of master node of your EMR cluster.
+   * `benchmark.sink.path` is the path to which queries insert records. This should point to a non-existing path. Contents of this path will be removed before each test.
+4. Copy `paimon-benchmark` to every worker node of your EMR cluster.
+5. Run `paimon-benchmark/bin/setup_cluster.sh` in master node. This activates the CPU metrics collector in worker nodes. Note that if you restart your Flink cluster, you must also restart the CPU metrics collectors. To stop CPU metrics collectors, run `paimon-benchmark/bin/shutdown_cluster.sh` in master node.
 
 ### Run Benchmark
 * Run `paimon-benchmark/bin/run_benchmark.sh <query> <sink>` to run `<query>` for `<sink>`. Currently `<query>` can be `q1` or `all`, and sink can only be `paimon`.

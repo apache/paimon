@@ -24,12 +24,17 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.ChannelWithMeta;
+import org.apache.paimon.disk.ExternalBuffer;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.DataType;
@@ -42,16 +47,24 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.StatsCollectorFactories;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -264,6 +277,174 @@ public class AppendOnlyWriterTest {
         assertThat(secInc.newFilesIncrement().newFiles()).hasSize(1);
     }
 
+    @Test
+    public void testCloseUnexpectedly() throws Exception {
+        final CountDownLatch latch = new CountDownLatch(1);
+        AppendOnlyWriter writer =
+                createWriter(20 * 1024, false, Collections.emptyList(), latch).getLeft();
+
+        for (int i = 0; i < 10; i++) { // create 10 small files.
+            for (int j = 0; j < 10; j++) {
+                writer.write(row(j, String.format("%03d", j), PART));
+            }
+            CommitIncrement increment = writer.prepareCommit(false);
+            assertThat(increment.compactIncrement().isEmpty()).isTrue();
+        }
+        Set<Path> committedFiles =
+                Files.walk(tempDir)
+                        .filter(Files::isRegularFile)
+                        .map(p -> new Path(p.toString()))
+                        .collect(Collectors.toSet());
+
+        // start compaction and write more records
+        latch.countDown();
+        for (int j = 0; j < 10; j++) {
+            writer.write(row(j, String.format("%03d", j), PART));
+        }
+        writer.sync();
+
+        // writer closed unexpectedly
+        writer.close();
+
+        Set<Path> afterClosedUnexpectedly =
+                Files.walk(tempDir)
+                        .filter(Files::isRegularFile)
+                        .map(p -> new Path(p.toString()))
+                        .collect(Collectors.toSet());
+        assertThat(afterClosedUnexpectedly).containsExactlyInAnyOrderElementsOf(committedFiles);
+    }
+
+    @Test
+    public void testExternalBufferWorks() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+
+        RowBuffer buffer = writer.getWriteBuffer();
+        Assertions.assertThat(buffer.size()).isEqualTo(100);
+        Assertions.assertThat(buffer.memoryOccupancy()).isLessThanOrEqualTo(16384L);
+
+        writer.close();
+    }
+
+    @Test
+    public void testNoBuffer() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        RowBuffer buffer = writer.getWriteBuffer();
+        Assertions.assertThat(buffer).isNull();
+
+        writer.close();
+    }
+
+    @Test
+    public void testMultipleFlush() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+
+        writer.flushMemory();
+        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
+        Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
+        Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(0);
+        long rowCount =
+                writer.getNewFiles().stream().map(DataFileMeta::rowCount).reduce(0L, Long::sum);
+        Assertions.assertThat(rowCount).isEqualTo(100);
+
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+        writer.flushMemory();
+
+        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
+        Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
+        Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(1);
+        rowCount = writer.getNewFiles().stream().map(DataFileMeta::rowCount).reduce(0L, Long::sum);
+        Assertions.assertThat(rowCount).isEqualTo(200);
+    }
+
+    @Test
+    public void testClose() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(16384L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+
+        ExternalBuffer externalBuffer = (ExternalBuffer) writer.getWriteBuffer();
+        List<ChannelWithMeta> channel = externalBuffer.getSpillChannels();
+
+        writer.close();
+
+        for (ChannelWithMeta meta : channel) {
+            File file = new File(meta.getChannel().getPath());
+            Assertions.assertThat(file.exists()).isEqualTo(false);
+        }
+        Assertions.assertThat(writer.getWriteBuffer()).isEqualTo(null);
+    }
+
+    @Test
+    public void testNonSpillable() throws Exception {
+        AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(2048L, 1024));
+
+        char[] s = new char[990];
+        Arrays.fill(s, 'a');
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+        // we got only one file after commit
+        Assertions.assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
+                .isEqualTo(1);
+        writer.close();
+
+        writer = createEmptyWriter(Long.MAX_VALUE, false);
+
+        // we give it a small Memory Pool, force it to spill
+        writer.setMemoryPool(new HeapMemorySegmentPool(2048L, 1024));
+
+        // set the record that much larger than the maxMemory
+        for (int j = 0; j < 100; j++) {
+            writer.write(row(j, String.valueOf(s), PART));
+        }
+        // we got 100 files
+        Assertions.assertThat(writer.prepareCommit(true).newFilesIncrement().newFiles().size())
+                .isEqualTo(100);
+        writer.close();
+    }
+
     private FieldStats initStats(Integer min, Integer max, long nullCount) {
         return new FieldStats(min, max, nullCount);
     }
@@ -286,11 +467,50 @@ public class AppendOnlyWriterTest {
     }
 
     private AppendOnlyWriter createEmptyWriter(long targetFileSize) {
-        return createWriter(targetFileSize, false, Collections.emptyList()).getLeft();
+        return createWriter(targetFileSize, false, false, false, Collections.emptyList()).getLeft();
+    }
+
+    private AppendOnlyWriter createEmptyWriter(long targetFileSize, boolean spillable) {
+        return createWriter(targetFileSize, false, true, spillable, Collections.emptyList())
+                .getLeft();
     }
 
     private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
             long targetFileSize, boolean forceCompact, List<DataFileMeta> scannedFiles) {
+        return createWriter(
+                targetFileSize, forceCompact, true, true, scannedFiles, new CountDownLatch(0));
+    }
+
+    private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
+            long targetFileSize,
+            boolean forceCompact,
+            boolean useWriteBuffer,
+            boolean spillable,
+            List<DataFileMeta> scannedFiles) {
+        return createWriter(
+                targetFileSize,
+                forceCompact,
+                useWriteBuffer,
+                spillable,
+                scannedFiles,
+                new CountDownLatch(0));
+    }
+
+    private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
+            long targetFileSize,
+            boolean forceCompact,
+            List<DataFileMeta> scannedFiles,
+            CountDownLatch latch) {
+        return createWriter(targetFileSize, forceCompact, false, false, scannedFiles, latch);
+    }
+
+    private Pair<AppendOnlyWriter, List<DataFileMeta>> createWriter(
+            long targetFileSize,
+            boolean forceCompact,
+            boolean useWriteBuffer,
+            boolean spillable,
+            List<DataFileMeta> scannedFiles,
+            CountDownLatch latch) {
         FileFormat fileFormat = FileFormat.fromIdentifier(AVRO, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>(scannedFiles);
         AppendOnlyCompactManager compactManager =
@@ -301,14 +521,18 @@ public class AppendOnlyWriterTest {
                         MIN_FILE_NUM,
                         MAX_FILE_NUM,
                         targetFileSize,
-                        compactBefore ->
-                                compactBefore.isEmpty()
-                                        ? Collections.emptyList()
-                                        : Collections.singletonList(
-                                                generateCompactAfter(compactBefore)));
+                        compactBefore -> {
+                            latch.await();
+                            return compactBefore.isEmpty()
+                                    ? Collections.emptyList()
+                                    : Collections.singletonList(
+                                            generateCompactAfter(compactBefore));
+                        });
+        CoreOptions options = new CoreOptions(new HashMap<>());
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
                         LocalFileIO.create(),
+                        IOManager.create(tempDir.toString()),
                         SCHEMA_ID,
                         fileFormat,
                         targetFileSize,
@@ -318,18 +542,22 @@ public class AppendOnlyWriterTest {
                         forceCompact,
                         pathFactory,
                         null,
+                        useWriteBuffer,
+                        spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                new CoreOptions(new HashMap<>()),
-                                AppendOnlyWriterTest.SCHEMA.getFieldNames()));
+                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()));
+        writer.setMemoryPool(
+                new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
     }
 
-    private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) {
+    private DataFileMeta generateCompactAfter(List<DataFileMeta> toCompact) throws IOException {
         int size = toCompact.size();
         long minSeq = toCompact.get(0).minSequenceNumber();
         long maxSeq = toCompact.get(size - 1).maxSequenceNumber();
         String fileName = "compact-" + UUID.randomUUID();
+        LocalFileIO.create().newOutputStream(pathFactory.toPath(fileName), false).close();
         return DataFileMeta.forAppend(
                 fileName,
                 toCompact.stream().mapToLong(DataFileMeta::fileSize).sum(),

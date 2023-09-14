@@ -43,6 +43,7 @@ import org.apache.paimon.table.source.snapshot.StaticFromTagStartingScanner;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.List;
 import java.util.Optional;
@@ -77,6 +78,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
     }
 
     protected StartingScanner createStartingScanner(boolean isStreaming) {
+        SnapshotManager snapshotManager = snapshotReader.snapshotManager();
         CoreOptions.StreamingCompactionType type =
                 options.toConfiguration().get(CoreOptions.STREAMING_COMPACT);
         switch (type) {
@@ -85,11 +87,11 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                     checkArgument(
                             isStreaming,
                             "Set 'streaming-compact' in batch mode. This is unexpected.");
-                    return new ContinuousCompactorStartingScanner();
+                    return new ContinuousCompactorStartingScanner(snapshotManager);
                 }
             case BUCKET_UNAWARE:
                 {
-                    return new FullStartingScanner();
+                    return new FullStartingScanner(snapshotManager);
                 }
         }
 
@@ -99,18 +101,19 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
             ConsumerManager consumerManager = snapshotReader.consumerManager();
             Optional<Consumer> consumer = consumerManager.consumer(consumerId);
             if (consumer.isPresent()) {
-                return new ContinuousFromSnapshotStartingScanner(consumer.get().nextSnapshot());
+                return new ContinuousFromSnapshotStartingScanner(
+                        snapshotManager, consumer.get().nextSnapshot());
             }
         }
 
         CoreOptions.StartupMode startupMode = options.startupMode();
         switch (startupMode) {
             case LATEST_FULL:
-                return new FullStartingScanner();
+                return new FullStartingScanner(snapshotManager);
             case LATEST:
                 return isStreaming
-                        ? new ContinuousLatestStartingScanner()
-                        : new FullStartingScanner();
+                        ? new ContinuousLatestStartingScanner(snapshotManager)
+                        : new FullStartingScanner(snapshotManager);
             case COMPACTED_FULL:
                 if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
                         || options.toConfiguration().contains(FULL_COMPACTION_DELTA_COMMITS)) {
@@ -118,44 +121,69 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                             options.toConfiguration()
                                     .getOptional(FULL_COMPACTION_DELTA_COMMITS)
                                     .orElse(1);
-                    return new FullCompactedStartingScanner(deltaCommits);
+                    return new FullCompactedStartingScanner(snapshotManager, deltaCommits);
                 } else {
-                    return new CompactedStartingScanner();
+                    return new CompactedStartingScanner(snapshotManager);
                 }
             case FROM_TIMESTAMP:
                 Long startupMillis = options.scanTimestampMills();
                 return isStreaming
-                        ? new ContinuousFromTimestampStartingScanner(startupMillis)
-                        : new StaticFromTimestampStartingScanner(startupMillis);
+                        ? new ContinuousFromTimestampStartingScanner(snapshotManager, startupMillis)
+                        : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
             case FROM_SNAPSHOT:
                 if (options.scanSnapshotId() != null) {
                     return isStreaming
-                            ? new ContinuousFromSnapshotStartingScanner(options.scanSnapshotId())
-                            : new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
+                            ? new ContinuousFromSnapshotStartingScanner(
+                                    snapshotManager, options.scanSnapshotId())
+                            : new StaticFromSnapshotStartingScanner(
+                                    snapshotManager, options.scanSnapshotId());
                 } else {
                     checkArgument(!isStreaming, "Cannot scan from tag in streaming mode.");
-                    return new StaticFromTagStartingScanner(options().scanTagName());
+                    return new StaticFromTagStartingScanner(
+                            snapshotManager, options().scanTagName());
                 }
             case FROM_SNAPSHOT_FULL:
                 return isStreaming
-                        ? new ContinuousFromSnapshotFullStartingScanner(options.scanSnapshotId())
-                        : new StaticFromSnapshotStartingScanner(options.scanSnapshotId());
+                        ? new ContinuousFromSnapshotFullStartingScanner(
+                                snapshotManager, options.scanSnapshotId())
+                        : new StaticFromSnapshotStartingScanner(
+                                snapshotManager, options.scanSnapshotId());
             case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
                 Pair<String, String> incrementalBetween = options.incrementalBetween();
+                CoreOptions.IncrementalBetweenScanMode scanType =
+                        options.incrementalBetweenScanMode();
+                ScanMode scanMode;
+                switch (scanType) {
+                    case DELTA:
+                        scanMode = ScanMode.DELTA;
+                        break;
+                    case CHANGELOG:
+                        scanMode = ScanMode.CHANGELOG;
+                        break;
+                    default:
+                        throw new UnsupportedOperationException(
+                                "Unknown incremental scan type " + scanType.name());
+                }
                 if (options.toMap().get(CoreOptions.INCREMENTAL_BETWEEN.key()) != null) {
                     try {
                         return new IncrementalStartingScanner(
+                                snapshotManager,
                                 Long.parseLong(incrementalBetween.getLeft()),
-                                Long.parseLong(incrementalBetween.getRight()));
+                                Long.parseLong(incrementalBetween.getRight()),
+                                scanMode);
                     } catch (NumberFormatException e) {
                         return new IncrementalTagStartingScanner(
-                                incrementalBetween.getLeft(), incrementalBetween.getRight());
+                                snapshotManager,
+                                incrementalBetween.getLeft(),
+                                incrementalBetween.getRight());
                     }
                 } else {
                     return new IncrementalTimeStampStartingScanner(
+                            snapshotManager,
                             Long.parseLong(incrementalBetween.getLeft()),
-                            Long.parseLong(incrementalBetween.getRight()));
+                            Long.parseLong(incrementalBetween.getRight()),
+                            scanMode);
                 }
             default:
                 throw new UnsupportedOperationException(

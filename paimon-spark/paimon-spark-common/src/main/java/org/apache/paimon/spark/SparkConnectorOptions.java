@@ -37,4 +37,36 @@ public class SparkConnectorOptions {
                     .defaultValue(false)
                     .withDescription(
                             "If true, allow to merge data types if the two types meet the rules for explicit casting.");
+
+    public static final ConfigOption<Integer> MAX_FILES_PER_TRIGGER =
+            key("read.stream.maxFilesPerTrigger")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription("The maximum number of files returned in a single batch.");
+
+    public static final ConfigOption<Long> MAX_BYTES_PER_TRIGGER =
+            key("read.stream.maxBytesPerTrigger")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription("The maximum number of bytes returned in a single batch.");
+
+    public static final ConfigOption<Long> MAX_ROWS_PER_TRIGGER =
+            key("read.stream.maxRowsPerTrigger")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription("The maximum number of rows returned in a single batch.");
+
+    public static final ConfigOption<Long> MIN_ROWS_PER_TRIGGER =
+            key("read.stream.minRowsPerTrigger")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The minimum number of rows returned in a single batch, which used to create MinRowsReadLimit with read.stream.maxTriggerDelayMs together.");
+
+    public static final ConfigOption<Long> MAX_DELAY_MS_PER_TRIGGER =
+            key("read.stream.maxTriggerDelayMs")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The maximum delay between two adjacent batches, which used to create MinRowsReadLimit with read.stream.minRowsPerTrigger together.");
 }

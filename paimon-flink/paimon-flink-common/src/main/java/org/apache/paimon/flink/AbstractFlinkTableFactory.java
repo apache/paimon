@@ -157,7 +157,7 @@ public abstract class AbstractFlinkTableFactory
 
     // ~ Tools ------------------------------------------------------------------
 
-    static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(
+    public static Optional<LogStoreTableFactory> createOptionalLogStoreFactory(
             DynamicTableFactory.Context context) {
         return createOptionalLogStoreFactory(
                 context.getClassLoader(), context.getCatalogTable().getOptions());

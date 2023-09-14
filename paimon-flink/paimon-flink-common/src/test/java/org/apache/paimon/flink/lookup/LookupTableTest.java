@@ -50,7 +50,7 @@ public class LookupTableTest {
 
     @BeforeEach
     public void before() throws IOException {
-        this.stateFactory = new RocksDBStateFactory(tempDir.toString(), new Options());
+        this.stateFactory = new RocksDBStateFactory(tempDir.toString(), new Options(), null);
         this.rowType = RowType.of(new IntType(), new IntType(), new IntType());
     }
 

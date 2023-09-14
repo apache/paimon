@@ -176,7 +176,7 @@ To enable this needs these configs below:
 
 ```text
 --conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
---conf spark.sql.extensions=org.apache.paimon.spark.PaimonSparkSessionExtension
+--conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
 you can use `paimon_incremental_query` in query to extract the incremental data:

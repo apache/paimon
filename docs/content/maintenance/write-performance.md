@@ -69,7 +69,7 @@ It is recommended that the parallelism of sink should be less than or equal to t
 ### Asynchronous Compaction
 
 Compaction is inherently asynchronous, but if you want it to be completely asynchronous and not blocking writing,
-expect a mode to have maximum write throughput, the compaction can be done slowly and not in a hurry.
+expect a mode to have maximum writing throughput, the compaction can be done slowly and not in a hurry.
 You can use the following strategies for your table:
 
 ```shell
@@ -226,7 +226,7 @@ In the initialization of write, the writer of the bucket needs to read all histo
 here (For example, writing a large number of partitions simultaneously), you can use `write-manifest-cache` to cache
 the read manifest data to accelerate initialization.
 
-## Memory
+## Write Memory
 
 There are three main places in Paimon writer that takes up memory:
 
@@ -242,3 +242,14 @@ If your Flink job does not rely on state, please avoid using managed memory, whi
 ```shell
 taskmanager.memory.managed.size=1m
 ```
+
+## Commit Memory
+
+Committer node may use a large memory if the amount of data written to the table is particularly large, OOM may occur
+if the memory is too small. In this case, you need to increase the Committer heap memory, but you may not want to
+increase the memory of Flink's TaskManager uniformly, which may lead to a waste of memory.
+
+You can use fine-grained-resource-management of Flink to increase committer heap memory only:
+1. Configure Flink Configuration `cluster.fine-grained-resource-management.enabled: true`. (This is default after Flink 1.18)
+2. Configure Paimon Table Options: `sink.committer-memory`, for example 300 MB, depends on your `TaskManager`.
+   (`sink.committer-cpu` is also supported)

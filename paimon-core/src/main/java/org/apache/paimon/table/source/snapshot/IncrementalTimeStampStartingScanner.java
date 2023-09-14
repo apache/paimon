@@ -19,34 +19,46 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.SnapshotManager;
 
 /** {@link StartingScanner} for incremental changes by timestamp. */
-public class IncrementalTimeStampStartingScanner implements StartingScanner {
+public class IncrementalTimeStampStartingScanner extends AbstractStartingScanner {
 
     private final long startTimestamp;
     private final long endTimestamp;
+    private final ScanMode scanMode;
 
-    public IncrementalTimeStampStartingScanner(long startTimestamp, long endTimestamp) {
+    public IncrementalTimeStampStartingScanner(
+            SnapshotManager snapshotManager,
+            long startTimestamp,
+            long endTimestamp,
+            ScanMode scanMode) {
+        super(snapshotManager);
         this.startTimestamp = startTimestamp;
         this.endTimestamp = endTimestamp;
+        this.scanMode = scanMode;
+        Snapshot startingSnapshot = snapshotManager.earlierOrEqualTimeMills(startTimestamp);
+        if (startingSnapshot != null) {
+            this.startingSnapshotId = startingSnapshot.id();
+        }
     }
 
     @Override
-    public Result scan(SnapshotManager manager, SnapshotReader reader) {
-        Snapshot earliestSnapshot = manager.snapshot(manager.earliestSnapshotId());
-        Snapshot latestSnapshot = manager.latestSnapshot();
+    public Result scan(SnapshotReader reader) {
+        Snapshot earliestSnapshot = snapshotManager.snapshot(snapshotManager.earliestSnapshotId());
+        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
         if (startTimestamp > latestSnapshot.timeMillis()
                 || endTimestamp < earliestSnapshot.timeMillis()) {
             return new NoSnapshot();
         }
-        Snapshot startSnapshot = manager.earlierOrEqualTimeMills(startTimestamp);
         Long startSnapshotId =
-                (startSnapshot == null) ? earliestSnapshot.id() - 1 : startSnapshot.id();
-        Snapshot endSnapshot = manager.earlierOrEqualTimeMills(endTimestamp);
+                (startingSnapshotId == null) ? earliestSnapshot.id() - 1 : startingSnapshotId;
+        Snapshot endSnapshot = snapshotManager.earlierOrEqualTimeMills(endTimestamp);
         Long endSnapshotId = (endSnapshot == null) ? latestSnapshot.id() : endSnapshot.id();
         IncrementalStartingScanner incrementalStartingScanner =
-                new IncrementalStartingScanner(startSnapshotId, endSnapshotId);
-        return incrementalStartingScanner.scan(manager, reader);
+                new IncrementalStartingScanner(
+                        snapshotManager, startSnapshotId, endSnapshotId, scanMode);
+        return incrementalStartingScanner.scan(reader);
     }
 }

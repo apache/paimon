@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.memory.DataInputView;
@@ -35,6 +36,10 @@ import java.util.Objects;
 public class InternalRowTypeSerializer extends InternalTypeSerializer<InternalRow> {
 
     private final InternalRowSerializer internalRowSerializer;
+
+    public InternalRowTypeSerializer(RowType rowType) {
+        this(rowType.getFieldTypes().toArray(new DataType[0]));
+    }
 
     public InternalRowTypeSerializer(DataType... types) {
         internalRowSerializer = new InternalRowSerializer(types);

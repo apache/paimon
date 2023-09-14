@@ -25,22 +25,21 @@ import org.apache.paimon.utils.SnapshotManager;
  * {@link StartingScanner} for the {@link CoreOptions.StartupMode#FROM_SNAPSHOT} startup mode of a
  * streaming read.
  */
-public class ContinuousFromSnapshotStartingScanner implements StartingScanner {
+public class ContinuousFromSnapshotStartingScanner extends AbstractStartingScanner {
 
-    private final long snapshotId;
-
-    public ContinuousFromSnapshotStartingScanner(long snapshotId) {
-        this.snapshotId = snapshotId;
+    public ContinuousFromSnapshotStartingScanner(SnapshotManager snapshotManager, long snapshotId) {
+        super(snapshotManager);
+        this.startingSnapshotId = snapshotId;
     }
 
     @Override
-    public Result scan(SnapshotManager snapshotManager, SnapshotReader snapshotReader) {
+    public Result scan(SnapshotReader snapshotReader) {
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
         if (earliestSnapshotId == null) {
             return new NoSnapshot();
         }
         // We should return the specified snapshot as next snapshot to indicate to scan delta data
         // from it. If the snapshotId < earliestSnapshotId, start from the earliest.
-        return new NextSnapshot(Math.max(snapshotId, earliestSnapshotId));
+        return new NextSnapshot(Math.max(startingSnapshotId, earliestSnapshotId));
     }
 }

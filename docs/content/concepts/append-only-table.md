@@ -27,7 +27,7 @@ under the License.
 # Append Only Table
 
 If a table does not have a primary key defined, it is an append-only table by default. Separated by the definition of bucket,
-we have two different append-only mode: "Append For Queue" and "Append For Scalable Table". 
+we have two different append-only mode: "Append For Queue" and "Append For Scalable Table".
 
 ## Append For Queue
 
@@ -207,8 +207,9 @@ although we can stream read and write still). All the records will go into one d
 and we do not maintain the order anymore. As we don't have the concept of bucket, we will not shuffle the input records by bucket anymore,
 which will speed up the inserting.
 
-{{< img src="/img/for-scalable.png">}}
+Using this mode, you can replace your Hive table to lake table.
 
+{{< img src="/img/for-scalable.png">}}
 
 ### Compaction
 
@@ -235,7 +236,7 @@ write-only for inserting job, and after per-partition data done, trigger a parti
 You can trigger action by shell script:
 ```shell
 <FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-0.5-SNAPSHOT.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
@@ -276,3 +277,14 @@ CREATE TABLE MyTable (
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## Multiple Partitions Write
+
+While writing multiple partitions in a single insert job, we may get an out-of-memory error if
+too many records arrived between two checkpoint.
+
+You can `write-buffer-for-append` option for append-only table. Setting this parameter to true, writer will cache
+the records use Segment Pool to avoid OOM.
+
+You can also set `write-buffer-spillable` to true, writer can spill the records to disk. This can reduce small
+files as much as possible.
