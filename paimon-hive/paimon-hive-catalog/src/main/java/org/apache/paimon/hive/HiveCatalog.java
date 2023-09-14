@@ -97,7 +97,8 @@ public class HiveCatalog extends AbstractCatalog {
     private static final String SERDE_CLASS_NAME = "org.apache.paimon.hive.PaimonSerDe";
     private static final String STORAGE_HANDLER_CLASS_NAME =
             "org.apache.paimon.hive.PaimonStorageHandler";
-
+    private static final String HIVE_PREFIX = "hive.";
+    private static final int HIVE_PREFIX_LENGTH = HIVE_PREFIX.length();
     public static final String HIVE_SITE_FILE = "hive-site.xml";
 
     private final HiveConf hiveConf;
@@ -328,10 +329,12 @@ public class HiveCatalog extends AbstractCatalog {
                 newHmsTable(
                         identifier,
                         tableSchema.options().entrySet().stream()
-                                .filter(entry -> entry.getKey().startsWith("hive."))
+                                .filter(entry -> entry.getKey().startsWith(HIVE_PREFIX))
                                 .collect(
                                         Collectors.toMap(
-                                                entry -> entry.getKey().substring(5),
+                                                entry ->
+                                                        entry.getKey()
+                                                                .substring(HIVE_PREFIX_LENGTH),
                                                 Map.Entry::getValue)));
         try {
             updateHmsTable(table, identifier, tableSchema);

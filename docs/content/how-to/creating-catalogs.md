@@ -166,13 +166,7 @@ If you want to see a partitioned table in Hive and also synchronize newly create
 
 ### Adding Parameters to a Hive Table
 
-Using the --table-conf parameter allows the convenient definition of Hive table parameters. Parameters that start with “hive.” 
-will be defined in the TBLPROPERTIES of the Hive table.
-for example:
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-{{< version >}}.jar \
-    .... \
-    --table-conf hive.table.owner=Jon
-```
-In the command mentioned above, `table.owner=Jon` will be used to add to the Hive table parameters during automatic table creation.
+Using the table option facilitates the convenient definition of Hive table parameters. 
+Parameters prefixed with `hive.` will be automatically defined in the `TBLPROPERTIES` of the Hive table. 
+For instance, using the option `hive.table.owner=Jon` will automatically add the parameter `table.owner=Jon` to the table properties during the creation process.
+
