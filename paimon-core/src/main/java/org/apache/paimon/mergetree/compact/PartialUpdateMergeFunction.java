@@ -214,7 +214,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                                             "Field %s is defined repeatedly by multiple groups: %s",
                                                             fieldNames.get(field), k));
                                         }
-                                        fieldSequences.put(field, sequenceGen);
+
+                                        if (field >= 0) {
+                                            fieldSequences.put(field, sequenceGen);
+                                        }
                                     });
 
                     // add self
