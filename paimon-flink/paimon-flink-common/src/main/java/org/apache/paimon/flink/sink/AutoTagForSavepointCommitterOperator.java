@@ -109,13 +109,13 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
 
             Field commitField = storeCommitterClass.getDeclaredField(COMMIT_FIELD_NAME);
             commitField.setAccessible(true);
-            Object commit = commitField.get(committer);
-
-            Field tagAutoCreationField =
-                    tableCommitImplClass.getDeclaredField(TAG_AUTO_CREATION_FIELD_NAME);
-            tagAutoCreationField.setAccessible(true);
-            tagAutoCreation = (TagAutoCreation) tagAutoCreationField.get(commit);
-
+            if (committer != null) {
+                Object commit = commitField.get(committer);
+                Field tagAutoCreationField =
+                        tableCommitImplClass.getDeclaredField(TAG_AUTO_CREATION_FIELD_NAME);
+                tagAutoCreationField.setAccessible(true);
+                tagAutoCreation = (TagAutoCreation) tagAutoCreationField.get(commit);
+            }
             snapshotManager = snapshotManagerFactory.get();
             tagManager = tagManagerFactory.get();
             identifiersForTagsState =
@@ -153,7 +153,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         if (identifiersForTags.remove(checkpointId)) {
             createTagForIdentifiers(Collections.singletonList(checkpointId));
         }
-        if (tagAutoCreation != null) {
+        if (tagAutoCreation != null && snapshotManager.latestSnapshotId() != null) {
             tagAutoCreation.run();
         }
     }

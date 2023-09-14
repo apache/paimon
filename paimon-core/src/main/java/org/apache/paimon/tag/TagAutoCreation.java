@@ -115,56 +115,55 @@ public class TagAutoCreation {
     }
 
     public void run() {
-        long snapshotId = Optional.ofNullable(snapshotManager.latestSnapshotId()).orElse(1L);
-        LocalDateTime currentTime =
-                Instant.ofEpochMilli(System.currentTimeMillis())
-                        .atZone(ZoneId.systemDefault())
-                        .toLocalDateTime();
-
         while (true) {
             if (snapshotManager.snapshotExists(nextSnapshot)) {
-                Snapshot snapshot = snapshotManager.snapshot(nextSnapshot);
-                processTags(snapshot, timeExtractor.extract(snapshot));
+                tryToTag(snapshotManager.snapshot(nextSnapshot));
                 nextSnapshot++;
             } else {
                 Long earliest = snapshotManager.earliestSnapshotId();
                 if (earliest != null && earliest > nextSnapshot) {
                     nextSnapshot = earliest;
                 } else {
-                    if (snapshotManager.snapshotExists(snapshotId)) {
-                        processTags(snapshotManager.snapshot(snapshotId), Optional.of(currentTime));
-                    }
                     break;
                 }
             }
         }
+
+        if (timeExtractor instanceof ProcessTimeExtractor) {
+            tryToTag(snapshotManager.snapshot(nextSnapshot - 1), LocalDateTime.now());
+        }
     }
 
-    private void processTags(Snapshot snapshot, Optional<LocalDateTime> timeOptional) {
-        timeOptional.ifPresent(time -> createTags(snapshot, time));
-        pruneOldTags();
+    private void tryToTag(Snapshot snapshot) {
+        timeExtractor.extract(snapshot).ifPresent(time -> createTagIfNecessary(snapshot, time));
     }
 
-    private void createTags(Snapshot snapshot, LocalDateTime time) {
+    private void tryToTag(Snapshot snapshot, LocalDateTime time) {
+        createTagIfNecessary(snapshot, time);
+    }
+
+    private void createTagIfNecessary(Snapshot snapshot, LocalDateTime time) {
         if (nextTag == null
                 || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag))) {
             LocalDateTime thisTag = periodHandler.normalizeToTagTime(time);
             String tagName = periodHandler.timeToTag(thisTag);
             tagManager.createTag(snapshot, tagName);
             nextTag = periodHandler.nextTagTime(thisTag);
-        }
-    }
 
-    private void pruneOldTags() {
-        if (numRetainedMax == null) {
-            return;
-        }
-        SortedMap<Snapshot, String> tags = tagManager.tags();
-        int tagsToDelete = tags.size() - numRetainedMax;
-        if (tagsToDelete > 0) {
-            tags.values().stream()
-                    .limit(tagsToDelete)
-                    .forEach(tag -> tagManager.deleteTag(tag, tagDeletion, snapshotManager));
+            if (numRetainedMax != null) {
+                SortedMap<Snapshot, String> tags = tagManager.tags();
+                if (tags.size() > numRetainedMax) {
+                    int toDelete = tags.size() - numRetainedMax;
+                    int i = 0;
+                    for (String tag : tags.values()) {
+                        tagManager.deleteTag(tag, tagDeletion, snapshotManager);
+                        i++;
+                        if (i == toDelete) {
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 
