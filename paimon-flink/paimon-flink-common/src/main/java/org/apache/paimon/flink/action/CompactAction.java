@@ -22,13 +22,10 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.configuration.ExecutionOptions;
-import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
@@ -41,6 +38,7 @@ import java.util.Map;
 public class CompactAction extends TableActionBase {
 
     private List<Map<String, String>> partitions;
+    private Boolean isStreaming;
 
     public CompactAction(String warehouse, String database, String tableName) {
         this(warehouse, database, tableName, Collections.emptyMap());
@@ -70,11 +68,13 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
+    public CompactAction withRuntimeMode(Boolean isStreaming) {
+        this.isStreaming = isStreaming;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) {
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
-        boolean isStreaming =
-                conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
         FileStoreTable fileStoreTable = (FileStoreTable) table;
         switch (fileStoreTable.bucketMode()) {
             case UNAWARE:
@@ -117,6 +117,11 @@ public class CompactAction extends TableActionBase {
     @Override
     public void run() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        if (isStreaming) {
+            env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
+        } else {
+            env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        }
         build(env);
         execute(env, "Compact job");
     }

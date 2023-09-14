@@ -18,8 +18,10 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
+import org.apache.flink.configuration.ExecutionOptions;
 
 import java.util.Arrays;
 import java.util.List;
@@ -69,6 +71,13 @@ public class CompactActionFactory implements ActionFactory {
         if (params.has("partition")) {
             List<Map<String, String>> partitions = getPartitions(params);
             action.withPartitions(partitions);
+        }
+
+        if (params.has(ExecutionOptions.RUNTIME_MODE.key())) {
+            Boolean isStreaming =
+                    params.get(ExecutionOptions.RUNTIME_MODE.key())
+                            .equalsIgnoreCase(RuntimeExecutionMode.STREAMING.name());
+            action.withRuntimeMode(isStreaming);
         }
 
         return Optional.of(action);
