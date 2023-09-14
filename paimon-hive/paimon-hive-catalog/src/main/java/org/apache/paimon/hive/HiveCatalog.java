@@ -350,35 +350,6 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
-    public Map<String, String> getTableParameters(Identifier identifier)
-            throws DatabaseNotExistException, TableNotExistException {
-
-        // Get the database name and table name from the identifier
-        String databaseName = identifier.getDatabaseName();
-        String tableName = identifier.getObjectName();
-
-        // Ensure the database exists
-        if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(databaseName);
-        }
-
-        // Ensure the table exists
-        if (!paimonTableExists(identifier)) {
-            throw new TableNotExistException(identifier);
-        }
-        try {
-            // Load the table from HiveMetaStore
-            Table table = client.getTable(databaseName, tableName);
-
-            // Return the table properties
-            return table.getParameters();
-        } catch (Exception e) {
-            // Handle any exceptions that occur while fetching the table parameters
-            throw new RuntimeException(
-                    "Failed to get parameters for table " + identifier.getFullName(), e);
-        }
-    }
-
     @Override
     public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
             throws TableNotExistException, TableAlreadyExistException {

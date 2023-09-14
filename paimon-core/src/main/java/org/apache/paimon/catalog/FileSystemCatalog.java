@@ -27,7 +27,6 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -175,12 +174,6 @@ public class FileSystemCatalog extends AbstractCatalog {
         copyTableDefaultOptions(schema.options());
 
         uncheck(() -> new SchemaManager(fileIO, path).createTable(schema));
-    }
-
-    @Override
-    public Map<String, String> getTableParameters(Identifier identifier)
-            throws TableNotExistException, DatabaseNotExistException {
-        return Collections.emptyMap();
     }
 
     @Override

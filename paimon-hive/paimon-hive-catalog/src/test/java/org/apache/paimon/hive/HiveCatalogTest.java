@@ -29,11 +29,14 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.Table;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -186,8 +189,12 @@ public class HiveCatalogTest extends CatalogTestBase {
                     Identifier.create(databaseName, tableName),
                     addHiveTableParametersSchema,
                     false);
-            Map<String, String> tableProperties =
-                    catalog.getTableParameters(Identifier.create(databaseName, tableName));
+
+            Field clientField = HiveCatalog.class.getDeclaredField("client");
+            clientField.setAccessible(true);
+            IMetaStoreClient client = (IMetaStoreClient) clientField.get(catalog);
+            Table table = client.getTable(databaseName, tableName);
+            Map<String, String> tableProperties = table.getParameters();
 
             // Verify the transformed parameters
             assertThat(tableProperties).containsEntry("table.owner", "Jon");

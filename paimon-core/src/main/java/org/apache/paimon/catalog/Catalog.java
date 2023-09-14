@@ -27,7 +27,6 @@ import org.apache.paimon.table.Table;
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -158,19 +157,6 @@ public interface Catalog extends AutoCloseable {
      */
     void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException;
-
-    /**
-     * Retrieve the properties of a Hive table.
-     *
-     * <p>NOTE: Properties of system tables cannot be retrieved.
-     *
-     * @param identifier The identifier of the table whose properties are to be retrieved.
-     * @return A map containing the properties of the table.
-     * @throws TableNotExistException If no table exists with the given identifier.
-     * @throws DatabaseNotExistException If the database specified in the identifier does not exist.
-     */
-    Map<String, String> getTableParameters(Identifier identifier)
-            throws TableNotExistException, DatabaseNotExistException;
 
     /**
      * Rename a table.
