@@ -57,8 +57,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
-                .withMode(MultiTablesSinkMode.fromString(params.get("mode")))
-                .withHiveProperties(optionalConfigMap(params, "table-conf", true));
+                .withMode(MultiTablesSinkMode.fromString(params.get("mode")));
 
         if (params.has("type-mapping")) {
             String[] options = params.get("type-mapping").split(",");

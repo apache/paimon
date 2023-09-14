@@ -92,7 +92,6 @@ public class KafkaSyncDatabaseAction extends ActionBase {
     private String includingTables = ".*";
     @Nullable String excludingTables;
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
-    private Map<String, String> tableProperties;
 
     public KafkaSyncDatabaseAction(
             String warehouse,
@@ -137,11 +136,6 @@ public class KafkaSyncDatabaseAction extends ActionBase {
 
     public KafkaSyncDatabaseAction withTypeMapping(TypeMapping typeMapping) {
         this.typeMapping = typeMapping;
-        return this;
-    }
-
-    public KafkaSyncDatabaseAction withHiveProperties(Map<String, String> tableProperties) {
-        this.tableProperties = tableProperties;
         return this;
     }
 

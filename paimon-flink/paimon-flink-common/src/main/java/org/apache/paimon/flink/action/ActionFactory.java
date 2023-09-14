@@ -126,29 +126,13 @@ public interface ActionFactory extends Factory {
     }
 
     default Map<String, String> optionalConfigMap(MultipleParameterTool params, String key) {
-        return optionalConfigMap(params, key, false);
-    }
-
-    default Map<String, String> optionalConfigMap(
-            MultipleParameterTool params, String key, boolean includeHivePrefix) {
         if (!params.has(key)) {
-            System.out.println("Key not found: " + key);
             return Collections.emptyMap();
         }
 
-        System.out.println("Processing key: " + key);
-
         Map<String, String> config = new HashMap<>();
         for (String kvString : params.getMultiParameter(key)) {
-            System.out.println("Analyzing kvString: " + kvString);
-
-            boolean hasHivePrefix = kvString.startsWith("hive.");
-            if ((includeHivePrefix && hasHivePrefix) || (!includeHivePrefix && !hasHivePrefix)) {
-                System.out.println("Adding kvString to config: " + kvString);
-                parseKeyValueString(config, kvString);
-            } else {
-                System.out.println("Ignoring kvString: " + kvString);
-            }
+            parseKeyValueString(config, kvString);
         }
         return config;
     }

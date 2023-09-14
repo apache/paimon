@@ -153,21 +153,24 @@ public interface Catalog extends AutoCloseable {
      * @param schema the table definition
      * @param ignoreIfExists flag to specify behavior when a table already exists at the given path:
      *     if set to false, it throws a TableAlreadyExistException, if set to true, do nothing.
-     * @param tableProperties A map of properties to be associated with the new table. These
-     *     properties can include various metadata, configurations, and settings related to the
-     *     table.
      * @throws TableAlreadyExistException if table already exists and ignoreIfExists is false
      * @throws DatabaseNotExistException if the database in identifier doesn't exist
      */
-    void createTable(
-            Identifier identifier,
-            Schema schema,
-            boolean ignoreIfExists,
-            Map<String, String> tableProperties)
-            throws TableAlreadyExistException, DatabaseNotExistException;
-
     void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException;
+
+    /**
+     * Retrieve the properties of a Hive table.
+     *
+     * <p>NOTE: Properties of system tables cannot be retrieved.
+     *
+     * @param identifier The identifier of the table whose properties are to be retrieved.
+     * @return A map containing the properties of the table.
+     * @throws TableNotExistException If no table exists with the given identifier.
+     * @throws DatabaseNotExistException If the database specified in the identifier does not exist.
+     */
+    Map<String, String> getTableParameters(Identifier identifier)
+            throws TableNotExistException, DatabaseNotExistException;
 
     /**
      * Rename a table.

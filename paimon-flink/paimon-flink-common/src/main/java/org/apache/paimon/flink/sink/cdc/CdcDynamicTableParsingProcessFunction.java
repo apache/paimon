@@ -33,7 +33,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
@@ -64,21 +63,15 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
     private final String database;
     private final Catalog.Loader catalogLoader;
 
-    private Map<String, String> tableProperties;
-
     private transient EventParser<T> parser;
     private transient Catalog catalog;
 
     public CdcDynamicTableParsingProcessFunction(
-            String database,
-            Catalog.Loader catalogLoader,
-            EventParser.Factory<T> parserFactory,
-            Map<String, String> tableProperties) {
+            String database, Catalog.Loader catalogLoader, EventParser.Factory<T> parserFactory) {
         // for now, only support single database
         this.database = database;
         this.catalogLoader = catalogLoader;
         this.parserFactory = parserFactory;
-        this.tableProperties = tableProperties;
     }
 
     @Override
@@ -105,7 +98,7 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                             Identifier identifier =
                                     new Identifier(database, parser.parseTableName());
                             try {
-                                catalog.createTable(identifier, schema, true, tableProperties);
+                                catalog.createTable(identifier, schema, true);
                             } catch (Exception e) {
                                 LOG.error("create newly added paimon table error.", e);
                             }

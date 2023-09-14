@@ -95,7 +95,6 @@ public class MySqlSyncTableAction extends ActionBase {
     private List<String> primaryKeys = new ArrayList<>();
 
     private Map<String, String> tableConfig = new HashMap<>();
-    private Map<String, String> tableProperties = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
@@ -141,11 +140,6 @@ public class MySqlSyncTableAction extends ActionBase {
 
     public MySqlSyncTableAction withTypeMapping(TypeMapping typeMapping) {
         this.typeMapping = typeMapping;
-        return this;
-    }
-
-    public MySqlSyncTableAction withHiveProperties(Map<String, String> tableProperties) {
-        this.tableProperties = tableProperties;
         return this;
     }
 
@@ -198,7 +192,7 @@ public class MySqlSyncTableAction extends ActionBase {
             }
             CdcActionCommonUtils.assertSchemaCompatible(table.schema(), fromMySql.fields());
         } catch (Catalog.TableNotExistException e) {
-            catalog.createTable(identifier, fromMySql, false, tableProperties);
+            catalog.createTable(identifier, fromMySql, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
 

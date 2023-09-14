@@ -21,6 +21,11 @@ package org.apache.paimon.hive;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.hive.utils.CommonTestUtils;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
@@ -29,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,6 +43,7 @@ import java.util.UUID;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /** Tests for {@link HiveCatalog}. */
 public class HiveCatalogTest extends CatalogTestBase {
@@ -147,5 +154,46 @@ public class HiveCatalogTest extends CatalogTestBase {
 
         HiveConf hiveConf = HiveCatalog.createHiveConf(null, null);
         assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
+    }
+
+    @Test
+    public void testAddHiveTableParameters() {
+        try {
+            // Create a new database for the test
+            String databaseName = "test_db";
+            catalog.createDatabase(databaseName, false);
+
+            // Create a new table with Hive table parameters
+            String tableName = "new_table";
+            Map<String, String> options = new HashMap<>();
+            options.put("hive.table.owner", "Jon");
+            options.put("hive.storage.format", "ORC");
+            options.put("snapshot.num-retained.min", "5");
+            options.put("snapshot.time-retained", "1h");
+
+            Schema addHiveTableParametersSchema =
+                    new Schema(
+                            Lists.newArrayList(
+                                    new DataField(0, "pk", DataTypes.INT()),
+                                    new DataField(1, "col1", DataTypes.STRING()),
+                                    new DataField(2, "col2", DataTypes.STRING())),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            options,
+                            "");
+
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName),
+                    addHiveTableParametersSchema,
+                    false);
+            Map<String, String> tableProperties =
+                    catalog.getTableParameters(Identifier.create(databaseName, tableName));
+
+            // Verify the transformed parameters
+            assertThat(tableProperties).containsEntry("table.owner", "Jon");
+            assertThat(tableProperties).containsEntry("storage.format", "ORC");
+        } catch (Exception e) {
+            fail("Test failed due to exception: " + e.getMessage());
+        }
     }
 }

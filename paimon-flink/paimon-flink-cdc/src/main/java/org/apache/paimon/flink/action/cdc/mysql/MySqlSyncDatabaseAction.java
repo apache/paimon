@@ -116,7 +116,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
     private final List<Identifier> excludedTables = new ArrayList<>();
-    private Map<String, String> tableProperties = new HashMap<>();
 
     public MySqlSyncDatabaseAction(
             String warehouse,
@@ -176,11 +175,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
     public MySqlSyncDatabaseAction withTypeMapping(TypeMapping typeMapping) {
         this.typeMapping = typeMapping;
-        return this;
-    }
-
-    public MySqlSyncDatabaseAction withHiveProperties(Map<String, String> tableProperties) {
-        this.tableProperties = tableProperties;
         return this;
     }
 
@@ -247,7 +241,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                     excludedTables.addAll(tableInfo.identifiers());
                 }
             } catch (Catalog.TableNotExistException e) {
-                catalog.createTable(identifier, fromMySql, false, tableProperties);
+                catalog.createTable(identifier, fromMySql, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
                 fileStoreTables.add(table);
                 monitoredTables.addAll(tableInfo.identifiers());

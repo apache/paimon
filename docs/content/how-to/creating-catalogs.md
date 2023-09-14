@@ -164,10 +164,10 @@ By default, Paimon does not synchronize newly created partitions into Hive metas
 
 If you want to see a partitioned table in Hive and also synchronize newly created partitions into Hive metastore, please set the table property `metastore.partitioned-table` to true. Also see [CoreOptions]({{< ref "maintenance/configurations#CoreOptions" >}}).
 
-### Adding Properties to a Hive Table
+### Adding Parameters to a Hive Table
 
-Using the `--table-conf` parameter allows for the convenient definition of Hive Table properties. When you utilize configurations
-that start with “hive.”, these configurations will be defined in the `TBLPROPERTIES` of the Hive Table, thereby specifying the table's attributes.
+Using the --table-conf parameter allows the convenient definition of Hive table parameters. Parameters that start with “hive.” 
+will be defined in the TBLPROPERTIES of the Hive table.
 for example:
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -175,4 +175,4 @@ for example:
     .... \
     --table-conf hive.table.owner=Jon
 ```
-In the command mentioned above, `table.owner=Jon` will be used to add to the Hive table attributes during automatic table creation.
+In the command mentioned above, `table.owner=Jon` will be used to add to the Hive table parameters during automatic table creation.

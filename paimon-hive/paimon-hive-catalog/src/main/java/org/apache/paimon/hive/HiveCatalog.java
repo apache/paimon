@@ -293,11 +293,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createTable(
-            Identifier identifier,
-            Schema schema,
-            boolean ignoreIfExists,
-            Map<String, String> tableProperties)
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotSystemTable(identifier, "createTable");
         String databaseName = identifier.getDatabaseName();
@@ -328,7 +324,15 @@ public class HiveCatalog extends AbstractCatalog {
                             + " to underlying files.",
                     e);
         }
-        Table table = newHmsTable(identifier, tableProperties);
+        Table table =
+                newHmsTable(
+                        identifier,
+                        tableSchema.options().entrySet().stream()
+                                .filter(entry -> entry.getKey().startsWith("hive."))
+                                .collect(
+                                        Collectors.toMap(
+                                                entry -> entry.getKey().substring(5),
+                                                Map.Entry::getValue)));
         try {
             updateHmsTable(table, identifier, tableSchema);
             client.createTable(table);
@@ -343,10 +347,33 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
-    @Override
-    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
-            throws TableAlreadyExistException, DatabaseNotExistException {
-        createTable(identifier, schema, ignoreIfExists, new HashMap<>());
+    public Map<String, String> getTableParameters(Identifier identifier)
+            throws DatabaseNotExistException, TableNotExistException {
+
+        // Get the database name and table name from the identifier
+        String databaseName = identifier.getDatabaseName();
+        String tableName = identifier.getObjectName();
+
+        // Ensure the database exists
+        if (!databaseExists(databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+
+        // Ensure the table exists
+        if (!paimonTableExists(identifier)) {
+            throw new TableNotExistException(identifier);
+        }
+        try {
+            // Load the table from HiveMetaStore
+            Table table = client.getTable(databaseName, tableName);
+
+            // Return the table properties
+            return table.getParameters();
+        } catch (Exception e) {
+            // Handle any exceptions that occur while fetching the table parameters
+            throw new RuntimeException(
+                    "Failed to get parameters for table " + identifier.getFullName(), e);
+        }
     }
 
     @Override
@@ -492,7 +519,7 @@ public class HiveCatalog extends AbstractCatalog {
         return database;
     }
 
-    private Table newHmsTable(Identifier identifier, Map<String, String> tableProperties) {
+    private Table newHmsTable(Identifier identifier, Map<String, String> tableParameters) {
         long currentTimeMillis = System.currentTimeMillis();
         TableType tableType =
                 OptionsUtils.convertToEnum(
@@ -509,13 +536,12 @@ public class HiveCatalog extends AbstractCatalog {
                         Integer.MAX_VALUE,
                         null,
                         Collections.emptyList(),
-                        new HashMap<>(),
+                        tableParameters,
                         null,
                         null,
                         tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
         table.getParameters()
                 .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
-        table.getParameters().putAll(tableProperties);
         if (TableType.EXTERNAL.equals(tableType)) {
             table.getParameters().put("EXTERNAL", "TRUE");
         }

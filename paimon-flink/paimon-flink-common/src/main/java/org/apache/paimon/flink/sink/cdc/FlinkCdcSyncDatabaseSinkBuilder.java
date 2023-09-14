@@ -76,7 +76,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     // database to sync, currently only support single database
     private String database;
     private MultiTablesSinkMode mode;
-    private Map<String, String> tableProperties;
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -120,12 +119,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         return this;
     }
 
-    public FlinkCdcSyncDatabaseSinkBuilder<T> withHiveProperties(
-            Map<String, String> tableProperties) {
-        this.tableProperties = tableProperties;
-        return this;
-    }
-
     public void build() {
         Preconditions.checkNotNull(input);
         Preconditions.checkNotNull(parserFactory);
@@ -144,7 +137,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 input.forward()
                         .process(
                                 new CdcDynamicTableParsingProcessFunction<>(
-                                        database, catalogLoader, parserFactory, tableProperties))
+                                        database, catalogLoader, parserFactory))
                         .setParallelism(input.getParallelism());
 
         // for newly-added tables, create a multiplexing operator that handles all their records
