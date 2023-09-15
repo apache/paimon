@@ -38,10 +38,12 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -126,11 +128,17 @@ public class SortCompactAction extends CompactAction {
         flinkSinkBuilder.build();
     }
 
-    public void withOrderStrategy(String sortStrategy) {
+    public SortCompactAction withOrderStrategy(String sortStrategy) {
         this.sortStrategy = sortStrategy;
+        return this;
     }
 
-    public void withOrderColumns(List<String> orderColumns) {
-        this.orderColumns = orderColumns;
+    public SortCompactAction withOrderColumns(String... orderColumns) {
+        return withOrderColumns(Arrays.asList(orderColumns));
+    }
+
+    public SortCompactAction withOrderColumns(List<String> orderColumns) {
+        this.orderColumns = orderColumns.stream().map(String::trim).collect(Collectors.toList());
+        return this;
     }
 }

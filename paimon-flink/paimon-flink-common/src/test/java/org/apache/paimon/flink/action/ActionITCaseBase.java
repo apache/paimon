@@ -36,10 +36,19 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.common.RuntimeExecutionMode;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
+import org.apache.flink.streaming.api.CheckpointingMode;
+import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.EnvironmentSettings;
+import org.apache.flink.table.api.TableEnvironment;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -130,5 +139,44 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
                     row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
             return result;
         }
+    }
+
+    protected StreamExecutionEnvironment buildDefaultEnv(boolean isStreaming) {
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
+        env.setParallelism(2);
+
+        if (isStreaming) {
+            env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
+            env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
+            env.getCheckpointConfig().setCheckpointInterval(500);
+        } else {
+            env.setRuntimeMode(RuntimeExecutionMode.BATCH);
+        }
+
+        return env;
+    }
+
+    protected void callProcedure(String procedureStatement, boolean isStreaming) {
+        StreamExecutionEnvironment env = buildDefaultEnv(isStreaming);
+
+        TableEnvironment tEnv;
+        if (isStreaming) {
+            tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inStreamingMode());
+            tEnv.getConfig()
+                    .set(
+                            ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL,
+                            Duration.ofMillis(500));
+        } else {
+            tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+        }
+
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse'='%s');",
+                        warehouse));
+        tEnv.useCatalog("PAIMON");
+
+        tEnv.executeSql(procedureStatement);
     }
 }

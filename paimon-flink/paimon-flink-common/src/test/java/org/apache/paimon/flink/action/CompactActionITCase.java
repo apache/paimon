@@ -32,14 +32,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
-import org.apache.flink.streaming.api.CheckpointingMode;
-import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.TableEnvironment;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -179,7 +172,6 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     public void testUnawareBucketStreamingCompact() throws Exception {
         Map<String, String> tableOptions = new HashMap<>();
         tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
-        // test that dedicated compact job will expire snapshots
         tableOptions.put(CoreOptions.BUCKET.key(), "-1");
         tableOptions.put(CoreOptions.COMPACTION_MIN_FILE_NUM.key(), "2");
         tableOptions.put(CoreOptions.COMPACTION_MAX_FILE_NUM.key(), "2");
@@ -287,45 +279,11 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     }
 
     private void callProcedure(boolean isStreaming) {
-        StreamExecutionEnvironment env = buildDefaultEnv(isStreaming);
-
-        TableEnvironment tEnv;
-        if (isStreaming) {
-            tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inStreamingMode());
-            tEnv.getConfig()
-                    .set(
-                            ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL,
-                            Duration.ofMillis(500));
-        } else {
-            tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
-        }
-
-        tEnv.executeSql(
+        callProcedure(
                 String.format(
-                        "CREATE CATALOG PAIMON WITH ('type'='paimon', 'warehouse'='%s');",
-                        warehouse));
-        tEnv.useCatalog("PAIMON");
-
-        tEnv.executeSql(
-                String.format(
-                        "CALL compact('%s.%s', '%s', '%s')",
-                        database, tableName, "dt=20221208,hh=15", "dt=20221209,hh=15"));
-    }
-
-    private StreamExecutionEnvironment buildDefaultEnv(boolean isStreaming) {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
-        env.setParallelism(2);
-
-        if (isStreaming) {
-            env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-            env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
-            env.getCheckpointConfig().setCheckpointInterval(500);
-        } else {
-            env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        }
-
-        return env;
+                        "CALL compact('%s.%s', '', '', '%s', '%s')",
+                        database, tableName, "dt=20221208,hh=15", "dt=20221209,hh=15"),
+                isStreaming);
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {

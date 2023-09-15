@@ -20,6 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
+import org.apache.paimon.flink.action.SortCompactAction;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -42,10 +43,14 @@ import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKe
  *
  * <pre><code>
  *  -- compact a table (tableId should be 'database_name.table_name')
- *  CALL compact(tableId)
+ *  CALL compact('tableId')
+ *
+ *  -- compact a table with sorting
+ *  CALL compact('tableId', 'order-strategy', 'order-by-columns')
  *
  *  -- compact specific partitions ('pt1=A,pt2=a', 'pt1=B,pt2=b', ...)
- *  CALL compact(tableId, partition1, partition2, ...)
+ *  -- NOTE: if you don't need sorting but you want specify partitions, use '' as placeholder
+ *  CALL compact('tableId', '', '', partition1, partition2, ...)
  * </code></pre>
  */
 public class CompactProcedure implements Procedure {
@@ -59,19 +64,50 @@ public class CompactProcedure implements Procedure {
     }
 
     public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
-        return call(procedureContext, tableId, new String[0]);
+        return call(procedureContext, tableId, "", "");
     }
 
     public String[] call(
-            ProcedureContext procedureContext, String tableId, String... partitionStrings)
+            ProcedureContext procedureContext,
+            String tableId,
+            String orderStrategy,
+            String orderByColumns)
+            throws Exception {
+        return call(procedureContext, tableId, orderStrategy, orderByColumns, new String[0]);
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String tableId,
+            String orderStrategy,
+            String orderByColumns,
+            String... partitionStrings)
             throws Exception {
         Identifier identifier = Identifier.fromString(tableId);
-        CompactAction action =
-                new CompactAction(
-                        warehouse,
-                        identifier.getDatabaseName(),
-                        identifier.getObjectName(),
-                        catalogOptions);
+        CompactAction action;
+        String jobName;
+        if (orderStrategy.isEmpty() && orderByColumns.isEmpty()) {
+            action =
+                    new CompactAction(
+                            warehouse,
+                            identifier.getDatabaseName(),
+                            identifier.getObjectName(),
+                            catalogOptions);
+            jobName = "Compact Job";
+        } else if (!orderStrategy.isEmpty() && !orderByColumns.isEmpty()) {
+            action =
+                    new SortCompactAction(
+                                    warehouse,
+                                    identifier.getDatabaseName(),
+                                    identifier.getObjectName(),
+                                    catalogOptions)
+                            .withOrderStrategy(orderStrategy)
+                            .withOrderColumns(orderByColumns.split(","));
+            jobName = "Sort Compact Job";
+        } else {
+            throw new IllegalArgumentException(
+                    "You must specify 'order strategy' and 'order by columns' both.");
+        }
 
         if (partitionStrings.length != 0) {
             List<Map<String, String>> partitions = new ArrayList<>();
@@ -85,7 +121,7 @@ public class CompactProcedure implements Procedure {
         action.build(env);
 
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
-        String name = conf.getOptional(PipelineOptions.NAME).orElse("Compact job");
+        String name = conf.getOptional(PipelineOptions.NAME).orElse(jobName);
         if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING) {
             JobClient jobClient = env.executeAsync(name);
             return new String[] {"JobID=" + jobClient.getJobID()};
