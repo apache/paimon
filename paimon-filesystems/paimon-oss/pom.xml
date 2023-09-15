@@ -61,10 +61,10 @@
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>copy-oss-jar</id>
+                        <id>copy-oss-classes</id>
                         <phase>prepare-package</phase>
                         <goals>
-                            <goal>copy</goal>
+                            <goal>unpack</goal>
                         </goals>
                         <configuration>
                             <artifactItems>
@@ -74,10 +74,9 @@
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <destFileName>paimon-plugin-oss.jar</destFileName>
+                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-oss</outputDirectory>
                                 </artifactItem>
                             </artifactItems>
-                            <outputDirectory>${project.build.directory}/classes</outputDirectory>
                         </configuration>
                     </execution>
                 </executions>

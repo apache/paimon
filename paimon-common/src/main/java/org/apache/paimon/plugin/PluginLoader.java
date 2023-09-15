@@ -18,24 +18,11 @@
 
 package org.apache.paimon.plugin;
 
-import org.apache.paimon.utils.FileIOUtils;
-import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.LocalFileUtils;
-import org.apache.paimon.utils.StringUtils;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
 import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import java.util.ServiceLoader;
-import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -62,54 +49,22 @@ public class PluginLoader {
 
     private static final String[] COMPONENT_CLASSPATH = new String[] {"org.apache.paimon"};
 
-    private final Path delegateJar;
-
     private final ComponentClassLoader submoduleClassLoader;
 
-    public PluginLoader(String jarName) {
-        try {
-            ClassLoader ownerClassLoader = PluginLoader.class.getClassLoader();
-            Path tmpDirectory =
-                    tmpDirectoryFromYarn()
-                            .orElseGet(() -> Paths.get(System.getProperty("java.io.tmpdir")));
-            Files.createDirectories(
-                    LocalFileUtils.getTargetPathIfContainsSymbolicPath(tmpDirectory));
-            delegateJar =
-                    extractResource(
-                            jarName,
-                            ownerClassLoader,
-                            tmpDirectory,
-                            String.format(
-                                    "%s could not be found.\n"
-                                            + "If you're running a test, please make sure you've built the modules by running\n"
-                                            + "mvn clean install -DskipTests",
-                                    jarName));
-            this.submoduleClassLoader =
-                    new ComponentClassLoader(
-                            new URL[] {delegateJar.toUri().toURL()},
-                            ownerClassLoader,
-                            OWNER_CLASSPATH,
-                            COMPONENT_CLASSPATH);
-        } catch (IOException e) {
-            throw new RuntimeException("Could not initialize the paimon-codegen loader.", e);
+    public PluginLoader(String dirName) {
+        // URL must end with slash,
+        // otherwise URLClassLoader cannot recognize this path as a directory
+        if (!dirName.endsWith("/")) {
+            dirName += "/";
         }
-    }
 
-    private Path extractResource(
-            String resourceName,
-            ClassLoader flinkClassLoader,
-            Path tmpDirectory,
-            String errorMessage)
-            throws IOException {
-        String[] splitName = resourceName.split("\\.");
-        splitName[0] += "_" + UUID.randomUUID();
-        final Path tempFile = Files.createFile(tmpDirectory.resolve(String.join(".", splitName)));
-        final InputStream resourceStream = flinkClassLoader.getResourceAsStream(resourceName);
-        if (resourceStream == null) {
-            throw new RuntimeException(errorMessage);
-        }
-        IOUtils.copyBytes(resourceStream, Files.newOutputStream(tempFile));
-        return tempFile;
+        ClassLoader ownerClassLoader = PluginLoader.class.getClassLoader();
+        this.submoduleClassLoader =
+                new ComponentClassLoader(
+                        new URL[] {ownerClassLoader.getResource(dirName)},
+                        ownerClassLoader,
+                        OWNER_CLASSPATH,
+                        COMPONENT_CLASSPATH);
     }
 
     public <T> T discover(Class<T> clazz) {
@@ -140,22 +95,5 @@ public class PluginLoader {
 
     public ClassLoader submoduleClassLoader() {
         return submoduleClassLoader;
-    }
-
-    @Override
-    protected void finalize() throws IOException {
-        submoduleClassLoader.close();
-        FileIOUtils.deleteFileOrDirectory(delegateJar.toFile());
-    }
-
-    private static Optional<Path> tmpDirectoryFromYarn() {
-        String localDirs = System.getenv("LOCAL_DIRS");
-        if (!StringUtils.isBlank(localDirs)) {
-            String[] paths = localDirs.split(",|" + File.pathSeparator);
-            if (paths.length > 0) {
-                return Optional.of(Paths.get(paths[0]));
-            }
-        }
-        return Optional.empty();
     }
 }
