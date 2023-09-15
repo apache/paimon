@@ -103,18 +103,18 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
         expected =
                 Arrays.asList(
-                        "+U[100000000000000000000101, scooter, Small 2-wheel scooter, 350]",
-                        "+U[100000000000000000000102, car battery, High-performance car battery, 8.1]",
-                        "+U[100000000000000000000103, 12-pack drill bits, Set of 12 professional-grade drill bits, 0.8]");
+                        "+I[100000000000000000000101, scooter, Small 2-wheel scooter, 350]",
+                        "+I[100000000000000000000102, car battery, High-performance car battery, 8.1]",
+                        "+I[100000000000000000000103, 12-pack drill bits, Set of 12 professional-grade drill bits, 0.8]");
         waitForResult(expected, table1, rowType1, primaryKeys1);
 
         writeRecordsToMongoDB("test-data-4", database, "database");
 
         expected =
                 Arrays.asList(
-                        "+U[100000000000000000000101, user_1, Guangzhou, 123563291234]",
-                        "+U[100000000000000000000102, user_2, Beijing, 1234546591234]",
-                        "+U[100000000000000000000103, user_3, Nanjing, 1235567891234]");
+                        "+I[100000000000000000000101, user_1, Guangzhou, 123563291234]",
+                        "+I[100000000000000000000102, user_2, Beijing, 1234546591234]",
+                        "+I[100000000000000000000103, user_3, Nanjing, 1235567891234]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
     }
 
