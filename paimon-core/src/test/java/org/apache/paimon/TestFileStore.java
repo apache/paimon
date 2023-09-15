@@ -138,7 +138,8 @@ public class TestFileStore extends KeyValueFileStore {
                 millisRetained,
                 snapshotManager(),
                 newSnapshotDeletion(),
-                new TagManager(fileIO, options.path()));
+                new TagManager(fileIO, options.path()),
+                Integer.MAX_VALUE);
     }
 
     public List<Snapshot> commitData(
@@ -492,12 +493,23 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public Set<Path> getFilesInUse(long snapshotId) {
-        Set<Path> result = new HashSet<>();
+        return getFilesInUse(
+                snapshotId,
+                snapshotManager(),
+                newScan(),
+                fileIO,
+                pathFactory(),
+                manifestListFactory().create());
+    }
 
-        SnapshotManager snapshotManager = snapshotManager();
-        FileStorePathFactory pathFactory = pathFactory();
-        ManifestList manifestList = manifestListFactory().create();
-        FileStoreScan scan = newScan();
+    public static Set<Path> getFilesInUse(
+            long snapshotId,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            FileIO fileIO,
+            FileStorePathFactory pathFactory,
+            ManifestList manifestList) {
+        Set<Path> result = new HashSet<>();
 
         Path snapshotPath = snapshotManager.snapshotPath(snapshotId);
         Snapshot snapshot = Snapshot.fromPath(fileIO, snapshotPath);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
@@ -56,6 +57,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     private final SnapshotDeletion snapshotDeletion;
 
     private final TagManager tagManager;
+    private final int expireLimit;
 
     private Lock lock;
 
@@ -65,13 +67,17 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             long millisRetained,
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
-            TagManager tagManager) {
+            TagManager tagManager,
+            int expireLimit) {
         Preconditions.checkArgument(
                 numRetainedMin >= 1,
                 "The minimum number of completed snapshots to retain should be >= 1.");
         Preconditions.checkArgument(
                 numRetainedMax >= numRetainedMin,
                 "The maximum number of snapshots to retain should be >= the minimum number.");
+        Preconditions.checkArgument(
+                expireLimit > 1,
+                String.format("The %s should be > 1.", CoreOptions.SNAPSHOT_EXPIRE_LIMIT.key()));
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
@@ -80,6 +86,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
+        this.expireLimit = expireLimit;
     }
 
     @Override
@@ -152,6 +159,9 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 break;
             }
         }
+
+        endExclusiveId = Math.min(beginInclusiveId + expireLimit, endExclusiveId);
+
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Snapshot expire range is [" + beginInclusiveId + ", " + endExclusiveId + ")");

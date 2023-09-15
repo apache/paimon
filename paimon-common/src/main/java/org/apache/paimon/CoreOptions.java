@@ -194,6 +194,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
+    public static final ConfigOption<ExpireExecutionMode> SNAPSHOT_EXPIRE_EXECUTION_MODE =
+            key("snapshot.expire.execution-mode")
+                    .enumType(ExpireExecutionMode.class)
+                    .defaultValue(ExpireExecutionMode.SYNC)
+                    .withDescription("Specifies the execution mode of expire.");
+
+    public static final ConfigOption<Integer> SNAPSHOT_EXPIRE_LIMIT =
+            key("snapshot.expire.limit")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "The maximum number of snapshots allowed to expire at a time.");
+
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
             key("continuous.discovery-interval")
                     .durationType()
@@ -981,6 +994,14 @@ public class CoreOptions implements Serializable {
 
     public Duration snapshotTimeRetain() {
         return options.get(SNAPSHOT_TIME_RETAINED);
+    }
+
+    public ExpireExecutionMode snapshotExpireExecutionMode() {
+        return options.get(SNAPSHOT_EXPIRE_EXECUTION_MODE);
+    }
+
+    public int snapshotExpireLimit() {
+        return options.get(SNAPSHOT_EXPIRE_LIMIT);
     }
 
     public int manifestMergeMinCount() {
@@ -1835,6 +1856,34 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         TagCreationPeriod(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The execution mode for expire. */
+    public enum ExpireExecutionMode implements DescribedEnum {
+        SYNC(
+                "sync",
+                "Execute expire synchronously. If there are too many files, it may take a long time and block stream processing."),
+        ASYNC(
+                "async",
+                "Execute expire asynchronously. If the generation of snapshots is greater than the deletion, there will be a backlog of files.");
+
+        private final String value;
+        private final String description;
+
+        ExpireExecutionMode(String value, String description) {
             this.value = value;
             this.description = description;
         }

@@ -18,8 +18,10 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.AbstractFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.TestFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -35,6 +37,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
+import org.apache.paimon.operation.FileStoreExpire;
+import org.apache.paimon.operation.FileStoreTestUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -48,6 +52,7 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -66,6 +71,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -75,13 +81,17 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -91,7 +101,10 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
+import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_EXECUTION_MODE;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
@@ -905,6 +918,154 @@ public abstract class FileStoreTableTestBase {
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class, "Tag 'tag1' doesn't exist."));
+    }
+
+    @Test
+    @Timeout(120)
+    public void testAsyncExpireExecutionMode() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        Map<String, String> options = new HashMap<>();
+        options.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
+        options.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        options.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
+
+        TableCommitImpl commit = table.copy(options).newCommit(commitUser);
+        ExecutorService executor = commit.getExpireMainExecutor();
+        CountDownLatch before = new CountDownLatch(1);
+        CountDownLatch after = new CountDownLatch(1);
+
+        executor.execute(
+                () -> {
+                    try {
+                        before.await();
+                    } catch (Exception ignore) {
+                        // ignore
+                    }
+                });
+
+        try (StreamTableWrite write = table.newWrite(commitUser)) {
+            for (int i = 0; i < 10; i++) {
+                write.write(rowData(i, 10 * i, 100L * i));
+                commit.commit(i, write.prepareCommit(false, i));
+            }
+        }
+
+        executor.execute(after::countDown);
+
+        SnapshotManager snapshotManager = table.snapshotManager();
+        long latestSnapshotId = snapshotManager.latestSnapshotId();
+
+        AbstractFileStore<?> store = (AbstractFileStore<?>) table.store();
+        Set<Path> filesInUse =
+                TestFileStore.getFilesInUse(
+                        latestSnapshotId,
+                        snapshotManager,
+                        store.newScan(),
+                        table.fileIO(),
+                        store.pathFactory(),
+                        store.manifestListFactory().create());
+
+        List<Path> unusedFileList =
+                Files.walk(Paths.get(tempDir.toString()))
+                        .filter(Files::isRegularFile)
+                        .filter(p -> !p.getFileName().toString().startsWith("snapshot"))
+                        .filter(p -> !p.getFileName().toString().startsWith("schema"))
+                        .filter(p -> !p.getFileName().toString().equals(SnapshotManager.LATEST))
+                        .filter(p -> !p.getFileName().toString().equals(SnapshotManager.EARLIEST))
+                        .map(p -> new Path(TraceableFileIO.SCHEME + "://" + p.toString()))
+                        .filter(p -> !filesInUse.contains(p))
+                        .collect(Collectors.toList());
+
+        // no expire happens, all files are preserved
+        for (int i = 1; i <= latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isTrue();
+        }
+        for (Path file : unusedFileList) {
+            FileStoreTestUtils.assertPathExists(table.fileIO(), file);
+        }
+
+        // waiting for all expire, only keeping files in use.
+        before.countDown();
+        after.await();
+
+        for (int i = 1; i < latestSnapshotId - 1; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
+        }
+        for (Path file : unusedFileList) {
+            FileStoreTestUtils.assertPathNotExists(table.fileIO(), file);
+        }
+        assertThat(snapshotManager.snapshotExists(latestSnapshotId)).isTrue();
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(latestSnapshotId);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestSnapshotId);
+
+        commit.close();
+    }
+
+    @Test
+    @Timeout(120)
+    public void testExpireWithLimit() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        Map<String, String> options = new HashMap<>();
+        options.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
+        options.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        options.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
+
+        table = table.copy(options);
+        TableCommitImpl commit =
+                table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true"))
+                        .newCommit(commitUser);
+        FileStoreExpire expire = table.store().newExpire();
+
+        try (StreamTableWrite write = table.newWrite(commitUser)) {
+            for (int i = 0; i < 10; i++) {
+                write.write(rowData(i, 10 * i, 100L * i));
+                commit.commit(i, write.prepareCommit(false, i));
+            }
+        }
+
+        SnapshotManager snapshotManager = table.snapshotManager();
+        List<Snapshot> remainingSnapshot = new ArrayList<>();
+        snapshotManager.snapshots().forEachRemaining(remainingSnapshot::add);
+        long latestSnapshotId = snapshotManager.latestSnapshotId();
+        int index = 0;
+
+        // trigger the first expire and the first two snapshots expired
+        expire.expire();
+        assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
+        assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
+        for (int i = index; i < remainingSnapshot.size(); i++) {
+            assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(i).id())).isTrue();
+        }
+        assertThat(snapshotManager.earliestSnapshotId())
+                .isEqualTo(remainingSnapshot.get(index).id());
+
+        // trigger the second expire and the second two snapshots expired
+        expire.expire();
+        assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
+        assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
+        for (int i = index; i < remainingSnapshot.size(); i++) {
+            assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(i).id())).isTrue();
+        }
+        assertThat(snapshotManager.earliestSnapshotId())
+                .isEqualTo(remainingSnapshot.get(index).id());
+
+        // trigger all remaining expires and only the last snapshot remaining
+        for (int i = 0; i < 5; i++) {
+            expire.expire();
+        }
+
+        for (int i = 0; i < remainingSnapshot.size() - 1; i++) {
+            assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(i).id())).isFalse();
+        }
+        assertThat(snapshotManager.snapshotExists(latestSnapshotId)).isTrue();
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(latestSnapshotId);
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestSnapshotId);
+
+        commit.close();
     }
 
     protected List<String> getResult(
