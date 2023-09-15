@@ -74,10 +74,9 @@ public class CompactActionFactory implements ActionFactory {
         }
 
         if (params.has(ExecutionOptions.RUNTIME_MODE.key())) {
-            Boolean isStreaming =
-                    params.get(ExecutionOptions.RUNTIME_MODE.key())
-                            .equalsIgnoreCase(RuntimeExecutionMode.STREAMING.name());
-            action.withRuntimeMode(isStreaming);
+            RuntimeExecutionMode runtimeExecutionMode =
+                    RuntimeExecutionMode.valueOf(params.get(ExecutionOptions.RUNTIME_MODE.key()));
+            action.withRuntimeMode(runtimeExecutionMode);
         }
 
         return Optional.of(action);
