@@ -91,6 +91,24 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testSequenceGroupDefinedNoField() {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1,f2,f7");
+        options.set("fields.f6.sequence-group", "f4,f5");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        assertThatThrownBy(() -> PartialUpdateMergeFunction.factory(options, rowType))
+                .hasMessageContaining("can not be found in table schema");
+    }
+
+    @Test
     public void testSequenceGroupRepeatDefine() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2");
@@ -104,33 +122,6 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT());
         assertThatThrownBy(() -> PartialUpdateMergeFunction.factory(options, rowType))
                 .hasMessageContaining("is defined repeatedly by multiple groups");
-    }
-
-    @Test
-    public void testSequenceGroupRepeatDefineNoField() {
-        Options options = new Options();
-        options.set("fields.f3.sequence-group", "f1,f2,f6");
-        options.set("fields.f5.sequence-group", "f4,f6");
-        RowType rowType =
-                RowType.of(
-                        DataTypes.INT(),
-                        DataTypes.INT(),
-                        DataTypes.INT(),
-                        DataTypes.INT(),
-                        DataTypes.INT(),
-                        DataTypes.INT());
-        MergeFunction<KeyValue> func =
-                PartialUpdateMergeFunction.factory(options, rowType).create();
-        func.reset();
-        add(func, 1, 1, 1, 1, 1, 1);
-        add(func, 1, 2, 2, 2, 2, null);
-        validate(func, 1, 2, 2, 2, 1, 1);
-        add(func, 1, 3, 3, 1, 3, 3);
-        validate(func, 1, 2, 2, 2, 3, 3);
-
-        // delete
-        add(func, RowKind.DELETE, 1, 1, 1, 3, 1, null);
-        validate(func, 1, null, null, 3, 3, 3);
     }
 
     @Test
