@@ -21,6 +21,9 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 
+import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoCredential;
+import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
@@ -35,6 +38,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.FIELD_NAME;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.START_MODE;
@@ -112,16 +116,47 @@ public class MongodbSchema {
                 databaseName, collectionName, schemaFields, Collections.singletonList(ID_FIELD));
     }
 
+    /**
+     * Utility class for creating a MongoDB schema based on a MongoDB collection's first document.
+     * It uses the MongoDB Java driver to connect to the database and retrieve the schema.
+     */
     private static MongodbSchema createSchemaFromDynamicConfig(Configuration mongodbConfig) {
         String hosts = mongodbConfig.get(MongoDBSourceOptions.HOSTS);
         String databaseName = mongodbConfig.get(MongoDBSourceOptions.DATABASE);
         String collectionName = mongodbConfig.get(MongoDBSourceOptions.COLLECTION);
-        String url = String.format("mongodb://%s/%s", hosts, databaseName);
-        try (MongoClient mongoClient = MongoClients.create(url)) {
+
+        List<ServerAddress> serverAddresses =
+                Arrays.stream(hosts.split(","))
+                        .map(ServerAddress::new)
+                        .collect(Collectors.toList());
+
+        MongoClientSettings.Builder settingsBuilder =
+                MongoClientSettings.builder()
+                        .applyToClusterSettings(builder -> builder.hosts(serverAddresses));
+
+        if (mongodbConfig.contains(MongoDBSourceOptions.USERNAME)
+                && mongodbConfig.contains(MongoDBSourceOptions.PASSWORD)) {
+            settingsBuilder.credential(
+                    MongoCredential.createCredential(
+                            mongodbConfig.get(MongoDBSourceOptions.USERNAME),
+                            databaseName,
+                            mongodbConfig.get(MongoDBSourceOptions.PASSWORD).toCharArray()));
+        }
+
+        MongoClientSettings settings = settingsBuilder.build();
+
+        try (MongoClient mongoClient = MongoClients.create(settings)) {
             MongoDatabase database = mongoClient.getDatabase(databaseName);
             MongoCollection<Document> collection = database.getCollection(collectionName);
             Document firstDocument = collection.find().first();
+
+            if (firstDocument == null) {
+                throw new IllegalStateException("No documents in collection to infer schema");
+            }
+
             return createMongodbSchema(databaseName, collectionName, getColumnNames(firstDocument));
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create schema from MongoDB collection", e);
         }
     }
 
