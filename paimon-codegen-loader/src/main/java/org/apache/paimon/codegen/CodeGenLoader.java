@@ -23,7 +23,7 @@ import org.apache.paimon.plugin.PluginLoader;
 /** Loader to load codegen classes. */
 public class CodeGenLoader {
 
-    private static final String CODEGEN_FAT_JAR = "paimon-codegen.jar";
+    private static final String CODEGEN_CLASSES_DIR = "paimon-codegen";
 
     // Singleton lazy initialization
 
@@ -32,7 +32,7 @@ public class CodeGenLoader {
     private static synchronized PluginLoader getLoader() {
         if (loader == null) {
             // Avoid NoClassDefFoundError without cause by exception
-            loader = new PluginLoader(CODEGEN_FAT_JAR);
+            loader = new PluginLoader(CODEGEN_CLASSES_DIR);
         }
         return loader;
     }

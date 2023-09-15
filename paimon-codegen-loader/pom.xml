@@ -65,10 +65,10 @@ under the License.
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>copy-table-planner-jars</id>
+                        <id>copy-codegen-classes</id>
                         <phase>prepare-package</phase>
                         <goals>
-                            <goal>copy</goal>
+                            <goal>unpack</goal>
                         </goals>
                         <configuration>
                             <artifactItems>
@@ -78,10 +78,9 @@ under the License.
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <destFileName>paimon-codegen.jar</destFileName>
                                 </artifactItem>
                             </artifactItems>
-                            <outputDirectory>${project.build.directory}/classes</outputDirectory>
+                            <outputDirectory>${project.build.directory}/classes/paimon-codegen</outputDirectory>
                         </configuration>
                     </execution>
                 </executions>
