@@ -57,17 +57,14 @@ public class PluginLoader {
         if (!dirName.endsWith("/")) {
             dirName += "/";
         }
-        try {
-            ClassLoader ownerClassLoader = PluginLoader.class.getClassLoader();
-            this.submoduleClassLoader =
-                    new ComponentClassLoader(
-                            new URL[] {ownerClassLoader.getResource(dirName)},
-                            ownerClassLoader,
-                            OWNER_CLASSPATH,
-                            COMPONENT_CLASSPATH);
-        } catch (Exception e) {
-            throw new RuntimeException("Could not initialize the paimon-codegen loader.", e);
-        }
+
+        ClassLoader ownerClassLoader = PluginLoader.class.getClassLoader();
+        this.submoduleClassLoader =
+                new ComponentClassLoader(
+                        new URL[] {ownerClassLoader.getResource(dirName)},
+                        ownerClassLoader,
+                        OWNER_CLASSPATH,
+                        COMPONENT_CLASSPATH);
     }
 
     public <T> T discover(Class<T> clazz) {
