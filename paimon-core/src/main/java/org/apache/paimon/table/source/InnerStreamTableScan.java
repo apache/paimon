@@ -18,5 +18,15 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.table.source.snapshot.StartingContext;
+
+import javax.annotation.Nullable;
+
 /** Streaming {@link InnerTableScan} with {@link StreamTableScan}. */
-public interface InnerStreamTableScan extends InnerTableScan, StreamTableScan {}
+public interface InnerStreamTableScan extends InnerTableScan, StreamTableScan {
+
+    StartingContext startingContext();
+
+    /** Restore from checkpoint next snapshot id with scan kind. */
+    void restore(@Nullable Long nextSnapshotId, boolean scanAllSnapshot);
+}

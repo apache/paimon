@@ -267,6 +267,20 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "If true, a tag will be automatically created for the snapshot created by flink savepoint.");
 
+    public static final ConfigOption<Double> SINK_COMMITTER_CPU =
+            ConfigOptions.key("sink.committer-cpu")
+                    .doubleType()
+                    .defaultValue(1.0)
+                    .withDescription(
+                            "Sink committer cpu to control cpu cores of global committer.");
+
+    public static final ConfigOption<MemorySize> SINK_COMMITTER_MEMORY =
+            ConfigOptions.key("sink.committer-memory")
+                    .memoryType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Sink committer memory to control heap memory of global committer.");
+
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

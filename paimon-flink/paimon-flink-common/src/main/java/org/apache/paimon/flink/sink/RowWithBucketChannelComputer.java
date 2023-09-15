@@ -18,20 +18,22 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.data.RowData;
 
 /** Hash key of a {@link RowData} with bucket. */
-public class RowWithBucketChannelComputer implements ChannelComputer<Tuple2<RowData, Integer>> {
+public class RowWithBucketChannelComputer implements ChannelComputer<Tuple2<InternalRow, Integer>> {
 
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
 
     private transient int numChannels;
-    private transient RowDataPartitionKeyExtractor extractor;
+    private transient RowPartitionKeyExtractor extractor;
 
     public RowWithBucketChannelComputer(TableSchema schema) {
         this.schema = schema;
@@ -40,11 +42,11 @@ public class RowWithBucketChannelComputer implements ChannelComputer<Tuple2<RowD
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.extractor = new RowDataPartitionKeyExtractor(schema);
+        this.extractor = new RowPartitionKeyExtractor(schema);
     }
 
     @Override
-    public int channel(Tuple2<RowData, Integer> record) {
+    public int channel(Tuple2<InternalRow, Integer> record) {
         return ChannelComputer.select(extractor.partition(record.f0), record.f1, numChannels);
     }
 

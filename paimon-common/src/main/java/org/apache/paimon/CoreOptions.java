@@ -720,6 +720,14 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start snapshot (exclusive) and end snapshot, "
                                     + "for example, '5,10' means changes between snapshot 5 and snapshot 10.");
 
+    public static final ConfigOption<IncrementalBetweenScanMode> INCREMENTAL_BETWEEN_SCAN_MODE =
+            key("incremental-between-scan-mode")
+                    .enumType(IncrementalBetweenScanMode.class)
+                    .defaultValue(IncrementalBetweenScanMode.DELTA)
+                    .withDescription(
+                            "Scan kind when Read incremental changes between start snapshot (exclusive) and end snapshot, "
+                                    + "'delta' for scan newly changed files between snapshots, 'changelog' scan changelog files between snapshots.");
+
     public static final ConfigOption<String> INCREMENTAL_BETWEEN_TIMESTAMP =
             key("incremental-between-timestamp")
                     .stringType()
@@ -1159,6 +1167,10 @@ public class CoreOptions implements Serializable {
                             + str);
         }
         return Pair.of(split[0], split[1]);
+    }
+
+    public IncrementalBetweenScanMode incrementalBetweenScanMode() {
+        return options.get(INCREMENTAL_BETWEEN_SCAN_MODE);
     }
 
     public Integer scanManifestParallelism() {
@@ -1623,6 +1635,50 @@ public class CoreOptions implements Serializable {
                             value,
                             StringUtils.join(
                                     Arrays.stream(StreamingCompactionType.values()).iterator(),
+                                    ",")));
+        }
+    }
+
+    /** Specifies this scan type for incremental scan . */
+    public enum IncrementalBetweenScanMode implements DescribedEnum {
+        DELTA("delta", "Scan newly changed files between snapshots."),
+        CHANGELOG("changelog", "Scan changelog files between snapshots.");
+
+        private final String value;
+        private final String description;
+
+        IncrementalBetweenScanMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        @VisibleForTesting
+        public static IncrementalBetweenScanMode fromValue(String value) {
+            for (IncrementalBetweenScanMode formatType : IncrementalBetweenScanMode.values()) {
+                if (formatType.value.equals(value)) {
+                    return formatType;
+                }
+            }
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Invalid format type %s, only support [%s]",
+                            value,
+                            StringUtils.join(
+                                    Arrays.stream(IncrementalBetweenScanMode.values()).iterator(),
                                     ",")));
         }
     }

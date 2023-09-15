@@ -21,6 +21,8 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.TableScan;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Helper class for the first planning of {@link TableScan}. */
@@ -51,6 +53,11 @@ public interface StartingScanner {
 
         public long currentSnapshotId() {
             return plan.snapshotId();
+        }
+
+        @Nullable
+        public Long currentWatermark() {
+            return plan.watermark();
         }
 
         public List<DataSplit> splits() {

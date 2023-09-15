@@ -51,7 +51,7 @@ public interface Expression extends Serializable {
 
     static Expression create(
             String exprName, String fieldReference, DataType fieldType, String... literals) {
-        switch (exprName) {
+        switch (exprName.toLowerCase()) {
             case "year":
                 return year(fieldReference);
             case "month":

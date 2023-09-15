@@ -39,7 +39,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.RichPlan;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -314,7 +313,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public RichPlan plan() {
+        public Plan plan() {
             return streamScan.plan();
         }
 
@@ -327,6 +326,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public Long checkpoint() {
             return streamScan.checkpoint();
+        }
+
+        @Nullable
+        @Override
+        public Long watermark() {
+            return streamScan.watermark();
         }
 
         @Override

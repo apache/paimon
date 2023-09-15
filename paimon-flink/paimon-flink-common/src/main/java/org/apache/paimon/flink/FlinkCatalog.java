@@ -604,7 +604,9 @@ public class FlinkCatalog extends AbstractCatalog {
 
         // add primary keys
         if (table.primaryKeys().size() > 0) {
-            builder.primaryKey(table.primaryKeys().toArray(new String[0]));
+            builder.primaryKey(
+                    table.primaryKeys().stream().collect(Collectors.joining("_", "PK_", "")),
+                    table.primaryKeys().toArray(new String[0]));
         }
 
         TableSchema schema = builder.build();

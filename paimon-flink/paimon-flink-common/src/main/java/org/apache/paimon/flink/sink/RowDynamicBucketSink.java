@@ -18,21 +18,22 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
-import org.apache.flink.table.data.RowData;
 
 import javax.annotation.Nullable;
 
 import java.util.Map;
 
 /** Sink for dynamic bucket table. */
-public class RowDynamicBucketSink extends DynamicBucketSink<RowData> {
+public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
@@ -42,23 +43,23 @@ public class RowDynamicBucketSink extends DynamicBucketSink<RowData> {
     }
 
     @Override
-    protected ChannelComputer<RowData> channelComputer1() {
+    protected ChannelComputer<InternalRow> channelComputer1() {
         return new RowHashKeyChannelComputer(table.schema());
     }
 
     @Override
-    protected ChannelComputer<Tuple2<RowData, Integer>> channelComputer2() {
+    protected ChannelComputer<Tuple2<InternalRow, Integer>> channelComputer2() {
         return new RowWithBucketChannelComputer(table.schema());
     }
 
     @Override
-    protected SerializableFunction<TableSchema, PartitionKeyExtractor<RowData>>
+    protected SerializableFunction<TableSchema, PartitionKeyExtractor<InternalRow>>
             extractorFunction() {
-        return RowDataPartitionKeyExtractor::new;
+        return RowPartitionKeyExtractor::new;
     }
 
     @Override
-    protected OneInputStreamOperator<Tuple2<RowData, Integer>, Committable> createWriteOperator(
+    protected OneInputStreamOperator<Tuple2<InternalRow, Integer>, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new DynamicBucketRowWriteOperator(table, writeProvider, commitUser);
     }

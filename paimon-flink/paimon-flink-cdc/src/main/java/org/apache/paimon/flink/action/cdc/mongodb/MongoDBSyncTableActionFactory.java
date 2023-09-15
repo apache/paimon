@@ -42,8 +42,8 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
         Tuple3<String, String, String> tablePath = getTablePath(params);
         checkRequiredArgument(params, "mongodb-conf");
 
-        MongoDBSyncTableAction.Builder builder =
-                new MongoDBSyncTableAction.Builder(
+        MongoDBSyncTableAction action =
+                new MongoDBSyncTableAction(
                                 tablePath.f0,
                                 tablePath.f1,
                                 tablePath.f2,
@@ -52,14 +52,15 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                         .withTableConfig(optionalConfigMap(params, "table-conf"));
 
         if (params.has("partition-keys")) {
-            builder.withPartitionKeys(params.get("partition-keys").split(","));
+            action.withPartitionKeys(params.get("partition-keys").split(","));
         }
 
         if (params.has("computed-column")) {
-            builder.withComputedColumnArgs(
+            action.withComputedColumnArgs(
                     new ArrayList<>(params.getMultiParameter("computed-column")));
         }
-        return Optional.ofNullable(builder.buildAction());
+
+        return Optional.of(action);
     }
 
     @Override

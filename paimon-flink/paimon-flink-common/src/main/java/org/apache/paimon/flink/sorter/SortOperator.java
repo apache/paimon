@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.NormalizedKeyComputer;
 import org.apache.paimon.codegen.RecordComparator;
@@ -43,6 +44,7 @@ import org.apache.flink.table.runtime.operators.TableStreamOperator;
 public class SortOperator extends TableStreamOperator<InternalRow>
         implements OneInputStreamOperator<InternalRow, InternalRow>, BoundedOneInput {
 
+    private final RowType keyType;
     private final RowType rowType;
     private final long maxMemory;
     private final int pageSize;
@@ -50,7 +52,13 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final int spillSortMaxNumFiles;
     private transient BinaryExternalSortBuffer buffer;
 
-    public SortOperator(RowType rowType, long maxMemory, int pageSize, int spillSortMaxNumFiles) {
+    public SortOperator(
+            RowType keyType,
+            RowType rowType,
+            long maxMemory,
+            int pageSize,
+            int spillSortMaxNumFiles) {
+        this.keyType = keyType;
         this.rowType = rowType;
         this.maxMemory = maxMemory;
         this.pageSize = pageSize;
@@ -61,13 +69,17 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     @Override
     public void open() throws Exception {
         super.open();
+        initBuffer();
+    }
 
+    @VisibleForTesting
+    void initBuffer() {
         InternalRowSerializer serializer = InternalSerializers.create(rowType);
         NormalizedKeyComputer normalizedKeyComputer =
                 CodeGenUtils.newNormalizedKeyComputer(
-                        rowType.getFieldTypes(), "MemTableKeyComputer");
+                        keyType.getFieldTypes(), "MemTableKeyComputer");
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(rowType.getFieldTypes(), "MemTableComparator");
+                CodeGenUtils.newRecordComparator(keyType.getFieldTypes(), "MemTableComparator");
 
         MemorySegmentPool memoryPool = new HeapMemorySegmentPool(maxMemory, pageSize);
 
@@ -101,7 +113,18 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     }
 
     @Override
+    public void close() throws Exception {
+        super.close();
+        buffer.clear();
+    }
+
+    @Override
     public void processElement(StreamRecord<InternalRow> element) throws Exception {
         buffer.write(element.getValue());
+    }
+
+    @VisibleForTesting
+    BinaryExternalSortBuffer getBuffer() {
+        return buffer;
     }
 }

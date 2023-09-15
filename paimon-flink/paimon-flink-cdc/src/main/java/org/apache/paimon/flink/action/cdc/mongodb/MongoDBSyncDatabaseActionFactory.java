@@ -23,7 +23,6 @@ import org.apache.paimon.flink.action.ActionFactory;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
-import java.util.Map;
 import java.util.Optional;
 
 /** Factory to create {@link MongoDBSyncDatabaseAction}. */
@@ -36,33 +35,23 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
         return IDENTIFIER;
     }
 
-    @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "warehouse");
-        checkRequiredArgument(params, "database");
         checkRequiredArgument(params, "mongodb-conf");
 
-        String warehouse = params.get("warehouse");
-        String database = params.get("database");
-        String tablePrefix = params.get("table-prefix");
-        String tableSuffix = params.get("table-suffix");
-        String includingTables = params.get("including-tables");
-        String excludingTables = params.get("excluding-tables");
-
-        Map<String, String> mongodbConfigOption = optionalConfigMap(params, "mongodb-conf");
-        Map<String, String> catalogConfigOption = optionalConfigMap(params, "catalog-conf");
-        Map<String, String> tableConfigOption = optionalConfigMap(params, "table-conf");
-        return Optional.of(
+        MongoDBSyncDatabaseAction action =
                 new MongoDBSyncDatabaseAction(
-                        mongodbConfigOption,
-                        warehouse,
-                        database,
-                        tablePrefix,
-                        tableSuffix,
-                        includingTables,
-                        excludingTables,
-                        catalogConfigOption,
-                        tableConfigOption));
+                        getRequiredValue(params, "warehouse"),
+                        getRequiredValue(params, "database"),
+                        optionalConfigMap(params, "catalog-conf"),
+                        optionalConfigMap(params, "mongodb-conf"));
+
+        action.withTableConfig(optionalConfigMap(params, "table-conf"))
+                .withTablePrefix(params.get("table-prefix"))
+                .withTableSuffix(params.get("table-suffix"))
+                .includingTables(params.get("including-tables"))
+                .excludingTables(params.get("excluding-tables"));
+
+        return Optional.of(action);
     }
 
     @Override

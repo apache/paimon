@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
@@ -40,6 +39,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -67,34 +67,53 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class MongoDBSyncDatabaseAction extends ActionBase {
 
-    private final Configuration mongodbConfig;
     private final String database;
-    private final String tablePrefix;
-    private final String tableSuffix;
-    private final Map<String, String> tableConfig;
-    @Nullable private final Pattern includingPattern;
-    @Nullable private final Pattern excludingPattern;
-    private final String includingTables;
+    private final Configuration mongodbConfig;
+    private Map<String, String> tableConfig = new HashMap<>();
+    private String tablePrefix = "";
+    private String tableSuffix = "";
+    private String includingTables = ".*";
+    @Nullable String excludingTables;
 
     public MongoDBSyncDatabaseAction(
-            Map<String, String> mongodbConfig,
             String warehouse,
             String database,
-            @Nullable String tablePrefix,
-            @Nullable String tableSuffix,
-            @Nullable String includingTables,
-            @Nullable String excludingTables,
             Map<String, String> catalogConfig,
-            Map<String, String> tableConfig) {
+            Map<String, String> mongodbConfig) {
         super(warehouse, catalogConfig);
-        this.mongodbConfig = Configuration.fromMap(mongodbConfig);
         this.database = database;
-        this.tablePrefix = tablePrefix == null ? "" : tablePrefix;
-        this.tableSuffix = tableSuffix == null ? "" : tableSuffix;
-        this.includingTables = includingTables == null ? ".*" : includingTables;
-        this.includingPattern = Pattern.compile(this.includingTables);
-        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
+        this.mongodbConfig = Configuration.fromMap(mongodbConfig);
+    }
+
+    public MongoDBSyncDatabaseAction withTableConfig(Map<String, String> tableConfig) {
         this.tableConfig = tableConfig;
+        return this;
+    }
+
+    public MongoDBSyncDatabaseAction withTablePrefix(@Nullable String tablePrefix) {
+        if (tablePrefix != null) {
+            this.tablePrefix = tablePrefix;
+        }
+        return this;
+    }
+
+    public MongoDBSyncDatabaseAction withTableSuffix(@Nullable String tableSuffix) {
+        if (tableSuffix != null) {
+            this.tableSuffix = tableSuffix;
+        }
+        return this;
+    }
+
+    public MongoDBSyncDatabaseAction includingTables(@Nullable String includingTables) {
+        if (includingTables != null) {
+            this.includingTables = includingTables;
+        }
+        return this;
+    }
+
+    public MongoDBSyncDatabaseAction excludingTables(@Nullable String excludingTables) {
+        this.excludingTables = excludingTables;
+        return this;
     }
 
     @Override
@@ -121,33 +140,25 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory;
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
                 new RichCdcMultiplexRecordSchemaBuilder(tableConfig, caseSensitive);
-        Pattern includingPattern = this.includingPattern;
-        Pattern excludingPattern = this.excludingPattern;
+        Pattern includingPattern = Pattern.compile(this.includingTables);
+        Pattern excludingPattern =
+                excludingTables == null ? null : Pattern.compile(excludingTables);
         parserFactory =
                 () ->
                         new RichCdcMultiplexRecordEventParser(
                                 schemaBuilder, includingPattern, excludingPattern);
-        FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
-                new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
-                        .withInput(
-                                env.fromSource(
-                                                source,
-                                                WatermarkStrategy.noWatermarks(),
-                                                "MongoDB Source")
-                                        .flatMap(
-                                                new MongoDBRecordParser(
-                                                        caseSensitive,
-                                                        tableNameConverter,
-                                                        mongodbConfig)))
-                        .withParserFactory(parserFactory)
-                        .withCatalogLoader(catalogLoader())
-                        .withDatabase(database)
-                        .withMode(MultiTablesSinkMode.COMBINED);
-        String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
-        if (sinkParallelism != null) {
-            sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
-        }
-        sinkBuilder.build();
+        new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
+                .withInput(
+                        env.fromSource(source, WatermarkStrategy.noWatermarks(), "MongoDB Source")
+                                .flatMap(
+                                        new MongoDBRecordParser(
+                                                caseSensitive, tableNameConverter, mongodbConfig)))
+                .withParserFactory(parserFactory)
+                .withCatalogLoader(catalogLoader())
+                .withDatabase(database)
+                .withMode(MultiTablesSinkMode.COMBINED)
+                .withTableOptions(tableConfig)
+                .build();
     }
 
     private void validateCaseInsensitive() {
