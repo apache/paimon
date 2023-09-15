@@ -112,6 +112,10 @@ Example: compact table
     --catalog-conf s3.secret-key=*****
 ```
 
+You can use `-D execution.runtime-mode=batch` to control batch or streaming mode. If you submit a batch job, all
+current table files will be compacted. If you submit a streaming job, the job will continuously monitor new changes
+to the table and perform compactions as needed.
+
 For more usage of the compact action, see
 
 ```bash
@@ -159,7 +163,9 @@ You can run the following command to submit a compaction job for multiple databa
 | continuous.discovery-interval     | 10 s    | Duration   | The discovery interval of continuous reading.                                                                                                                                                               |
 | sink.parallelism                  | (none)  | Integer    | Defines a custom parallelism for the sink. By default, if this option is not defined, the planner will derive the parallelism for each statement individually by also considering the global configuration. |
 
-If you submit a batch job (set `execution.runtime-mode: batch` in Flink's configuration), all current table files will be compacted. If you submit a streaming job (set `execution.runtime-mode: streaming` in Flink's configuration), the job will continuously monitor new changes to the table and perform compactions as needed.
+You can use `-D execution.runtime-mode=batch` to control batch or streaming mode. If you submit a batch job, all
+current table files will be compacted. If you submit a streaming job, the job will continuously monitor new changes
+to the table and perform compactions as needed.
 
 {{< hint info >}}
 
