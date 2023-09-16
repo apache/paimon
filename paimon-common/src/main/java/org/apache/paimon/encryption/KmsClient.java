@@ -16,27 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.orc;
+package org.apache.paimon.encryption;
 
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.format.FormatReadWriteTest;
 import org.apache.paimon.options.Options;
 
-/** An orc {@link FormatReadWriteTest}. */
-public class OrcFormatReadWriteTest extends FormatReadWriteTest {
+import java.io.Closeable;
+import java.io.Serializable;
 
-    protected OrcFormatReadWriteTest() {
-        super("orc");
-    }
+/** KMS client interface, provide common operations for KMS. */
+public interface KmsClient extends Serializable, Closeable {
+    void configure(Options options);
 
-    @Override
-    protected FileFormat fileFormat() {
-        FileFormatFactory.FormatContext formatContext =
-                FileFormatFactory.formatContextBuilder()
-                        .formatOptions(new Options())
-                        .readBatchSize(1024)
-                        .build();
-        return new OrcFileFormat(formatContext);
-    }
+    String identifier();
+
+    byte[] wrapKey(byte[] unWrappedKey, String masterKeyId);
+
+    byte[] unwrapKey(byte[] wrappedKey, String masterKeyId);
 }

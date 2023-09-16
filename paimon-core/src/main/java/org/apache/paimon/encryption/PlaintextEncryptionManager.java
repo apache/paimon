@@ -16,27 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.orc;
+package org.apache.paimon.encryption;
 
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.format.FormatReadWriteTest;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
 
-/** An orc {@link FormatReadWriteTest}. */
-public class OrcFormatReadWriteTest extends FormatReadWriteTest {
+/** Do not encrypt the data files. */
+public class PlaintextEncryptionManager implements EncryptionManager {
 
-    protected OrcFormatReadWriteTest() {
-        super("orc");
+    public static final String IDENTIFIER = "plaintext";
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 
     @Override
-    protected FileFormat fileFormat() {
-        FileFormatFactory.FormatContext formatContext =
-                FileFormatFactory.formatContextBuilder()
-                        .formatOptions(new Options())
-                        .readBatchSize(1024)
-                        .build();
-        return new OrcFileFormat(formatContext);
+    public void configure(Options options) {}
+
+    @Override
+    public FileIO decrypt(EnvelopeEncryptionManager.EncryptedFileIO encryptedFileIO) {
+        return encryptedFileIO.fileIO();
+    }
+
+    @Override
+    public EnvelopeEncryptionManager.EncryptedFileIO encrypt(FileIO fileIO) {
+        return new EnvelopeEncryptionManager.EncryptedFileIO(fileIO);
     }
 }

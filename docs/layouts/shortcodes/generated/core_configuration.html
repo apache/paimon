@@ -726,5 +726,23 @@ If the data size allocated for the sorting task is uneven,which may lead to perf
             <td>Integer</td>
             <td>The bytes of types (CHAR, VARCHAR, BINARY, VARBINARY) devote to the zorder sort.</td>
         </tr>
+        <tr>
+            <td><h5>encryption.table.key-id</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the master key id for encryption.</td>
+        </tr>
+        <tr>
+            <td><h5>encryption.columns</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specify the partial columns to be encrypted, separated by commas. If this parameter is not specified, all columns will be encrypted.</td>
+        </tr>
+        <tr>
+            <td><h5>encryption.algorithm</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Encryption algorithm for encrypting data files, for parquet format, the value can be `AES_GCM_V1` or `AES_GCM_CTR_V1`, and the default value is `AES_GCM_CTR_V1`. And can not specify algorithm for orc format now.</td>
+        </tr>
     </tbody>
 </table>

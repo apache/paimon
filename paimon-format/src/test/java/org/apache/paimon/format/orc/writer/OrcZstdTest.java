@@ -62,9 +62,13 @@ class OrcZstdTest {
         options.set("compress", "zstd");
         options.set("stripe.size", "31457280");
         options.set("compression.zstd.level", "1");
-        OrcFileFormat orc =
-                new OrcFileFormatFactory()
-                        .create(new FileFormatFactory.FormatContext(options, 1024));
+
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(options)
+                        .readBatchSize(1024)
+                        .build();
+        OrcFileFormat orc = new OrcFileFormatFactory().create(formatContext);
         Assertions.assertThat(orc).isInstanceOf(OrcFileFormat.class);
 
         Assertions.assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", ""))

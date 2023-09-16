@@ -1076,6 +1076,26 @@ public class CoreOptions implements Serializable {
                                     + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
                                     + "the config can be set to size.");
 
+    public static final ConfigOption<String> ENCRYPTION_TABLE_KEY_ID =
+            key("encryption.table.key-id")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the master key id for encryption.");
+
+    public static final ConfigOption<String> ENCRYPTION_COLUMNS =
+            key("encryption.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify the partial columns to be encrypted, separated by commas. If this parameter is not specified, all columns will be encrypted.");
+
+    public static final ConfigOption<String> ENCRYPTION_ALGORITHM =
+            key("encryption.algorithm")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Encryption algorithm for encrypting data files, for parquet format, the value can be `AES_GCM_V1` or `AES_GCM_CTR_V1`, and the default value is `AES_GCM_CTR_V1`. And can not specify algorithm for orc format now.");
+
     public static final ConfigOption<Integer> SORT_COMPACTION_SAMPLE_MAGNIFICATION =
             key("sort-compaction.local-sample.magnification")
                     .intType()
@@ -1688,6 +1708,14 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public String encryptionAlgorithm() {
+        return options.get(ENCRYPTION_ALGORITHM);
+    }
+
+    public String encryptionColumns() {
+        return options.get(ENCRYPTION_COLUMNS);
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -92,5 +92,17 @@ under the License.
             <td>String</td>
             <td>The warehouse root path of catalog.</td>
         </tr>
+        <tr>
+            <td><h5>encryption.mechanism</h5></td>
+            <td style="word-wrap: break-word;">plaintext</td>
+            <td>Enum</td>
+            <td>Encryption mechanism for paimon, the default value is plaintext, which means it is not encrypted.<br /><br />Possible values:<ul><li>"plaintext": Do not encrypt the data files.</li><li>"envelope": Encrypt data file using envelope encryption mechanism.</li></ul></td>
+        </tr>
+        <tr>
+            <td><h5>encryption.kms-client</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Enum</td>
+            <td>The kms client for encryption, if the user has enabled encryption, the kms client must be specified.<br /><br />Possible values:<ul><li>"memory": Use memory kms for encryption, this is only for test, can not be used in production environment.</li><li>"hadoop": Use hadoop kms for encryption, parameters prefixed with `hadoop.security.` will be used to build hadoop kms client, the `hadoop.security.key.provider.path` is required. The hadoop parameters can be configured from catalog or environment，please refer to `https://paimon.apache.org/docs/master/filesystems/hdfs/#hdfs-configuration`.</li></ul></td>
+        </tr>
     </tbody>
 </table>

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.format.parquet;
 
-import org.apache.paimon.format.FileFormatFactory.FormatContext;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
@@ -46,8 +46,12 @@ public class ParquetFileFormatTest {
     @Test
     public void testAbsent() {
         Options options = new Options();
-        ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(options, 1024));
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(options)
+                        .readBatchSize(1024)
+                        .build();
+        ParquetFileFormat parquet = new ParquetFileFormatFactory().create(formatContext);
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("absent");
     }
 
@@ -55,8 +59,12 @@ public class ParquetFileFormatTest {
     public void testPresent() {
         Options options = new Options();
         options.setString(KEY1.key(), "v1");
-        ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(options, 1024));
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(options)
+                        .readBatchSize(1024)
+                        .build();
+        ParquetFileFormat parquet = new ParquetFileFormatFactory().create(formatContext);
         assertThat(parquet.formatOptions().getString(KEY1)).isEqualTo("v1");
     }
 
@@ -85,8 +93,12 @@ public class ParquetFileFormatTest {
 
     @Test
     public void testSupportedDataFields() {
-        ParquetFileFormat parquet =
-                new ParquetFileFormatFactory().create(new FormatContext(new Options(), 1024));
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(new Options())
+                        .readBatchSize(1024)
+                        .build();
+        ParquetFileFormat parquet = new ParquetFileFormatFactory().create(formatContext);
 
         int index = 0;
         List<DataField> dataFields = new ArrayList<DataField>();

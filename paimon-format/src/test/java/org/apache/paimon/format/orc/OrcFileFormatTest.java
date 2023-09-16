@@ -18,6 +18,7 @@
 
 package org.apache.paimon.format.orc;
 
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FileFormatFactory.FormatContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
@@ -39,7 +40,12 @@ public class OrcFileFormatTest {
     public void testAbsent() {
         Options options = new Options();
         options.setString("haha", "1");
-        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
+        FormatContext context =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(options)
+                        .readBatchSize(1024)
+                        .build();
+        OrcFileFormat orc = new OrcFileFormatFactory().create(context);
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("lz4");
     }
@@ -49,15 +55,24 @@ public class OrcFileFormatTest {
         Options options = new Options();
         options.setString("haha", "1");
         options.setString("compress", "zlib");
-        OrcFileFormat orc = new OrcFileFormatFactory().create(new FormatContext(options, 1024));
+        FormatContext context =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(options)
+                        .readBatchSize(1024)
+                        .build();
+        OrcFileFormat orc = new OrcFileFormatFactory().create(context);
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".haha", "")).isEqualTo("1");
         assertThat(orc.orcProperties().getProperty(IDENTIFIER + ".compress", "")).isEqualTo("zlib");
     }
 
     @Test
     public void testSupportedDataTypes() {
-        OrcFileFormat orc =
-                new OrcFileFormatFactory().create(new FormatContext(new Options(), 1024));
+        FormatContext context =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(new Options())
+                        .readBatchSize(1024)
+                        .build();
+        OrcFileFormat orc = new OrcFileFormatFactory().create(context);
 
         int index = 0;
         List<DataField> dataFields = new ArrayList<DataField>();

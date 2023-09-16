@@ -18,13 +18,17 @@
 
 package org.apache.paimon.options;
 
+import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
+import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.options.description.TextElement;
 import org.apache.paimon.table.TableType;
 
 import java.time.Duration;
 
+import static org.apache.paimon.options.CatalogOptions.EncryptionMechanism.PLAINTEXT;
 import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Options for catalog. */
 public class CatalogOptions {
@@ -110,4 +114,72 @@ public class CatalogOptions {
                                             TextElement.text(
                                                     "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
                                     .build());
+
+    public static final ConfigOption<EncryptionMechanism> ENCRYPTION_MECHANISM =
+            key("encryption.mechanism")
+                    .enumType(EncryptionMechanism.class)
+                    .defaultValue(PLAINTEXT)
+                    .withDescription(
+                            "Encryption mechanism for paimon, the default value is plaintext, which means it is not encrypted.");
+
+    public static final ConfigOption<EncryptionKmsClient> ENCRYPTION_KMS_CLIENT =
+            key("encryption.kms-client")
+                    .enumType(EncryptionKmsClient.class)
+                    .noDefaultValue()
+                    .withDescription(
+                            "The kms client for encryption, if the user has enabled encryption, the kms client must be specified.");
+
+    /** The encryption mechanism for paimon. */
+    public enum EncryptionMechanism implements DescribedEnum {
+        PLAINTEXT("plaintext", "Do not encrypt the data files."),
+        ENVELOPE("envelope", "Encrypt data file using envelope encryption mechanism.");
+
+        private final String value;
+        private final String description;
+
+        EncryptionMechanism(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The kms client for encryption. */
+    public enum EncryptionKmsClient implements DescribedEnum {
+        MEMORY(
+                "memory",
+                "Use memory kms for encryption, this is only for test, can not be used in production environment."),
+        HADOOP(
+                "hadoop",
+                "Use hadoop kms for encryption, parameters prefixed with `hadoop.security.` will be used to build hadoop kms client, "
+                        + "the `hadoop.security.key.provider.path` is required. The hadoop parameters can be configured from catalog or environment，"
+                        + "please refer to `https://paimon.apache.org/docs/master/filesystems/hdfs/#hdfs-configuration`.");
+
+        private final String value;
+        private final String description;
+
+        EncryptionKmsClient(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
 }

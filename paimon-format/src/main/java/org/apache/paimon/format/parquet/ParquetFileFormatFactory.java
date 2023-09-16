@@ -37,10 +37,12 @@ public class ParquetFileFormatFactory implements FileFormatFactory {
 
     @Override
     public ParquetFileFormat create(FormatContext formatContext) {
-        return new ParquetFileFormat(
-                new FormatContext(
-                        supplyDefaultOptions(formatContext.formatOptions()),
-                        formatContext.readBatchSize()));
+        FormatContext context =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(supplyDefaultOptions(formatContext.formatOptions()))
+                        .readBatchSize(formatContext.readBatchSize())
+                        .build();
+        return new ParquetFileFormat(context);
     }
 
     private Options supplyDefaultOptions(Options options) {

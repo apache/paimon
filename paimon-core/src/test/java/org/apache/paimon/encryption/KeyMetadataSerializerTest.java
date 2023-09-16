@@ -16,27 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.orc;
+package org.apache.paimon.encryption;
 
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.format.FormatReadWriteTest;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.ObjectSerializerTestBase;
 
-/** An orc {@link FormatReadWriteTest}. */
-public class OrcFormatReadWriteTest extends FormatReadWriteTest {
+/** Tests for {@link KeyMetadataSerializer}. */
+public class KeyMetadataSerializerTest extends ObjectSerializerTestBase<KeyMetadata> {
 
-    protected OrcFormatReadWriteTest() {
-        super("orc");
+    @Override
+    protected ObjectSerializer<KeyMetadata> serializer() {
+        return new KeyMetadataSerializer();
     }
 
     @Override
-    protected FileFormat fileFormat() {
-        FileFormatFactory.FormatContext formatContext =
-                FileFormatFactory.formatContextBuilder()
-                        .formatOptions(new Options())
-                        .readBatchSize(1024)
-                        .build();
-        return new OrcFileFormat(formatContext);
+    protected KeyMetadata object() {
+        return new KeyMetadata(
+                "kekID".getBytes(),
+                "wrappedKEK".getBytes(),
+                "wrappedDEK".getBytes(),
+                "aadPrefix".getBytes());
     }
 }

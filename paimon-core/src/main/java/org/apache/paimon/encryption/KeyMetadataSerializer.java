@@ -16,27 +16,31 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format.orc;
+package org.apache.paimon.encryption;
 
-import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.format.FileFormatFactory;
-import org.apache.paimon.format.FormatReadWriteTest;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.utils.ObjectSerializer;
 
-/** An orc {@link FormatReadWriteTest}. */
-public class OrcFormatReadWriteTest extends FormatReadWriteTest {
+/** Serializer for {@link KeyMetadata}. */
+public class KeyMetadataSerializer extends ObjectSerializer<KeyMetadata> {
 
-    protected OrcFormatReadWriteTest() {
-        super("orc");
+    public KeyMetadataSerializer() {
+        super(KeyMetadata.schema());
     }
 
     @Override
-    protected FileFormat fileFormat() {
-        FileFormatFactory.FormatContext formatContext =
-                FileFormatFactory.formatContextBuilder()
-                        .formatOptions(new Options())
-                        .readBatchSize(1024)
-                        .build();
-        return new OrcFileFormat(formatContext);
+    public InternalRow toRow(KeyMetadata record) {
+        return GenericRow.of(
+                record.kekID(), record.wrappedKEK(), record.wrappedDEK(), record.aadPrefix());
+    }
+
+    @Override
+    public KeyMetadata fromRow(InternalRow rowData) {
+        return new KeyMetadata(
+                rowData.getBinary(0),
+                rowData.getBinary(1),
+                rowData.getBinary(2),
+                rowData.getBinary(3));
     }
 }
