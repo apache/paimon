@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -77,7 +78,7 @@ public class FileUtils {
             FormatReaderFactory readerFactory)
             throws IOException {
         List<T> result = new ArrayList<>();
-        createFormatReader(fileIO, readerFactory, path)
+        createFormatReader(fileIO, readerFactory, path, null, null)
                 .forEachRemaining(row -> result.add(serializer.fromRow(row)));
         return result;
     }
@@ -143,8 +144,19 @@ public class FileUtils {
     }
 
     public static RecordReader<InternalRow> createFormatReader(
-            FileIO fileIO, FormatReaderFactory format, Path file) throws IOException {
+            FileIO fileIO,
+            FormatReaderFactory format,
+            Path file,
+            byte[] plaintextKey,
+            byte[] addPrefix)
+            throws IOException {
         checkExists(fileIO, file);
-        return format.createReader(fileIO, file);
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .withDataKey(plaintextKey)
+                        .withAADPrefix(addPrefix)
+                        .build();
+
+        return format.createReader(fileIO, file, formatContext);
     }
 }

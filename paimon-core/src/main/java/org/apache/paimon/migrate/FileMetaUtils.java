@@ -157,7 +157,7 @@ public class FileMetaUtils {
                 new FieldStatsArraySerializer(table.rowType());
 
         Pair<FieldStats[], TableStatsExtractor.FileInfo> fileInfo =
-                tableStatsExtractor.extractWithFileInfo(fileIO, path);
+                tableStatsExtractor.extractWithFileInfo(fileIO, path, null, null);
         BinaryTableStats stats = statsArraySerializer.toBinary(fileInfo.getLeft());
 
         return DataFileMeta.forAppend(
@@ -167,7 +167,8 @@ public class FileMetaUtils {
                 stats,
                 0,
                 0,
-                ((AbstractFileStoreTable) table).schema().id());
+                ((AbstractFileStoreTable) table).schema().id(),
+                null);
     }
 
     public static BinaryRow writePartitionValue(

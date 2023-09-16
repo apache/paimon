@@ -119,6 +119,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 newKeyComparator(),
                 mfFactory,
+                encryptionManager,
                 newReaderFactoryBuilder());
     }
 
@@ -163,7 +164,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 indexFactory,
                 options,
                 keyValueFieldsExtractor,
-                tableName);
+                tableName,
+                encryptionManager,
+                createKeyResult);
     }
 
     private Map<String, FileStorePathFactory> format2PathFactory() {

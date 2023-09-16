@@ -28,6 +28,8 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.IndexMaintainer;
@@ -102,8 +104,19 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
-            String tableName) {
-        super(commitUser, snapshotManager, scan, options, indexFactory, tableName, pathFactory);
+            String tableName,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
+        super(
+                commitUser,
+                snapshotManager,
+                scan,
+                options,
+                indexFactory,
+                tableName,
+                pathFactory,
+                encryptionManager,
+                createKeyResult);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -177,7 +190,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement,
-                getWriterMetrics(partition, bucket));
+                getWriterMetrics(partition, bucket),
+                encryptionManager,
+                createKeyResult);
     }
 
     @VisibleForTesting
@@ -224,7 +239,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         mfFactory,
                         mergeSorter,
                         valueEqualiserSupplier.get(),
-                        options.changelogRowDeduplicate());
+                        options.changelogRowDeduplicate(),
+                        encryptionManager,
+                        createKeyResult);
             case LOOKUP:
                 if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
                     KeyValueFileReaderFactory keyOnlyReader =
@@ -241,7 +258,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             mfFactory,
                             mergeSorter,
                             valueEqualiserSupplier.get(),
-                            options.changelogRowDeduplicate());
+                            options.changelogRowDeduplicate(),
+                            encryptionManager,
+                            createKeyResult);
                 }
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
                 return new LookupMergeTreeCompactRewriter(
@@ -252,10 +271,18 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         mfFactory,
                         mergeSorter,
                         valueEqualiserSupplier.get(),
-                        options.changelogRowDeduplicate());
+                        options.changelogRowDeduplicate(),
+                        encryptionManager,
+                        createKeyResult);
             default:
                 return new MergeTreeCompactRewriter(
-                        readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
+                        readerFactory,
+                        writerFactory,
+                        keyComparator,
+                        mfFactory,
+                        mergeSorter,
+                        encryptionManager,
+                        createKeyResult);
         }
     }
 
@@ -270,9 +297,17 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 keyComparatorSupplier.get(),
                 keyType,
                 valueType,
-                file ->
-                        readerFactory.createRecordReader(
-                                file.schemaId(), file.fileName(), file.fileSize(), file.level()),
+                file -> {
+                    byte[] plaintextKey = encryptionManager.decrypt(file.keyMetadata());
+                    byte[] addPrefix = file.keyMetadata().aadPrefix();
+                    return readerFactory.createRecordReader(
+                            file.schemaId(),
+                            file.fileName(),
+                            file.fileSize(),
+                            file.level(),
+                            plaintextKey,
+                            addPrefix);
+                },
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,
@@ -291,9 +326,17 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 levels,
                 keyComparatorSupplier.get(),
                 keyType,
-                file ->
-                        readerFactory.createRecordReader(
-                                file.schemaId(), file.fileName(), file.fileSize(), file.level()),
+                file -> {
+                    byte[] plaintextKey = encryptionManager.decrypt(file.keyMetadata());
+                    byte[] addPrefix = file.keyMetadata().aadPrefix();
+                    return readerFactory.createRecordReader(
+                            file.schemaId(),
+                            file.fileName(),
+                            file.fileSize(),
+                            file.level(),
+                            plaintextKey,
+                            addPrefix);
+                },
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,

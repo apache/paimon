@@ -20,8 +20,6 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.fs.PositionOutputStream;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 
 /** A factory to create {@link FormatWriter} for file. */
@@ -31,9 +29,10 @@ public interface FormatWriterFactory {
      * Creates a writer that writes to the given stream.
      *
      * @param out The output stream to write the encoded data to.
-     * @param compression the compression value.
+     * @param formatContext the compression value.
      * @throws IOException Thrown if the writer cannot be opened, or if the output stream throws an
      *     exception.
      */
-    FormatWriter create(PositionOutputStream out, @Nullable String compression) throws IOException;
+    FormatWriter create(PositionOutputStream out, FileFormatFactory.FormatContext formatContext)
+            throws IOException;
 }

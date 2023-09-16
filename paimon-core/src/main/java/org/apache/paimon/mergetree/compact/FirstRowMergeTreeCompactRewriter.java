@@ -22,6 +22,8 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -53,7 +55,9 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate) {
+            boolean changelogRowDeduplicate,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
         super(
                 readerFactory,
                 writerFactory,
@@ -61,7 +65,9 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
                 mfFactory,
                 mergeSorter,
                 valueEqualiser,
-                changelogRowDeduplicate);
+                changelogRowDeduplicate,
+                encryptionManager,
+                createKeyResult);
         this.containsLevels = containsLevels;
     }
 

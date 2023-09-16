@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.KeyMetadataSerializer;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.utils.ObjectSerializer;
 
@@ -34,8 +35,11 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
 
     private static final long serialVersionUID = 1L;
 
+    private final KeyMetadataSerializer keyMetadataSerializer;
+
     public DataFileMetaSerializer() {
         super(DataFileMeta.schema());
+        keyMetadataSerializer = new KeyMetadataSerializer();
     }
 
     @Override
@@ -53,11 +57,17 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.schemaId(),
                 meta.level(),
                 toStringArrayData(meta.extraFiles()),
-                meta.creationTime());
+                meta.creationTime(),
+                meta.keyMetadata() == null
+                        ? null
+                        : keyMetadataSerializer.toRow(meta.keyMetadata()));
     }
 
     @Override
     public DataFileMeta fromRow(InternalRow row) {
+
+        InternalRow keyMetadata = row.getRow(13, keyMetadataSerializer.numFields());
+
         return new DataFileMeta(
                 row.getString(0).toString(),
                 row.getLong(1),
@@ -71,6 +81,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getLong(9),
                 row.getInt(10),
                 fromStringArrayData(row.getArray(11)),
-                row.getTimestamp(12, 3));
+                row.getTimestamp(12, 3),
+                keyMetadata == null ? null : keyMetadataSerializer.fromRow(keyMetadata));
     }
 }

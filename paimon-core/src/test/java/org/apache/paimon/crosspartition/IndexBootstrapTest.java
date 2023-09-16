@@ -132,7 +132,8 @@ public class IndexBootstrapTest extends TableTestBase {
                 Timestamp.fromLocalDateTime(
                         Instant.ofEpochMilli(timeMillis)
                                 .atZone(ZoneId.systemDefault())
-                                .toLocalDateTime()));
+                                .toLocalDateTime()),
+                null);
     }
 
     private Pair<InternalRow, Integer> row(int pt, int col, int pk, int bucket) {

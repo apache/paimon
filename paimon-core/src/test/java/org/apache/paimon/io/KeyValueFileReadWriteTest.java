@@ -75,7 +75,10 @@ public class KeyValueFileReadWriteTest {
     public void testReadNonExistentFile() {
         KeyValueFileReaderFactory readerFactory =
                 createReaderFactory(tempDir.toString(), "avro", null, null);
-        assertThatThrownBy(() -> readerFactory.createRecordReader(0, "dummy_file.avro", 1, 0))
+        assertThatThrownBy(
+                        () ->
+                                readerFactory.createRecordReader(
+                                        0, "dummy_file.avro", 1, 0, null, null))
                 .hasMessageContaining(
                         "you can configure 'snapshot.time-retained' option with a larger value.");
     }
@@ -96,7 +99,7 @@ public class KeyValueFileReadWriteTest {
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0);
+                writerFactory.createRollingMergeTreeFileWriter(0, null, null);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
@@ -125,7 +128,8 @@ public class KeyValueFileReadWriteTest {
                         FailingFileIO.getFailingPath(failingName, tempDir.toString()), "avro");
 
         try {
-            FileWriter<KeyValue, ?> writer = writerFactory.createRollingMergeTreeFileWriter(0);
+            FileWriter<KeyValue, ?> writer =
+                    writerFactory.createRollingMergeTreeFileWriter(0, null, null);
             writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         } catch (Throwable e) {
             if (e.getCause() != null) {
@@ -149,7 +153,7 @@ public class KeyValueFileReadWriteTest {
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0);
+                writerFactory.createRollingMergeTreeFileWriter(0, null, null);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
@@ -187,7 +191,7 @@ public class KeyValueFileReadWriteTest {
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
 
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(0);
+                writerFactory.createRollingMergeTreeFileWriter(0, null, null);
         writer.write(CloseableIterator.fromList(data.content, kv -> {}));
         writer.close();
         List<DataFileMeta> actualMetas = writer.result();
@@ -314,7 +318,9 @@ public class KeyValueFileReadWriteTest {
                                     meta.schemaId(),
                                     meta.fileName(),
                                     meta.fileSize(),
-                                    meta.level()));
+                                    meta.level(),
+                                    null,
+                                    null));
             while (actualKvsIterator.hasNext()) {
                 assertThat(expectedIterator.hasNext()).isTrue();
                 KeyValue actualKv = actualKvsIterator.next();

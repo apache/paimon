@@ -22,6 +22,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FileFormatDiscover;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.orc.OrcFileFormat;
@@ -60,9 +61,13 @@ public class FileFormatTest {
         expected.add(GenericRow.of(2, 22));
         expected.add(GenericRow.of(3, 33));
         PositionOutputStream out = LocalFileIO.create().newOutputStream(path, false);
-        FormatWriter writer =
-                avro.createWriterFactory(rowType)
-                        .create(out, CoreOptions.FILE_COMPRESSION.defaultValue());
+
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .compression(CoreOptions.FILE_COMPRESSION.defaultValue())
+                        .build();
+
+        FormatWriter writer = avro.createWriterFactory(rowType).create(out, formatContext);
         for (InternalRow row : expected) {
             writer.addElement(row);
         }
@@ -71,7 +76,8 @@ public class FileFormatTest {
 
         // read
         RecordReader<InternalRow> reader =
-                avro.createReaderFactory(rowType).createReader(LocalFileIO.create(), path);
+                avro.createReaderFactory(rowType)
+                        .createReader(LocalFileIO.create(), path, formatContext);
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
                 rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(1))));
@@ -84,11 +90,17 @@ public class FileFormatTest {
         FormatWriterFactory writerFactory =
                 createFileFormat("_unsupported").createWriterFactory(RowType.of(new IntType()));
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
+
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .compression(CoreOptions.FILE_COMPRESSION.defaultValue())
+                        .build();
+
         assertThatThrownBy(
                         () ->
                                 writerFactory.create(
                                         LocalFileIO.create().newOutputStream(path, false),
-                                        CoreOptions.FILE_COMPRESSION.defaultValue()))
+                                        formatContext))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("Unrecognized codec: _unsupported");
     }

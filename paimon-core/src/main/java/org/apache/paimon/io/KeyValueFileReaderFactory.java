@@ -83,12 +83,20 @@ public class KeyValueFileReaderFactory {
     }
 
     public RecordReader<KeyValue> createRecordReader(
-            long schemaId, String fileName, long fileSize, int level) throws IOException {
+            long schemaId,
+            String fileName,
+            long fileSize,
+            int level,
+            byte[] plaintextKey,
+            byte[] addPrefix)
+            throws IOException {
         if (fileSize >= asyncThreshold && fileName.endsWith("orc")) {
             return new AsyncRecordReader<>(
-                    () -> createRecordReader(schemaId, fileName, level, false, 2));
+                    () ->
+                            createRecordReader(
+                                    schemaId, fileName, level, false, 2, plaintextKey, addPrefix));
         }
-        return createRecordReader(schemaId, fileName, level, true, null);
+        return createRecordReader(schemaId, fileName, level, true, null, plaintextKey, addPrefix);
     }
 
     private RecordReader<KeyValue> createRecordReader(
@@ -96,7 +104,9 @@ public class KeyValueFileReaderFactory {
             String fileName,
             int level,
             boolean reuseFormat,
-            @Nullable Integer poolSize)
+            @Nullable Integer poolSize,
+            byte[] plaintextKey,
+            byte[] addPrefix)
             throws IOException {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
 
@@ -123,7 +133,9 @@ public class KeyValueFileReaderFactory {
                 poolSize,
                 bulkFormatMapping.getIndexMapping(),
                 bulkFormatMapping.getCastMapping(),
-                PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+                PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition),
+                plaintextKey,
+                addPrefix);
     }
 
     public static Builder builder(

@@ -24,6 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
@@ -40,6 +41,7 @@ import org.apache.paimon.utils.Pool;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
+import org.apache.parquet.crypto.FileDecryptionProperties;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetInputFormat;
 import org.apache.parquet.schema.GroupType;
@@ -87,13 +89,16 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     @Override
-    public ParquetReader createReader(FileIO fileIO, Path filePath) throws IOException {
+    public ParquetReader createReader(
+            FileIO fileIO, Path filePath, FileFormatFactory.FormatContext formatContext)
+            throws IOException {
         final long splitOffset = 0;
         final long splitLength = fileIO.getFileSize(filePath);
 
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
-        setReadOptions(builder);
+
+        setReadOptions(builder, formatContext);
 
         ParquetFileReader reader =
                 new ParquetFileReader(ParquetInputFile.fromPath(fileIO, filePath), builder.build());
@@ -114,7 +119,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         throw new UnsupportedOperationException();
     }
 
-    private void setReadOptions(ParquetReadOptions.Builder builder) {
+    private void setReadOptions(
+            ParquetReadOptions.Builder builder, FileFormatFactory.FormatContext formatContext) {
         builder.useSignedStringMinMax(
                 conf.getBoolean("parquet.strings.signed-min-max.enabled", false));
         builder.useDictionaryFilter(
@@ -130,6 +136,16 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         String badRecordThresh = conf.getString(BAD_RECORD_THRESHOLD_CONF_KEY, null);
         if (badRecordThresh != null) {
             builder.set(BAD_RECORD_THRESHOLD_CONF_KEY, badRecordThresh);
+        }
+
+        FileDecryptionProperties fileDecryptionProperties;
+        if (formatContext.dataKey() != null) {
+            fileDecryptionProperties =
+                    FileDecryptionProperties.builder()
+                            .withFooterKey(formatContext.dataKey())
+                            .withAADPrefix(formatContext.dataAADPrefix())
+                            .build();
+            builder.withDecryption(fileDecryptionProperties);
         }
     }
 

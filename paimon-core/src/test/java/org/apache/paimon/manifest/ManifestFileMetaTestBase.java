@@ -81,7 +81,8 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         Collections.emptyList(),
-                        Timestamp.fromEpochMillis(200000)));
+                        Timestamp.fromEpochMillis(200000),
+                        null));
     }
 
     protected ManifestFileMeta makeManifest(ManifestEntry... entries) {
@@ -135,6 +136,9 @@ public abstract class ManifestFileMetaTestBase {
                                 "default",
                                 CoreOptions.FILE_FORMAT.defaultValue().toString()),
                         Long.MAX_VALUE,
+                        null,
+                        null,
+                        null,
                         null)
                 .create();
     }
@@ -241,7 +245,7 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         0, // not used
-                        0 // not used
-                        ));
+                        0, // not used
+                        null));
     }
 }

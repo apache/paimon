@@ -180,7 +180,8 @@ public class IntervalPartitionTest {
                 0,
                 0,
                 Collections.emptyList(),
-                Timestamp.fromEpochMillis(100000));
+                Timestamp.fromEpochMillis(100000),
+                null);
     }
 
     private List<Map<SortedRun, Integer>> toMultiset(List<List<SortedRun>> sections) {

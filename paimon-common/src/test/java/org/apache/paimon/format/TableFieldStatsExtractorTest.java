@@ -83,7 +83,11 @@ public abstract class TableFieldStatsExtractorTest {
         FormatWriterFactory writerFactory = format.createWriterFactory(rowType);
         Path path = new Path(tempDir.toString() + "/test");
         PositionOutputStream out = new LocalFileIO().newOutputStream(path, false);
-        FormatWriter writer = writerFactory.create(out, fileCompression());
+
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder().compression(fileCompression()).build();
+
+        FormatWriter writer = writerFactory.create(out, formatContext);
 
         List<GenericRow> data = createData(rowType);
         for (GenericRow row : data) {
@@ -99,7 +103,7 @@ public abstract class TableFieldStatsExtractorTest {
 
         TableStatsExtractor extractor = format.createStatsExtractor(rowType, stats).get();
         assertThat(extractor).isNotNull();
-        FieldStats[] actual = extractor.extract(fileIO, path);
+        FieldStats[] actual = extractor.extract(fileIO, path, null, null);
         for (int i = 0; i < expected.length; i++) {
             expected[i] = regenerate(expected[i], rowType.getTypeAt(i));
         }

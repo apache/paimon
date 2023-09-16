@@ -19,7 +19,10 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsCollector;
@@ -54,8 +57,19 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
             RowType writeSchema,
             @Nullable TableStatsExtractor tableStatsExtractor,
             String compression,
-            FieldStatsCollector.Factory[] statsCollectors) {
-        super(fileIO, factory, path, converter, compression);
+            FieldStatsCollector.Factory[] statsCollectors,
+            CoreOptions options,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
+        super(
+                fileIO,
+                factory,
+                path,
+                converter,
+                compression,
+                encryptionManager,
+                createKeyResult,
+                options);
         this.tableStatsExtractor = tableStatsExtractor;
         if (this.tableStatsExtractor == null) {
             this.tableStatsCollector = new TableStatsCollector(writeSchema, statsCollectors);
@@ -76,7 +90,13 @@ public abstract class StatsCollectingSingleFileWriter<T, R> extends SingleFileWr
     public FieldStats[] fieldStats() throws IOException {
         Preconditions.checkState(closed, "Cannot access metric unless the writer is closed.");
         if (tableStatsExtractor != null) {
-            return tableStatsExtractor.extract(fileIO, path);
+            if (keyMetadata != null) {
+                return tableStatsExtractor.extract(
+                        fileIO, path, keyMetadata.plaintextKey(), keyMetadata.aadPrefix());
+            } else {
+                return tableStatsExtractor.extract(fileIO, path, null, null);
+            }
+
         } else {
             return tableStatsCollector.extract();
         }

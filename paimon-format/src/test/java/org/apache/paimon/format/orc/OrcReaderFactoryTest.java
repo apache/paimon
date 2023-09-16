@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -184,12 +185,17 @@ class OrcReaderFactoryTest {
 
     private RecordReader<InternalRow> createReader(OrcReaderFactory format, Path split)
             throws IOException {
-        return format.createReader(new LocalFileIO(), split);
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder().build();
+        return format.createReader(new LocalFileIO(), split, formatContext);
     }
 
     private void forEach(OrcReaderFactory format, Path file, Consumer<InternalRow> action)
             throws IOException {
-        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), file);
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder().build();
+        RecordReader<InternalRow> reader =
+                format.createReader(new LocalFileIO(), file, formatContext);
         reader.forEachRemaining(action);
     }
 

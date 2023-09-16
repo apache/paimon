@@ -23,6 +23,8 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
@@ -79,7 +81,9 @@ public class KeyValueDataFileWriter
             long schemaId,
             int level,
             String compression,
-            CoreOptions options) {
+            CoreOptions options,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
         super(
                 fileIO,
                 factory,
@@ -89,7 +93,10 @@ public class KeyValueDataFileWriter
                 tableStatsExtractor,
                 compression,
                 StatsCollectorFactories.createStatsFactories(
-                        options, KeyValue.schema(keyType, valueType).getFieldNames()));
+                        options, KeyValue.schema(keyType, valueType).getFieldNames()),
+                options,
+                encryptionManager,
+                createKeyResult);
 
         this.keyType = keyType;
         this.valueType = valueType;
@@ -162,6 +169,7 @@ public class KeyValueDataFileWriter
                 minSeqNumber,
                 maxSeqNumber,
                 schemaId,
-                level);
+                level,
+                keyMetadata);
     }
 }

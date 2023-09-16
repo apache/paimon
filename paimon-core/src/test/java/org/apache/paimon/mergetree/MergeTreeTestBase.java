@@ -425,6 +425,8 @@ public abstract class MergeTreeTestBase {
                         options.commitForceCompact(),
                         ChangelogProducer.NONE,
                         null,
+                        null,
+                        null,
                         null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
@@ -554,7 +556,8 @@ public abstract class MergeTreeTestBase {
                         readerFactory,
                         comparator,
                         DeduplicateMergeFunction.factory().create(),
-                        new MergeSorter(options, null, null, null));
+                        new MergeSorter(options, null, null, null),
+                        null);
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -592,7 +595,7 @@ public abstract class MergeTreeTestBase {
                 int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
                 throws Exception {
             RollingFileWriter<KeyValue, DataFileMeta> writer =
-                    writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                    writerFactory.createRollingMergeTreeFileWriter(outputLevel, null, null);
             RecordReader<KeyValue> sectionsReader =
                     MergeTreeReaders.readerForMergeTree(
                             sections,
@@ -600,7 +603,8 @@ public abstract class MergeTreeTestBase {
                             compactReaderFactory,
                             comparator,
                             DeduplicateMergeFunction.factory().create(),
-                            new MergeSorter(options, null, null, null));
+                            new MergeSorter(options, null, null, null),
+                            null);
             writer.write(new RecordReaderIterator<>(sectionsReader));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());

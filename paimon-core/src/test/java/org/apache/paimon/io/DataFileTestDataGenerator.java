@@ -160,7 +160,8 @@ public class DataFileTestDataGenerator {
                         minSequenceNumber,
                         maxSequenceNumber,
                         0,
-                        level),
+                        level,
+                        null),
                 kvs);
     }
 

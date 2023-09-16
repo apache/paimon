@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -107,7 +108,7 @@ public abstract class ObjectsFile<T> {
         }
 
         RecordReader<InternalRow> reader =
-                createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName));
+                createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName), null, null);
         if (readFilter != Filter.ALWAYS_TRUE) {
             reader = reader.filter(readFilter);
         }
@@ -124,8 +125,12 @@ public abstract class ObjectsFile<T> {
         Path path = pathFactory.newPath();
         try {
             try (PositionOutputStream out = fileIO.newOutputStream(path, false)) {
-                FormatWriter writer =
-                        writerFactory.create(out, CoreOptions.FILE_COMPRESSION.defaultValue());
+                FileFormatFactory.FormatContext formatContext =
+                        FileFormatFactory.formatContextBuilder()
+                                .compression(CoreOptions.FILE_COMPRESSION.defaultValue())
+                                .build();
+
+                FormatWriter writer = writerFactory.create(out, formatContext);
                 try {
                     while (records.hasNext()) {
                         writer.addElement(serializer.toRow(records.next()));
@@ -145,7 +150,8 @@ public abstract class ObjectsFile<T> {
 
     private CloseableIterator<InternalRow> createIterator(String fileName) {
         try {
-            return createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName))
+            return createFormatReader(
+                            fileIO, readerFactory, pathFactory.toPath(fileName), null, null)
                     .toCloseableIterator();
         } catch (IOException e) {
             throw new RuntimeException(e);

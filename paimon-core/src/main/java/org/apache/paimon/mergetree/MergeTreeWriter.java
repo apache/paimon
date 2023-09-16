@@ -25,6 +25,8 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -71,6 +73,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final LinkedHashMap<String, DataFileMeta> compactBefore;
     private final LinkedHashSet<DataFileMeta> compactAfter;
     private final LinkedHashSet<DataFileMeta> compactChangelog;
+    private final EncryptionManager encryptionManager;
+    private final KmsClient.CreateKeyResult createKeyResult;
 
     private long newSequenceNumber;
     private WriteBuffer writeBuffer;
@@ -89,7 +93,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             boolean commitForceCompact,
             ChangelogProducer changelogProducer,
             @Nullable CommitIncrement increment,
-            WriterMetrics writerMetrics) {
+            WriterMetrics writerMetrics,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.sortMaxFan = sortMaxFan;
         this.ioManager = ioManager;
@@ -108,6 +114,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
         this.compactChangelog = new LinkedHashSet<>();
+        this.encryptionManager = encryptionManager;
+        this.createKeyResult = createKeyResult;
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
             newFilesChangelog.addAll(increment.newFilesIncrement().changelogFiles());
@@ -200,10 +208,12 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
             final RollingFileWriter<KeyValue, DataFileMeta> changelogWriter =
                     changelogProducer == ChangelogProducer.INPUT
-                            ? writerFactory.createRollingChangelogFileWriter(0)
+                            ? writerFactory.createRollingChangelogFileWriter(
+                                    0, encryptionManager, createKeyResult)
                             : null;
             final RollingFileWriter<KeyValue, DataFileMeta> dataWriter =
-                    writerFactory.createRollingMergeTreeFileWriter(0);
+                    writerFactory.createRollingMergeTreeFileWriter(
+                            0, encryptionManager, createKeyResult);
 
             try {
                 writeBuffer.forEach(

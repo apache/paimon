@@ -108,6 +108,9 @@ public class ManifestFileTest {
                         avro,
                         pathFactory,
                         suggestedFileSize,
+                        null,
+                        null,
+                        null,
                         null)
                 .create();
     }

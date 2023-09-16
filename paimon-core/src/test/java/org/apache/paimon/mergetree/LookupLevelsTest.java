@@ -223,7 +223,12 @@ public class LookupLevelsTest {
                 file ->
                         createReaderFactory()
                                 .createRecordReader(
-                                        0, file.fileName(), file.fileSize(), file.level()),
+                                        0,
+                                        file.fileName(),
+                                        file.fileSize(),
+                                        file.level(),
+                                        file.keyMetadata().plaintextKey(),
+                                        file.keyMetadata().aadPrefix()),
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(new CacheManager(2048, MemorySize.ofMebiBytes(1)), 0.75),
                 Duration.ofHours(1),
@@ -237,7 +242,7 @@ public class LookupLevelsTest {
 
     private DataFileMeta newFile(int level, KeyValue... records) throws IOException {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                createWriterFactory().createRollingMergeTreeFileWriter(level);
+                createWriterFactory().createRollingMergeTreeFileWriter(level, null, null);
         for (KeyValue kv : records) {
             writer.write(kv);
         }

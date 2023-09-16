@@ -21,6 +21,7 @@ package org.apache.paimon.format.orc;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.orc.writer.OrcBulkWriter;
@@ -102,9 +103,12 @@ public class OrcWriterFactory implements FormatWriterFactory {
     }
 
     @Override
-    public FormatWriter create(PositionOutputStream out, String compression) throws IOException {
-        if (null != compression) {
-            writerProperties.setProperty(OrcConf.COMPRESS.getAttribute(), compression);
+    public FormatWriter create(
+            PositionOutputStream out, FileFormatFactory.FormatContext formatContext)
+            throws IOException {
+        if (null != formatContext.compression()) {
+            writerProperties.setProperty(
+                    OrcConf.COMPRESS.getAttribute(), formatContext.compression());
         }
 
         OrcFile.WriterOptions opts = getWriterOptions();

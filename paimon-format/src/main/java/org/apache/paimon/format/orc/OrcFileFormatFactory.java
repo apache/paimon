@@ -35,10 +35,12 @@ public class OrcFileFormatFactory implements FileFormatFactory {
 
     @Override
     public OrcFileFormat create(FormatContext formatContext) {
-        return new OrcFileFormat(
-                new FormatContext(
-                        supplyDefaultOptions(formatContext.formatOptions()),
-                        formatContext.readBatchSize()));
+        FormatContext context =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(supplyDefaultOptions(formatContext.formatOptions()))
+                        .readBatchSize(formatContext.readBatchSize())
+                        .build();
+        return new OrcFileFormat(context);
     }
 
     private Options supplyDefaultOptions(Options options) {

@@ -20,6 +20,7 @@ package org.apache.paimon.format.orc.writer;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.orc.OrcFileFormat;
@@ -56,7 +57,11 @@ class OrcBulkWriterTest {
 
         Path path = new Path(tempDir.toUri().toString(), "1.orc");
         PositionOutputStream out = LocalFileIO.create().newOutputStream(path, false);
-        FormatWriter formatWriter = writerFactory.create(out, null);
+
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder().build();
+
+        FormatWriter formatWriter = writerFactory.create(out, formatContext);
 
         Assertions.assertThat(formatWriter).isInstanceOf(OrcBulkWriter.class);
 

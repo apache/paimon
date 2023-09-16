@@ -129,7 +129,8 @@ public class TestChangelogDataReadWrite {
                         ignore -> avro,
                         pathFactory,
                         EXTRACTOR,
-                        new CoreOptions(new HashMap<>()));
+                        new CoreOptions(new HashMap<>()),
+                        null);
         return new KeyValueTableRead(read, null) {
 
             @Override
@@ -185,7 +186,9 @@ public class TestChangelogDataReadWrite {
                                 null,
                                 options,
                                 EXTRACTOR,
-                                tablePath.getName())
+                                tablePath.getName(),
+                                null,
+                                null)
                         .createWriterContainer(partition, bucket, true)
                         .writer;
         ((MemoryOwner) writer)

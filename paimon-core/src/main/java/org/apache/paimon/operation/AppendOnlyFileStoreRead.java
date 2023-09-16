@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.fs.FileIO;
@@ -66,6 +67,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final EncryptionManager encryptionManager;
 
     private int[][] projection;
 
@@ -77,12 +79,14 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
             long schemaId,
             RowType rowType,
             FileFormatDiscover formatDiscover,
-            FileStorePathFactory pathFactory) {
+            FileStorePathFactory pathFactory,
+            EncryptionManager encryptionManager) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
+        this.encryptionManager = encryptionManager;
         this.bulkFormatMappings = new HashMap<>();
 
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
@@ -168,6 +172,9 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                                         projectedRowType, dataFilters));
                             });
 
+            byte[] plaintextKey = encryptionManager.decrypt(file.keyMetadata());
+            byte[] addPrefix = file.keyMetadata().aadPrefix();
+
             final BinaryRow partition = split.partition();
             suppliers.add(
                     () ->
@@ -178,7 +185,9 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                     bulkFormatMapping.getIndexMapping(),
                                     bulkFormatMapping.getCastMapping(),
                                     PartitionUtils.create(
-                                            bulkFormatMapping.getPartitionPair(), partition)));
+                                            bulkFormatMapping.getPartitionPair(), partition),
+                                    plaintextKey,
+                                    addPrefix));
         }
 
         return ConcatRecordReader.create(suppliers);

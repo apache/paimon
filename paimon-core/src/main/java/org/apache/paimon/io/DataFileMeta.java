@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.encryption.KeyMetadata;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
@@ -30,6 +31,8 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+
+import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -71,6 +74,7 @@ public class DataFileMeta {
 
     private final List<String> extraFiles;
     private final Timestamp creationTime;
+    private final KeyMetadata keyMetadata;
 
     public static DataFileMeta forAppend(
             String fileName,
@@ -79,7 +83,8 @@ public class DataFileMeta {
             BinaryTableStats rowStats,
             long minSequenceNumber,
             long maxSequenceNumber,
-            long schemaId) {
+            long schemaId,
+            KeyMetadata keyMetadata) {
         return new DataFileMeta(
                 fileName,
                 fileSize,
@@ -91,7 +96,8 @@ public class DataFileMeta {
                 minSequenceNumber,
                 maxSequenceNumber,
                 schemaId,
-                DUMMY_LEVEL);
+                DUMMY_LEVEL,
+                keyMetadata);
     }
 
     public DataFileMeta(
@@ -105,7 +111,8 @@ public class DataFileMeta {
             long minSequenceNumber,
             long maxSequenceNumber,
             long schemaId,
-            int level) {
+            int level,
+            @Nullable KeyMetadata keyMetadata) {
         this(
                 fileName,
                 fileSize,
@@ -119,7 +126,8 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 Collections.emptyList(),
-                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp());
+                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp(),
+                keyMetadata);
     }
 
     public DataFileMeta(
@@ -135,7 +143,8 @@ public class DataFileMeta {
             long schemaId,
             int level,
             List<String> extraFiles,
-            Timestamp creationTime) {
+            Timestamp creationTime,
+            @Nullable KeyMetadata keyMetadata) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowCount = rowCount;
@@ -151,6 +160,7 @@ public class DataFileMeta {
         this.schemaId = schemaId;
         this.extraFiles = Collections.unmodifiableList(extraFiles);
         this.creationTime = creationTime;
+        this.keyMetadata = keyMetadata;
     }
 
     public String fileName() {
@@ -195,6 +205,10 @@ public class DataFileMeta {
 
     public int level() {
         return level;
+    }
+
+    public KeyMetadata keyMetadata() {
+        return keyMetadata;
     }
 
     /**
@@ -249,7 +263,8 @@ public class DataFileMeta {
                 schemaId,
                 newLevel,
                 extraFiles,
-                creationTime);
+                creationTime,
+                keyMetadata);
     }
 
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
@@ -273,7 +288,8 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 newExtraFiles,
-                creationTime);
+                creationTime,
+                keyMetadata);
     }
 
     @Override
@@ -294,7 +310,8 @@ public class DataFileMeta {
                 && schemaId == that.schemaId
                 && level == that.level
                 && Objects.equals(extraFiles, that.extraFiles)
-                && Objects.equals(creationTime, that.creationTime);
+                && Objects.equals(creationTime, that.creationTime)
+                && Objects.equals(keyMetadata, that.keyMetadata);
     }
 
     @Override
@@ -312,13 +329,14 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 extraFiles,
-                creationTime);
+                creationTime,
+                keyMetadata);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d, %d, %s, %s}",
+                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d, %d, %s, %s,%s}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -331,7 +349,8 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 extraFiles,
-                creationTime);
+                creationTime,
+                keyMetadata);
     }
 
     public static RowType schema() {
@@ -349,6 +368,7 @@ public class DataFileMeta {
         fields.add(new DataField(10, "_LEVEL", new IntType(false)));
         fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
         fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
+        fields.add(new DataField(13, "_KEY_METADATA", KeyMetadata.schema()));
         return new RowType(fields);
     }
 

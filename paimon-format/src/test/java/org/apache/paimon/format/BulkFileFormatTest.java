@@ -71,7 +71,11 @@ public class BulkFileFormatTest {
         expected.add(GenericRow.of(2, 2));
         expected.add(GenericRow.of(3, 3));
         PositionOutputStream out = new LocalFileIO().newOutputStream(path, false);
-        FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, "LZ4");
+
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder().compression("LZ4").build();
+
+        FormatWriter writer = fileFormat.createWriterFactory(rowType).create(out, formatContext);
         for (InternalRow row : expected) {
             writer.addElement(row);
         }
@@ -80,7 +84,9 @@ public class BulkFileFormatTest {
 
         // read
         RecordReader<InternalRow> reader =
-                fileFormat.createReaderFactory(rowType).createReader(new LocalFileIO(), path);
+                fileFormat
+                        .createReaderFactory(rowType)
+                        .createReader(new LocalFileIO(), path, formatContext);
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(
                 rowData -> result.add(GenericRow.of(rowData.getInt(0), rowData.getInt(0))));

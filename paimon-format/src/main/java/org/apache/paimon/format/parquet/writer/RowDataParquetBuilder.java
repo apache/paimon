@@ -18,19 +18,30 @@
 
 package org.apache.paimon.format.parquet.writer;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.parquet.column.ParquetProperties;
+import org.apache.parquet.crypto.ColumnEncryptionProperties;
+import org.apache.parquet.crypto.FileEncryptionProperties;
+import org.apache.parquet.crypto.ParquetCipher;
+import org.apache.parquet.crypto.ParquetCryptoRuntimeException;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.apache.parquet.hadoop.ParquetWriter;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.io.OutputFile;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.security.SecureRandom;
+import java.util.HashMap;
+import java.util.Map;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
@@ -44,11 +55,47 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
     }
 
     @Override
-    public ParquetWriter<InternalRow> createWriter(OutputFile out, String compression)
-            throws IOException {
+    public ParquetWriter<InternalRow> createWriter(
+            OutputFile out, FileFormatFactory.FormatContext formatContext) throws IOException {
+
+        FileEncryptionProperties fileEncryptionProperties = null;
+
+        if (formatContext.dataKey() != null) {
+            byte[] encryptionKeyArray = formatContext.dataKey();
+            byte[] aadPrefixArray = formatContext.dataAADPrefix();
+            CoreOptions.EncryptionAlgorithm encryptionAlgorithm =
+                    formatContext.encryptionAlgorithm();
+            String encryptionColumns = formatContext.encryptionColumns();
+
+            ParquetCipher cipher = ParquetCipher.AES_GCM_CTR_V1;
+            try {
+                if (encryptionAlgorithm.equals(CoreOptions.EncryptionAlgorithm.AES_GCM)) {
+                    cipher = ParquetCipher.AES_GCM_V1;
+                }
+            } catch (IllegalArgumentException e) {
+                throw new ParquetCryptoRuntimeException(
+                        "Wrong encryption algorithm: " + encryptionAlgorithm);
+            }
+
+            Map<ColumnPath, ColumnEncryptionProperties> encryptedColumns =
+                    getColumnEncryptionProperties(encryptionColumns);
+
+            FileEncryptionProperties.Builder builder =
+                    FileEncryptionProperties.builder(encryptionKeyArray)
+                            .withAADPrefix(aadPrefixArray)
+                            .withoutAADPrefixStorage()
+                            .withAlgorithm(cipher);
+
+            if (!encryptedColumns.isEmpty()) {
+                builder = builder.withEncryptedColumns(encryptedColumns);
+            }
+
+            fileEncryptionProperties = builder.build();
+        }
 
         return new ParquetRowDataBuilder(out, rowType)
-                .withCompressionCodec(CompressionCodecName.fromConf(getCompression(compression)))
+                .withCompressionCodec(
+                        CompressionCodecName.fromConf(getCompression(formatContext.compression())))
                 .withRowGroupSize(
                         conf.getLong(
                                 ParquetOutputFormat.BLOCK_SIZE, ParquetWriter.DEFAULT_BLOCK_SIZE))
@@ -73,7 +120,25 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                                 conf.getString(
                                         ParquetOutputFormat.WRITER_VERSION,
                                         ParquetProperties.DEFAULT_WRITER_VERSION.toString())))
+                .withEncryption(fileEncryptionProperties)
                 .build();
+    }
+
+    private Map<ColumnPath, ColumnEncryptionProperties> getColumnEncryptionProperties(
+            String encryptionColumns) {
+        Map<ColumnPath, ColumnEncryptionProperties> map = new HashMap<>();
+        SecureRandom secureRandom = new SecureRandom();
+        byte[] keys = new byte[16];
+        if (!StringUtils.isBlank(encryptionColumns)) {
+            String[] columns = encryptionColumns.split(",");
+            for (String column : columns) {
+                secureRandom.nextBytes(keys);
+                ColumnEncryptionProperties properties =
+                        ColumnEncryptionProperties.builder(column).withKey(keys).build();
+                map.put(ColumnPath.fromDotString(column), properties);
+            }
+        }
+        return map;
     }
 
     public String getCompression(@Nullable String compression) {

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.format.parquet.writer;
 
+import org.apache.paimon.format.FileFormatFactory;
+
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.io.OutputFile;
 
@@ -33,5 +35,6 @@ import java.io.Serializable;
 public interface ParquetBuilder<T> extends Serializable {
 
     /** Creates and configures a parquet writer to the given output file. */
-    ParquetWriter<T> createWriter(OutputFile out, String compression) throws IOException;
+    ParquetWriter<T> createWriter(OutputFile out, FileFormatFactory.FormatContext writerContext)
+            throws IOException;
 }

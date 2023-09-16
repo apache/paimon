@@ -26,9 +26,12 @@ import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.crypto.ColumnDecryptionProperties;
+import org.apache.parquet.crypto.FileDecryptionProperties;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
+import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 
 import java.io.IOException;
@@ -43,12 +46,14 @@ public class ParquetUtil {
      * Extract stats from specified Parquet files path.
      *
      * @param path the path of parquet files to be read
+     * @param encryptionKey
+     * @param aadPrefix
      * @return result sets as map, key is column name, value is statistics (for example, null count,
      *     minimum value, maximum value)
      */
     public static Pair<Map<String, Statistics<?>>, TableStatsExtractor.FileInfo> extractColumnStats(
-            FileIO fileIO, Path path) throws IOException {
-        try (ParquetFileReader reader = getParquetReader(fileIO, path)) {
+            FileIO fileIO, Path path, byte[] encryptionKey, byte[] aadPrefix) throws IOException {
+        try (ParquetFileReader reader = getParquetReader(fileIO, path, encryptionKey, aadPrefix)) {
             ParquetMetadata parquetMetadata = reader.getFooter();
             List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
             Map<String, Statistics<?>> resultStats = new HashMap<>();
@@ -77,9 +82,35 @@ public class ParquetUtil {
      * @param path the path of parquet files to be read
      * @return parquet reader, used for reading footer, status, etc.
      */
-    public static ParquetFileReader getParquetReader(FileIO fileIO, Path path) throws IOException {
-        return ParquetFileReader.open(
-                ParquetInputFile.fromPath(fileIO, path), ParquetReadOptions.builder().build());
+    public static ParquetFileReader getParquetReader(
+            FileIO fileIO, Path path, byte[] encryptionKey, byte[] aadPrefix) throws IOException {
+
+        FileDecryptionProperties fileDecryptionProperties = null;
+        if (encryptionKey != null) {
+            Map<ColumnPath, ColumnDecryptionProperties> columnProperties =
+                    getColumnDencryptionProperties();
+            fileDecryptionProperties =
+                    FileDecryptionProperties.builder()
+                            .withFooterKey(encryptionKey)
+                            .withAADPrefix(aadPrefix)
+                            // .withColumnKeys(columnProperties)
+                            .build();
+        }
+
+        ParquetReadOptions decryptOptions =
+                ParquetReadOptions.builder().withDecryption(fileDecryptionProperties).build();
+
+        return ParquetFileReader.open(ParquetInputFile.fromPath(fileIO, path), decryptOptions);
+    }
+
+    /** testing... */
+    private static Map<ColumnPath, ColumnDecryptionProperties> getColumnDencryptionProperties() {
+        byte[] keys = new byte[16];
+        Map<ColumnPath, ColumnDecryptionProperties> columnProperties = new HashMap<>();
+        ColumnDecryptionProperties properties =
+                ColumnDecryptionProperties.builder("column_name").withKey(keys).build();
+        columnProperties.put(ColumnPath.fromDotString("column_name"), properties);
+        return columnProperties;
     }
 
     static void assertStatsClass(

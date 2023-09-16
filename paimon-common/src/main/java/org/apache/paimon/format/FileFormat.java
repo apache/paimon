@@ -76,7 +76,12 @@ public abstract class FileFormat {
 
     @VisibleForTesting
     public static FileFormat fromIdentifier(String identifier, Options options) {
-        return fromIdentifier(identifier, new FormatContext(options, 1024));
+        FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(options)
+                        .readBatchSize(1024)
+                        .build();
+        return fromIdentifier(identifier, formatContext);
     }
 
     /** Create a {@link FileFormat} from format identifier and format options. */
@@ -105,8 +110,11 @@ public abstract class FileFormat {
 
     public static FileFormat getFileFormat(Options options, String formatIdentifier) {
         int readBatchSize = options.get(CoreOptions.READ_BATCH_SIZE);
-        return FileFormat.fromIdentifier(
-                formatIdentifier,
-                new FormatContext(options.removePrefix(formatIdentifier + "."), readBatchSize));
+        FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .formatOptions(options.removePrefix(formatIdentifier + "."))
+                        .readBatchSize(readBatchSize)
+                        .build();
+        return FileFormat.fromIdentifier(formatIdentifier, formatContext);
     }
 }

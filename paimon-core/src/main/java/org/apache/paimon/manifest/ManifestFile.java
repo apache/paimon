@@ -20,6 +20,8 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -52,6 +54,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
     private final RowType partitionType;
     private final FormatWriterFactory writerFactory;
     private final long suggestedFileSize;
+    private final EncryptionManager encryptionManager;
+    private final KmsClient.CreateKeyResult createKeyResult;
+    private final CoreOptions options;
 
     private ManifestFile(
             FileIO fileIO,
@@ -62,12 +67,18 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             FormatWriterFactory writerFactory,
             PathFactory pathFactory,
             long suggestedFileSize,
-            @Nullable SegmentsCache<String> cache) {
+            @Nullable SegmentsCache<String> cache,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult,
+            CoreOptions options) {
         super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
         this.schemaManager = schemaManager;
         this.partitionType = partitionType;
         this.writerFactory = writerFactory;
         this.suggestedFileSize = suggestedFileSize;
+        this.encryptionManager = encryptionManager;
+        this.createKeyResult = createKeyResult;
+        this.options = options;
     }
 
     @VisibleForTesting
@@ -87,7 +98,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                                 new ManifestEntryWriter(
                                         writerFactory,
                                         pathFactory.newPath(),
-                                        CoreOptions.FILE_COMPRESSION.defaultValue()),
+                                        CoreOptions.FILE_COMPRESSION.defaultValue(),
+                                        encryptionManager,
+                                        createKeyResult),
                         suggestedFileSize);
         try {
             writer.write(entries);
@@ -107,8 +120,21 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private long numDeletedFiles = 0;
         private long schemaId = Long.MIN_VALUE;
 
-        ManifestEntryWriter(FormatWriterFactory factory, Path path, String fileCompression) {
-            super(ManifestFile.this.fileIO, factory, path, serializer::toRow, fileCompression);
+        ManifestEntryWriter(
+                FormatWriterFactory factory,
+                Path path,
+                String fileCompression,
+                EncryptionManager encryptionManager,
+                KmsClient.CreateKeyResult createKeyResult) {
+            super(
+                    ManifestFile.this.fileIO,
+                    factory,
+                    path,
+                    serializer::toRow,
+                    fileCompression,
+                    encryptionManager,
+                    createKeyResult,
+                    options);
 
             this.partitionStatsCollector = new TableStatsCollector(partitionType);
             this.partitionStatsSerializer = new FieldStatsArraySerializer(partitionType);
@@ -157,6 +183,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
         private final FileStorePathFactory pathFactory;
         private final long suggestedFileSize;
         @Nullable private final SegmentsCache<String> cache;
+        private final EncryptionManager encryptionManager;
+        private final KmsClient.CreateKeyResult createKeyResult;
+        private final CoreOptions options;
 
         public Factory(
                 FileIO fileIO,
@@ -165,7 +194,10 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                 FileFormat fileFormat,
                 FileStorePathFactory pathFactory,
                 long suggestedFileSize,
-                @Nullable SegmentsCache<String> cache) {
+                @Nullable SegmentsCache<String> cache,
+                EncryptionManager encryptionManager,
+                KmsClient.CreateKeyResult createKeyResult,
+                CoreOptions options) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.partitionType = partitionType;
@@ -173,6 +205,9 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             this.pathFactory = pathFactory;
             this.suggestedFileSize = suggestedFileSize;
             this.cache = cache;
+            this.encryptionManager = encryptionManager;
+            this.createKeyResult = createKeyResult;
+            this.options = options;
         }
 
         public ManifestFile create() {
@@ -186,7 +221,10 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileFormat.createWriterFactory(entryType),
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
-                    cache);
+                    cache,
+                    encryptionManager,
+                    createKeyResult,
+                    options);
         }
     }
 }

@@ -67,15 +67,16 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
     }
 
     @Override
-    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
-        return extractWithFileInfo(fileIO, path).getLeft();
+    public FieldStats[] extract(FileIO fileIO, Path path, byte[] plaintextKey, byte[] aadPrefix)
+            throws IOException {
+        return extractWithFileInfo(fileIO, path, plaintextKey, aadPrefix).getLeft();
     }
 
     @Override
-    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
-            throws IOException {
+    public Pair<FieldStats[], FileInfo> extractWithFileInfo(
+            FileIO fileIO, Path path, byte[] plaintextKey, byte[] aadPrefix) throws IOException {
         Pair<Map<String, Statistics<?>>, FileInfo> statsPair =
-                ParquetUtil.extractColumnStats(fileIO, path);
+                ParquetUtil.extractColumnStats(fileIO, path, plaintextKey, aadPrefix);
         FieldStatsCollector[] collectors = FieldStatsCollector.create(statsCollectors);
         return Pair.of(
                 IntStream.range(0, rowType.getFieldCount())

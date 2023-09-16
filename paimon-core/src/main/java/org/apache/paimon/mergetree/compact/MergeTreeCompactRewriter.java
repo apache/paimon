@@ -21,6 +21,8 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -42,30 +44,43 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected final Comparator<InternalRow> keyComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
     protected final MergeSorter mergeSorter;
+    protected final EncryptionManager encryptionManager;
+    protected final KmsClient.CreateKeyResult createKeyResult;
 
     public MergeTreeCompactRewriter(
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            MergeSorter mergeSorter) {
+            MergeSorter mergeSorter,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
         this.mergeSorter = mergeSorter;
+        this.encryptionManager = encryptionManager;
+        this.createKeyResult = createKeyResult;
     }
 
     @Override
     public CompactResult rewrite(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
-        return rewriteCompaction(outputLevel, dropDelete, sections);
+        return rewriteCompaction(
+                outputLevel, dropDelete, sections, encryptionManager, createKeyResult);
     }
 
     protected CompactResult rewriteCompaction(
-            int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
+            int outputLevel,
+            boolean dropDelete,
+            List<List<SortedRun>> sections,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult)
+            throws Exception {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+                writerFactory.createRollingMergeTreeFileWriter(
+                        outputLevel, encryptionManager, createKeyResult);
         RecordReader<KeyValue> sectionsReader =
                 MergeTreeReaders.readerForMergeTree(
                         sections,
@@ -73,7 +88,8 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                         readerFactory,
                         keyComparator,
                         mfFactory.create(),
-                        mergeSorter);
+                        mergeSorter,
+                        encryptionManager);
         writer.write(new RecordReaderIterator<>(sectionsReader));
         writer.close();
         return new CompactResult(extractFilesFromSections(sections), writer.result());

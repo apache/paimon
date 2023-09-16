@@ -20,6 +20,7 @@ package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -111,7 +112,8 @@ public class AvroFileFormat extends FileFormat {
         }
 
         @Override
-        public FormatWriter create(PositionOutputStream out, String compression)
+        public FormatWriter create(
+                PositionOutputStream out, FileFormatFactory.FormatContext formatContext)
                 throws IOException {
             AvroBulkWriter<InternalRow> writer = factory.create(out);
             return new FormatWriter() {

@@ -19,6 +19,9 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.PlaintextEncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
@@ -33,6 +36,7 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.table.CatalogEnvironment;
@@ -51,6 +55,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.ServiceLoader;
 
 /**
  * Base {@link FileStore} implementation.
@@ -65,8 +70,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final CoreOptions options;
     protected final RowType partitionType;
     private final CatalogEnvironment catalogEnvironment;
+    protected final EncryptionManager encryptionManager;
 
     @Nullable private final SegmentsCache<String> writeManifestCache;
+    @Nullable protected KmsClient.CreateKeyResult createKeyResult;
 
     public AbstractFileStore(
             FileIO fileIO,
@@ -86,6 +93,54 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 writeManifestCache.getBytes() == 0
                         ? null
                         : new SegmentsCache<>(options.pageSize(), writeManifestCache);
+
+        this.encryptionManager = encryptionManager(options.toConfiguration());
+        this.encryptionManager.configure(options);
+
+        CoreOptions.EncryptionMechanism encryptionMechanism = options.encryptionMechanism();
+        if (!encryptionMechanism.equals(CoreOptions.EncryptionMechanism.PLAINTEXT)) {
+            KmsClient kmsClient = kmsClient(options.toConfiguration());
+            Snapshot snapshot = snapshotManager().latestSnapshot();
+            String encryptionKeyId;
+            if (snapshot != null) {
+                encryptionKeyId = snapshot.encryptionKeyId();
+                kmsClient.configure(options);
+                byte[] key = kmsClient.getKey(encryptionKeyId);
+                this.createKeyResult = new KmsClient.CreateKeyResult(encryptionKeyId, key);
+            } else {
+                if (null != kmsClient) {
+                    kmsClient.configure(options);
+                    this.createKeyResult = kmsClient.createKey();
+                } else {
+                    this.createKeyResult = null;
+                }
+            }
+        }
+    }
+
+    private static EncryptionManager encryptionManager(Options options) {
+        for (EncryptionManager encryptionManager :
+                ServiceLoader.load(
+                        EncryptionManager.class, AbstractFileStore.class.getClassLoader())) {
+            if (encryptionManager
+                    .identifier()
+                    .equals(options.get(CoreOptions.ENCRYPTION_MECHANISM).toString())) {
+                return encryptionManager;
+            }
+        }
+        return new PlaintextEncryptionManager();
+    }
+
+    private static KmsClient kmsClient(Options options) {
+
+        for (KmsClient client :
+                ServiceLoader.load(KmsClient.class, AbstractFileStore.class.getClassLoader())) {
+            if (client.identifier()
+                    .equals(options.get(CoreOptions.ENCRYPTION_KMS_CLIENT).toString())) {
+                return client;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -115,7 +170,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFormat(),
                 pathFactory(),
                 options.manifestTargetSize().getBytes(),
-                forWrite ? writeManifestCache : null);
+                forWrite ? writeManifestCache : null,
+                encryptionManager,
+                createKeyResult,
+                options);
     }
 
     @Override

@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -161,6 +162,12 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             @Override
             public void projection(int[][] projection) {
                 read.withValueProjection(projection);
+            }
+
+            @Override
+            public InnerTableRead withEncryptionManager(EncryptionManager encryptionManager) {
+                read.withEncryptionManager(encryptionManager);
+                return this;
             }
 
             @Override

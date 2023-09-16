@@ -26,10 +26,11 @@ import java.io.IOException;
 
 /** Extracts statistics directly from file. */
 public interface TableStatsExtractor {
+    FieldStats[] extract(FileIO fileIO, Path path, byte[] plaintextKey, byte[] aadPrefix)
+            throws IOException;
 
-    FieldStats[] extract(FileIO fileIO, Path path) throws IOException;
-
-    Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path) throws IOException;
+    Pair<FieldStats[], FileInfo> extractWithFileInfo(
+            FileIO fileIO, Path path, byte[] plaintextKey, byte[] aadPrefix) throws IOException;
 
     /** File info fetched from physical file. */
     class FileInfo {

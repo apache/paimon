@@ -62,6 +62,7 @@ public class TraceableFileIO implements FileIO {
 
     @Override
     public PositionOutputStream newOutputStream(Path f, boolean overwrite) throws IOException {
+
         return createOutputStream(
                 f,
                 () -> {

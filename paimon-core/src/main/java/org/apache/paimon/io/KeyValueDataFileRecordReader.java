@@ -26,6 +26,7 @@ import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -58,12 +59,21 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             @Nullable Integer poolSize,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
+            @Nullable PartitionInfo partitionInfo,
+            byte[] plaintextKey,
+            byte[] addPrefix)
             throws IOException {
         FileUtils.checkExists(fileIO, path);
+
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder()
+                        .withDataKey(plaintextKey)
+                        .withAADPrefix(addPrefix)
+                        .build();
+
         this.reader =
                 poolSize == null
-                        ? readerFactory.createReader(fileIO, path)
+                        ? readerFactory.createReader(fileIO, path, formatContext)
                         : readerFactory.createReader(fileIO, path, poolSize);
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;

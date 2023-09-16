@@ -56,14 +56,14 @@ public class TestTableStatsExtractor implements TableStatsExtractor {
                 "The stats collector is not aligned to write schema.");
     }
 
-    @Override
-    public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
-        return extractWithFileInfo(fileIO, path).getLeft();
+    public FieldStats[] extract(FileIO fileIO, Path path, byte[] plaintextKey, byte[] aadPrefix)
+            throws IOException {
+        return extractWithFileInfo(fileIO, path, plaintextKey, aadPrefix).getLeft();
     }
 
     @Override
-    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
-            throws IOException {
+    public Pair<FieldStats[], FileInfo> extractWithFileInfo(
+            FileIO fileIO, Path path, byte[] plaintextKey, byte[] aadPrefix) throws IOException {
         IdentityObjectSerializer serializer = new IdentityObjectSerializer(rowType);
         FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
         List<InternalRow> records =

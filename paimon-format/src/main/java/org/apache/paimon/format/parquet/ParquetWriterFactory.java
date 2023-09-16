@@ -19,6 +19,7 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.parquet.writer.ParquetBuilder;
@@ -47,9 +48,11 @@ public class ParquetWriterFactory implements FormatWriterFactory {
     }
 
     @Override
-    public FormatWriter create(PositionOutputStream stream, String compression) throws IOException {
+    public FormatWriter create(
+            PositionOutputStream stream, FileFormatFactory.FormatContext formatContext)
+            throws IOException {
         final OutputFile out = new StreamOutputFile(stream);
-        final ParquetWriter<InternalRow> writer = writerBuilder.createWriter(out, compression);
+        final ParquetWriter<InternalRow> writer = writerBuilder.createWriter(out, formatContext);
         return new ParquetBulkWriter(writer);
     }
 }

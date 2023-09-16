@@ -24,6 +24,7 @@ import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.encryption.EncryptionManager;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -72,6 +73,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final Comparator<InternalRow> keyComparator;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final MergeSorter mergeSorter;
+    private EncryptionManager encryptionManager;
 
     @Nullable private int[][] keyProjectedFields;
 
@@ -95,7 +97,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             KeyValueFieldsExtractor extractor,
-            CoreOptions options) {
+            CoreOptions options,
+            EncryptionManager encryptionManager) {
         this(
                 schemaManager,
                 schemaId,
@@ -103,6 +106,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                 valueType,
                 keyComparator,
                 mfFactory,
+                encryptionManager,
                 KeyValueFileReaderFactory.builder(
                         fileIO,
                         schemaManager,
@@ -122,6 +126,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             RowType valueType,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
+            EncryptionManager encryptionManager,
             KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
         this.tableSchema = schemaManager.schema(schemaId);
         this.readerFactoryBuilder = readerFactoryBuilder;
@@ -130,6 +135,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.mergeSorter =
                 new MergeSorter(
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
+        this.encryptionManager = encryptionManager;
     }
 
     public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
@@ -156,6 +162,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     public KeyValueFileStoreRead forceKeepDelete() {
         this.forceKeepDelete = true;
+        return this;
+    }
+
+    public KeyValueFileStoreRead withEncryptionManager(EncryptionManager encryptionManager) {
+        this.encryptionManager = encryptionManager;
         return this;
     }
 
@@ -220,12 +231,24 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         } else {
             return split.beforeFiles().isEmpty()
                     ? batchMergeRead(
-                            split.partition(), split.bucket(), split.dataFiles(), forceKeepDelete)
+                            split.partition(),
+                            split.bucket(),
+                            split.dataFiles(),
+                            forceKeepDelete,
+                            encryptionManager)
                     : DiffReader.readDiff(
                             batchMergeRead(
-                                    split.partition(), split.bucket(), split.beforeFiles(), false),
+                                    split.partition(),
+                                    split.bucket(),
+                                    split.beforeFiles(),
+                                    false,
+                                    encryptionManager),
                             batchMergeRead(
-                                    split.partition(), split.bucket(), split.dataFiles(), false),
+                                    split.partition(),
+                                    split.bucket(),
+                                    split.dataFiles(),
+                                    false,
+                                    encryptionManager),
                             keyComparator,
                             mergeSorter,
                             forceKeepDelete);
@@ -233,7 +256,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     }
 
     private RecordReader<KeyValue> batchMergeRead(
-            BinaryRow partition, int bucket, List<DataFileMeta> files, boolean keepDelete)
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            boolean keepDelete,
+            EncryptionManager encryptionManager)
             throws IOException {
         // Sections are read by SortMergeReader, which sorts and merges records by keys.
         // So we cannot project keys or else the sorting will be incorrect.
@@ -256,7 +283,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                             : nonOverlappedSectionFactory,
                                     keyComparator,
                                     mergeFuncWrapper,
-                                    mergeSorter));
+                                    mergeSorter,
+                                    encryptionManager));
         }
 
         RecordReader<KeyValue> reader = ConcatRecordReader.create(sectionReaders);
@@ -274,11 +302,19 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         for (DataFileMeta file : files) {
             suppliers.add(
                     () -> {
+                        byte[] plaintextKey = encryptionManager.decrypt(file.keyMetadata());
+                        byte[] addPrefix = file.keyMetadata().aadPrefix();
+
                         // We need to check extraFiles to be compatible with Paimon 0.2.
                         // See comments on DataFileMeta#extraFiles.
                         String fileName = changelogFile(file).orElse(file.fileName());
                         return readerFactory.createRecordReader(
-                                file.schemaId(), fileName, file.fileSize(), file.level());
+                                file.schemaId(),
+                                fileName,
+                                file.fileSize(),
+                                file.level(),
+                                plaintextKey,
+                                addPrefix);
                     });
         }
         return ConcatRecordReader.create(suppliers);

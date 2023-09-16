@@ -19,7 +19,10 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -39,7 +42,10 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             DataFilePathFactory pathFactory,
             LongCounter seqNumCounter,
             String fileCompression,
-            FieldStatsCollector.Factory[] statsCollectors) {
+            FieldStatsCollector.Factory[] statsCollectors,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult,
+            CoreOptions options) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -55,7 +61,10 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 schemaId,
                                 seqNumCounter,
                                 fileCompression,
-                                statsCollectors),
+                                statsCollectors,
+                                encryptionManager,
+                                createKeyResult,
+                                options),
                 targetFileSize);
     }
 }

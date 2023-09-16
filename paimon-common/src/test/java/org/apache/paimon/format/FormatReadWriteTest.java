@@ -95,8 +95,11 @@ public abstract class FormatReadWriteTest {
         writer.finish();
         out.close();
 
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder().build();
+
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType).createReader(fileIO, file);
+                format.createReaderFactory(rowType).createReader(fileIO, file, formatContext);
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(row -> result.add(serializer.copy(row)));
 
@@ -122,8 +125,11 @@ public abstract class FormatReadWriteTest {
         writer.finish();
         out.close();
 
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder().build();
+
         RecordReader<InternalRow> reader =
-                format.createReaderFactory(rowType).createReader(fileIO, file);
+                format.createReaderFactory(rowType).createReader(fileIO, file, formatContext);
         List<InternalRow> result = new ArrayList<>();
         reader.forEachRemaining(result::add);
         assertThat(result.size()).isEqualTo(1);

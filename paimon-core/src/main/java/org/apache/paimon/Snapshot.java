@@ -53,6 +53,7 @@ import java.util.Optional;
  *   <li>Version 2: Introduced in paimon 0.3. Add "version" field and "changelogManifestList" field.
  *   <li>Version 3: Introduced in paimon 0.4. Add "baseRecordCount" field, "deltaRecordCount" field
  *       and "changelogRecordCount" field.
+ *   <li>Version 4: Introduced in paimon 0.7. Add "encryptionKeyId" field.
  * </ul>
  *
  * <p>Unversioned change list:
@@ -69,7 +70,7 @@ public class Snapshot {
     public static final long FIRST_SNAPSHOT_ID = 1;
 
     public static final int TABLE_STORE_02_VERSION = 1;
-    private static final int CURRENT_VERSION = 3;
+    private static final int CURRENT_VERSION = 4;
 
     private static final String FIELD_VERSION = "version";
     private static final String FIELD_ID = "id";
@@ -87,6 +88,7 @@ public class Snapshot {
     private static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
     private static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
     private static final String FIELD_WATERMARK = "watermark";
+    private static final String FIELD_ENCRYPTION_KEY_ID = "encryptionKeyId";
 
     // version of snapshot
     // null for paimon <= 0.2
@@ -169,6 +171,10 @@ public class Snapshot {
     @Nullable
     private final Long watermark;
 
+    @JsonProperty(FIELD_ENCRYPTION_KEY_ID)
+    @Nullable
+    private final String encryptionKeyId;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -184,7 +190,8 @@ public class Snapshot {
             @Nullable Long totalRecordCount,
             @Nullable Long deltaRecordCount,
             @Nullable Long changelogRecordCount,
-            @Nullable Long watermark) {
+            @Nullable Long watermark,
+            @Nullable String encryptionKeyId) {
         this(
                 CURRENT_VERSION,
                 id,
@@ -201,7 +208,8 @@ public class Snapshot {
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,
-                watermark);
+                watermark,
+                encryptionKeyId);
     }
 
     @JsonCreator
@@ -221,7 +229,8 @@ public class Snapshot {
             @JsonProperty(FIELD_TOTAL_RECORD_COUNT) Long totalRecordCount,
             @JsonProperty(FIELD_DELTA_RECORD_COUNT) Long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) Long changelogRecordCount,
-            @JsonProperty(FIELD_WATERMARK) Long watermark) {
+            @JsonProperty(FIELD_WATERMARK) Long watermark,
+            @JsonProperty(FIELD_ENCRYPTION_KEY_ID) String encryptionKeyId) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -238,6 +247,7 @@ public class Snapshot {
         this.deltaRecordCount = deltaRecordCount;
         this.changelogRecordCount = changelogRecordCount;
         this.watermark = watermark;
+        this.encryptionKeyId = encryptionKeyId;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -325,6 +335,12 @@ public class Snapshot {
     @Nullable
     public Long watermark() {
         return watermark;
+    }
+
+    @JsonGetter(FIELD_ENCRYPTION_KEY_ID)
+    @Nullable
+    public String encryptionKeyId() {
+        return encryptionKeyId;
     }
 
     /**
@@ -450,7 +466,8 @@ public class Snapshot {
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,
-                watermark);
+                watermark,
+                encryptionKeyId);
     }
 
     @Override
@@ -474,7 +491,8 @@ public class Snapshot {
                 && Objects.equals(totalRecordCount, that.totalRecordCount)
                 && Objects.equals(deltaRecordCount, that.deltaRecordCount)
                 && Objects.equals(changelogRecordCount, that.changelogRecordCount)
-                && Objects.equals(watermark, that.watermark);
+                && Objects.equals(watermark, that.watermark)
+                && Objects.equals(encryptionKeyId, that.encryptionKeyId);
     }
 
     /** Type of changes in this snapshot. */

@@ -18,8 +18,9 @@
 
 package org.apache.paimon.format.parquet.writer;
 
+import org.apache.paimon.fs.PositionOutputStream;
+
 import org.apache.parquet.io.OutputFile;
-import org.apache.parquet.io.PositionOutputStream;
 
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -27,7 +28,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * An implementation of Parquet's {@link OutputFile} interface that goes against a Paimon {@link
- * PositionOutputStream}.
+ * org.apache.parquet.io.PositionOutputStream}.
  *
  * <p>Because the implementation goes against an open stream, rather than open its own streams
  * against a file, instances can create one stream only.
@@ -36,7 +37,7 @@ public class StreamOutputFile implements OutputFile {
 
     private static final long DEFAULT_BLOCK_SIZE = 64L * 1024L * 1024L;
 
-    private final org.apache.paimon.fs.PositionOutputStream stream;
+    private final PositionOutputStream stream;
 
     private final AtomicBoolean used;
 
@@ -46,13 +47,13 @@ public class StreamOutputFile implements OutputFile {
      *
      * @param stream The stream to write to.
      */
-    public StreamOutputFile(org.apache.paimon.fs.PositionOutputStream stream) {
+    public StreamOutputFile(PositionOutputStream stream) {
         this.stream = checkNotNull(stream);
         this.used = new AtomicBoolean(false);
     }
 
     @Override
-    public PositionOutputStream create(long blockSizeHint) {
+    public org.apache.parquet.io.PositionOutputStream create(long blockSizeHint) {
         if (used.compareAndSet(false, true)) {
             return new PositionOutputStreamAdapter(stream);
         } else {
@@ -61,7 +62,7 @@ public class StreamOutputFile implements OutputFile {
     }
 
     @Override
-    public PositionOutputStream createOrOverwrite(long blockSizeHint) {
+    public org.apache.parquet.io.PositionOutputStream createOrOverwrite(long blockSizeHint) {
         return create(blockSizeHint);
     }
 

@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FileFormatFactory;
 import org.apache.paimon.format.orc.writer.RowDataVectorizer;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.fs.local.LocalFileIO.LocalPositionOutputStream;
@@ -50,8 +51,14 @@ class OrcWriterFactoryTest {
                                 "struct<_col0:string,_col1:int>",
                                 new DataType[] {DataTypes.STRING(), DataTypes.INT()}),
                         memoryManager);
-        factory.create(new LocalPositionOutputStream(tmpDir.resolve("file1").toFile()), "LZ4");
-        factory.create(new LocalPositionOutputStream(tmpDir.resolve("file2").toFile()), "LZ4");
+
+        FileFormatFactory.FormatContext formatContext =
+                FileFormatFactory.formatContextBuilder().compression("LZ4").build();
+
+        factory.create(
+                new LocalPositionOutputStream(tmpDir.resolve("file1").toFile()), formatContext);
+        factory.create(
+                new LocalPositionOutputStream(tmpDir.resolve("file2").toFile()), formatContext);
 
         List<Path> addedWriterPath = memoryManager.getAddedWriterPath();
         assertThat(addedWriterPath).hasSize(2);

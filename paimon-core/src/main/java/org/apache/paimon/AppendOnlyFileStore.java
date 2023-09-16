@@ -80,7 +80,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 schemaId,
                 rowType,
                 FileFormatDiscover.of(options),
-                pathFactory());
+                pathFactory(),
+                encryptionManager);
     }
 
     @Override
@@ -101,7 +102,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 snapshotManager(),
                 newScan(true).withManifestCacheFilter(manifestFilter),
                 options,
-                tableName);
+                tableName,
+                encryptionManager,
+                createKeyResult);
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite) {

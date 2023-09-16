@@ -20,6 +20,9 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.PlaintextEncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
@@ -29,6 +32,7 @@ import org.apache.paimon.schema.TableSchema;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ServiceLoader;
 
 import static org.apache.paimon.CoreOptions.PATH;
 
@@ -100,5 +104,30 @@ public class FileStoreTableFactory {
                         : new PrimaryKeyFileStoreTable(
                                 fileIO, tablePath, tableSchema, catalogEnvironment);
         return table.copy(dynamicOptions.toMap());
+    }
+
+    private static EncryptionManager encryptionManager(Options options) {
+        for (EncryptionManager encryptionManager :
+                ServiceLoader.load(
+                        EncryptionManager.class, FileStoreTableFactory.class.getClassLoader())) {
+            if (encryptionManager
+                    .identifier()
+                    .equals(options.get(CoreOptions.ENCRYPTION_MECHANISM).toString())) {
+                return encryptionManager;
+            }
+        }
+        return new PlaintextEncryptionManager();
+    }
+
+    private static KmsClient kmsClient(Options options) {
+
+        for (KmsClient client :
+                ServiceLoader.load(KmsClient.class, FileStoreTableFactory.class.getClassLoader())) {
+            if (client.identifier()
+                    .equals(options.get(CoreOptions.ENCRYPTION_KMS_CLIENT).toString())) {
+                return client;
+            }
+        }
+        return null;
     }
 }

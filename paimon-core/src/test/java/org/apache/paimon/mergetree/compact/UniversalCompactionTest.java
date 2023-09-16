@@ -356,6 +356,6 @@ public class UniversalCompactionTest {
     }
 
     static DataFileMeta file(long size) {
-        return new DataFileMeta("", size, 1, null, null, null, null, 0, 0, 0, 0);
+        return new DataFileMeta("", size, 1, null, null, null, null, 0, 0, 0, 0, null);
     }
 }

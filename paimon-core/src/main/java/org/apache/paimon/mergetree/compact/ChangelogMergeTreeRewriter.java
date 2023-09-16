@@ -22,6 +22,8 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -49,8 +51,17 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate) {
-        super(readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
+            boolean changelogRowDeduplicate,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
+        super(
+                readerFactory,
+                writerFactory,
+                keyComparator,
+                mfFactory,
+                mergeSorter,
+                encryptionManager,
+                createKeyResult);
         this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
@@ -83,14 +94,18 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     public CompactResult rewrite(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         if (rewriteChangelog(outputLevel, dropDelete, sections)) {
-            return rewriteChangelogCompaction(outputLevel, sections);
+            return rewriteChangelogCompaction(outputLevel, sections, null, null);
         } else {
-            return rewriteCompaction(outputLevel, dropDelete, sections);
+            return rewriteCompaction(outputLevel, dropDelete, sections, null, null);
         }
     }
 
     private CompactResult rewriteChangelogCompaction(
-            int outputLevel, List<List<SortedRun>> sections) throws Exception {
+            int outputLevel,
+            List<List<SortedRun>> sections,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult)
+            throws Exception {
         List<ConcatRecordReader.ReaderSupplier<ChangelogResult>> sectionReaders = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             sectionReaders.add(
@@ -100,7 +115,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                                     readerFactory,
                                     keyComparator,
                                     createMergeWrapper(outputLevel),
-                                    mergeSorter));
+                                    mergeSorter,
+                                    encryptionManager));
         }
 
         RecordReaderIterator<ChangelogResult> iterator = null;
@@ -109,8 +125,12 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
 
         try {
             iterator = new RecordReaderIterator<>(ConcatRecordReader.create(sectionReaders));
-            compactFileWriter = writerFactory.createRollingMergeTreeFileWriter(outputLevel);
-            changelogFileWriter = writerFactory.createRollingChangelogFileWriter(outputLevel);
+            compactFileWriter =
+                    writerFactory.createRollingMergeTreeFileWriter(
+                            outputLevel, encryptionManager, createKeyResult);
+            changelogFileWriter =
+                    writerFactory.createRollingChangelogFileWriter(
+                            outputLevel, encryptionManager, createKeyResult);
 
             while (iterator.hasNext()) {
                 ChangelogResult result = iterator.next();
@@ -145,7 +165,9 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             return rewriteChangelogCompaction(
                     outputLevel,
                     Collections.singletonList(
-                            Collections.singletonList(SortedRun.fromSingle(file))));
+                            Collections.singletonList(SortedRun.fromSingle(file))),
+                    null,
+                    null);
         } else {
             return super.upgrade(outputLevel, file);
         }

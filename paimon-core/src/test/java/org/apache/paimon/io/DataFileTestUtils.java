@@ -50,7 +50,8 @@ public class DataFileTestUtils {
                 0L,
                 DataFileMeta.DUMMY_LEVEL,
                 Collections.emptyList(),
-                Timestamp.fromEpochMillis(100));
+                Timestamp.fromEpochMillis(100),
+                null);
     }
 
     public static DataFileMeta newFile() {
@@ -65,7 +66,8 @@ public class DataFileTestUtils {
                 0,
                 0,
                 0,
-                0);
+                0,
+                null);
     }
 
     public static DataFileMeta newFile(
@@ -81,7 +83,8 @@ public class DataFileTestUtils {
                 0,
                 maxSequence,
                 0,
-                level);
+                level,
+                null);
     }
 
     public static BinaryRow row(int i) {

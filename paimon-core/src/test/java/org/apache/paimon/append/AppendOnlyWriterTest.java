@@ -548,7 +548,10 @@ public class AppendOnlyWriterTest {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
                                 options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
-                        null);
+                        null,
+                        null,
+                        null,
+                        options);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
@@ -583,6 +586,7 @@ public class AppendOnlyWriterTest {
                         }),
                 minSeq,
                 maxSeq,
-                toCompact.get(0).schemaId());
+                toCompact.get(0).schemaId(),
+                null);
     }
 }

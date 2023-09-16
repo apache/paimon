@@ -49,6 +49,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.EncryptionAlgorithm.AES_CTR;
+import static org.apache.paimon.CoreOptions.EncryptionMechanism.PLAINTEXT;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -1045,6 +1047,36 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(10))
                     .withDescription("The threshold for read file async.");
 
+    public static final ConfigOption<EncryptionMechanism> ENCRYPTION_MECHANISM =
+            key("encryption.mechanism")
+                    .enumType(EncryptionMechanism.class)
+                    .defaultValue(PLAINTEXT)
+                    .withDescription(".");
+
+    public static final ConfigOption<EncryptionKmsClient> ENCRYPTION_KMS_CLIENT =
+            key("encryption.kms-client")
+                    .enumType(EncryptionKmsClient.class)
+                    .noDefaultValue()
+                    .withDescription("xxxxxx");
+
+    public static final ConfigOption<String> ENCRYPTION_KMS_CLIENT_HADOOP_URI =
+            key("encryption.kms-client.hadoop.uri")
+                    .stringType()
+                    .defaultValue("kms://http@localhost:9600/kms")
+                    .withDescription(".");
+
+    public static final ConfigOption<String> ENCRYPTION_COLUMNS =
+            key("encryption.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Specify the columns to be encrypted, separated by commas.");
+
+    public static final ConfigOption<EncryptionAlgorithm> ENCRYPTION_ALGORITHM_DATAFILE =
+            key("encryption.algorithm.data-file")
+                    .enumType(EncryptionAlgorithm.class)
+                    .defaultValue(AES_CTR)
+                    .withDescription("Encryption algorithm for data files.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1580,6 +1612,26 @@ public class CoreOptions implements Serializable {
 
     public int varTypeSize() {
         return options.get(ZORDER_VAR_LENGTH_CONTRIBUTION);
+    }
+
+    public EncryptionMechanism encryptionMechanism() {
+        return options.get(ENCRYPTION_MECHANISM);
+    }
+
+    public EncryptionKmsClient encryptionKmsClient() {
+        return options.get(ENCRYPTION_KMS_CLIENT);
+    }
+
+    public EncryptionAlgorithm encryptionAlgorithmDatafile() {
+        return options.get(ENCRYPTION_ALGORITHM_DATAFILE);
+    }
+
+    public String encryptionColumns() {
+        return options.get(ENCRYPTION_COLUMNS);
+    }
+
+    public String kmsHadoopURI() {
+        return options.get(ENCRYPTION_KMS_CLIENT_HADOOP_URI);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -2182,6 +2234,78 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ConsumerMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** EncryptionAlgorithm. */
+    public enum EncryptionAlgorithm implements DescribedEnum {
+        AES_CTR("aes_ctr", ""),
+        AES_GCM("aes_gcm", "");
+
+        private final String value;
+        private final String description;
+
+        EncryptionAlgorithm(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** EncryptionKmsClient. */
+    public enum EncryptionKmsClient implements DescribedEnum {
+        HADOOP("hadoop", ""),
+        RANGER("ranger", "");
+
+        private final String value;
+        private final String description;
+
+        EncryptionKmsClient(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** EncryptionMechanism. */
+    public enum EncryptionMechanism implements DescribedEnum {
+        PLAINTEXT("plaintext", ""),
+        ENVELOPE("envelope", "");
+
+        private final String value;
+        private final String description;
+
+        EncryptionMechanism(String value, String description) {
             this.value = value;
             this.description = description;
         }

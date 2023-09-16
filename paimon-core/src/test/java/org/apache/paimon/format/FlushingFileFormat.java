@@ -48,11 +48,13 @@ public class FlushingFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return (PositionOutputStream, level) -> {
+            FileFormatFactory.FormatContext formatContext =
+                    FileFormatFactory.formatContextBuilder()
+                            .compression(CoreOptions.FILE_COMPRESSION.defaultValue())
+                            .build();
+
             FormatWriter wrapped =
-                    format.createWriterFactory(type)
-                            .create(
-                                    PositionOutputStream,
-                                    CoreOptions.FILE_COMPRESSION.defaultValue());
+                    format.createWriterFactory(type).create(PositionOutputStream, formatContext);
             return new FormatWriter() {
                 @Override
                 public void addElement(InternalRow rowData) throws IOException {

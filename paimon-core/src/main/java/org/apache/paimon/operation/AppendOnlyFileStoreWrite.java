@@ -26,6 +26,8 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -84,8 +86,19 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            String tableName) {
-        super(commitUser, snapshotManager, scan, options, null, tableName, pathFactory);
+            String tableName,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
+        super(
+                commitUser,
+                snapshotManager,
+                scan,
+                options,
+                null,
+                tableName,
+                pathFactory,
+                encryptionManager,
+                createKeyResult);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
@@ -143,7 +156,10 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 spillable || forceBufferSpill,
                 fileCompression,
                 statsCollectors,
-                getWriterMetrics(partition, bucket));
+                getWriterMetrics(partition, bucket),
+                encryptionManager,
+                createKeyResult,
+                options);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -162,7 +178,10 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             pathFactory.createDataFilePathFactory(partition, bucket),
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
-                            statsCollectors);
+                            statsCollectors,
+                            null,
+                            null,
+                            options);
             try {
                 rewriter.write(
                         new RecordReaderIterator<>(

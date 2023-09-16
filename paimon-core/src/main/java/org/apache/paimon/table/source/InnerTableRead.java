@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.encryption.EncryptionManager;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 
@@ -32,6 +33,10 @@ public interface InnerTableRead extends TableRead {
             return this;
         }
         return withFilter(PredicateBuilder.and(predicates));
+    }
+
+    default InnerTableRead withEncryptionManager(EncryptionManager encryptionManager) {
+        return this;
     }
 
     InnerTableRead withFilter(Predicate predicate);

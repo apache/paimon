@@ -41,7 +41,7 @@ class ScanHelperTest extends PaimonSparkTestBase {
       0.until(fileNum).foreach {
         i =>
           val path = s"f$i.parquet"
-          files += DataFileMeta.forAppend(path, 750000, 30000, null, 0, 29999, 1)
+          files += DataFileMeta.forAppend(path, 750000, 30000, null, 0, 29999, 1, null)
 
           rawFiles += new RawFile(s"/a/b/$path", 0, 75000, "parquet", 0, 30000)
       }

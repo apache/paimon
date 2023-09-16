@@ -23,6 +23,8 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.encryption.EncryptionManager;
+import org.apache.paimon.encryption.kms.KmsClient;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
@@ -81,21 +83,39 @@ public class KeyValueFileWriterFactory {
         return formatContext.pathFactory(level);
     }
 
-    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(int level) {
-        return new RollingFileWriter<>(
-                () -> createDataFileWriter(formatContext.pathFactory(level).newPath(), level),
-                suggestedFileSize);
-    }
-
-    public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(int level) {
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingMergeTreeFileWriter(
+            int level,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
         return new RollingFileWriter<>(
                 () ->
                         createDataFileWriter(
-                                formatContext.pathFactory(level).newChangelogPath(), level),
+                                formatContext.pathFactory(level).newPath(),
+                                level,
+                                encryptionManager,
+                                createKeyResult),
                 suggestedFileSize);
     }
 
-    private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {
+    public RollingFileWriter<KeyValue, DataFileMeta> createRollingChangelogFileWriter(
+            int level,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
+        return new RollingFileWriter<>(
+                () ->
+                        createDataFileWriter(
+                                formatContext.pathFactory(level).newChangelogPath(),
+                                level,
+                                encryptionManager,
+                                createKeyResult),
+                suggestedFileSize);
+    }
+
+    private KeyValueDataFileWriter createDataFileWriter(
+            Path path,
+            int level,
+            EncryptionManager encryptionManager,
+            KmsClient.CreateKeyResult createKeyResult) {
         KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
         return new KeyValueDataFileWriter(
                 fileIO,
@@ -108,7 +128,9 @@ public class KeyValueFileWriterFactory {
                 schemaId,
                 level,
                 formatContext.compression(level),
-                options);
+                options,
+                encryptionManager,
+                createKeyResult);
     }
 
     public void deleteFile(String filename, int level) {
