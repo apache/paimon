@@ -171,6 +171,10 @@ public class UniversalCompaction implements CompactStrategy {
             }
         }
 
+        if (outputLevel == 0) {
+            outputLevel = maxLevel;
+        }
+
         return CompactUnit.fromLevelRuns(outputLevel, runs.subList(0, runCount));
     }
 }
