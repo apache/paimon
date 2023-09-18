@@ -21,37 +21,37 @@ package org.apache.paimon.flink.action.cdc.mysql.schema;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.Pair;
 
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.Objects;
+
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Utility class to load MySQL table schema with JDBC. */
-public class MySqlSchema {
+public class MySqlSchemaUtils {
 
-    private final LinkedHashMap<String, Pair<DataType, String>> fields;
-    private final List<String> primaryKeys;
-
-    private MySqlSchema(
-            LinkedHashMap<String, Pair<DataType, String>> fields, List<String> primaryKeys) {
-        this.fields = fields;
-        this.primaryKeys = primaryKeys;
-    }
-
-    public static MySqlSchema buildSchema(
+    public static Schema buildSchema(
             DatabaseMetaData metaData,
             String databaseName,
             String tableName,
-            TypeMapping typeMapping)
+            String tableComment,
+            TypeMapping typeMapping,
+            boolean caseSensitive)
             throws SQLException {
-        LinkedHashMap<String, Pair<DataType, String>> fields = new LinkedHashMap<>();
+        Map<String, Integer> duplicateFields = new HashMap<>();
+        Schema.Builder builder = Schema.newBuilder();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
@@ -70,50 +70,45 @@ public class MySqlSchema {
                 DataType paimonType =
                         MySqlTypeUtils.toDataType(fieldType, precision, scale, typeMapping);
 
-                fields.put(fieldName, Pair.of(paimonType, fieldComment));
+                if (!caseSensitive) {
+                    checkArgument(
+                            !duplicateFields.containsKey(fieldName.toLowerCase()),
+                            columnDuplicateErrMsg(tableName).apply(fieldName));
+                    fieldName = fieldName.toLowerCase();
+                }
+
+                builder.column(fieldName, paimonType, fieldComment);
+                duplicateFields.put(fieldName, 1);
             }
         }
 
+        // primary keys
         List<String> primaryKeys = new ArrayList<>();
         try (ResultSet rs = metaData.getPrimaryKeys(databaseName, null, tableName)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
-                primaryKeys.add(fieldName);
+                primaryKeys.add(caseSensitiveConversion(fieldName, caseSensitive));
             }
         }
+        builder.primaryKey(primaryKeys);
 
-        return new MySqlSchema(fields, primaryKeys);
+        // comment
+        builder.comment(tableComment);
+
+        return builder.build();
     }
 
-    public LinkedHashMap<String, Pair<DataType, String>> fields() {
-        return fields;
-    }
-
-    public List<String> primaryKeys() {
-        return primaryKeys;
-    }
-
-    public LinkedHashMap<String, DataType> typeMapping() {
-        LinkedHashMap<String, DataType> typeMapping = new LinkedHashMap<>();
-        fields.forEach((name, pair) -> typeMapping.put(name, pair.getLeft()));
-        return typeMapping;
-    }
-
-    public List<String> comments() {
-        List<String> comments = new ArrayList<>();
-        fields.forEach((name, pair) -> comments.add(pair.getRight()));
-        return comments;
-    }
-
-    public MySqlSchema merge(String currentTable, String otherTable, MySqlSchema other) {
-        for (Map.Entry<String, Pair<DataType, String>> entry : other.fields.entrySet()) {
-            String fieldName = entry.getKey();
-            DataType newType = entry.getValue().getLeft();
-            if (fields.containsKey(fieldName)) {
-                DataType oldType = fields.get(fieldName).getLeft();
-                switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newType)) {
+    public static Schema mergeSchema(
+            String currentTable, Schema current, String otherTable, Schema other) {
+        LinkedHashMap<String, DataField> currentFields = new LinkedHashMap<>();
+        current.fields().forEach(field -> currentFields.put(field.name(), field));
+        for (DataField newField : other.fields()) {
+            DataField dataField = currentFields.get(newField.name());
+            if (Objects.nonNull(dataField)) {
+                DataType oldType = dataField.type();
+                switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newField.type())) {
                     case CONVERT:
-                        fields.put(fieldName, Pair.of(newType, entry.getValue().getRight()));
+                        currentFields.put(newField.name(), newField);
                         break;
                     case EXCEPTION:
                         throw new IllegalArgumentException(
@@ -121,28 +116,27 @@ public class MySqlSchema {
                                         "Column %s have different types when merging schemas.\n"
                                                 + "Current table '%s' fields: %s\n"
                                                 + "To be merged table '%s' fields: %s",
-                                        fieldName,
+                                        newField.name(),
                                         currentTable,
-                                        fieldsToString(),
+                                        dataField,
                                         otherTable,
-                                        other.fieldsToString()));
+                                        newField));
                 }
             } else {
-                fields.put(fieldName, Pair.of(newType, entry.getValue().getRight()));
+                currentFields.put(newField.name(), newField);
             }
         }
-
-        if (!primaryKeys.equals(other.primaryKeys)) {
-            primaryKeys.clear();
+        Schema.Builder builder = Schema.newBuilder();
+        if (current.primaryKeys().equals(other.primaryKeys())) {
+            builder.primaryKey(current.primaryKeys());
         }
-        return this;
-    }
-
-    private String fieldsToString() {
-        return "["
-                + fields.entrySet().stream()
-                        .map(e -> String.format("%s %s", e.getKey(), e.getValue().getLeft()))
-                        .collect(Collectors.joining(","))
-                + "]";
+        builder.comment(current.comment());
+        builder.options(current.options());
+        builder.partitionKeys(current.partitionKeys());
+        currentFields.forEach(
+                ((name, dataField) ->
+                        builder.column(
+                                dataField.name(), dataField.type(), dataField.description())));
+        return builder.build();
     }
 }

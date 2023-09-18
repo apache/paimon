@@ -138,6 +138,67 @@ public class CdcActionCommonUtils {
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
             Map<String, String> tableConfig,
+            Schema sourceSchema) {
+        Schema.Builder builder = Schema.newBuilder();
+
+        // options
+        builder.options(tableConfig);
+        builder.options(sourceSchema.options());
+
+        // fields
+        sourceSchema
+                .fields()
+                .forEach(
+                        dataField ->
+                                builder.column(
+                                        dataField.name(),
+                                        dataField.type(),
+                                        dataField.description()));
+
+        for (ComputedColumn computedColumn : computedColumns) {
+            builder.column(computedColumn.columnName(), computedColumn.columnType());
+        }
+
+        // primary keys
+        if (!specifiedPrimaryKeys.isEmpty()) {
+            Map<String, Integer> sourceColumns =
+                    sourceSchema.fields().stream()
+                            .collect(Collectors.toMap(DataField::name, entity -> 1));
+            for (String key : specifiedPrimaryKeys) {
+                if (!sourceColumns.containsKey(key)
+                        && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
+                    throw new IllegalArgumentException(
+                            "Specified primary key '"
+                                    + key
+                                    + "' does not exist in source tables or computed columns.");
+                }
+            }
+            builder.primaryKey(specifiedPrimaryKeys);
+        } else if (!sourceSchema.primaryKeys().isEmpty()) {
+            builder.primaryKey(sourceSchema.primaryKeys());
+        } else {
+            throw new IllegalArgumentException(
+                    "Primary keys are not specified. "
+                            + "Also, can't infer primary keys from source table schemas because "
+                            + "source tables have no primary keys or have different primary keys.");
+        }
+
+        // partition keys
+        if (!specifiedPartitionKeys.isEmpty()) {
+            builder.partitionKeys(specifiedPartitionKeys);
+        }
+
+        // comment
+        builder.comment(sourceSchema.comment());
+
+        return builder.build();
+    }
+
+    public static Schema buildPaimonSchema(
+            List<String> specifiedPartitionKeys,
+            List<String> specifiedPrimaryKeys,
+            List<ComputedColumn> computedColumns,
+            Map<String, String> tableConfig,
             LinkedHashMap<String, DataType> sourceColumns,
             @Nullable List<String> sourceColumnComments,
             List<String> sourcePrimaryKeys) {

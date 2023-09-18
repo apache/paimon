@@ -761,7 +761,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.STRING(),
                             DataTypes.STRING(),
                             DataTypes.STRING(),
-                            DataTypes.INT()
+                            DataTypes.INT().notNull()
                         },
                         new String[] {
                             "pk",
