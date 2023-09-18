@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
@@ -48,12 +50,8 @@ import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKe
  */
 public class CompactProcedure extends ProcedureBase {
 
-    private final String warehouse;
-    private final Map<String, String> catalogOptions;
-
-    public CompactProcedure(String warehouse, Map<String, String> catalogOptions) {
-        this.warehouse = warehouse;
-        this.catalogOptions = catalogOptions;
+    public CompactProcedure(Catalog catalog) {
+        super(catalog);
     }
 
     public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
@@ -76,6 +74,8 @@ public class CompactProcedure extends ProcedureBase {
             String orderByColumns,
             String... partitionStrings)
             throws Exception {
+        String warehouse = ((AbstractCatalog) catalog).warehouse();
+        Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
         Identifier identifier = Identifier.fromString(tableId);
         CompactAction action;
         String jobName;

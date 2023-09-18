@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 
 import org.apache.flink.configuration.PipelineOptions;
@@ -31,6 +32,12 @@ import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYN
 
 /** Base implementation for flink {@link Procedure}. */
 public class ProcedureBase implements Procedure {
+
+    protected final Catalog catalog;
+
+    ProcedureBase(Catalog catalog) {
+        this.catalog = catalog;
+    }
 
     protected String[] execute(StreamExecutionEnvironment env, String defaultJobName)
             throws Exception {
