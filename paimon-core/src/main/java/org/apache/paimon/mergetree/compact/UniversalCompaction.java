@@ -171,7 +171,7 @@ public class UniversalCompaction implements CompactStrategy {
             }
         }
 
-        if (outputLevel == 0) {
+        if (runCount == runs.size()) {
             outputLevel = maxLevel;
         }
 
