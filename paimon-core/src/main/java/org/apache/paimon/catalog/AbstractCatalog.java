@@ -157,7 +157,8 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
-    @Override
+    public abstract String warehouse();
+
     public Map<String, String> options() {
         return catalogOptions;
     }

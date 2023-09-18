@@ -23,8 +23,6 @@ import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.configuration.PipelineOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.execution.JobClient;
@@ -36,6 +34,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
 import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
 
 /**
@@ -122,12 +121,12 @@ public class CompactProcedure implements Procedure {
 
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         String name = conf.getOptional(PipelineOptions.NAME).orElse(jobName);
-        if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING) {
-            JobClient jobClient = env.executeAsync(name);
-            return new String[] {"JobID=" + jobClient.getJobID()};
-        } else {
+        if (conf.get(TABLE_DML_SYNC)) {
             env.execute(name);
             return new String[] {"Success"};
+        } else {
+            JobClient jobClient = env.executeAsync(name);
+            return new String[] {"JobID=" + jobClient.getJobID()};
         }
     }
 }

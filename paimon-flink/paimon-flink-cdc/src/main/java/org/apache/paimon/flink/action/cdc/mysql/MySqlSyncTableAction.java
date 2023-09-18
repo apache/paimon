@@ -280,11 +280,6 @@ public class MySqlSyncTableAction extends ActionBase {
         return tableConfig;
     }
 
-    @VisibleForTesting
-    public Map<String, String> catalogConfig() {
-        return catalogOptions.toMap();
-    }
-
     // ------------------------------------------------------------------------
     //  Flink run methods
     // ------------------------------------------------------------------------

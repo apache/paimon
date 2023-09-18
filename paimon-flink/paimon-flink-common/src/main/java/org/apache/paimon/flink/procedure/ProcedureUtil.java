@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.CompactActionFactory;
 
@@ -27,6 +28,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utility methods for {@link Procedure}. */
 public class ProcedureUtil {
@@ -44,9 +47,15 @@ public class ProcedureUtil {
     }
 
     public static Optional<Procedure> getProcedure(Catalog catalog, String procedureName) {
+        checkArgument(
+                catalog instanceof AbstractCatalog,
+                "Currently, only Paimon built-in AbstractCatalog supports procedure.");
+        AbstractCatalog abstractCatalog = (AbstractCatalog) catalog;
         switch (procedureName) {
             case CompactActionFactory.IDENTIFIER:
-                return Optional.of(new CompactProcedure(catalog.warehouse(), catalog.options()));
+                return Optional.of(
+                        new CompactProcedure(
+                                abstractCatalog.warehouse(), abstractCatalog.options()));
             default:
                 return Optional.empty();
         }
