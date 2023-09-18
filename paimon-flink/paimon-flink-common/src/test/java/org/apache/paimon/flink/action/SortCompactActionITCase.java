@@ -233,7 +233,8 @@ public class SortCompactActionITCase extends ActionITCaseBase {
                 String.format(
                         "CALL compact('%s.%s', '%s', '%s')",
                         database, tableName, orderStrategy, String.join(",", orderByColumns)),
-                false);
+                false,
+                true);
     }
 
     public void createTable() throws Exception {

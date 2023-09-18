@@ -44,6 +44,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.api.config.TableConfigOptions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
@@ -157,7 +158,7 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         return env;
     }
 
-    protected void callProcedure(String procedureStatement, boolean isStreaming) {
+    protected void callProcedure(String procedureStatement, boolean isStreaming, boolean dmlSync) {
         StreamExecutionEnvironment env = buildDefaultEnv(isStreaming);
 
         TableEnvironment tEnv;
@@ -170,6 +171,8 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         } else {
             tEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
         }
+
+        tEnv.getConfig().set(TableConfigOptions.TABLE_DML_SYNC, dmlSync);
 
         tEnv.executeSql(
                 String.format(

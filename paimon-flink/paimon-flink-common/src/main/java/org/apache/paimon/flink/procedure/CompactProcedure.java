@@ -21,20 +21,14 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 
-import org.apache.flink.configuration.PipelineOptions;
-import org.apache.flink.configuration.ReadableConfig;
-import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.procedure.ProcedureContext;
-import org.apache.flink.table.procedures.Procedure;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
 import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
 
 /**
@@ -52,7 +46,7 @@ import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKe
  *  CALL compact('tableId', '', '', partition1, partition2, ...)
  * </code></pre>
  */
-public class CompactProcedure implements Procedure {
+public class CompactProcedure extends ProcedureBase {
 
     private final String warehouse;
     private final Map<String, String> catalogOptions;
@@ -119,14 +113,6 @@ public class CompactProcedure implements Procedure {
         StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
         action.build(env);
 
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
-        String name = conf.getOptional(PipelineOptions.NAME).orElse(jobName);
-        if (conf.get(TABLE_DML_SYNC)) {
-            env.execute(name);
-            return new String[] {"Success"};
-        } else {
-            JobClient jobClient = env.executeAsync(name);
-            return new String[] {"JobID=" + jobClient.getJobID()};
-        }
+        return execute(env, jobName);
     }
 }
