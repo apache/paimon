@@ -176,22 +176,29 @@ public class CanalRecordParser extends RecordParser {
         }
 
         Map<String, String> resultMap =
-                fieldTypes.entrySet().stream()
-                        .filter(entry -> jsonMap.get(entry.getKey()) != null)
+                jsonMap.entrySet().stream()
+                        .filter(
+                                entry ->
+                                        fieldTypes.get(applyCaseSensitiveFieldName(entry.getKey()))
+                                                != null)
                         .collect(
                                 Collectors.toMap(
                                         Map.Entry::getKey,
                                         entry ->
                                                 transformValue(
                                                         jsonMap.get(entry.getKey()).toString(),
-                                                        entry.getValue())));
+                                                        fieldTypes.get(
+                                                                applyCaseSensitiveFieldName(
+                                                                        entry.getKey())))));
 
         // generate values for computed columns
         for (ComputedColumn computedColumn : computedColumns) {
             resultMap.put(
                     computedColumn.columnName(),
                     computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
-            paimonFieldTypes.put(computedColumn.columnName(), computedColumn.columnType());
+            paimonFieldTypes.put(
+                    applyCaseSensitiveFieldName(computedColumn.columnName()),
+                    computedColumn.columnType());
         }
         return resultMap;
     }

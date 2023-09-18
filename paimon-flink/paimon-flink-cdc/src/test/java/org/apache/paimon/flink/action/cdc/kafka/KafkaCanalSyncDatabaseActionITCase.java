@@ -18,6 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.mysql.TestCaseInsensitiveCatalogFactory;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
@@ -29,6 +33,7 @@ import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -570,5 +575,48 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 .containsExactlyEntriesOf(Collections.singletonMap("catalog-key", "catalog-value"));
         assertThat(action.tableConfig())
                 .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testCaseInsensitive() throws Exception {
+        catalog =
+                new TestCaseInsensitiveCatalogFactory()
+                        .createCatalog(CatalogContext.create(new Path(warehouse)));
+
+        final String topic = "case-insensitive";
+        createTestTopic(topic, 1, 1);
+
+        // ---------- Write the Canal json into Kafka -------------------
+        writeRecordsToKafka(
+                topic, readLines("kafka/canal/database/case-insensitive/canal-data-1.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        Field catalogField = ActionBase.class.getDeclaredField("catalog");
+        catalogField.setAccessible(true);
+        Object newCatalog = catalog;
+        catalogField.set(action, newCatalog);
+        runActionWithDefaultEnv(action);
+
+        waitingTables("t1");
+        FileStoreTable table = getFileStoreTable("t1");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.INT()
+                        },
+                        new String[] {"k1", "v0", "v1"});
+        waitForResult(
+                Arrays.asList("+I[5, five, 50]", "+I[7, seven, 70]"),
+                table,
+                rowType,
+                Collections.singletonList("k1"));
     }
 }
