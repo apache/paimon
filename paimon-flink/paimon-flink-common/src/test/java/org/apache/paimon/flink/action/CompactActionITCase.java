@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
@@ -241,6 +242,25 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         // first compaction, snapshot will be 3.
         checkFileAndRowSize(table, 3L, 0L, 1, 6);
+    }
+
+    @Test
+    public void testTableConf() throws Exception {
+        prepareTable(
+                Arrays.asList("dt", "hh"), Arrays.asList("dt", "hh", "k"), Collections.emptyMap());
+
+        CompactAction compactAction =
+                new CompactAction(
+                                warehouse,
+                                database,
+                                tableName,
+                                Collections.emptyMap(),
+                                Collections.singletonMap(
+                                        FlinkConnectorOptions.SCAN_PARALLELISM.key(), "6"))
+                        .withPartitions(getSpecifiedPartitions());
+
+        assertThat(compactAction.table.options().get(FlinkConnectorOptions.SCAN_PARALLELISM.key()))
+                .isEqualTo("6");
     }
 
     private FileStoreTable prepareTable(

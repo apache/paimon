@@ -26,6 +26,7 @@ import org.apache.paimon.flink.action.SortCompactAction;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -83,7 +84,8 @@ public class CompactProcedure extends ProcedureBase {
                             warehouse,
                             identifier.getDatabaseName(),
                             identifier.getObjectName(),
-                            catalogOptions);
+                            catalogOptions,
+                            Collections.emptyMap());
             jobName = "Compact Job";
         } else if (!orderStrategy.isEmpty() && !orderByColumns.isEmpty()) {
             action =
@@ -91,7 +93,8 @@ public class CompactProcedure extends ProcedureBase {
                                     warehouse,
                                     identifier.getDatabaseName(),
                                     identifier.getObjectName(),
-                                    catalogOptions)
+                                    catalogOptions,
+                                    Collections.emptyMap())
                             .withOrderStrategy(orderStrategy)
                             .withOrderColumns(orderByColumns.split(","));
             jobName = "Sort Compact Job";

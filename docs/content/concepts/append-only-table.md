@@ -241,6 +241,7 @@ You can trigger action by shell script:
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table <tableName> \
+    --table-conf <key>=<value> \
     --order-strategy <orderType> \
     --order-by <col1,col2,...>
 ```

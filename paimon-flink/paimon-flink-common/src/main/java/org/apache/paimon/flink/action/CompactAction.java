@@ -34,6 +34,7 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -43,14 +44,15 @@ public class CompactAction extends TableActionBase {
     private List<Map<String, String>> partitions;
 
     public CompactAction(String warehouse, String database, String tableName) {
-        this(warehouse, database, tableName, Collections.emptyMap());
+        this(warehouse, database, tableName, Collections.emptyMap(), Collections.emptyMap());
     }
 
     public CompactAction(
             String warehouse,
             String database,
             String tableName,
-            Map<String, String> catalogConfig) {
+            Map<String, String> catalogConfig,
+            Map<String, String> tableConf) {
         super(warehouse, database, tableName, catalogConfig);
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
@@ -58,7 +60,9 @@ public class CompactAction extends TableActionBase {
                             "Only FileStoreTable supports compact action. The table type is '%s'.",
                             table.getClass().getName()));
         }
-        table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        HashMap<String, String> dynamicOptions = new HashMap<>(tableConf);
+        dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+        table = table.copy(dynamicOptions);
     }
 
     // ------------------------------------------------------------------------
@@ -67,6 +71,11 @@ public class CompactAction extends TableActionBase {
 
     public CompactAction withPartitions(List<Map<String, String>> partitions) {
         this.partitions = partitions;
+        return this;
+    }
+
+    public CompactAction withTableConfig(Map<String, String> tableConfig) {
+        table = table.copy(tableConfig);
         return this;
     }
 
