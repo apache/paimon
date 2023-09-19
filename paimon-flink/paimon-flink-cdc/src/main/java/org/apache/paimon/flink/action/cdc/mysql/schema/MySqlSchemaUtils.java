@@ -114,8 +114,8 @@ public class MySqlSchemaUtils {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Column %s have different types when merging schemas.\n"
-                                                + "Current table '%s' fields: %s\n"
-                                                + "To be merged table '%s' fields: %s",
+                                                + "Current table '%s' field: %s\n"
+                                                + "To be merged table '%s' field: %s",
                                         newField.name(),
                                         currentTable,
                                         dataField,
