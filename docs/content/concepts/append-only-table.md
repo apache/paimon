@@ -248,6 +248,7 @@ You can trigger action by shell script:
 
 {{< generated/sort-compact >}}
 
+The sort parallelism is the same as the sink parallelism, you can dynamically specify it by add conf --table-conf sink.parallelism=<value>.
 Other config is the same as [Compact Table]({{< ref "concepts/file-operations#compact-table" >}})
 
 ### Streaming Source
