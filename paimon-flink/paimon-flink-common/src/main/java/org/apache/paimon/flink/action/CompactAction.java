@@ -74,11 +74,6 @@ public class CompactAction extends TableActionBase {
         return this;
     }
 
-    public CompactAction withTableConfig(Map<String, String> tableConfig) {
-        table = table.copy(tableConfig);
-        return this;
-    }
-
     @Override
     public void build(StreamExecutionEnvironment env) {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
