@@ -61,7 +61,7 @@ public class RocksDBOptions {
                     .durationType()
                     .noDefaultValue()
                     .withDescription(
-                            "The discovery interval of lookup continuous reading. This is used as an sql hint. If it's not configured, the lookup function will fallback to 'continuous.discovery-interval'.");
+                            "The discovery interval of lookup continuous reading. This is used as an SQL hint. If it's not configured, the lookup function will fallback to 'continuous.discovery-interval'.");
 
     // --------------------------------------------------------------------------
     // Provided configurable DBOptions within Flink
