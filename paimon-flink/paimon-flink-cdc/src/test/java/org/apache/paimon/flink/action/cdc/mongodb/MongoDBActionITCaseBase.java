@@ -38,6 +38,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBContainer.PAIMON_USER;
+import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBContainer.PAIMON_USER_PASSWORD;
+
 /** Base test class for {@link org.apache.paimon.flink.action.Action}s related to MongoDB. */
 public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
 
@@ -65,6 +68,8 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
     protected Map<String, String> getBasicMongoDBConfig() {
         Map<String, String> config = new HashMap<>();
         config.put("hosts", MONGODB_CONTAINER.getHostAndPort());
+        config.put("username", PAIMON_USER);
+        config.put("password", PAIMON_USER_PASSWORD);
         return config;
     }
 
