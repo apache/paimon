@@ -113,6 +113,7 @@ public class CompactActionFactory implements ActionFactory {
                         + "--table test_table "
                         + "--order-strategy zorder "
                         + "--order-by a,b,c "
+                        + "--table-conf sink.parallelism=9 "
                         + "--catalog-conf s3.endpoint=https://****.com "
                         + "--catalog-conf s3.access-key=***** "
                         + "--catalog-conf s3.secret-key=***** ");
