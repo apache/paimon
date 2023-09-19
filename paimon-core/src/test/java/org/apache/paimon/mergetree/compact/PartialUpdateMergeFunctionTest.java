@@ -91,6 +91,24 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testSequenceGroupDefinedNoField() {
+        Options options = new Options();
+        options.set("fields.f3.sequence-group", "f1,f2,f7");
+        options.set("fields.f6.sequence-group", "f4,f5");
+        RowType rowType =
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
+        assertThatThrownBy(() -> PartialUpdateMergeFunction.factory(options, rowType))
+                .hasMessageContaining("can not be found in table schema");
+    }
+
+    @Test
     public void testSequenceGroupRepeatDefine() {
         Options options = new Options();
         options.set("fields.f3.sequence-group", "f1,f2");
