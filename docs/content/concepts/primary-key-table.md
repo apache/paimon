@@ -64,13 +64,13 @@ Performance:
    entries in a partition takes up **1 GB** more memory, partitions that are no longer active do not take up memory.
 2. For tables with low update rates, this mode is recommended to significantly improve performance.
 
-#### Cross Partitions Update Dynamic Bucket Mode
+#### Cross Partitions Upsert Dynamic Bucket Mode
 
 {{< hint info >}}
 This is an experimental feature.
 {{< /hint >}}
 
-When you need cross partition updates (primary keys not contain all partition fields), Dynamic Bucket mode directly
+When you need cross partition upsert (primary keys not contain all partition fields), Dynamic Bucket mode directly
 maintains the mapping of keys to partition and bucket, uses local disks, and initializes indexes by reading all 
 existing keys in the table when starting stream write job. Different merge engines have different behaviors:
 
@@ -80,6 +80,16 @@ existing keys in the table when starting stream write job. Different merge engin
 
 Performance: For tables with a large amount of data, there will be a significant loss in performance. Moreover,
 initialization takes a long time.
+
+If your upsert does not rely on too old data, you can consider configuring index TTL and bootstrap-min-partition to
+reduce Index and initialization time:
+- `'cross-partition-upsert.index-ttl'`: The TTL in rocksdb index, this can avoid maintaining too many indexes and lead
+  to worse and worse performance.
+- `'cross-partition-upsert.bootstrap-min-partition'`: The min partition bootstrap of rocksdb index, bootstrap will only
+  read the partitions above it, and the smaller partitions will not be read into the index. This can reduce job startup
+  time and excessive initialization of index.
+
+But please note that this may also cause data duplication.
 
 ## Merge Engines
 

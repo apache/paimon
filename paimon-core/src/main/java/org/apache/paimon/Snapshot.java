@@ -20,6 +20,7 @@ package org.apache.paimon;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
@@ -387,6 +388,20 @@ public class Snapshot {
 
     public static long recordCount(List<ManifestEntry> manifestEntries) {
         return manifestEntries.stream().mapToLong(manifest -> manifest.file().rowCount()).sum();
+    }
+
+    public static long recordCountAdd(List<ManifestEntry> manifestEntries) {
+        return manifestEntries.stream()
+                .filter(manifestEntry -> FileKind.ADD.equals(manifestEntry.kind()))
+                .mapToLong(manifest -> manifest.file().rowCount())
+                .sum();
+    }
+
+    public static long recordCountDelete(List<ManifestEntry> manifestEntries) {
+        return manifestEntries.stream()
+                .filter(manifestEntry -> FileKind.DELETE.equals(manifestEntry.kind()))
+                .mapToLong(manifest -> manifest.file().rowCount())
+                .sum();
     }
 
     public String toJson() {

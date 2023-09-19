@@ -21,7 +21,7 @@ package org.apache.paimon.flink.sink.index;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.types.RowType;
@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /** A {@link PartitionKeyExtractor} to {@link RowData} with only key and partiton fields. */
-public class KeyPartPartitionKeyExtractor implements PartitionKeyExtractor<RowData> {
+public class KeyPartPartitionKeyExtractor implements PartitionKeyExtractor<InternalRow> {
 
     private final Projection partitionProjection;
     private final Projection keyProjection;
@@ -50,12 +50,12 @@ public class KeyPartPartitionKeyExtractor implements PartitionKeyExtractor<RowDa
     }
 
     @Override
-    public BinaryRow partition(RowData record) {
-        return partitionProjection.apply(new FlinkRowWrapper(record));
+    public BinaryRow partition(InternalRow record) {
+        return partitionProjection.apply(record);
     }
 
     @Override
-    public BinaryRow trimmedPrimaryKey(RowData record) {
-        return keyProjection.apply(new FlinkRowWrapper(record));
+    public BinaryRow trimmedPrimaryKey(InternalRow record) {
+        return keyProjection.apply(record);
     }
 }

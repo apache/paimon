@@ -39,6 +39,26 @@ We currently support the following sync ways:
 6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table. 
 7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
 
+
+## What is Schema Evolution
+
+Suppose we have a MySQL table named `tableA`, it has three fields: `field_1`, `field_2`, `field_3`. When we want to load
+this MySQL table to Paimon, we can do this in Flink SQL, or use [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction).
+
+**Flink SQL:**
+
+In Flink SQL, if we change the table schema of the MySQL table after the ingestion, the table schema change will not be synchronized to Paimon.
+
+{{< img src="/img/cdc-ingestion-flinksql.png">}}
+
+**MySqlSyncTableAction:**
+
+In [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction),
+if we change the table schema of the MySQL table after the ingestion, the table schema change will be synchronized to Paimon,
+and the data of `field_4` which is newly added will be synchronized to Paimon too.
+
+{{< img src="/img/cdc-ingestion-schema-evolution.png">}}
+
 ## MySQL
 
 Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
@@ -430,8 +450,9 @@ Synchronization from multiple Kafka topics to Paimon database.
 ### Prepare MongoDB Bundled Jar
 
 ```
-flink-sql-connector-mongodb-*.jar
+flink-sql-connector-mongodb-cdc-*.jar
 ```
+only cdc 2.4+ is supported
 
 ### Synchronizing Tables
 
@@ -667,9 +688,10 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 you can specify type mapping option `tinyint1-not-bool` (Use `--type-mapping`), then the column will be mapped to TINYINT in Paimon table.
 2. You can use type mapping option `to-nullable` (Use `--type-mapping`) to ignore all NOT NULL constraints (except primary keys).
 3. You can use type mapping option `to-string` (Use `--type-mapping`) to map all MySQL data type to STRING.
-4. MySQL BIT(1) type will be mapped to Boolean.
-5. When using Hive catalog, MySQL TIME type will be mapped to STRING.
-6. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it 
+4. You can use type mapping option `char-to-string` (Use `--type-mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
+5. MySQL BIT(1) type will be mapped to Boolean.
+6. When using Hive catalog, MySQL TIME type will be mapped to STRING.
+7. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it 
 should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
 
 ## FAQ

@@ -21,7 +21,6 @@ package org.apache.paimon.flink.action;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -44,24 +43,10 @@ public class CompactActionFactory implements ActionFactory {
 
         CompactAction action;
         if (params.has("order-strategy")) {
-            SortCompactAction sortCompactAction =
-                    new SortCompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
-
-            String strategy = params.get("order-strategy");
-            sortCompactAction.withOrderStrategy(strategy);
-
-            if (params.has("order-by")) {
-                String sqlOrderBy = params.get("order-by");
-                if (sqlOrderBy == null) {
-                    throw new IllegalArgumentException("Please specify \"order-by\".");
-                }
-                sortCompactAction.withOrderColumns(Arrays.asList(sqlOrderBy.split(",")));
-            } else {
-                throw new IllegalArgumentException(
-                        "Please specify order columns in parameter --order-by.");
-            }
-
-            action = sortCompactAction;
+            action =
+                    new SortCompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig)
+                            .withOrderStrategy(params.get("order-strategy"))
+                            .withOrderColumns(getRequiredValue(params, "order-by").split(","));
         } else {
             action = new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
         }

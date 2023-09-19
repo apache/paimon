@@ -26,6 +26,7 @@ import org.apache.paimon.table.source.TableScan.Plan
 import org.apache.paimon.table.source.snapshot.StartingContext
 import org.apache.paimon.utils.RowDataPartitionComputer
 
+import org.apache.spark.sql.connector.read.streaming.ReadLimit
 import org.apache.spark.sql.execution.datasources.PartitioningUtils
 import org.apache.spark.sql.types.StructType
 
@@ -37,6 +38,8 @@ case class IndexedDataSplit(snapshotId: Long, index: Long, entry: DataSplit, isL
 trait StreamHelper extends WithFileStoreTable {
 
   val initOffset: PaimonSourceOffset
+
+  var lastTriggerMillis: Long
 
   private lazy val streamScan: InnerStreamTableScan = table.newStreamScan()
 
@@ -50,46 +53,53 @@ trait StreamHelper extends WithFileStoreTable {
   )
 
   // Used to get the initial offset.
-  def getStartingContext: StartingContext = streamScan.startingContext()
+  lazy val streamScanStartingContext: StartingContext = streamScan.startingContext()
 
-  def getLatestOffset: PaimonSourceOffset = {
-    val latestSnapshotId = table.snapshotManager().latestSnapshotId()
-    val plan = if (needToScanCurrentSnapshot(latestSnapshotId)) {
-      table
-        .newSnapshotReader()
-        .withSnapshot(latestSnapshotId)
-        .withMode(ScanMode.ALL)
-        .read()
-    } else {
-      table
-        .newSnapshotReader()
-        .withSnapshot(latestSnapshotId)
-        .withMode(ScanMode.DELTA)
-        .read()
-    }
-    val indexedDataSplits = convertPlanToIndexedSplits(plan)
+  def getLatestOffset(
+      startOffset: PaimonSourceOffset,
+      endOffset: Option[PaimonSourceOffset],
+      limit: ReadLimit): Option[PaimonSourceOffset] = {
+    val indexedDataSplits = getBatch(startOffset, endOffset, Some(limit))
     indexedDataSplits.lastOption
       .map(ids => PaimonSourceOffset(ids.snapshotId, ids.index, scanSnapshot = false))
-      .orNull
   }
 
   def getBatch(
       startOffset: PaimonSourceOffset,
-      endOffset: PaimonSourceOffset): Array[IndexedDataSplit] = {
-    val indexedDataSplits = mutable.ArrayBuffer.empty[IndexedDataSplit]
+      endOffset: Option[PaimonSourceOffset],
+      limit: Option[ReadLimit]): Array[IndexedDataSplit] = {
     if (startOffset != null) {
       streamScan.restore(startOffset.snapshotId, needToScanCurrentSnapshot(startOffset.snapshotId))
     }
+
+    val readLimitGuard = limit.flatMap(PaimonReadLimits(_, lastTriggerMillis))
     var hasSplits = true
-    while (hasSplits && streamScan.checkpoint() <= endOffset.snapshotId) {
+    def continue: Boolean = {
+      hasSplits && readLimitGuard.forall(_.hasCapacity) && endOffset.forall(
+        streamScan.checkpoint() <= _.snapshotId)
+    }
+
+    val indexedDataSplits = mutable.ArrayBuffer.empty[IndexedDataSplit]
+    while (continue) {
       val plan = streamScan.plan()
       if (plan.splits.isEmpty) {
         hasSplits = false
       } else {
         indexedDataSplits ++= convertPlanToIndexedSplits(plan)
+          // Filter by (start, end]
+          .filter(ids => inRange(ids, startOffset, endOffset))
+          // Filter splits by read limits other than ReadMinRows.
+          .takeWhile(s => readLimitGuard.forall(_.admit(s)))
       }
     }
-    indexedDataSplits.filter(ids => inRange(ids, startOffset, endOffset)).toArray
+
+    // Filter splits by ReadMinRows read limit if exists.
+    // If this batch doesn't meet the condition of ReadMinRows, then nothing will be returned.
+    if (readLimitGuard.exists(_.skipBatch)) {
+      Array.empty
+    } else {
+      indexedDataSplits.toArray
+    }
   }
 
   private def needToScanCurrentSnapshot(snapshotId: Long): Boolean = {
@@ -134,13 +144,9 @@ trait StreamHelper extends WithFileStoreTable {
   private def inRange(
       indexedDataSplit: IndexedDataSplit,
       start: PaimonSourceOffset,
-      end: PaimonSourceOffset): Boolean = {
-    val startRange = indexedDataSplit.snapshotId > start.snapshotId ||
-      (indexedDataSplit.snapshotId == start.snapshotId && indexedDataSplit.index > start.index)
-    val endRange = indexedDataSplit.snapshotId < end.snapshotId ||
-      (indexedDataSplit.snapshotId == end.snapshotId && indexedDataSplit.index <= end.index)
-
-    startRange && endRange
+      end: Option[PaimonSourceOffset]): Boolean = {
+    PaimonSourceOffset.gt(indexedDataSplit, start) && end.forall(
+      PaimonSourceOffset.le(indexedDataSplit, _))
   }
 
 }

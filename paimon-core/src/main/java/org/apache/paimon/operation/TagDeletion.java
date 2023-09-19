@@ -28,6 +28,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -60,17 +61,19 @@ public class TagDeletion extends FileDeletionBase {
 
     public void cleanUnusedDataFiles(
             Iterable<ManifestEntry> entries, Predicate<ManifestEntry> skipper) {
+        List<Path> dataFileToDelete = new ArrayList<>();
         for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
             if (!skipper.test(entry)) {
                 Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-                fileIO.deleteQuietly(new Path(bucketPath, entry.file().fileName()));
+                dataFileToDelete.add(new Path(bucketPath, entry.file().fileName()));
                 for (String file : entry.file().extraFiles()) {
-                    fileIO.deleteQuietly(new Path(bucketPath, file));
+                    dataFileToDelete.add(new Path(bucketPath, file));
                 }
 
                 recordDeletionBuckets(entry);
             }
         }
+        deleteFiles(dataFileToDelete, fileIO::deleteQuietly);
     }
 
     public Predicate<ManifestEntry> dataFileSkipper(Snapshot fromSnapshot) {

@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.utils;
 
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.RowType;
+
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
@@ -33,6 +36,10 @@ public class InternalTypeInfo<T> extends TypeInformation<T> {
 
     public InternalTypeInfo(InternalTypeSerializer<T> serializer) {
         this.serializer = serializer;
+    }
+
+    public static InternalTypeInfo<InternalRow> fromRowType(RowType rowType) {
+        return new InternalTypeInfo<>(new InternalRowTypeSerializer(rowType));
     }
 
     @Override

@@ -70,7 +70,7 @@ under the License.
 
     <properties>
         <project.build.outputTimestamp>2023-09-06T02:16:30Z</project.build.outputTimestamp>
-        <paimon.shade.version>0.4.0-incubating</paimon.shade.version>
+        <paimon.shade.version>0.6-SNAPSHOT</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
         <paimon.shade.caffeine.version>2.9.3</paimon.shade.caffeine.version>

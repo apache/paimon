@@ -27,6 +27,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -61,6 +62,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                         Collections.emptyMap())
                 .run();
 
+        SnapshotManager snapshotManager = getFileStoreTable(tableName).snapshotManager();
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
         assertThat(snapshot.id()).isEqualTo(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
@@ -112,6 +114,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                         Collections.emptyMap())
                 .run();
 
+        SnapshotManager snapshotManager = getFileStoreTable(tableName).snapshotManager();
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
         assertThat(snapshot.id()).isEqualTo(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
@@ -153,7 +156,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
                                 ? Arrays.asList("partKey0", "partKey1", "dt")
                                 : Collections.emptyList(),
                         new HashMap<>());
-        snapshotManager = table.snapshotManager();
+        SnapshotManager snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = streamWriteBuilder.newWrite();

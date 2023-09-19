@@ -53,12 +53,13 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     private final boolean supportStreamingReadOverwrite;
     private final DefaultValueAssigner defaultValueAssigner;
 
-    private boolean inited = false;
+    private boolean initialized = false;
     private StartingScanner startingScanner;
     private FollowUpScanner followUpScanner;
     private BoundedChecker boundedChecker;
 
     private boolean isFullPhaseEnd = false;
+    @Nullable private Long currentWatermark;
     @Nullable private Long nextSnapshotId;
 
     public InnerStreamTableScanImpl(
@@ -82,15 +83,15 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
 
     @Override
     public StartingContext startingContext() {
-        if (!inited) {
+        if (!initialized) {
             initScanner();
         }
         return startingScanner.startingContext();
     }
 
     @Override
-    public RichPlan plan() {
-        if (!inited) {
+    public Plan plan() {
+        if (!initialized) {
             initScanner();
         }
 
@@ -111,13 +112,14 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         if (boundedChecker == null) {
             boundedChecker = createBoundedChecker();
         }
-        inited = true;
+        initialized = true;
     }
 
-    private RichPlan tryFirstPlan() {
+    private Plan tryFirstPlan() {
         StartingScanner.Result result = startingScanner.scan(snapshotReader);
         if (result instanceof ScannedResult) {
             ScannedResult scannedResult = (ScannedResult) result;
+            currentWatermark = scannedResult.currentWatermark();
             long currentSnapshotId = scannedResult.currentSnapshotId();
             nextSnapshotId = currentSnapshotId + 1;
             isFullPhaseEnd =
@@ -133,7 +135,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         return SnapshotNotExistPlan.INSTANCE;
     }
 
-    private RichPlan nextPlan() {
+    private Plan nextPlan() {
         while (true) {
             if (isFullPhaseEnd) {
                 throw new EndOfScanException();
@@ -167,11 +169,13 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
                 SnapshotReader.Plan overwritePlan =
                         followUpScanner.getOverwriteChangesPlan(nextSnapshotId, snapshotReader);
+                currentWatermark = overwritePlan.watermark();
                 nextSnapshotId++;
                 return overwritePlan;
             } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
                 SnapshotReader.Plan plan = followUpScanner.scan(nextSnapshotId, snapshotReader);
+                currentWatermark = plan.watermark();
                 nextSnapshotId++;
                 return plan;
             } else {
@@ -231,6 +235,12 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     @Override
     public Long checkpoint() {
         return nextSnapshotId;
+    }
+
+    @Nullable
+    @Override
+    public Long watermark() {
+        return currentWatermark;
     }
 
     @Override

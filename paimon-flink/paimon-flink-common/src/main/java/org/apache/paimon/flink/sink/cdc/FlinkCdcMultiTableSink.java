@@ -33,6 +33,7 @@ import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -42,10 +43,13 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.DiscardingSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.UUID;
 
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
+import static org.apache.paimon.flink.sink.FlinkSink.configureGlobalCommitter;
 
 /**
  * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
@@ -58,9 +62,16 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
     private final boolean isOverwrite = false;
     private final Catalog.Loader catalogLoader;
+    private final double commitCpuCores;
+    @Nullable private final MemorySize commitHeapMemory;
 
-    public FlinkCdcMultiTableSink(Catalog.Loader catalogLoader) {
+    public FlinkCdcMultiTableSink(
+            Catalog.Loader catalogLoader,
+            double commitCpuCores,
+            @Nullable MemorySize commitHeapMemory) {
         this.catalogLoader = catalogLoader;
+        this.commitCpuCores = commitCpuCores;
+        this.commitHeapMemory = commitHeapMemory;
     }
 
     private StoreSinkWrite.WithWriteBufferProvider createWriteProvider() {
@@ -103,15 +114,14 @@ public class FlinkCdcMultiTableSink implements Serializable {
 
         SingleOutputStreamOperator<?> committed =
                 written.transform(
-                                GLOBAL_COMMITTER_NAME,
-                                typeInfo,
-                                new CommitterOperator<>(
-                                        true,
-                                        commitUser,
-                                        createCommitterFactory(),
-                                        createCommittableStateManager()))
-                        .setParallelism(1)
-                        .setMaxParallelism(1);
+                        GLOBAL_COMMITTER_NAME,
+                        typeInfo,
+                        new CommitterOperator<>(
+                                true,
+                                commitUser,
+                                createCommitterFactory(),
+                                createCommittableStateManager()));
+        configureGlobalCommitter(committed, commitCpuCores, commitHeapMemory);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
