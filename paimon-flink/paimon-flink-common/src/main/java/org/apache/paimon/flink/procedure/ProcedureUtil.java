@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.flink.action.CompactActionFactory;
 
 import org.apache.flink.table.procedures.Procedure;
 
@@ -36,7 +35,14 @@ public class ProcedureUtil {
     private static final List<String> SYSTEM_PROCEDURES = new ArrayList<>();
 
     static {
-        SYSTEM_PROCEDURES.add(CompactActionFactory.IDENTIFIER);
+        SYSTEM_PROCEDURES.add(CompactProcedure.NAME);
+        SYSTEM_PROCEDURES.add(CompactDatabaseProcedure.NAME);
+        SYSTEM_PROCEDURES.add(CreateTagProcedure.NAME);
+        SYSTEM_PROCEDURES.add(DeleteTagProcedure.NAME);
+        SYSTEM_PROCEDURES.add(DropPartitionProcedure.NAME);
+        SYSTEM_PROCEDURES.add(MergeIntoProcedure.NAME);
+        SYSTEM_PROCEDURES.add(ResetConsumerProcedure.NAME);
+        SYSTEM_PROCEDURES.add(RollbackToProcedure.NAME);
     }
 
     public static List<String> listProcedures() {
@@ -45,8 +51,22 @@ public class ProcedureUtil {
 
     public static Optional<Procedure> getProcedure(Catalog catalog, String procedureName) {
         switch (procedureName) {
-            case CompactActionFactory.IDENTIFIER:
+            case CompactProcedure.NAME:
                 return Optional.of(new CompactProcedure(catalog));
+            case CompactDatabaseProcedure.NAME:
+                return Optional.of(new CompactDatabaseProcedure(catalog));
+            case CreateTagProcedure.NAME:
+                return Optional.of(new CreateTagProcedure(catalog));
+            case DeleteTagProcedure.NAME:
+                return Optional.of(new DeleteTagProcedure(catalog));
+            case DropPartitionProcedure.NAME:
+                return Optional.of(new DropPartitionProcedure(catalog));
+            case MergeIntoProcedure.NAME:
+                return Optional.of(new MergeIntoProcedure(catalog));
+            case ResetConsumerProcedure.NAME:
+                return Optional.of(new ResetConsumerProcedure(catalog));
+            case RollbackToProcedure.NAME:
+                return Optional.of(new RollbackToProcedure(catalog));
             default:
                 return Optional.empty();
         }

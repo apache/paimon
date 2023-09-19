@@ -38,14 +38,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -95,8 +94,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
 
-        Map<String, String> tableOptions = new HashMap<>();
-
         List<FileStoreTable> tables = new ArrayList<>();
 
         for (String dbName : DATABASE_NAMES) {
@@ -131,26 +128,15 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             }
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        if (mode.equals("divided")) {
-            new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingDatabases(null)
-                    .includingTables(null)
-                    .excludingTables(null)
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            new CompactDatabaseAction(warehouse, Collections.emptyMap())
+                    .withDatabaseCompactMode(mode)
                     .build(env);
+            env.execute();
         } else {
-            new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingDatabases(null)
-                    .includingTables(null)
-                    .excludingTables(null)
-                    .withDatabaseCompactMode("combined")
-                    .withTableOptions(tableOptions)
-                    .build(env);
+            callProcedure(String.format("CALL compact_database('', '%s')", mode), false, true);
         }
-
-        env.execute();
 
         for (FileStoreTable table : tables) {
             SnapshotManager snapshotManager = table.snapshotManager();
@@ -180,11 +166,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         // test that dedicated compact job will expire snapshots
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
-
-        Map<String, String> tableOptions = new HashMap<>();
-        // if CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() use default value, the cost time in
-        // combined mode will be over 1mins
-        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
 
         List<FileStoreTable> tables = new ArrayList<>();
         for (String dbName : DATABASE_NAMES) {
@@ -220,27 +201,31 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             }
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointInterval(500);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        if (mode.equals("divided")) {
-            new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingDatabases(null)
-                    .includingTables(null)
-                    .excludingTables(null)
-                    .build(env);
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            if (mode.equals("divided")) {
+                new CompactDatabaseAction(warehouse, new HashMap<>()).build(env);
+            } else {
+                // if CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() use default value, the cost
+                // time in combined mode will be over 1 min
+                new CompactDatabaseAction(warehouse, new HashMap<>())
+                        .withDatabaseCompactMode("combined")
+                        .withTableOptions(
+                                Collections.singletonMap(
+                                        CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s"))
+                        .build(env);
+            }
+            env.executeAsync();
         } else {
-            new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingDatabases(null)
-                    .includingTables(null)
-                    .excludingTables(null)
-                    .withDatabaseCompactMode("combined")
-                    .withTableOptions(tableOptions)
-                    .build(env);
+            if (mode.equals("divided")) {
+                callProcedure("CALL compact_database()", true, false);
+            } else {
+                callProcedure(
+                        "CALL compact_database('', 'combined', '', '', 'continuous.discovery-interval=1s')",
+                        true,
+                        false);
+            }
         }
-        JobClient client = env.executeAsync();
 
         for (FileStoreTable table : tables) {
             StreamTableScan scan = table.newReadBuilder().newStreamScan();
@@ -381,8 +366,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                                 "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
             }
         }
-
-        client.cancel();
     }
 
     @ParameterizedTest(name = "mode = {0}")
@@ -437,9 +420,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
 
-        Map<String, String> tableOptions = new HashMap<>();
-        tableOptions.put(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s");
-
         List<FileStoreTable> compactionTables = new ArrayList<>();
         List<FileStoreTable> noCompactionTables = new ArrayList<>();
 
@@ -480,26 +460,37 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             }
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-
-        if (mode.equals("divided")) {
-            new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingDatabases(null)
-                    .includingTables(includingPattern)
-                    .excludingTables(excludesPattern)
-                    .build(env);
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            CompactDatabaseAction action =
+                    new CompactDatabaseAction(warehouse, Collections.emptyMap())
+                            .includingTables(includingPattern)
+                            .excludingTables(excludesPattern)
+                            .withDatabaseCompactMode(mode);
+            if (mode.equals("combined")) {
+                action.withTableOptions(
+                        Collections.singletonMap(
+                                CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s"));
+            }
+            action.build(env);
+            env.execute();
         } else {
-            new CompactDatabaseAction(warehouse, new HashMap<>())
-                    .includingDatabases(null)
-                    .includingTables(includingPattern)
-                    .excludingTables(excludesPattern)
-                    .withDatabaseCompactMode("combined")
-                    .withTableOptions(tableOptions)
-                    .build(env);
+            if (mode.equals("divided")) {
+                callProcedure(
+                        String.format(
+                                "CALL compact_database('', 'divided', '%s', '%s')",
+                                nonNull(includingPattern), nonNull(excludesPattern)),
+                        false,
+                        true);
+            } else {
+                callProcedure(
+                        String.format(
+                                "CALL compact_database('', 'combined', '%s', '%s', 'continuous.discovery-interval=1s')",
+                                nonNull(includingPattern), nonNull(excludesPattern)),
+                        false,
+                        true);
+            }
         }
-        env.execute();
 
         for (FileStoreTable table : compactionTables) {
             SnapshotManager snapshotManager = table.snapshotManager();
@@ -530,6 +521,10 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 assertThat(split.dataFiles().size()).isEqualTo(2);
             }
         }
+    }
+
+    private String nonNull(@Nullable String s) {
+        return s == null ? "" : s;
     }
 
     @Test
@@ -573,17 +568,13 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointInterval(500);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(warehouse, new HashMap<>())
-                .includingDatabases(null)
-                .includingTables(null)
-                .excludingTables(null)
-                .build(env);
-        JobClient client = env.executeAsync();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            new CompactDatabaseAction(warehouse, new HashMap<>()).build(env);
+            env.executeAsync();
+        } else {
+            callProcedure("CALL compact_database()");
+        }
 
         for (FileStoreTable table : tables) {
             StreamWriteBuilder streamWriteBuilder =
@@ -602,8 +593,6 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             // second compaction, snapshot will be 5
             checkFileAndRowSize(table, 5L, 30_000L, 1, 9);
         }
-
-        client.cancel().get();
     }
 
     @Test
@@ -646,15 +635,13 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(warehouse, new HashMap<>())
-                .includingDatabases(null)
-                .includingTables(null)
-                .excludingTables(null)
-                .build(env);
-        env.execute();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            new CompactDatabaseAction(warehouse, new HashMap<>()).build(env);
+            env.execute();
+        } else {
+            callProcedure("CALL compact_database()", false, true);
+        }
 
         for (FileStoreTable table : tables) {
             // first compaction, snapshot will be 3.

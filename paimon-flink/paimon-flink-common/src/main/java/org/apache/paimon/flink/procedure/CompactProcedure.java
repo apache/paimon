@@ -24,31 +24,29 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
 
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
-
-import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
 
 /**
  * Compact procedure. Usage:
  *
  * <pre><code>
+ *  -- NOTE: use '' as placeholder for optional arguments
+ *
  *  -- compact a table (tableId should be 'database_name.table_name')
  *  CALL compact('tableId')
  *
  *  -- compact a table with sorting
- *  CALL compact('tableId', 'order-strategy', 'order-by-columns')
+ *  CALL compact('tableId', 'orderStrategy', 'orderByColumns')
  *
  *  -- compact specific partitions ('pt1=A,pt2=a', 'pt1=B,pt2=b', ...)
- *  -- NOTE: if you don't need sorting but you want specify partitions, use '' as placeholder
  *  CALL compact('tableId', '', '', partition1, partition2, ...)
  * </code></pre>
  */
 public class CompactProcedure extends ProcedureBase {
+
+    public static final String NAME = "compact";
 
     public CompactProcedure(Catalog catalog) {
         super(catalog);
@@ -103,16 +101,9 @@ public class CompactProcedure extends ProcedureBase {
         }
 
         if (partitionStrings.length != 0) {
-            List<Map<String, String>> partitions = new ArrayList<>();
-            for (String partition : partitionStrings) {
-                partitions.add(parseCommaSeparatedKeyValues(partition));
-            }
-            action.withPartitions(partitions);
+            action.withPartitions(getPartitions(partitionStrings));
         }
 
-        StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
-        action.build(env);
-
-        return execute(env, jobName);
+        return execute(procedureContext, action, jobName);
     }
 }
