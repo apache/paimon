@@ -126,8 +126,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
                         .withTableConfig(Collections.singletonMap("table-key", "table-value"))
                         .build();
 
-        assertThat(action.catalogConfig())
-                .containsExactlyEntriesOf(Collections.singletonMap("catalog-key", "catalog-value"));
+        assertThat(action.catalogConfig()).containsEntry("catalog-key", "catalog-value");
         assertThat(action.tableConfig())
                 .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }
