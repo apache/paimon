@@ -68,6 +68,20 @@ Snapshot expiration is controlled by the following table properties.
       <td>Integer</td>
       <td>The maximum number of completed snapshots to retain. Should be greater than or equal to the minimum number.</td>
     </tr>
+    <tr>
+      <td><h5>snapshot.expire.execution-mode</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">sync</td>
+      <td>Enum</td>
+      <td>Specifies the execution mode of expire.</td>
+    </tr>
+    <tr>
+      <td><h5>snapshot.expire.limit</h5></td>
+      <td>No</td>
+      <td style="word-wrap: break-word;">10</td>
+      <td>Integer</td>
+      <td>The maximum number of snapshots allowed to expire at a time.</td>
+    </tr>
     </tbody>
 </table>
 
@@ -206,6 +220,11 @@ Please note that too short retain time or too small retain number may result in:
   When the job restarts, the snapshot it recorded may have expired. (You can use
   [Consumer Id]({{< ref "how-to/querying-tables#consumer-id" >}}) to protect streaming reading
   in a small retain time of snapshot expiration).
+
+By default, paimon will delete expired snapshots synchronously. When there are too 
+many files that need to be deleted, they may not be deleted quickly and back-pressured 
+to the upstream operator. To avoid this situation, users can use asynchronous expiration 
+mode by setting `snapshot.expire.execution-mode` to `async`.
 
 ## Rollback to Snapshot
 

@@ -450,8 +450,9 @@ Synchronization from multiple Kafka topics to Paimon database.
 ### Prepare MongoDB Bundled Jar
 
 ```
-flink-sql-connector-mongodb-*.jar
+flink-sql-connector-mongodb-cdc-*.jar
 ```
+only cdc 2.4+ is supported
 
 ### Synchronizing Tables
 
