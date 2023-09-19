@@ -444,7 +444,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           // Only 9 rows in this table. Only one batch can consume all the data.
           Assertions.assertEquals(1, query.recentProgress.count(_.numInputRows != 0))
           Assertions.assertEquals(
-            PaimonSourceOffset(3L, 1L, scanSnapshot = false),
+            PaimonSourceOffset(3L, 1L, scanSnapshot = true),
             PaimonSourceOffset(query.lastProgress.sources(0).endOffset))
           checkAnswer(currentResult(), snapshotData)
         } finally {
@@ -499,7 +499,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           // So there latest committed offset is not changed.
           Assertions.assertEquals(1, query.recentProgress.count(_.numInputRows != 0))
           Assertions.assertEquals(
-            PaimonSourceOffset(3L, 1L, scanSnapshot = false),
+            PaimonSourceOffset(3L, 1L, scanSnapshot = true),
             PaimonSourceOffset(query.lastProgress.sources(0).endOffset))
           checkAnswer(currentResult(), totalStreamingData)
 
@@ -563,7 +563,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
           Assertions.assertEquals(2, query.recentProgress.count(_.numInputRows != 0))
           Assertions.assertTrue(query.recentProgress.map(_.numInputRows).sum < 16)
 
-          Thread.sleep(5000)
+          Thread.sleep(6000)
           // the rest rows can trigger a batch. Then all the data are consumed.
           Assertions.assertEquals(3, query.recentProgress.count(_.numInputRows != 0))
           Assertions.assertEquals(16L, query.recentProgress.map(_.numInputRows).sum)
