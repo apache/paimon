@@ -233,6 +233,8 @@ SELECT * FROM my_table;
 
 {{< hint info >}}
 
+Paimon currently supports Spark 3+ for streaming write.
+
 Paimon Structured Streaming only supports the two `append` and `complete` modes.
 
 {{< /hint >}}
@@ -258,6 +260,12 @@ val stream = df
 ```
 
 ## Streaming Read
+
+{{< hint info >}}
+
+Paimon currently supports Spark 3.3+ for streaming read.
+
+{{< /hint >}}
 
 Paimon supports rich scan mode for streaming read. There is a list:
 <table class="configuration table table-bordered">
