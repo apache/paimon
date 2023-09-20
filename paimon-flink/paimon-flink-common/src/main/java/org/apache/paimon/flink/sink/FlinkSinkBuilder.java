@@ -54,7 +54,8 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    public FlinkSinkBuilder withOverwritePartition(Map<String, String> overwritePartition) {
+    public FlinkSinkBuilder withOverwritePartition(
+            @Nullable Map<String, String> overwritePartition) {
         this.overwritePartition = overwritePartition;
         return this;
     }
