@@ -34,7 +34,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** Debezium Event Record Entity. */
+/** Debezium Event Records Entity. */
 public class DebeziumEvent {
 
     private static final String FIELD_PAYLOAD = "payload";
@@ -77,6 +77,7 @@ public class DebeziumEvent {
         return schema;
     }
 
+    /** Payload elements in Debezium event record. */
     public static class Payload {
         @JsonProperty(FIELD_SOURCE)
         private final Source source;
@@ -137,6 +138,7 @@ public class DebeziumEvent {
         }
     }
 
+    /** Payload elements in Debezium event record. */
     public static class Field {
 
         @JsonProperty(FIELD_FIELD)
@@ -204,6 +206,7 @@ public class DebeziumEvent {
         }
     }
 
+    /** Source element of payload in Debezium event record. */
     public static class Source {
         @JsonProperty(FIELD_DB)
         private final String db;
@@ -228,6 +231,7 @@ public class DebeziumEvent {
         }
     }
 
+    /** HistoryRecord element of payload in Debezium event record. */
     public static class HistoryRecord {
 
         @JsonProperty(FIELD_TABLE_CHANGES)
