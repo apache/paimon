@@ -19,12 +19,15 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -184,6 +187,26 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         () -> batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='unknown') */"))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage("Tag 'unknown' doesn't exist.");
+    }
+
+    @Test
+    public void testTimeTravelReadWithSnapshotExpiration() throws Exception {
+        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+
+        paimonTable("T").createTag("tag1", 1);
+
+        batchSql("INSERT INTO T VALUES (3, 33, 333), (4, 44, 444)");
+
+        // expire snapshot 1
+        Map<String, String> expireOptions = new HashMap<>();
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        FileStoreTable table = (FileStoreTable) paimonTable("T");
+        table.copy(expireOptions).store().newExpire().expire();
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag1') */"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
     }
 
     @Test
