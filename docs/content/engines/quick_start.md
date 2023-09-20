@@ -55,7 +55,7 @@ docker compose is a convenient way to manage docker containers and quickly build
 you need. The following docker compose file is composed of three services, jobmanager, taskmanager and sql-client
 , using the flink:1.17.1-scala_2.12 image.
 
-Create a file named flink_docker_compose.yml and copy the following into it.
+Create a file named ```flink_docker_compose.yml``` and copy the following into it.
 
 > Notice:
 >
@@ -341,7 +341,8 @@ Look at the version mapping between paimon and Spark in the [Engines/Spark](http
 docker compose is a convenient way to manage docker containers and quickly build the application environment you need. The following docker compose file is composed of three services,
 spark-master、spark-worker-1、spark-sql,using the bitnami/spark:3.3.2 image.
 
-Copy the following into a ```spark3_docker_compose.yml``` file.
+Create a file named ```spark3_docker_compose.yml``` and copy the following into it.
+
 > Notice:
 >
 > The /tmp path in the container is mapped to the local./tmp path so that multiple containers can share a file system path. The reason is because the 'warehouse'='file:/tmp/paimon' option is configured when the catalog is created. If you use another path as the warehouse address, modify the volumes option in the docker compose file simultaneously.
