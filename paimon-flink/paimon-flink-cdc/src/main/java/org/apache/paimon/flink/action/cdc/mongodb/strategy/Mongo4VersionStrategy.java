@@ -42,10 +42,11 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
 
     private static final String FIELD_TYPE = "operationType";
     private static final String FIELD_DATA = "fullDocument";
+    private static final String FIELD_KEY = "documentKey";
     private static final String OP_UPDATE = "update";
     private static final String OP_INSERT = "insert";
     private static final String OP_REPLACE = "replace";
-
+    private static final String OP_DELETE = "delete";
     private final String databaseName;
     private final String collection;
     private final boolean caseSensitive;
@@ -77,7 +78,8 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
             throws JsonProcessingException {
         String op = root.get(FIELD_TYPE).asText();
         JsonNode fullDocument = root.get(FIELD_DATA);
-        return handleOperation(op, fullDocument);
+        JsonNode documentKey = root.get(FIELD_KEY);
+        return handleOperation(op, fullDocument, documentKey);
     }
 
     /**
@@ -88,18 +90,25 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
      * @return A list of RichCdcMultiplexRecord based on the operation type.
      * @throws JsonProcessingException If there's an error during JSON processing.
      */
-    private List<RichCdcMultiplexRecord> handleOperation(String op, JsonNode fullDocument)
-            throws JsonProcessingException {
+    private List<RichCdcMultiplexRecord> handleOperation(
+            String op, JsonNode fullDocument, JsonNode documentKey) throws JsonProcessingException {
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
 
         switch (op) {
             case OP_INSERT:
-                records.add(handleInsert(fullDocument, paimonFieldTypes));
+                records.add(processRecord(fullDocument, paimonFieldTypes, RowKind.INSERT));
                 break;
             case OP_REPLACE:
             case OP_UPDATE:
-                records.add(handleUpdateOrReplace(fullDocument, paimonFieldTypes));
+                // Before version 6.0 of MongoDB, it was not possible to obtain 'Update Before'
+                // information. Therefore, data is first deleted using the primary key '_id', and
+                // then inserted.
+                records.add(processRecord(documentKey, paimonFieldTypes, RowKind.DELETE));
+                records.add(processRecord(fullDocument, paimonFieldTypes, RowKind.INSERT));
+                break;
+            case OP_DELETE:
+                records.add(processRecord(documentKey, paimonFieldTypes, RowKind.DELETE));
                 break;
             default:
                 throw new UnsupportedOperationException("Unknown record type: " + op);
@@ -108,17 +117,22 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
     }
 
     /**
-     * Processes the insert operation and constructs a RichCdcMultiplexRecord.
+     * Processes a JSON record based on the specified parameters and returns a
+     * RichCdcMultiplexRecord object.
      *
-     * @param fullDocument The JsonNode representing the full MongoDB document for insertion.
-     * @param paimonFieldTypes A map to store the field types.
-     * @return A RichCdcMultiplexRecord representing the insert operation.
-     * @throws JsonProcessingException If there's an error during JSON processing.
+     * @param fullDocument the JSON node containing the full document to be processed.
+     * @param paimonFieldTypes a LinkedHashMap containing the field types to be used in the
+     *     processing.
+     * @param rowKind the kind of row to be processed (e.g., insert, update, delete).
+     * @throws JsonProcessingException if there is an error in processing the JSON document.
+     * @return a RichCdcMultiplexRecord object that contains the processed record information.
      */
-    private RichCdcMultiplexRecord handleInsert(
-            JsonNode fullDocument, LinkedHashMap<String, DataType> paimonFieldTypes)
+    private RichCdcMultiplexRecord processRecord(
+            JsonNode fullDocument,
+            LinkedHashMap<String, DataType> paimonFieldTypes,
+            RowKind rowKind)
             throws JsonProcessingException {
-        Map<String, String> insert =
+        Map<String, String> record =
                 getExtractRow(
                         fullDocument,
                         paimonFieldTypes,
@@ -130,32 +144,6 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
                 collection,
                 paimonFieldTypes,
                 extractPrimaryKeys(),
-                new CdcRecord(RowKind.INSERT, insert));
-    }
-
-    /**
-     * Processes the update or replace operation and constructs a RichCdcMultiplexRecord.
-     *
-     * @param fullDocument The JsonNode representing the full MongoDB document for update/replace.
-     * @param paimonFieldTypes A map to store the field types.
-     * @return A RichCdcMultiplexRecord representing the update or replace operation.
-     * @throws JsonProcessingException If there's an error during JSON processing.
-     */
-    private RichCdcMultiplexRecord handleUpdateOrReplace(
-            JsonNode fullDocument, LinkedHashMap<String, DataType> paimonFieldTypes)
-            throws JsonProcessingException {
-        Map<String, String> after =
-                getExtractRow(
-                        fullDocument,
-                        paimonFieldTypes,
-                        caseSensitive,
-                        computedColumns,
-                        mongodbConfig);
-        return new RichCdcMultiplexRecord(
-                databaseName,
-                collection,
-                paimonFieldTypes,
-                extractPrimaryKeys(),
-                new CdcRecord(RowKind.UPDATE_AFTER, after));
+                new CdcRecord(rowKind, record));
     }
 }
