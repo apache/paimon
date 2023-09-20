@@ -332,6 +332,8 @@ public class AlterTable {
         options.put("compaction.max.file-num", "40");
 
         Catalog catalog = CreateCatalog.createFilesystemCatalog();
+        catalog.createDatabase("my_db", false);
+
         try {
             catalog.createTable(
                 identifier,
