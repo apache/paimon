@@ -38,6 +38,7 @@ import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -67,6 +68,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -157,7 +159,9 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     @Override
     public void setRawEvent(String rawEvent) {
         try {
-            objectMapper.configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
+            objectMapper
+                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
             root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
             currentTable = root.payload().source().table();
             shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable();
@@ -177,21 +181,21 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             return Collections.emptyList();
         }
 
-        DebeziumEvent.HistoryRecord historyRecord = root.payload().historyRecord();
-        if (historyRecord == null) {
+        DebeziumEvent.Payload payload = root.payload();
+        if (!payload.hasHistoryRecord()) {
             return Collections.emptyList();
         }
 
         TableChanges.TableChange tableChange;
         try {
-            List<TableChanges.TableChange> tableChanges = historyRecord.tableChanges();
-            if (tableChanges.size() != 1) {
+            Iterator<TableChanges.TableChange> tableChanges = payload.getTableChanges();
+            if (Iterators.size(tableChanges) != 1) {
                 LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
-                                + historyRecord);
+                                + payload.historyRecord());
                 return Collections.emptyList();
             }
-            tableChange = tableChanges.get(0);
+            tableChange = tableChanges.next();
         } catch (Exception e) {
             LOG.info("Failed to parse history record for schema changes", e);
             return Collections.emptyList();
@@ -207,21 +211,21 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             return Optional.empty();
         }
 
-        DebeziumEvent.HistoryRecord historyRecord = root.payload().historyRecord();
-        if (historyRecord == null) {
+        DebeziumEvent.Payload payload = root.payload();
+        if (!payload.hasHistoryRecord()) {
             return Optional.empty();
         }
 
         try {
-            List<TableChanges.TableChange> tableChanges = historyRecord.tableChanges();
-            if (tableChanges.size() != 1) {
+            Iterator<TableChanges.TableChange> tableChanges = payload.getTableChanges();
+            if (Iterators.size(tableChanges) != 1) {
                 LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
-                                + historyRecord);
+                                + payload.historyRecord());
                 return Optional.empty();
             }
 
-            TableChanges.TableChange tableChange = tableChanges.get(0);
+            TableChanges.TableChange tableChange = tableChanges.next();
             if (TableChanges.TableChangeType.CREATE != tableChange.getType()) {
                 return Optional.empty();
             }

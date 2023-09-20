@@ -16,11 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from JsonDebeziumSchemaSerializer in the doris-flink-connector
- * (https://github.com/apache/doris-flink-connector/), licensed by the Apache Software Foundation (ASF) under the
- * Apache License, Version 2.0. See the NOTICE file distributed with this work for additional
- *  information regarding copyright ownership. */
-
 package org.apache.paimon.flink.action.cdc.mysql.format;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -29,6 +24,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import io.debezium.relational.history.TableChanges;
 
+import java.io.IOException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -46,7 +43,6 @@ public class DebeziumEvent {
     private static final String FIELD_OP = "op";
     private static final String FIELD_DB = "db";
     private static final String FIELD_TABLE = "table";
-    private static final String FIELD_TABLE_CHANGES = "tableChanges";
     private static final String FIELD_FIELDS = "fields";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_TYPE = "type";
@@ -89,7 +85,7 @@ public class DebeziumEvent {
         private final Map<String, Object> after;
 
         @JsonProperty(FIELD_HISTORY_RECORD)
-        private final HistoryRecord historyRecord;
+        private final String historyRecord;
 
         @JsonProperty(FIELD_OP)
         private final String op;
@@ -99,7 +95,7 @@ public class DebeziumEvent {
                 @JsonProperty(FIELD_SOURCE) Source source,
                 @JsonProperty(FIELD_BEFORE) Map<String, Object> before,
                 @JsonProperty(FIELD_AFTER) Map<String, Object> after,
-                @JsonProperty(FIELD_HISTORY_RECORD) HistoryRecord historyRecord,
+                @JsonProperty(FIELD_HISTORY_RECORD) String historyRecord,
                 @JsonProperty(FIELD_OP) String op) {
             this.source = source;
             this.before = before;
@@ -124,7 +120,7 @@ public class DebeziumEvent {
         }
 
         @JsonGetter(FIELD_HISTORY_RECORD)
-        public HistoryRecord historyRecord() {
+        public String historyRecord() {
             return historyRecord;
         }
 
@@ -135,6 +131,15 @@ public class DebeziumEvent {
 
         public boolean isSchemaChange() {
             return op() == null;
+        }
+
+        public boolean hasHistoryRecord() {
+            return historyRecord != null;
+        }
+
+        /** Get table changes in history record. */
+        public Iterator<TableChanges.TableChange> getTableChanges() throws IOException {
+            return DebeziumEventUtils.getTableChanges(historyRecord).iterator();
         }
     }
 
@@ -228,24 +233,6 @@ public class DebeziumEvent {
         @JsonGetter(FIELD_TABLE)
         public String table() {
             return table;
-        }
-    }
-
-    /** HistoryRecord element of payload in Debezium event record. */
-    public static class HistoryRecord {
-
-        @JsonProperty(FIELD_TABLE_CHANGES)
-        private final List<TableChanges.TableChange> tableChanges;
-
-        @JsonCreator
-        public HistoryRecord(
-                @JsonProperty(FIELD_TABLE_CHANGES) List<TableChanges.TableChange> tableChanges) {
-            this.tableChanges = tableChanges;
-        }
-
-        @JsonGetter(FIELD_TABLE_CHANGES)
-        public List<TableChanges.TableChange> tableChanges() {
-            return tableChanges;
         }
     }
 }
