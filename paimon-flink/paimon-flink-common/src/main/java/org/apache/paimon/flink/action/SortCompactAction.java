@@ -116,16 +116,13 @@ public class SortCompactAction extends CompactAction {
         DataStream<RowData> source = sourceBuilder.withEnv(env).withContinuousMode(false).build();
         TableSorter sorter =
                 TableSorter.getSorter(env, source, fileStoreTable, sortStrategy, orderColumns);
-        DataStream<RowData> sorted = sorter.sort();
 
-        FlinkSinkBuilder flinkSinkBuilder = new FlinkSinkBuilder(fileStoreTable);
-        flinkSinkBuilder.withInput(sorted).withOverwritePartition(new HashMap<>());
-        String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
-        if (sinkParallelism != null) {
-            flinkSinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
-        }
-
-        flinkSinkBuilder.build();
+        new FlinkSinkBuilder(fileStoreTable)
+                .withInput(sorter.sort())
+                // This should use empty map to tag it on overwrite action, otherwise there is no
+                // overwrite action.
+                .withOverwritePartition(new HashMap<>())
+                .build();
     }
 
     public SortCompactAction withOrderStrategy(String sortStrategy) {
