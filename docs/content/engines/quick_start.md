@@ -55,7 +55,7 @@ docker compose is a convenient way to manage docker containers and quickly build
 you need. The following docker compose file is composed of three services, jobmanager, taskmanager and sql-client
 , using the flink:1.17.1-scala_2.12 image.
 
-Copy the following into a ```flink_docker_compose.yml``` file.
+Create a file named flink_docker_compose.yml and copy the following into it.
 
 > Notice:
 >
