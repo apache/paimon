@@ -46,6 +46,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -1066,6 +1067,18 @@ public abstract class FileStoreTableTestBase {
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(latestSnapshotId);
 
         commit.close();
+    }
+
+    @Test
+    public void testSchemaPathOption() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        TableSchema schema = table.schema();
+        schema.options().put(CoreOptions.PATH.key(), "fake path");
+        // reset PATH of schema option to table location
+        table = table.copy(Collections.emptyMap());
+        String schemaPath = table.schema().options().get(CoreOptions.PATH.key());
+        String tablePath = table.location().toString();
+        assertThat(schemaPath).isEqualTo(tablePath);
     }
 
     protected List<String> getResult(
