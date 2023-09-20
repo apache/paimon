@@ -39,14 +39,12 @@ public class TableScanUtils {
                     }
                 };
         if (table.primaryKeys().size() > 0 && mergeEngineDesc.containsKey(mergeEngine)) {
-            switch (options.changelogProducer()) {
-                case NONE:
-                case INPUT:
-                    throw new RuntimeException(
-                            mergeEngineDesc.get(mergeEngine)
-                                    + " streaming reading is not supported. You can use "
-                                    + "'lookup' or 'full-compaction' changelog producer to support streaming reading.");
-                default:
+            if (options.changelogProducer() == CoreOptions.ChangelogProducer.NONE) {
+                throw new RuntimeException(
+                        mergeEngineDesc.get(mergeEngine)
+                                + " streaming reading is not supported. You can use "
+                                + "'lookup' or 'full-compaction' changelog producer to support streaming reading. "
+                                + "('input' changelog producer is also supported, but only returns input records.)");
             }
         }
     }

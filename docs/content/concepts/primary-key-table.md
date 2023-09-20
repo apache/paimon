@@ -120,7 +120,8 @@ For example, suppose Paimon receives three records:
 Assuming that the first column is the primary key, the final result would be `<1, 25.2, 10, 'This is a book'>`.
 
 {{< hint info >}}
-For streaming queries, `partial-update` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
+For streaming queries, `partial-update` merge engine must be used together with `lookup` or `full-compaction`
+[changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}). ('input' changelog producer is also supported, but only returns input records.)
 {{< /hint >}}
 
 {{< hint info >}}
@@ -257,7 +258,8 @@ If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 
 {{< hint info >}}
-For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
+For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction`
+[changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}). ('input' changelog producer is also supported, but only returns input records.)
 {{< /hint >}}
 
 ### First Row
