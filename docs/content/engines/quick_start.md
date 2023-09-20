@@ -127,7 +127,7 @@ networks:
 
 ### Step 1: Prepare the dependent jar files
 
-Reading [Engines/Flink](https://paimon.apache.org/docs/master/engines/flink/) chapters, Download the appropriate versions of the ```paimon-flink-{{< version >}}.jar``` and ```flink-shaded-hadoop-2-uber-{{< version >}}.jar``` files to the specified path
+Reading [Engines/Flink](https://paimon.apache.org/docs/master/engines/flink/) chapters, Download the appropriate versions of the paimon-flink-*.jar and flink-shaded-hadoop-2-uber-*.jar files to the specified path.
 
 For example, ```./incubator-paimon/docker/custom_jars```.
 
