@@ -18,10 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.mysql.TestCaseInsensitiveCatalogFactory;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -30,7 +27,6 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -188,9 +184,6 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
     @Test
     @Timeout(60)
     public void testDynamicTableCreationInMongoDB() throws Exception {
-        catalog =
-                new TestCaseInsensitiveCatalogFactory()
-                        .createCatalog(CatalogContext.create(new Path(warehouse)));
         String dbName = database + UUID.randomUUID();
         writeRecordsToMongoDB("test-data-5", dbName, "database");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -198,11 +191,10 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
         MongoDBSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mongodbConfig)
                         .withTableConfig(getBasicTableConfig())
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"))
                         .build();
-        Field catalogField = ActionBase.class.getDeclaredField("catalog");
-        catalogField.setAccessible(true);
-        Object newCatalog = catalog;
-        catalogField.set(action, newCatalog);
         runActionWithDefaultEnv(action);
 
         waitingTables("t3");

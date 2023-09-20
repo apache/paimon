@@ -18,10 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.mysql.TestCaseInsensitiveCatalogFactory;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
@@ -33,7 +30,6 @@ import org.junit.jupiter.api.Timeout;
 
 import javax.annotation.Nullable;
 
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -471,10 +467,6 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testCaseInsensitive() throws Exception {
-        catalog =
-                new TestCaseInsensitiveCatalogFactory()
-                        .createCatalog(CatalogContext.create(new Path(warehouse)));
-
         final String topic = "case-insensitive";
         createTestTopic(topic, 1, 1);
 
@@ -489,11 +481,10 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTableConfig(getBasicTableConfig())
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"))
                         .build();
-        Field catalogField = ActionBase.class.getDeclaredField("catalog");
-        catalogField.setAccessible(true);
-        Object newCatalog = catalog;
-        catalogField.set(action, newCatalog);
         runActionWithDefaultEnv(action);
 
         waitingTables("t1");
