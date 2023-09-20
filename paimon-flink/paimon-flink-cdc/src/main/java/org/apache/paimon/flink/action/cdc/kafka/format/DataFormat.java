@@ -16,13 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.formats;
+package org.apache.paimon.flink.action.cdc.kafka.format;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.formats.canal.CanalRecordParser;
-import org.apache.paimon.flink.action.cdc.kafka.formats.ogg.OggRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.ogg.OggRecordParser;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;

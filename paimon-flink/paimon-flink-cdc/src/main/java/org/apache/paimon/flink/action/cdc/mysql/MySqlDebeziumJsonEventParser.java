@@ -27,20 +27,18 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.debezium.data.Bits;
@@ -77,7 +75,6 @@ import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
 /** {@link EventParser} for MySQL Debezium JSON. */
@@ -90,15 +87,15 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     private final boolean caseSensitive;
     private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
-    private final NewTableSchemaBuilder<JsonNode> schemaBuilder;
+    private final NewTableSchemaBuilder<TableChanges.TableChange> schemaBuilder;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final Set<String> includedTables = new HashSet<>();
     private final Set<String> excludedTables = new HashSet<>();
     private final TypeMapping typeMapping;
 
-    private JsonNode root;
-    private JsonNode payload;
+    private DebeziumEvent root;
+
     // NOTE: current table name is not converted by tableNameConverter
     private String currentTable;
     private boolean shouldSynchronizeCurrentTable;
@@ -123,7 +120,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             ZoneId serverTimeZone,
             boolean caseSensitive,
             TableNameConverter tableNameConverter,
-            NewTableSchemaBuilder<JsonNode> schemaBuilder,
+            NewTableSchemaBuilder<TableChanges.TableChange> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
             TypeMapping typeMapping) {
@@ -143,7 +140,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TableNameConverter tableNameConverter,
-            NewTableSchemaBuilder<JsonNode> schemaBuilder,
+            NewTableSchemaBuilder<TableChanges.TableChange> schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
             TypeMapping typeMapping) {
@@ -161,9 +158,8 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     public void setRawEvent(String rawEvent) {
         try {
             objectMapper.configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
-            root = objectMapper.readValue(rawEvent, JsonNode.class);
-            payload = root.get("payload");
-            currentTable = payload.get("source").get("table").asText();
+            root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
+            currentTable = root.payload().source().table();
             shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable();
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -175,60 +171,34 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         return tableNameConverter.convert(Identifier.create(getDatabaseName(), currentTable));
     }
 
-    private boolean isSchemaChange() {
-        return payload.get("op") == null;
-    }
-
     @Override
     public List<DataField> parseSchemaChange() {
-        if (!shouldSynchronizeCurrentTable || !isSchemaChange()) {
+        if (!shouldSynchronizeCurrentTable || !root.payload().isSchemaChange()) {
             return Collections.emptyList();
         }
 
-        JsonNode historyRecord = payload.get("historyRecord");
+        DebeziumEvent.HistoryRecord historyRecord = root.payload().historyRecord();
         if (historyRecord == null) {
             return Collections.emptyList();
         }
 
-        JsonNode columns;
+        TableChanges.TableChange tableChange;
         try {
-            String historyRecordString = historyRecord.asText();
-            JsonNode tableChanges = objectMapper.readTree(historyRecordString).get("tableChanges");
+            List<TableChanges.TableChange> tableChanges = historyRecord.tableChanges();
             if (tableChanges.size() != 1) {
                 LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
-                                + historyRecord.asText());
+                                + historyRecord);
                 return Collections.emptyList();
             }
-            columns = tableChanges.get(0).get("table").get("columns");
+            tableChange = tableChanges.get(0);
         } catch (Exception e) {
             LOG.info("Failed to parse history record for schema changes", e);
             return Collections.emptyList();
         }
-        if (columns == null) {
-            return Collections.emptyList();
-        }
 
-        List<DataField> result = new ArrayList<>();
-        for (int i = 0; i < columns.size(); i++) {
-            JsonNode column = columns.get(i);
-            JsonNode length = column.get("length");
-            JsonNode scale = column.get("scale");
-            DataType type =
-                    MySqlTypeUtils.toDataType(
-                            column.get("typeName").asText(),
-                            length == null ? null : length.asInt(),
-                            scale == null ? null : scale.asInt(),
-                            typeMapping);
-
-            if (!typeMapping.containsMode(TO_NULLABLE)) {
-                type = type.copy(column.get("optional").asBoolean());
-            }
-
-            String fieldName = column.get("name").asText();
-            result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
-        }
-        return result;
+        Optional<Schema> schema = schemaBuilder.build(tableChange);
+        return schema.get().fields();
     }
 
     @Override
@@ -237,31 +207,27 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             return Optional.empty();
         }
 
-        JsonNode historyRecord = payload.get("historyRecord");
+        DebeziumEvent.HistoryRecord historyRecord = root.payload().historyRecord();
         if (historyRecord == null) {
             return Optional.empty();
         }
 
         try {
-            String historyRecordString = historyRecord.asText();
-            JsonNode tableChanges = objectMapper.readTree(historyRecordString).get("tableChanges");
+            List<TableChanges.TableChange> tableChanges = historyRecord.tableChanges();
             if (tableChanges.size() != 1) {
                 LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
-                                + historyRecord.asText());
+                                + historyRecord);
                 return Optional.empty();
             }
 
-            JsonNode tableChange = tableChanges.get(0);
-            if (!tableChange
-                    .get("type")
-                    .asText()
-                    .equals(TableChanges.TableChangeType.CREATE.name())) {
+            TableChanges.TableChange tableChange = tableChanges.get(0);
+            if (TableChanges.TableChangeType.CREATE != tableChange.getType()) {
                 return Optional.empty();
             }
 
-            JsonNode primaryKeyColumnNames = tableChange.get("table").get("primaryKeyColumnNames");
-            if (primaryKeyColumnNames.size() == 0) {
+            List<String> primaryKeyColumnNames = tableChange.getTable().primaryKeyColumnNames();
+            if (primaryKeyColumnNames.isEmpty()) {
                 LOG.debug(
                         "Didn't find primary keys from MySQL DDL for table '{}'. "
                                 + "This table won't be synchronized.",
@@ -280,19 +246,19 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
     @Override
     public List<CdcRecord> parseRecords() {
-        if (!shouldSynchronizeCurrentTable || isSchemaChange()) {
+        if (!shouldSynchronizeCurrentTable || root.payload().isSchemaChange()) {
             return Collections.emptyList();
         }
         List<CdcRecord> records = new ArrayList<>();
 
-        Map<String, String> before = extractRow(payload.get("before"));
-        if (before.size() > 0) {
+        Map<String, String> before = extractRow(root.payload().before());
+        if (!before.isEmpty()) {
             before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
             records.add(new CdcRecord(RowKind.DELETE, before));
         }
 
-        Map<String, String> after = extractRow(payload.get("after"));
-        if (after.size() > 0) {
+        Map<String, String> after = extractRow(root.payload().after());
+        if (!after.isEmpty()) {
             after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             records.add(new CdcRecord(RowKind.INSERT, after));
         }
@@ -301,56 +267,33 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     private String getDatabaseName() {
-        return payload.get("source").get("db").asText();
+        return root.payload().source().db();
     }
 
-    private Map<String, String> extractRow(JsonNode recordRow) {
-        JsonNode schema =
+    private Map<String, String> extractRow(Map<String, Object> recordRow) {
+        if (recordRow == null) {
+            return new HashMap<>();
+        }
+
+        DebeziumEvent.Field schema =
                 Preconditions.checkNotNull(
-                        root.get("schema"),
+                        root.schema(),
                         "MySqlDebeziumJsonEventParser only supports debezium JSON with schema. "
                                 + "Please make sure that `includeSchema` is true "
                                 + "in the JsonDebeziumDeserializationSchema you created");
 
-        Map<String, String> mySqlFieldTypes = new HashMap<>();
-        Map<String, String> fieldClassNames = new HashMap<>();
-        JsonNode arrayNode = schema.get("fields");
-        for (int i = 0; i < arrayNode.size(); i++) {
-            JsonNode elementNode = arrayNode.get(i);
-            String field = elementNode.get("field").asText();
-            if ("before".equals(field) || "after".equals(field)) {
-                JsonNode innerArrayNode = elementNode.get("fields");
-                for (int j = 0; j < innerArrayNode.size(); j++) {
-                    JsonNode innerElementNode = innerArrayNode.get(j);
-                    String fieldName = innerElementNode.get("field").asText();
-                    String fieldType = innerElementNode.get("type").asText();
-                    mySqlFieldTypes.put(fieldName, fieldType);
-                    if (innerElementNode.get("name") != null) {
-                        String className = innerElementNode.get("name").asText();
-                        fieldClassNames.put(fieldName, className);
-                    }
-                }
-            }
-        }
-
-        // the geometry, point type can not be converted to string, so we convert it to Object
-        // first.
-        Map<String, Object> jsonMap =
-                objectMapper.convertValue(recordRow, new TypeReference<Map<String, Object>>() {});
-        if (jsonMap == null) {
-            return new HashMap<>();
-        }
+        Map<String, DebeziumEvent.Field> fields = schema.beforeAndAfterFields();
 
         Map<String, String> resultMap = new HashMap<>();
-        for (Map.Entry<String, String> field : mySqlFieldTypes.entrySet()) {
+        for (Map.Entry<String, DebeziumEvent.Field> field : fields.entrySet()) {
             String fieldName = field.getKey();
-            String mySqlType = field.getValue();
-            Object objectValue = jsonMap.get(fieldName);
+            String mySqlType = field.getValue().type();
+            Object objectValue = recordRow.get(fieldName);
             if (objectValue == null) {
                 continue;
             }
 
-            String className = fieldClassNames.get(fieldName);
+            String className = field.getValue().name();
             String oldValue = objectValue.toString();
             String newValue = oldValue;
 
@@ -441,13 +384,13 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                 .toString();
             } else if (Point.LOGICAL_NAME.equals(className)
                     || Geometry.LOGICAL_NAME.equals(className)) {
-                JsonNode jsonNode = recordRow.get(fieldName);
+                Map<String, Object> valueNode = (Map<String, Object>) recordRow.get(fieldName);
                 try {
-                    byte[] wkb = jsonNode.get("wkb").binaryValue();
+                    byte[] wkb = (byte[]) valueNode.get(Geometry.WKB_FIELD);
                     newValue = MySqlTypeUtils.convertWkbArray(wkb);
                 } catch (Exception e) {
                     throw new IllegalArgumentException(
-                            String.format("Failed to convert %s to geometry JSON.", jsonNode), e);
+                            String.format("Failed to convert %s to geometry JSON.", valueNode), e);
                 }
             }
 
