@@ -54,9 +54,15 @@ public class FlinkSinkBuilder {
         return this;
     }
 
+    /**
+     * Whether we need to overwrite partitions.
+     *
+     * @param overwritePartition If we pass null, it means not overwrite. If we pass an empty map,
+     *     it means to overwrite every partition it received. If we pass a non-empty map, it means
+     *     we only overwrite the partitions match the map.
+     * @return returns this.
+     */
     public FlinkSinkBuilder withOverwritePartition(
-            // if we pass null, it means not overwrite
-            // if we pass an empty map, it means to overwrite every partition it received
             @Nullable Map<String, String> overwritePartition) {
         this.overwritePartition = overwritePartition;
         return this;
