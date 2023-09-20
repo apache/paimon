@@ -32,12 +32,6 @@ public class StaticFromTagStartingScanner extends AbstractStartingScanner {
     public StaticFromTagStartingScanner(SnapshotManager snapshotManager, String tagName) {
         super(snapshotManager);
         this.tagName = tagName;
-        TagManager tagManager =
-                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        Snapshot snapshot = tagManager.taggedSnapshot(this.tagName);
-        if (snapshot != null) {
-            this.startingSnapshotId = snapshot.id();
-        }
     }
 
     @Override
@@ -47,10 +41,10 @@ public class StaticFromTagStartingScanner extends AbstractStartingScanner {
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        if (startingSnapshotId == null) {
-            return new NoSnapshot();
-        }
+        TagManager tagManager =
+                new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
+        Snapshot snapshot = tagManager.taggedSnapshot(tagName);
         return StartingScanner.fromPlan(
-                snapshotReader.withMode(ScanMode.ALL).withSnapshot(startingSnapshotId).read());
+                snapshotReader.withMode(ScanMode.ALL).withSnapshot(snapshot).read());
     }
 }
