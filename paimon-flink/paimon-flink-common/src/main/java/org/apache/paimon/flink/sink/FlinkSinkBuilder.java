@@ -55,6 +55,8 @@ public class FlinkSinkBuilder {
     }
 
     public FlinkSinkBuilder withOverwritePartition(
+            // if we pass null, it means not overwrite
+            // if we pass an empty map, it means to overwrite every partition it received
             @Nullable Map<String, String> overwritePartition) {
         this.overwritePartition = overwritePartition;
         return this;
