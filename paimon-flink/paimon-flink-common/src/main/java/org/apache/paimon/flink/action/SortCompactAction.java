@@ -119,7 +119,7 @@ public class SortCompactAction extends CompactAction {
 
         new FlinkSinkBuilder(fileStoreTable)
                 .withInput(sorter.sort())
-                // we pass an object here to tag it an overwrite action.
+                // This should use empty map to tag it on overwrite action, otherwise there is no overwrite action.
                 .withOverwritePartition(new HashMap<>())
                 .build();
     }
