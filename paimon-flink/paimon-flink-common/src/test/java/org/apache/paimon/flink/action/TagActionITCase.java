@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
@@ -65,10 +66,13 @@ public class TagActionITCase extends ActionITCaseBase {
 
         TagManager tagManager = new TagManager(table.fileIO(), table.location());
 
-        CreateTagAction createTagAction =
-                new CreateTagAction(
-                        warehouse, database, tableName, Collections.emptyMap(), "tag2", 2);
-        createTagAction.run();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            new CreateTagAction(warehouse, database, tableName, Collections.emptyMap(), "tag2", 2)
+                    .run();
+        } else {
+            callProcedure(
+                    String.format("CALL create_tag('%s.%s', 'tag2', 2)", database, tableName));
+        }
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
         // read tag2
@@ -76,9 +80,12 @@ public class TagActionITCase extends ActionITCaseBase {
                 "SELECT * FROM `" + tableName + "` /*+ OPTIONS('scan.tag-name'='tag2') */",
                 Arrays.asList(Row.of(1L, "Hi"), Row.of(2L, "Hello")));
 
-        DeleteTagAction deleteTagAction =
-                new DeleteTagAction(warehouse, database, tableName, Collections.emptyMap(), "tag2");
-        deleteTagAction.run();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            new DeleteTagAction(warehouse, database, tableName, Collections.emptyMap(), "tag2")
+                    .run();
+        } else {
+            callProcedure(String.format("CALL delete_tag('%s.%s', 'tag2')", database, tableName));
+        }
         assertThat(tagManager.tagExists("tag2")).isFalse();
     }
 }
