@@ -31,10 +31,6 @@ under the License.
     <artifactId>paimon-common</artifactId>
     <name>Paimon : Common</name>
 
-    <properties>
-        <antlr4.version>4.7</antlr4.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
