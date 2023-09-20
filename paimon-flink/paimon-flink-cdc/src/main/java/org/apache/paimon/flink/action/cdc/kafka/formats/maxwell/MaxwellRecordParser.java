@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.kafka.formats.maxwell;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -54,11 +53,8 @@ public class MaxwellRecordParser extends RecordParser {
     private static final String OP_DELETE = "delete";
 
     public MaxwellRecordParser(
-            boolean caseSensitive,
-            TypeMapping typeMapping,
-            TableNameConverter tableNameConverter,
-            List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, tableNameConverter, computedColumns);
+            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(caseSensitive, typeMapping, computedColumns);
     }
 
     @Override

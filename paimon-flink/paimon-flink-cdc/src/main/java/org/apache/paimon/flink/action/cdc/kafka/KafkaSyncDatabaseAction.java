@@ -148,24 +148,26 @@ public class KafkaSyncDatabaseAction extends ActionBase {
         }
 
         catalog.createDatabase(database, true);
-        TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
 
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
 
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);
         RecordParser recordParser =
-                format.createParser(
-                        caseSensitive, tableNameConverter, typeMapping, Collections.emptyList());
+                format.createParser(caseSensitive, typeMapping, Collections.emptyList());
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
                 new RichCdcMultiplexRecordSchemaBuilder(tableConfig, caseSensitive);
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
+        TableNameConverter tableNameConverter =
+                new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
                 () ->
                         new RichCdcMultiplexRecordEventParser(
-                                schemaBuilder, includingPattern, excludingPattern);
+                                schemaBuilder,
+                                includingPattern,
+                                excludingPattern,
+                                tableNameConverter);
 
         new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
                 .withInput(
