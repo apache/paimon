@@ -38,7 +38,6 @@ import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -186,16 +185,19 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             return Collections.emptyList();
         }
 
-        TableChanges.TableChange tableChange;
+        TableChanges.TableChange tableChange = null;
         try {
             Iterator<TableChanges.TableChange> tableChanges = payload.getTableChanges();
-            if (Iterators.size(tableChanges) != 1) {
+            long count;
+            for (count = 0L; tableChanges.hasNext(); ++count) {
+                tableChange = tableChanges.next();
+            }
+            if (count != 1) {
                 LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
                                 + payload.historyRecord());
                 return Collections.emptyList();
             }
-            tableChange = tableChanges.next();
         } catch (Exception e) {
             LOG.info("Failed to parse history record for schema changes", e);
             return Collections.emptyList();
@@ -217,15 +219,19 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         }
 
         try {
+            TableChanges.TableChange tableChange = null;
             Iterator<TableChanges.TableChange> tableChanges = payload.getTableChanges();
-            if (Iterators.size(tableChanges) != 1) {
+            long count;
+            for (count = 0L; tableChanges.hasNext(); ++count) {
+                tableChange = tableChanges.next();
+            }
+            if (count != 1) {
                 LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
                                 + payload.historyRecord());
                 return Optional.empty();
             }
 
-            TableChanges.TableChange tableChange = tableChanges.next();
             if (TableChanges.TableChangeType.CREATE != tableChange.getType()) {
                 return Optional.empty();
             }
