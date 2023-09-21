@@ -62,16 +62,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
@@ -294,7 +285,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
 
         Map<String, DebeziumEvent.Field> fields = schema.beforeAndAfterFields();
 
-        Map<String, String> resultMap = new HashMap<>();
+        LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
         for (Map.Entry<String, DebeziumEvent.Field> field : fields.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue().type();
@@ -396,7 +387,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                     || Geometry.LOGICAL_NAME.equals(className)) {
                 Map<String, Object> valueNode = (Map<String, Object>) recordRow.get(fieldName);
                 try {
-                    byte[] wkb = (byte[]) valueNode.get(Geometry.WKB_FIELD);
+                    byte[] wkb = Base64.getDecoder().decode(valueNode.get(Geometry.WKB_FIELD).toString());
                     newValue = MySqlTypeUtils.convertWkbArray(wkb);
                 } catch (Exception e) {
                     throw new IllegalArgumentException(

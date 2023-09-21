@@ -26,6 +26,7 @@ import io.debezium.relational.history.TableChanges;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -207,7 +208,7 @@ public class DebeziumEvent {
                                     FIELD_BEFORE.equals(item.field)
                                             || FIELD_AFTER.equals(item.field))
                     .flatMap(item -> item.fields.stream())
-                    .collect(Collectors.toMap(Field::field, Function.identity(), (v1, v2) -> v2));
+                    .collect(Collectors.toMap(Field::field, Function.identity(), (v1, v2) -> v2, LinkedHashMap::new));
         }
     }
 
