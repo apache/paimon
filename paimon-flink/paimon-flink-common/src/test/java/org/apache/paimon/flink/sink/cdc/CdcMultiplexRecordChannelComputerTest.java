@@ -149,7 +149,7 @@ public class CdcMultiplexRecordChannelComputerTest {
 
         int numChannels = random.nextInt(10) + 1;
         CdcMultiplexRecordChannelComputer channelComputer =
-                new CdcMultiplexRecordChannelComputer(catalogLoader);
+                new CdcMultiplexRecordChannelComputer(catalogLoader, new HashMap<>());
         channelComputer.setup(numChannels);
 
         // assert that insert and delete records are routed into same channel

@@ -277,7 +277,7 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
         waitingTables("t4");
 
         FileStoreTable table = getFileStoreTable("t4");
-        Map<String, String> options = table.options();
-        assertThat(options).containsAllEntriesOf(tableConfig).containsKey("path");
+        Map<String, String> tableOptions = table.options();
+        assertThat(tableOptions).containsAllEntriesOf(tableConfig);
     }
 }

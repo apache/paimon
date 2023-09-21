@@ -20,8 +20,6 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.common.typeinfo.TypeHint;
@@ -101,11 +99,6 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                                     new Identifier(database, parser.parseTableName());
                             try {
                                 catalog.createTable(identifier, schema, true);
-                                Table table = catalog.getTable(identifier);
-                                List<SchemaChange> schemaChanges =
-                                        ConfigChangeGenerator.generateConfigChanges(
-                                                table.options(), schema.options());
-                                catalog.alterTable(identifier, schemaChanges, true);
                             } catch (Exception e) {
                                 LOG.error("create newly added paimon table error.", e);
                             }

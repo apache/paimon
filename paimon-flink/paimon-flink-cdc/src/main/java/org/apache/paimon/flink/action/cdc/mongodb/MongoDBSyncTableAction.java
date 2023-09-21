@@ -25,12 +25,10 @@ import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
-import org.apache.paimon.flink.sink.cdc.ConfigChangeGenerator;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
@@ -72,6 +70,7 @@ public class MongoDBSyncTableAction extends ActionBase {
     private final String database;
     private final String table;
     private final Configuration mongodbConfig;
+    private FileStoreTable fileStoreTable;
     private List<String> partitionKeys = new ArrayList<>();
     private Map<String, String> tableConfig = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
@@ -134,14 +133,11 @@ public class MongoDBSyncTableAction extends ActionBase {
                 buildComputedColumns(computedColumnArgs, mongodbSchema.fields());
 
         Identifier identifier = new Identifier(database, table);
-        FileStoreTable table;
 
         // Check if table exists before trying to get or create it
         if (catalog.tableExists(identifier)) {
-            table = (FileStoreTable) catalog.getTable(identifier);
-            List<SchemaChange> schemaChanges =
-                    ConfigChangeGenerator.generateConfigChanges(table.options(), tableConfig);
-            catalog.alterTable(identifier, schemaChanges, true);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = fileStoreTable.copy(tableConfig);
         } else {
             Schema fromMongodb =
                     MongoDBActionUtils.buildPaimonSchema(
@@ -151,7 +147,7 @@ public class MongoDBSyncTableAction extends ActionBase {
                             tableConfig,
                             caseSensitive);
             catalog.createTable(identifier, fromMongodb, false);
-            table = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
@@ -171,7 +167,7 @@ public class MongoDBSyncTableAction extends ActionBase {
                                                         computedColumns,
                                                         mongodbConfig)))
                         .withParserFactory(parserFactory)
-                        .withTable(table)
+                        .withTable(fileStoreTable)
                         .withIdentifier(identifier)
                         .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -204,6 +200,11 @@ public class MongoDBSyncTableAction extends ActionBase {
     @VisibleForTesting
     public Map<String, String> tableConfig() {
         return tableConfig;
+    }
+
+    @VisibleForTesting
+    public FileStoreTable fileStoreTable() {
+        return fileStoreTable;
     }
 
     // ------------------------------------------------------------------------

@@ -195,13 +195,11 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
         tableConfig.put("snapshot.num-retained.max", "10");
         tableConfig.put("changelog-producer", "input");
 
-        MongoDBSyncTableAction action12 =
+        MongoDBSyncTableAction action2 =
                 syncTableActionBuilder(mongodbConfig).withTableConfig(tableConfig).build();
-        runActionWithDefaultEnv(action12);
-
-        FileStoreTable table = getFileStoreTable(tableName);
-        Map<String, String> options = table.options();
-        assertThat(options).containsAllEntriesOf(tableConfig).containsKey("path");
+        runActionWithDefaultEnv(action2);
+        Map<String, String> dynamicOptions = action2.fileStoreTable().options();
+        assertThat(dynamicOptions).containsAllEntriesOf(tableConfig);
     }
 
     @Test

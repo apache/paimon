@@ -31,12 +31,10 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
-import org.apache.paimon.flink.sink.cdc.ConfigChangeGenerator;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -90,6 +88,7 @@ public class KafkaSyncTableAction extends ActionBase {
     private final String database;
     private final String table;
     private final Configuration kafkaConfig;
+    private FileStoreTable fileStoreTable;
 
     private List<String> partitionKeys = new ArrayList<>();
     private List<String> primaryKeys = new ArrayList<>();
@@ -153,7 +152,6 @@ public class KafkaSyncTableAction extends ActionBase {
         boolean caseSensitive = catalog.caseSensitive();
 
         Identifier identifier = new Identifier(database, table);
-        FileStoreTable table;
         List<ComputedColumn> computedColumns =
                 buildComputedColumns(computedColumnArgs, kafkaSchema.fields());
         Schema fromCanal =
@@ -165,14 +163,13 @@ public class KafkaSyncTableAction extends ActionBase {
                         tableConfig,
                         caseSensitive);
         try {
-            table = (FileStoreTable) catalog.getTable(identifier);
-            List<SchemaChange> schemaChanges =
-                    ConfigChangeGenerator.generateConfigChanges(table.options(), tableConfig);
-            catalog.alterTable(identifier, schemaChanges, true);
-            CdcActionCommonUtils.assertSchemaCompatible(table.schema(), fromCanal.fields());
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = fileStoreTable.copy(tableConfig);
+            CdcActionCommonUtils.assertSchemaCompatible(
+                    fileStoreTable.schema(), fromCanal.fields());
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromCanal, false);
-            table = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);
         RecordParser recordParser =
@@ -193,7 +190,7 @@ public class KafkaSyncTableAction extends ActionBase {
                                                 "Kafka Source")
                                         .flatMap(recordParser))
                         .withParserFactory(parserFactory)
-                        .withTable(table)
+                        .withTable(fileStoreTable)
                         .withIdentifier(identifier)
                         .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -206,6 +203,11 @@ public class KafkaSyncTableAction extends ActionBase {
     @VisibleForTesting
     public Map<String, String> tableConfig() {
         return tableConfig;
+    }
+
+    @VisibleForTesting
+    public FileStoreTable fileStoreTable() {
+        return fileStoreTable;
     }
 
     // ------------------------------------------------------------------------

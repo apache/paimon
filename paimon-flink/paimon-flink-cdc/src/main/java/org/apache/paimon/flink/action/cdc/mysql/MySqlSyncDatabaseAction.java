@@ -232,6 +232,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                             caseSensitive);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
+                table = table.copy(tableConfig);
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), tableInfo, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {

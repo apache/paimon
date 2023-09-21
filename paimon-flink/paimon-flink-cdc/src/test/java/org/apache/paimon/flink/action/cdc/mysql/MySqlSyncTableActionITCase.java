@@ -891,9 +891,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action2);
 
-        FileStoreTable table = getFileStoreTable(tableName);
-        Map<String, String> options = table.options();
-        assertThat(options).containsAllEntriesOf(tableConfig).containsKey("path");
+        Map<String, String> dynamicOptions = action2.fileStoreTable().options();
+        assertThat(dynamicOptions).containsAllEntriesOf(tableConfig);
     }
 
     @Test

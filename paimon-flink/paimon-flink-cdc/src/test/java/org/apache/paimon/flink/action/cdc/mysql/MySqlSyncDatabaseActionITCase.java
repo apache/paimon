@@ -1220,18 +1220,17 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         try (Statement statement = getStatement()) {
             statement.execute("USE " + "newly_added_tables_option_schange");
-            statement.executeUpdate("CREATE TABLE t10 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
-            statement.executeUpdate("INSERT INTO t10 VALUES (1, 'Hi')");
+            statement.executeUpdate("CREATE TABLE t2 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+            statement.executeUpdate("INSERT INTO t2 VALUES (1, 'Hi')");
         }
 
         MySqlSyncDatabaseAction action2 =
                 syncDatabaseActionBuilder(mySqlConfig).withTableConfig(tableConfig).build();
         runActionWithDefaultEnv(action2);
-        waitingTables("t10");
+        waitingTables("t2");
 
-        FileStoreTable table = getFileStoreTable("t10");
-        Map<String, String> options = table.options();
-        assertThat(options).containsAllEntriesOf(tableConfig).containsKey("path");
+        Map<String, String> tableOptions = getFileStoreTable("t2").options();
+        assertThat(tableOptions).containsAllEntriesOf(tableConfig).containsKey("path");
     }
 
     @Test

@@ -30,10 +30,8 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
-import org.apache.paimon.flink.sink.cdc.ConfigChangeGenerator;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
@@ -92,6 +90,7 @@ public class MySqlSyncTableAction extends ActionBase {
     private final String database;
     private final String table;
     private final Configuration mySqlConfig;
+    private FileStoreTable fileStoreTable;
 
     private List<String> partitionKeys = new ArrayList<>();
     private List<String> primaryKeys = new ArrayList<>();
@@ -164,9 +163,9 @@ public class MySqlSyncTableAction extends ActionBase {
         validateMySqlTableInfos(mySqlSchemasInfo);
 
         catalog.createDatabase(database, true);
+
         MySqlTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
         Identifier identifier = new Identifier(database, table);
-        FileStoreTable table;
         List<ComputedColumn> computedColumns =
                 buildComputedColumns(computedColumnArgs, tableInfo.schema().typeMapping());
         Schema fromMySql =
@@ -178,26 +177,25 @@ public class MySqlSyncTableAction extends ActionBase {
                         tableConfig,
                         caseSensitive);
         try {
-            table = (FileStoreTable) catalog.getTable(identifier);
-            List<SchemaChange> schemaChanges =
-                    ConfigChangeGenerator.generateConfigChanges(table.options(), tableConfig);
-            catalog.alterTable(identifier, schemaChanges, true);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = fileStoreTable.copy(tableConfig);
             if (computedColumns.size() > 0) {
                 List<String> computedFields =
                         computedColumns.stream()
                                 .map(ComputedColumn::columnName)
                                 .collect(Collectors.toList());
-                List<String> fieldNames = table.schema().fieldNames();
+                List<String> fieldNames = fileStoreTable.schema().fieldNames();
                 checkArgument(
                         new HashSet<>(fieldNames).containsAll(computedFields),
                         " Exists Table should contain all computed columns %s, but are %s.",
                         computedFields,
                         fieldNames);
             }
-            CdcActionCommonUtils.assertSchemaCompatible(table.schema(), fromMySql.fields());
+            CdcActionCommonUtils.assertSchemaCompatible(
+                    fileStoreTable.schema(), fromMySql.fields());
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromMySql, false);
-            table = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
 
         String tableList =
@@ -220,7 +218,7 @@ public class MySqlSyncTableAction extends ActionBase {
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
-                        .withTable(table)
+                        .withTable(fileStoreTable)
                         .withIdentifier(identifier)
                         .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -282,6 +280,11 @@ public class MySqlSyncTableAction extends ActionBase {
     @VisibleForTesting
     public Map<String, String> tableConfig() {
         return tableConfig;
+    }
+
+    @VisibleForTesting
+    public FileStoreTable fileStoreTable() {
+        return fileStoreTable;
     }
 
     // ------------------------------------------------------------------------
