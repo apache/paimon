@@ -106,7 +106,6 @@ public class OggRecordParser extends RecordParser {
                 break;
             case OP_DELETE:
                 checkNotNull(root.get(FIELD_BEFORE), errorMessageTemplate, FIELD_BEFORE);
-                checkNotNull(root.get(fieldData), errorMessageTemplate, "null");
                 break;
         }
     }

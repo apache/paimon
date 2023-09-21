@@ -487,4 +487,73 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
                 rowType,
                 Arrays.asList("_id", "_year"));
     }
+
+    @Test
+    @Timeout(60)
+    public void testCDCOperations() throws Exception {
+        String topic = "event";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines = readLines("kafka/ogg/table/event/event-insert.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "ogg-json");
+        kafkaConfig.put("topic", topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+        List<String> primaryKeys = Collections.singletonList("id");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+
+        // For the INSERT operation
+        List<String> expectedInsert =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175]",
+                        "+I[102, car battery, 12V car battery, 8.100000381469727]",
+                        "+I[103, scooter, Big 2-wheel scooter , 5.179999828338623]");
+        waitForResult(expectedInsert, table, rowType, primaryKeys);
+
+        try {
+            writeRecordsToKafka(topic, readLines("kafka/ogg/table/event/event-update.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+        // For the UPDATE operation
+        List<String> expectedUpdate =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175]",
+                        "+I[102, car battery, 12V car battery, 8.100000381469727]",
+                        "+I[103, scooter, Big 2-wheel scooter , 8.170000076293945]");
+        waitForResult(expectedUpdate, table, rowType, primaryKeys);
+
+        try {
+            writeRecordsToKafka(topic, readLines("kafka/ogg/table/event/event-delete.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+
+        // For the REPLACE operation
+        List<String> expectedReplace =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175]",
+                        "+I[102, car battery, 12V car battery, 8.100000381469727]");
+        waitForResult(expectedReplace, table, rowType, primaryKeys);
+    }
 }
