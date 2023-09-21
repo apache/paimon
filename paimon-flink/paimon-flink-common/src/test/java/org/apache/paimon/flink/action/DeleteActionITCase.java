@@ -28,6 +28,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
@@ -79,6 +80,7 @@ public class DeleteActionITCase extends ActionITCaseBase {
 
         action.run();
 
+        SnapshotManager snapshotManager = getFileStoreTable(tableName).snapshotManager();
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
         assertThat(snapshot.id()).isEqualTo(2);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
@@ -156,7 +158,7 @@ public class DeleteActionITCase extends ActionITCaseBase {
                         Collections.emptyList(),
                         hasPk ? Collections.singletonList("k") : Collections.emptyList(),
                         options);
-        snapshotManager = table.snapshotManager();
+        SnapshotManager snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
         write = streamWriteBuilder.newWrite();

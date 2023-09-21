@@ -70,9 +70,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link FlinkCatalog}. */
@@ -81,6 +83,10 @@ public class FlinkCatalogTest {
 
     private final ObjectPath path1 = new ObjectPath("db1", "t1");
     private final ObjectPath path3 = new ObjectPath("db1", "t2");
+
+    private final ObjectPath tableInDefaultDb = new ObjectPath("default", "t1");
+
+    private final ObjectPath tableInDefaultDb1 = new ObjectPath("default-db", "t1");
     private final ObjectPath nonExistDbPath = ObjectPath.fromString("non.exist");
     private final ObjectPath nonExistObjectPath = ObjectPath.fromString("db1.nonexist");
     private Catalog catalog;
@@ -502,6 +508,53 @@ public class FlinkCatalogTest {
                 .isEqualTo(String.format("%s-topic", path3.getObjectName()));
         assertThatThrownBy(() -> catalog.dropTable(path3, true))
                 .hasMessage("Check unregister log store topic here.");
+    }
+
+    @Test
+    public void testDisableCreateTableInDefaultDB()
+            throws TableAlreadyExistException, DatabaseNotExistException,
+                    DatabaseAlreadyExistException {
+        String path = new File(temporaryFolder.toFile(), UUID.randomUUID().toString()).toString();
+        Options conf = new Options();
+        conf.setString("warehouse", path);
+        conf.set(LOG_SYSTEM_AUTO_REGISTER, true);
+        conf.set(DISABLE_CREATE_TABLE_IN_DEFAULT_DB, true);
+        Catalog catalog =
+                FlinkCatalogFactory.createCatalog(
+                        "test-ddl-catalog",
+                        CatalogContext.create(conf),
+                        FlinkCatalogTest.class.getClassLoader());
+
+        assertThatThrownBy(
+                        () ->
+                                catalog.createTable(
+                                        tableInDefaultDb,
+                                        this.createTable(new HashMap<>(0)),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Creating table in default database is disabled, please specify a database name.");
+
+        catalog.createDatabase("db1", null, false);
+        assertThatCode(() -> catalog.createTable(path1, this.createTable(new HashMap<>(0)), false))
+                .doesNotThrowAnyException();
+
+        conf.set(FlinkCatalogOptions.DEFAULT_DATABASE, "default-db");
+        Catalog catalog1 =
+                FlinkCatalogFactory.createCatalog(
+                        "test-ddl-catalog1",
+                        CatalogContext.create(conf),
+                        FlinkCatalogTest.class.getClassLoader());
+
+        assertThatThrownBy(
+                        () ->
+                                catalog1.createTable(
+                                        tableInDefaultDb1,
+                                        this.createTable(new HashMap<>(0)),
+                                        false))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "Creating table in default database is disabled, please specify a database name.");
     }
 
     private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {

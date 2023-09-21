@@ -82,6 +82,10 @@ public final class Timestamp implements Comparable<Timestamp>, Serializable {
         return java.sql.Timestamp.valueOf(toLocalDateTime());
     }
 
+    public Timestamp toMillisTimestamp() {
+        return fromEpochMillis(millisecond);
+    }
+
     /** Converts this {@link Timestamp} object to a {@link LocalDateTime}. */
     public LocalDateTime toLocalDateTime() {
         int date = (int) (millisecond / MILLIS_PER_DAY);

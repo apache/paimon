@@ -49,6 +49,19 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-flink-cdc</artifactId>
+            <version>${project.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>*</groupId>
+                    <artifactId>*</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-table-common</artifactId>
@@ -97,6 +110,7 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-flink-common</include>
+                                    <include>org.apache.paimon:paimon-flink-cdc</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

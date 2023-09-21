@@ -99,10 +99,10 @@
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>copy-s3-jar</id>
+                        <id>copy-s3-classes</id>
                         <phase>prepare-package</phase>
                         <goals>
-                            <goal>copy</goal>
+                            <goal>unpack</goal>
                         </goals>
                         <configuration>
                             <artifactItems>
@@ -112,10 +112,9 @@
                                     <version>${project.version}</version>
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
-                                    <destFileName>paimon-plugin-s3.jar</destFileName>
+                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-s3</outputDirectory>
                                 </artifactItem>
                             </artifactItems>
-                            <outputDirectory>${project.build.directory}/classes</outputDirectory>
                         </configuration>
                     </execution>
                 </executions>

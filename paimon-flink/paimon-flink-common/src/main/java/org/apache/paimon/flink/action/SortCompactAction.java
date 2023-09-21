@@ -38,10 +38,12 @@ import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -114,23 +116,26 @@ public class SortCompactAction extends CompactAction {
         DataStream<RowData> source = sourceBuilder.withEnv(env).withContinuousMode(false).build();
         TableSorter sorter =
                 TableSorter.getSorter(env, source, fileStoreTable, sortStrategy, orderColumns);
-        DataStream<RowData> sorted = sorter.sort();
 
-        FlinkSinkBuilder flinkSinkBuilder = new FlinkSinkBuilder(fileStoreTable);
-        flinkSinkBuilder.withInput(sorted).withOverwritePartition(new HashMap<>());
-        String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
-        if (sinkParallelism != null) {
-            flinkSinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
-        }
-
-        flinkSinkBuilder.build();
+        new FlinkSinkBuilder(fileStoreTable)
+                .withInput(sorter.sort())
+                // This should use empty map to tag it on overwrite action, otherwise there is no
+                // overwrite action.
+                .withOverwritePartition(new HashMap<>())
+                .build();
     }
 
-    public void withOrderStrategy(String sortStrategy) {
+    public SortCompactAction withOrderStrategy(String sortStrategy) {
         this.sortStrategy = sortStrategy;
+        return this;
     }
 
-    public void withOrderColumns(List<String> orderColumns) {
-        this.orderColumns = orderColumns;
+    public SortCompactAction withOrderColumns(String... orderColumns) {
+        return withOrderColumns(Arrays.asList(orderColumns));
+    }
+
+    public SortCompactAction withOrderColumns(List<String> orderColumns) {
+        this.orderColumns = orderColumns.stream().map(String::trim).collect(Collectors.toList());
+        return this;
     }
 }

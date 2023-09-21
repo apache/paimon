@@ -78,7 +78,7 @@ under the License.
             <td><h5>scan.push-down</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>If true, flink will push down projection, filters, limit to the source. The cost is that it is difficult to reuse the source in a job.</td>
+            <td>If true, flink will push down projection, filters, limit to the source. The cost is that it is difficult to reuse the source in a job. With flink 1.18 or higher version, it is possible to reuse the source even with projection push down.</td>
         </tr>
         <tr>
             <td><h5>scan.remove-normalize</h5></td>
@@ -127,6 +127,18 @@ under the License.
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>If no records flow in a partition of a stream for that amount of time, then that partition is considered "idle" and will not hold back the progress of watermarks in downstream operators.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.committer-cpu</h5></td>
+            <td style="word-wrap: break-word;">1.0</td>
+            <td>Double</td>
+            <td>Sink committer cpu to control cpu cores of global committer.</td>
+        </tr>
+        <tr>
+            <td><h5>sink.committer-memory</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>MemorySize</td>
+            <td>Sink committer memory to control heap memory of global committer.</td>
         </tr>
         <tr>
             <td><h5>sink.managed.writer-buffer-memory</h5></td>

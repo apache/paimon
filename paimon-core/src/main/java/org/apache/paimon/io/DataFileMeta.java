@@ -117,7 +117,7 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 Collections.emptyList(),
-                Timestamp.fromLocalDateTime(LocalDateTime.now()));
+                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp());
     }
 
     public DataFileMeta(

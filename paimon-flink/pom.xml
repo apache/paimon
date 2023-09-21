@@ -39,7 +39,9 @@ under the License.
         <module>paimon-flink-1.15</module>
         <module>paimon-flink-1.16</module>
         <module>paimon-flink-1.17</module>
+        <module>paimon-flink-1.18</module>
         <module>paimon-flink-action</module>
+        <module>paimon-flink-cdc</module>
     </modules>
 
     <dependencies>

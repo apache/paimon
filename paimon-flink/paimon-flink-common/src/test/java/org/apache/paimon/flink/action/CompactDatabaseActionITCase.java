@@ -22,10 +22,12 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.StreamTableCommit;
+import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -34,14 +36,15 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
+import org.apache.paimon.utils.SnapshotManager;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -59,45 +62,35 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     private static final String[] DATABASE_NAMES = new String[] {"db1", "db2"};
     private static final String[] TABLE_NAMES = new String[] {"t1", "t2"};
-    private static final Map<String, RowType> ROW_TYPE_MAP = new HashMap<>(TABLE_NAMES.length);
-
-    @BeforeAll
-    public static void beforeAll() {
-        // set different datatype and RowType
-        DataType[] dataTypes1 =
-                new DataType[] {
-                    DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()
-                };
-        DataType[] dataTypes2 =
-                new DataType[] {
-                    DataTypes.INT(), DataTypes.BIGINT(), DataTypes.INT(), DataTypes.STRING()
-                };
-
-        ROW_TYPE_MAP.put("t1", RowType.of(dataTypes1, new String[] {"k", "v", "hh", "dt"}));
-        ROW_TYPE_MAP.put("t2", RowType.of(dataTypes2, new String[] {"k", "v1", "hh", "dt"}));
-    }
+    private static final String[] New_DATABASE_NAMES = new String[] {"db3", "db4"};
+    private static final String[] New_TABLE_NAMES = new String[] {"t3", "t4"};
+    private static final RowType ROW_TYPE =
+            RowType.of(
+                    new DataType[] {
+                        DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()
+                    },
+                    new String[] {"k", "v", "hh", "dt"});
 
     private FileStoreTable createTable(
             String databaseName,
             String tableName,
-            RowType rowType,
             List<String> partitionKeys,
             List<String> primaryKeys,
             Map<String, String> options)
             throws Exception {
-
         Identifier identifier = Identifier.create(databaseName, tableName);
         catalog.createDatabase(databaseName, true);
         catalog.createTable(
                 identifier,
-                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
+                new Schema(ROW_TYPE.getFields(), partitionKeys, primaryKeys, options, ""),
                 false);
         return (FileStoreTable) catalog.getTable(identifier);
     }
 
-    @Test
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(strings = {"divided", "combined"})
     @Timeout(60)
-    public void testBatchCompact() throws Exception {
+    public void testBatchCompact(String mode) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
 
@@ -109,33 +102,25 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         createTable(
                                 dbName,
                                 tableName,
-                                ROW_TYPE_MAP.get(tableName),
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
                 tables.add(table);
-                snapshotManager = table.snapshotManager();
+                SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 write = streamWriteBuilder.newWrite();
                 commit = streamWriteBuilder.newCommit();
 
-                Object value = null;
-                if (tableName.equals("t1")) {
-                    value = 100;
-                } else if (tableName.equals("t2")) {
-                    value = 100L;
-                }
+                writeData(
+                        rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                        rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                        rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
                 writeData(
-                        rowData(1, value, 15, BinaryString.fromString("20221208")),
-                        rowData(1, value, 16, BinaryString.fromString("20221208")),
-                        rowData(1, value, 15, BinaryString.fromString("20221209")));
-
-                writeData(
-                        rowData(2, value, 15, BinaryString.fromString("20221208")),
-                        rowData(2, value, 16, BinaryString.fromString("20221208")),
-                        rowData(2, value, 15, BinaryString.fromString("20221209")));
+                        rowData(2, 100, 15, BinaryString.fromString("20221208")),
+                        rowData(2, 100, 16, BinaryString.fromString("20221208")),
+                        rowData(2, 100, 15, BinaryString.fromString("20221209")));
 
                 Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
                 assertThat(snapshot.id()).isEqualTo(2);
@@ -143,13 +128,18 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             }
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(warehouse, "db1|db2", null, null, new HashMap<>()).build(env);
-        env.execute();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            new CompactDatabaseAction(warehouse, Collections.emptyMap())
+                    .withDatabaseCompactMode(mode)
+                    .build(env);
+            env.execute();
+        } else {
+            callProcedure(String.format("CALL compact_database('', '%s')", mode), false, true);
+        }
 
         for (FileStoreTable table : tables) {
+            SnapshotManager snapshotManager = table.snapshotManager();
             Snapshot snapshot =
                     table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
             assertThat(snapshot.id()).isEqualTo(3);
@@ -163,140 +153,9 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
     }
 
-    @Test
-    @Timeout(60)
-    public void includeTableCompaction() throws Exception {
-        includingAndExcludingTablesImpl(
-                "db1.t1",
-                null,
-                Collections.singletonList(Identifier.fromString("db1.t1")),
-                Arrays.asList(
-                        Identifier.fromString("db1.t2"),
-                        Identifier.fromString("db2.t1"),
-                        Identifier.fromString("db2.t2")));
-    }
-
-    @Test
-    @Timeout(60)
-    public void excludeTableCompaction() throws Exception {
-        includingAndExcludingTablesImpl(
-                null,
-                "db2.t2",
-                Arrays.asList(
-                        Identifier.fromString("db1.t1"),
-                        Identifier.fromString("db1.t2"),
-                        Identifier.fromString("db2.t1")),
-                Collections.singletonList(Identifier.fromString("db2.t2")));
-    }
-
-    @Test
-    @Timeout(60)
-    public void includeAndExcludeTableCompaction() throws Exception {
-        includingAndExcludingTablesImpl(
-                "db1.+|db2.t1",
-                "db1.t2",
-                Arrays.asList(Identifier.fromString("db1.t1"), Identifier.fromString("db2.t1")),
-                Arrays.asList(Identifier.fromString("db1.t2"), Identifier.fromString("db2.t2")));
-    }
-
-    private void includingAndExcludingTablesImpl(
-            String includingPattern,
-            String excludesPattern,
-            List<Identifier> includeTables,
-            List<Identifier> excludeTables)
-            throws Exception {
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.WRITE_ONLY.key(), "true");
-
-        List<FileStoreTable> compactionTables = new ArrayList<>();
-        List<FileStoreTable> noCompactionTables = new ArrayList<>();
-
-        for (String dbName : DATABASE_NAMES) {
-            for (String tableName : TABLE_NAMES) {
-                FileStoreTable table =
-                        createTable(
-                                dbName,
-                                tableName,
-                                ROW_TYPE_MAP.get(tableName),
-                                Arrays.asList("dt", "hh"),
-                                Arrays.asList("dt", "hh", "k"),
-                                options);
-                if (includeTables.contains(Identifier.create(dbName, tableName))) {
-                    compactionTables.add(table);
-                } else if (excludeTables.contains(Identifier.create(dbName, tableName))) {
-                    noCompactionTables.add(table);
-                }
-
-                snapshotManager = table.snapshotManager();
-                StreamWriteBuilder streamWriteBuilder =
-                        table.newStreamWriteBuilder().withCommitUser(commitUser);
-                write = streamWriteBuilder.newWrite();
-                commit = streamWriteBuilder.newCommit();
-
-                Object value = null;
-                if (tableName.equals("t1")) {
-                    value = 100;
-                } else if (tableName.equals("t2")) {
-                    value = 100L;
-                }
-
-                writeData(
-                        rowData(1, value, 15, BinaryString.fromString("20221208")),
-                        rowData(1, value, 16, BinaryString.fromString("20221208")),
-                        rowData(1, value, 15, BinaryString.fromString("20221209")));
-
-                writeData(
-                        rowData(2, value, 15, BinaryString.fromString("20221208")),
-                        rowData(2, value, 16, BinaryString.fromString("20221208")),
-                        rowData(2, value, 15, BinaryString.fromString("20221209")));
-
-                Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
-                assertThat(snapshot.id()).isEqualTo(2);
-                assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
-            }
-        }
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(
-                        warehouse, "db1|db2", includingPattern, excludesPattern, new HashMap<>())
-                .build(env);
-        env.execute();
-
-        for (FileStoreTable table : compactionTables) {
-            snapshotManager = table.snapshotManager();
-            Snapshot snapshot =
-                    table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
-
-            assertThat(snapshot.id()).isEqualTo(3);
-            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
-
-            List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
-            assertThat(splits.size()).isEqualTo(3);
-            for (DataSplit split : splits) {
-                assertThat(split.dataFiles().size()).isEqualTo(1);
-            }
-        }
-
-        for (FileStoreTable table : noCompactionTables) {
-            snapshotManager = table.snapshotManager();
-            Snapshot snapshot =
-                    table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
-
-            assertThat(snapshot.id()).isEqualTo(2);
-            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
-
-            List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
-            assertThat(splits.size()).isEqualTo(3);
-            for (DataSplit split : splits) {
-                assertThat(split.dataFiles().size()).isEqualTo(2);
-            }
-        }
-    }
-
-    @Test
-    public void testStreamingCompact() throws Exception {
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(strings = {"divided", "combined"})
+    public void testStreamingCompact(String mode) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.CHANGELOG_PRODUCER.key(), "full-compaction");
         options.put(
@@ -315,29 +174,21 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         createTable(
                                 dbName,
                                 tableName,
-                                ROW_TYPE_MAP.get(tableName),
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
                                 options);
                 tables.add(table);
-                snapshotManager = table.snapshotManager();
+                SnapshotManager snapshotManager = table.snapshotManager();
                 StreamWriteBuilder streamWriteBuilder =
                         table.newStreamWriteBuilder().withCommitUser(commitUser);
                 write = streamWriteBuilder.newWrite();
                 commit = streamWriteBuilder.newCommit();
 
-                Object value = null;
-                if (tableName.equals("t1")) {
-                    value = 100;
-                } else if (tableName.equals("t2")) {
-                    value = 100L;
-                }
-
                 // base records
                 writeData(
-                        rowData(1, value, 15, BinaryString.fromString("20221208")),
-                        rowData(1, value, 16, BinaryString.fromString("20221208")),
-                        rowData(1, value, 15, BinaryString.fromString("20221209")));
+                        rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                        rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                        rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
                 Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
                 assertThat(snapshot.id()).isEqualTo(1);
@@ -350,20 +201,38 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             }
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointInterval(500);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(warehouse, "db1|db2", null, null, new HashMap<>()).build(env);
-        JobClient client = env.executeAsync();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            if (mode.equals("divided")) {
+                new CompactDatabaseAction(warehouse, new HashMap<>()).build(env);
+            } else {
+                // if CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() use default value, the cost
+                // time in combined mode will be over 1 min
+                new CompactDatabaseAction(warehouse, new HashMap<>())
+                        .withDatabaseCompactMode("combined")
+                        .withTableOptions(
+                                Collections.singletonMap(
+                                        CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s"))
+                        .build(env);
+            }
+            env.executeAsync();
+        } else {
+            if (mode.equals("divided")) {
+                callProcedure("CALL compact_database()", true, false);
+            } else {
+                callProcedure(
+                        "CALL compact_database('', 'combined', '', '', 'continuous.discovery-interval=1s')",
+                        true,
+                        false);
+            }
+        }
 
         for (FileStoreTable table : tables) {
             StreamTableScan scan = table.newReadBuilder().newStreamScan();
             // first full compaction
             validateResult(
                     table,
-                    ROW_TYPE_MAP.get(table.name()),
+                    ROW_TYPE,
                     scan,
                     Arrays.asList(
                             "+I[1, 100, 15, 20221208]",
@@ -371,15 +240,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                             "+I[1, 100, 16, 20221208]"),
                     60_000);
 
-            Object value = null;
-            String tName = table.name();
-            if (tName.equals("t1")) {
-                value = 101;
-            } else if (tName.equals("t2")) {
-                value = 101L;
-            }
-
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             StreamWriteBuilder streamWriteBuilder =
                     table.newStreamWriteBuilder().withCommitUser(commitUser);
             write = streamWriteBuilder.newWrite();
@@ -387,14 +248,14 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
             // incremental records
             writeData(
-                    rowData(1, value, 15, BinaryString.fromString("20221208")),
-                    rowData(1, value, 16, BinaryString.fromString("20221208")),
-                    rowData(1, value, 15, BinaryString.fromString("20221209")));
+                    rowData(1, 101, 15, BinaryString.fromString("20221208")),
+                    rowData(1, 101, 16, BinaryString.fromString("20221208")),
+                    rowData(1, 101, 15, BinaryString.fromString("20221209")));
 
             // second full compaction
             validateResult(
                     table,
-                    ROW_TYPE_MAP.get(table.name()),
+                    ROW_TYPE,
                     scan,
                     Arrays.asList(
                             "+U[1, 101, 15, 20221208]",
@@ -416,7 +277,254 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                             "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
         }
 
-        client.cancel();
+        // In combined mode, check whether newly created table can be detected
+        if (mode.equals("combined")) {
+            // second create tables and write data to tables
+            List<FileStoreTable> newtables = new ArrayList<>();
+            for (String dbName : New_DATABASE_NAMES) {
+                for (String tableName : New_TABLE_NAMES) {
+                    FileStoreTable table =
+                            createTable(
+                                    dbName,
+                                    tableName,
+                                    Arrays.asList("dt", "hh"),
+                                    Arrays.asList("dt", "hh", "k"),
+                                    options);
+                    newtables.add(table);
+                    SnapshotManager snapshotManager = table.snapshotManager();
+                    StreamWriteBuilder streamWriteBuilder =
+                            table.newStreamWriteBuilder().withCommitUser(commitUser);
+                    write = streamWriteBuilder.newWrite();
+                    commit = streamWriteBuilder.newCommit();
+
+                    // base records
+                    writeData(
+                            write,
+                            commit,
+                            0,
+                            rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                            rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                            rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+                    Snapshot snapshot =
+                            snapshotManager.snapshot(snapshotManager.latestSnapshotId());
+                    assertThat(snapshot.id()).isEqualTo(1);
+                    assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+                }
+            }
+
+            for (FileStoreTable table : newtables) {
+                StreamTableScan scan = table.newReadBuilder().newStreamScan();
+                // first full compaction for new tables
+                validateResult(
+                        table,
+                        ROW_TYPE,
+                        scan,
+                        Arrays.asList(
+                                "+I[1, 100, 15, 20221208]",
+                                "+I[1, 100, 15, 20221209]",
+                                "+I[1, 100, 16, 20221208]"),
+                        60_000);
+
+                SnapshotManager snapshotManager = table.snapshotManager();
+                StreamWriteBuilder streamWriteBuilder =
+                        table.newStreamWriteBuilder().withCommitUser(commitUser);
+                write = streamWriteBuilder.newWrite();
+                commit = streamWriteBuilder.newCommit();
+
+                // incremental records
+                writeData(
+                        write,
+                        commit,
+                        1,
+                        rowData(1, 101, 15, BinaryString.fromString("20221208")),
+                        rowData(1, 101, 16, BinaryString.fromString("20221208")),
+                        rowData(1, 101, 15, BinaryString.fromString("20221209")));
+
+                // second full compaction for new tables
+                validateResult(
+                        table,
+                        ROW_TYPE,
+                        scan,
+                        Arrays.asList(
+                                "+U[1, 101, 15, 20221208]",
+                                "+U[1, 101, 15, 20221209]",
+                                "+U[1, 101, 16, 20221208]",
+                                "-U[1, 100, 15, 20221208]",
+                                "-U[1, 100, 15, 20221209]",
+                                "-U[1, 100, 16, 20221208]"),
+                        60_000);
+
+                // assert dedicated compact job will expire snapshots
+                CommonTestUtils.waitUtil(
+                        () ->
+                                snapshotManager.latestSnapshotId() - 2
+                                        == snapshotManager.earliestSnapshotId(),
+                        Duration.ofSeconds(60_000),
+                        Duration.ofSeconds(100),
+                        String.format(
+                                "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
+            }
+        }
+    }
+
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(strings = {"divided", "combined"})
+    @Timeout(60)
+    public void includeTableCompaction(String mode) throws Exception {
+        includingAndExcludingTablesImpl(
+                mode,
+                "db1.t1",
+                null,
+                Collections.singletonList(Identifier.fromString("db1.t1")),
+                Arrays.asList(
+                        Identifier.fromString("db1.t2"),
+                        Identifier.fromString("db2.t1"),
+                        Identifier.fromString("db2.t2")));
+    }
+
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(strings = {"divided", "combined"})
+    @Timeout(60)
+    public void excludeTableCompaction(String mode) throws Exception {
+        includingAndExcludingTablesImpl(
+                mode,
+                null,
+                "db2.t2",
+                Arrays.asList(
+                        Identifier.fromString("db1.t1"),
+                        Identifier.fromString("db1.t2"),
+                        Identifier.fromString("db2.t1")),
+                Collections.singletonList(Identifier.fromString("db2.t2")));
+    }
+
+    @ParameterizedTest(name = "mode = {0}")
+    @ValueSource(strings = {"divided", "combined"})
+    @Timeout(60)
+    public void includeAndExcludeTableCompaction(String mode) throws Exception {
+        includingAndExcludingTablesImpl(
+                mode,
+                "db1.+|db2.t1",
+                "db1.t2",
+                Arrays.asList(Identifier.fromString("db1.t1"), Identifier.fromString("db2.t1")),
+                Arrays.asList(Identifier.fromString("db1.t2"), Identifier.fromString("db2.t2")));
+    }
+
+    private void includingAndExcludingTablesImpl(
+            String mode,
+            String includingPattern,
+            String excludesPattern,
+            List<Identifier> includeTables,
+            List<Identifier> excludeTables)
+            throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+
+        List<FileStoreTable> compactionTables = new ArrayList<>();
+        List<FileStoreTable> noCompactionTables = new ArrayList<>();
+
+        for (String dbName : DATABASE_NAMES) {
+            for (String tableName : TABLE_NAMES) {
+                FileStoreTable table =
+                        createTable(
+                                dbName,
+                                tableName,
+                                Arrays.asList("dt", "hh"),
+                                Arrays.asList("dt", "hh", "k"),
+                                options);
+                if (includeTables.contains(Identifier.create(dbName, tableName))) {
+                    compactionTables.add(table);
+                } else if (excludeTables.contains(Identifier.create(dbName, tableName))) {
+                    noCompactionTables.add(table);
+                }
+
+                SnapshotManager snapshotManager = table.snapshotManager();
+                StreamWriteBuilder streamWriteBuilder =
+                        table.newStreamWriteBuilder().withCommitUser(commitUser);
+                write = streamWriteBuilder.newWrite();
+                commit = streamWriteBuilder.newCommit();
+
+                writeData(
+                        rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                        rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                        rowData(1, 100, 15, BinaryString.fromString("20221209")));
+
+                writeData(
+                        rowData(2, 100, 15, BinaryString.fromString("20221208")),
+                        rowData(2, 100, 16, BinaryString.fromString("20221208")),
+                        rowData(2, 100, 15, BinaryString.fromString("20221209")));
+
+                Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
+                assertThat(snapshot.id()).isEqualTo(2);
+                assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+            }
+        }
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            CompactDatabaseAction action =
+                    new CompactDatabaseAction(warehouse, Collections.emptyMap())
+                            .includingTables(includingPattern)
+                            .excludingTables(excludesPattern)
+                            .withDatabaseCompactMode(mode);
+            if (mode.equals("combined")) {
+                action.withTableOptions(
+                        Collections.singletonMap(
+                                CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s"));
+            }
+            action.build(env);
+            env.execute();
+        } else {
+            if (mode.equals("divided")) {
+                callProcedure(
+                        String.format(
+                                "CALL compact_database('', 'divided', '%s', '%s')",
+                                nonNull(includingPattern), nonNull(excludesPattern)),
+                        false,
+                        true);
+            } else {
+                callProcedure(
+                        String.format(
+                                "CALL compact_database('', 'combined', '%s', '%s', 'continuous.discovery-interval=1s')",
+                                nonNull(includingPattern), nonNull(excludesPattern)),
+                        false,
+                        true);
+            }
+        }
+
+        for (FileStoreTable table : compactionTables) {
+            SnapshotManager snapshotManager = table.snapshotManager();
+            Snapshot snapshot =
+                    table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
+
+            assertThat(snapshot.id()).isEqualTo(3);
+            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+
+            List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+            assertThat(splits.size()).isEqualTo(3);
+            for (DataSplit split : splits) {
+                assertThat(split.dataFiles().size()).isEqualTo(1);
+            }
+        }
+
+        for (FileStoreTable table : noCompactionTables) {
+            SnapshotManager snapshotManager = table.snapshotManager();
+            Snapshot snapshot =
+                    table.snapshotManager().snapshot(snapshotManager.latestSnapshotId());
+
+            assertThat(snapshot.id()).isEqualTo(2);
+            assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+
+            List<DataSplit> splits = table.newSnapshotReader().read().dataSplits();
+            assertThat(splits.size()).isEqualTo(3);
+            for (DataSplit split : splits) {
+                assertThat(split.dataFiles().size()).isEqualTo(2);
+            }
+        }
+    }
+
+    private String nonNull(@Nullable String s) {
+        return s == null ? "" : s;
     }
 
     @Test
@@ -434,78 +542,57 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     createTable(
                             database,
                             tableName,
-                            ROW_TYPE_MAP.get(tableName),
-                            Arrays.asList("k"),
+                            Collections.singletonList("k"),
                             Collections.emptyList(),
                             options);
             tables.add(table);
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             StreamWriteBuilder streamWriteBuilder =
                     table.newStreamWriteBuilder().withCommitUser(commitUser);
             write = streamWriteBuilder.newWrite();
             commit = streamWriteBuilder.newCommit();
 
-            Object value = null;
-            if (tableName.equals("t1")) {
-                value = 100;
-            } else if (tableName.equals("t2")) {
-                value = 100L;
-            }
-
             // base records
             writeData(
-                    rowData(1, value, 15, BinaryString.fromString("20221208")),
-                    rowData(1, value, 16, BinaryString.fromString("20221208")),
-                    rowData(1, value, 15, BinaryString.fromString("20221209")));
+                    rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
             writeData(
-                    rowData(1, value, 15, BinaryString.fromString("20221208")),
-                    rowData(1, value, 16, BinaryString.fromString("20221208")),
-                    rowData(1, value, 15, BinaryString.fromString("20221209")));
+                    rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
             Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
             assertThat(snapshot.id()).isEqualTo(2);
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
-        env.getCheckpointConfig().setCheckpointInterval(500);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(warehouse, database, null, null, new HashMap<>()).build(env);
-        JobClient client = env.executeAsync();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            new CompactDatabaseAction(warehouse, new HashMap<>()).build(env);
+            env.executeAsync();
+        } else {
+            callProcedure("CALL compact_database()");
+        }
 
         for (FileStoreTable table : tables) {
-            FileStoreScan storeScan = table.store().newScan();
-
-            snapshotManager = table.snapshotManager();
             StreamWriteBuilder streamWriteBuilder =
                     table.newStreamWriteBuilder().withCommitUser(commitUser);
             write = streamWriteBuilder.newWrite();
             commit = streamWriteBuilder.newCommit();
 
             // first compaction, snapshot will be 3
-            checkFileAndRowSize(storeScan, 3L, 30_000L, 1, 6);
-
-            Object value = null;
-            String tName = table.name();
-            if (tName.equals("t1")) {
-                value = 101;
-            } else if (tName.equals("t2")) {
-                value = 101L;
-            }
+            checkFileAndRowSize(table, 3L, 30_000L, 1, 6);
 
             writeData(
-                    rowData(1, value, 15, BinaryString.fromString("20221208")),
-                    rowData(1, value, 16, BinaryString.fromString("20221208")),
-                    rowData(1, value, 15, BinaryString.fromString("20221209")));
+                    rowData(1, 101, 15, BinaryString.fromString("20221208")),
+                    rowData(1, 101, 16, BinaryString.fromString("20221208")),
+                    rowData(1, 101, 15, BinaryString.fromString("20221209")));
 
             // second compaction, snapshot will be 5
-            checkFileAndRowSize(storeScan, 5L, 30_000L, 1, 9);
+            checkFileAndRowSize(table, 5L, 30_000L, 1, 9);
         }
-
-        client.cancel().get();
     }
 
     @Test
@@ -522,51 +609,55 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     createTable(
                             database,
                             tableName,
-                            ROW_TYPE_MAP.get(tableName),
                             Collections.singletonList("k"),
                             Collections.emptyList(),
                             options);
             tables.add(table);
-            snapshotManager = table.snapshotManager();
+            SnapshotManager snapshotManager = table.snapshotManager();
             StreamWriteBuilder streamWriteBuilder =
                     table.newStreamWriteBuilder().withCommitUser(commitUser);
             write = streamWriteBuilder.newWrite();
             commit = streamWriteBuilder.newCommit();
 
-            Object value = null;
-            if (tableName.equals("t1")) {
-                value = 100;
-            } else if (tableName.equals("t2")) {
-                value = 100L;
-            }
-
             // base records
             writeData(
-                    rowData(1, value, 15, BinaryString.fromString("20221208")),
-                    rowData(1, value, 16, BinaryString.fromString("20221208")),
-                    rowData(1, value, 15, BinaryString.fromString("20221209")));
+                    rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
             writeData(
-                    rowData(1, value, 15, BinaryString.fromString("20221208")),
-                    rowData(1, value, 16, BinaryString.fromString("20221208")),
-                    rowData(1, value, 15, BinaryString.fromString("20221209")));
+                    rowData(1, 100, 15, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 16, BinaryString.fromString("20221208")),
+                    rowData(1, 100, 15, BinaryString.fromString("20221209")));
 
             Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
             assertThat(snapshot.id()).isEqualTo(2);
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
         }
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
-        new CompactDatabaseAction(warehouse, database, null, null, new HashMap<>()).build(env);
-        env.execute();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            new CompactDatabaseAction(warehouse, new HashMap<>()).build(env);
+            env.execute();
+        } else {
+            callProcedure("CALL compact_database()", false, true);
+        }
 
         for (FileStoreTable table : tables) {
-            FileStoreScan storeScan = table.store().newScan();
-            snapshotManager = table.snapshotManager();
             // first compaction, snapshot will be 3.
-            checkFileAndRowSize(storeScan, 3L, 0L, 1, 6);
+            checkFileAndRowSize(table, 3L, 0L, 1, 6);
         }
+    }
+
+    private void writeData(
+            StreamTableWrite write,
+            StreamTableCommit commit,
+            long incrementalIdentifier,
+            GenericRow... data)
+            throws Exception {
+        for (GenericRow d : data) {
+            write.write(d);
+        }
+        commit.commit(incrementalIdentifier, write.prepareCommit(true, incrementalIdentifier));
     }
 }

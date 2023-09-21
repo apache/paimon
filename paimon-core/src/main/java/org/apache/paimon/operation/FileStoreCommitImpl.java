@@ -393,7 +393,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 Collections.emptyList(),
                 commitIdentifier,
                 null,
-                Collections.emptyMap());
+                new HashMap<>());
     }
 
     @Override
@@ -640,8 +640,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             partitionType));
             previousChangesListName = manifestList.write(newMetas);
 
+            // the added records subtract the deleted records from
+            long deltaRecordCount =
+                    Snapshot.recordCountAdd(tableFiles) - Snapshot.recordCountDelete(tableFiles);
+            long totalRecordCount = previousTotalRecordCount + deltaRecordCount;
+
             // write new changes into manifest files
-            long deltaRecordCount = Snapshot.recordCount(tableFiles);
             List<ManifestFileMeta> newChangesManifests = manifestFile.write(tableFiles);
             newMetas.addAll(newChangesManifests);
             newChangesListName = manifestList.write(newChangesManifests);
@@ -672,7 +676,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             commitKind,
                             System.currentTimeMillis(),
                             logOffsets,
-                            previousTotalRecordCount + deltaRecordCount,
+                            totalRecordCount,
                             deltaRecordCount,
                             Snapshot.recordCount(changelogFiles),
                             currentWatermark);

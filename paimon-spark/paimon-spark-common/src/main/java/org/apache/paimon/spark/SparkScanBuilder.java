@@ -81,6 +81,7 @@ public class SparkScanBuilder
     @Override
     public Scan build() {
         return new SparkScan(
+                table,
                 table.newReadBuilder().withFilter(predicates).withProjection(projectedFields));
     }
 }

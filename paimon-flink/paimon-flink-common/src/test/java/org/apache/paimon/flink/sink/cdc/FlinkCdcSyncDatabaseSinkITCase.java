@@ -57,6 +57,8 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM;
+
 /** IT cases for {@link FlinkCdcSyncDatabaseSinkBuilder}. */
 public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
 
@@ -160,7 +162,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                 .withTables(fileStoreTables)
                 // because we have at most 3 tables and 8 slots in AbstractTestBase
                 // each table can only get 2 slots
-                .withParallelism(2)
+                .withTableOptions(Collections.singletonMap(SINK_PARALLELISM.key(), "2"))
                 .withDatabase(DATABASE_NAME)
                 .withCatalogLoader(catalogLoader)
                 .build();

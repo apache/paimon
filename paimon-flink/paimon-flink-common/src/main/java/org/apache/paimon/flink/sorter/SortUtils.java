@@ -18,17 +18,16 @@
 
 package org.apache.paimon.flink.sorter;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.shuffle.RangeShuffle;
-import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.SerializableSupplier;
@@ -87,8 +86,7 @@ public class SortUtils {
 
         final RowType valueRowType = table.rowType();
         final int parallelism = inputStream.getParallelism();
-        final long maxSortMemory = table.coreOptions().writeBufferSize();
-        final int pageSize = table.coreOptions().pageSize();
+        CoreOptions options = table.coreOptions();
 
         String sinkParallelismValue =
                 table.options().get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -114,9 +112,7 @@ public class SortUtils {
         fields.addAll(dataFields);
         final RowType longRowType = new RowType(fields);
         final InternalTypeInfo<InternalRow> internalRowType =
-                new InternalTypeInfo<>(
-                        new InternalRowTypeSerializer(
-                                longRowType.getFieldTypes().toArray(new DataType[0])));
+                InternalTypeInfo.fromRowType(longRowType);
 
         // generate the KEY as the key of Pair.
         DataStream<Tuple2<KEY, RowData>> inputWithKey =
@@ -154,7 +150,12 @@ public class SortUtils {
                 .transform(
                         "LOCAL SORT",
                         internalRowType,
-                        new SortOperator(longRowType, maxSortMemory, pageSize))
+                        new SortOperator(
+                                sortKeyType,
+                                longRowType,
+                                options.writeBufferSize(),
+                                options.pageSize(),
+                                options.localSortMaxNumFileHandles()))
                 .setParallelism(sinkParallelism)
                 // remove the key column from every row
                 .map(
@@ -172,9 +173,7 @@ public class SortUtils {
                                 return keyProjectedRow.replaceRow(value);
                             }
                         },
-                        new InternalTypeInfo<>(
-                                new InternalRowTypeSerializer(
-                                        valueRowType.getFieldTypes().toArray(new DataType[0]))))
+                        InternalTypeInfo.fromRowType(valueRowType))
                 .setParallelism(sinkParallelism)
                 .map(FlinkRowData::new, inputStream.getType())
                 .setParallelism(sinkParallelism);
