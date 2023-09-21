@@ -54,6 +54,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /** {@link Action} test base. */
 public abstract class ActionITCaseBase extends AbstractTestBase {
@@ -145,7 +146,7 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     protected StreamExecutionEnvironment buildDefaultEnv(boolean isStreaming) {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
-        env.setParallelism(2);
+        env.setParallelism(ThreadLocalRandom.current().nextInt(2) + 1);
 
         if (isStreaming) {
             env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
@@ -156,6 +157,11 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         }
 
         return env;
+    }
+
+    protected void callProcedure(String procedureStatement) {
+        // default execution mode
+        callProcedure(procedureStatement, true, false);
     }
 
     protected void callProcedure(String procedureStatement, boolean isStreaming, boolean dmlSync) {

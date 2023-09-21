@@ -89,7 +89,7 @@ public class CanalRecordParser extends RecordParser {
                 .forEachRemaining(
                         fieldName -> {
                             String fieldType = schema.get(fieldName).asText();
-                            fieldTypes.put(applyCaseSensitiveFieldName(fieldName), fieldType);
+                            fieldTypes.put(fieldName, fieldType);
                         });
         this.fieldTypes = fieldTypes;
     }
@@ -131,7 +131,9 @@ public class CanalRecordParser extends RecordParser {
         LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         fieldTypes.forEach(
                 (name, type) ->
-                        paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type, typeMapping)));
+                        paimonFieldTypes.put(
+                                applyCaseSensitiveFieldName(name),
+                                MySqlTypeUtils.toDataType(type, typeMapping)));
         return paimonFieldTypes;
     }
 
@@ -168,7 +170,9 @@ public class CanalRecordParser extends RecordParser {
             JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
         fieldTypes.forEach(
                 (name, type) ->
-                        paimonFieldTypes.put(name, MySqlTypeUtils.toDataType(type, typeMapping)));
+                        paimonFieldTypes.put(
+                                applyCaseSensitiveFieldName(name),
+                                MySqlTypeUtils.toDataType(type, typeMapping)));
         Map<String, Object> jsonMap =
                 OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
         if (jsonMap == null) {
@@ -191,7 +195,9 @@ public class CanalRecordParser extends RecordParser {
             resultMap.put(
                     computedColumn.columnName(),
                     computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
-            paimonFieldTypes.put(computedColumn.columnName(), computedColumn.columnType());
+            paimonFieldTypes.put(
+                    applyCaseSensitiveFieldName(computedColumn.columnName()),
+                    computedColumn.columnType());
         }
         return resultMap;
     }

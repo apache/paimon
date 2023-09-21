@@ -167,7 +167,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
         Map<String, String> resultMap = new HashMap<>();
         linkedHashMap.forEach(
                 (key, value) -> {
-                    paimonFieldTypes.put(key, DataTypes.STRING());
+                    paimonFieldTypes.put(applyCaseSensitiveFieldName(key), DataTypes.STRING());
                     resultMap.put(key, value);
                 });
 
@@ -177,7 +177,9 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                     resultMap.put(
                             computedColumn.columnName(),
                             computedColumn.eval(resultMap.get(computedColumn.fieldReference())));
-                    paimonFieldTypes.put(computedColumn.columnName(), computedColumn.columnType());
+                    paimonFieldTypes.put(
+                            applyCaseSensitiveFieldName(computedColumn.columnName()),
+                            computedColumn.columnType());
                 });
 
         return resultMap;

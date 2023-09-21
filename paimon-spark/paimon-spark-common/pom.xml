@@ -168,6 +168,11 @@ under the License.
             </exclusions>
         </dependency>
         <dependency>
+            <groupId>org.antlr</groupId>
+            <artifactId>antlr4-runtime</artifactId>
+            <version>${antlr4.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.scalatest</groupId>
             <artifactId>scalatest_${scala.binary.version}</artifactId>
             <version>3.1.0</version>
@@ -280,7 +285,7 @@ under the License.
             <plugin>
                 <groupId>org.antlr</groupId>
                 <artifactId>antlr4-maven-plugin</artifactId>
-                <version>${antlr4-maven-plugin.version}</version>
+                <version>${antlr4.version}</version>
                 <executions>
                     <execution>
                         <goals>

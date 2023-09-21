@@ -33,7 +33,7 @@ import org.apache.spark.sql.types.StructType
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
-case class IndexedDataSplit(snapshotId: Long, index: Long, entry: DataSplit, isLast: Boolean)
+case class IndexedDataSplit(snapshotId: Long, index: Long, entry: DataSplit)
 
 trait StreamHelper extends WithFileStoreTable {
 
@@ -61,7 +61,13 @@ trait StreamHelper extends WithFileStoreTable {
       limit: ReadLimit): Option[PaimonSourceOffset] = {
     val indexedDataSplits = getBatch(startOffset, endOffset, Some(limit))
     indexedDataSplits.lastOption
-      .map(ids => PaimonSourceOffset(ids.snapshotId, ids.index, scanSnapshot = false))
+      .map(
+        ids =>
+          PaimonSourceOffset(
+            ids.snapshotId,
+            ids.index,
+            scanSnapshot =
+              startOffset.scanSnapshot && ids.snapshotId.equals(startOffset.snapshotId)))
   }
 
   def getBatch(
@@ -69,7 +75,7 @@ trait StreamHelper extends WithFileStoreTable {
       endOffset: Option[PaimonSourceOffset],
       limit: Option[ReadLimit]): Array[IndexedDataSplit] = {
     if (startOffset != null) {
-      streamScan.restore(startOffset.snapshotId, needToScanCurrentSnapshot(startOffset.snapshotId))
+      streamScan.restore(startOffset.snapshotId, startOffset.scanSnapshot)
     }
 
     val readLimitGuard = limit.flatMap(PaimonReadLimits(_, lastTriggerMillis))
@@ -111,14 +117,13 @@ trait StreamHelper extends WithFileStoreTable {
     val dataSplits =
       plan.splits().asScala.collect { case dataSplit: DataSplit => dataSplit }.toArray
     val snapshotId = dataSplits.head.snapshotId()
-    val length = dataSplits.length
 
     dataSplits
       .sortWith((ds1, ds2) => compareByPartitionAndBucket(ds1, ds2) < 0)
       .zipWithIndex
       .map {
         case (split, idx) =>
-          IndexedDataSplit(snapshotId, idx, split, idx == length - 1)
+          IndexedDataSplit(snapshotId, idx, split)
       }
   }
 

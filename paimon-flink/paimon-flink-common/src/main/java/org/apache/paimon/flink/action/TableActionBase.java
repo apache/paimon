@@ -30,8 +30,6 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.data.RowData;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -40,8 +38,6 @@ import java.util.Map;
 
 /** Abstract base of {@link Action} for table. */
 public abstract class TableActionBase extends ActionBase {
-
-    private static final Logger LOG = LoggerFactory.getLogger(TableActionBase.class);
 
     protected Table table;
     protected final Identifier identifier;

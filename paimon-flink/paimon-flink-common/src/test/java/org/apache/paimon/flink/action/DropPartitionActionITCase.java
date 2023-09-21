@@ -37,6 +37,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -54,13 +55,19 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
     public void testDropPartitionWithSinglePartitionKey(boolean hasPk) throws Exception {
         FileStoreTable table = prepareTable(hasPk);
 
-        new DropPartitionAction(
-                        warehouse,
-                        database,
-                        tableName,
-                        Collections.singletonList(Collections.singletonMap("partKey0", "0")),
-                        Collections.emptyMap())
-                .run();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            new DropPartitionAction(
+                            warehouse,
+                            database,
+                            tableName,
+                            Collections.singletonList(Collections.singletonMap("partKey0", "0")),
+                            Collections.emptyMap())
+                    .run();
+        } else {
+            callProcedure(
+                    String.format(
+                            "CALL drop_partition('%s.%s', 'partKey0 = 0')", database, tableName));
+        }
 
         SnapshotManager snapshotManager = getFileStoreTable(tableName).snapshotManager();
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
@@ -106,13 +113,20 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         partitions1.put("partKey0", "1");
         partitions1.put("partKey1", "0");
 
-        new DropPartitionAction(
-                        warehouse,
-                        database,
-                        tableName,
-                        Arrays.asList(partitions0, partitions1),
-                        Collections.emptyMap())
-                .run();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            new DropPartitionAction(
+                            warehouse,
+                            database,
+                            tableName,
+                            Arrays.asList(partitions0, partitions1),
+                            Collections.emptyMap())
+                    .run();
+        } else {
+            callProcedure(
+                    String.format(
+                            "CALL drop_partition('%s.%s', 'partKey0=0,partKey1=1', 'partKey0=1,partKey1=0')",
+                            database, tableName));
+        }
 
         SnapshotManager snapshotManager = getFileStoreTable(tableName).snapshotManager();
         Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());

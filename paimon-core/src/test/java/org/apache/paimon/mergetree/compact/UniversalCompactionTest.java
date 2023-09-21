@@ -95,6 +95,26 @@ public class UniversalCompactionTest {
     }
 
     @Test
+    public void testExtremeCaseNoOutputLevel0() {
+        UniversalCompaction compaction = new UniversalCompaction(200, 1, 5);
+
+        Optional<CompactUnit> pick =
+                compaction.pick(
+                        6,
+                        Arrays.asList(
+                                level(0, 1),
+                                level(0, 1),
+                                level(0, 1),
+                                level(0, 1024),
+                                level(0, 1024 * 1024)));
+
+        assertThat(pick.isPresent()).isTrue();
+        long[] results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {1, 1, 1, 1024, 1024 * 1024});
+        assertThat(pick.get().outputLevel()).isEqualTo(5);
+    }
+
+    @Test
     public void testSizeAmplification() {
         UniversalCompaction compaction = new UniversalCompaction(25, 0, 1);
         long[] sizes = new long[] {1};

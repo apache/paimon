@@ -33,6 +33,12 @@ public class MergeIntoActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "merge-into";
 
+    public static final String MATCHED_UPSERT = "matched-upsert";
+    public static final String NOT_MATCHED_BY_SOURCE_UPSERT = "not-matched-by-source-upsert";
+    public static final String MATCHED_DELETE = "matched-delete";
+    public static final String NOT_MATCHED_BY_SOURCE_DELETE = "not-matched-by-source-delete";
+    public static final String NOT_MATCHED_INSERT = "not-matched-insert";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
@@ -66,25 +72,25 @@ public class MergeIntoActionFactory implements ActionFactory {
                 Arrays.stream(params.get("merge-actions").split(","))
                         .map(String::trim)
                         .collect(Collectors.toList());
-        if (actions.contains("matched-upsert")) {
+        if (actions.contains(MATCHED_UPSERT)) {
             checkRequiredArgument(params, "matched-upsert-set");
             action.withMatchedUpsert(
                     params.get("matched-upsert-condition"), params.get("matched-upsert-set"));
         }
-        if (actions.contains("not-matched-by-source-upsert")) {
+        if (actions.contains(NOT_MATCHED_BY_SOURCE_UPSERT)) {
             checkRequiredArgument(params, "not-matched-by-source-upsert-set");
             action.withNotMatchedBySourceUpsert(
                     params.get("not-matched-by-source-upsert-condition"),
                     params.get("not-matched-by-source-upsert-set"));
         }
-        if (actions.contains("matched-delete")) {
+        if (actions.contains(MATCHED_DELETE)) {
             action.withMatchedDelete(params.get("matched-delete-condition"));
         }
-        if (actions.contains("not-matched-by-source-delete")) {
+        if (actions.contains(NOT_MATCHED_BY_SOURCE_DELETE)) {
             action.withNotMatchedBySourceDelete(
                     params.get("not-matched-by-source-delete-condition"));
         }
-        if (actions.contains("not-matched-insert")) {
+        if (actions.contains(NOT_MATCHED_INSERT)) {
             checkRequiredArgument(params, "not-matched-insert-values");
             action.withNotMatchedInsert(
                     params.get("not-matched-insert-condition"),
@@ -182,7 +188,7 @@ public class MergeIntoActionFactory implements ActionFactory {
                 "  It will find matched rows of target table that meet condition (T.k = S.k), then update T.v with S.v where (T.v <> S.v).");
     }
 
-    private void validate(MergeIntoAction action) {
+    public static void validate(MergeIntoAction action) {
         if (!action.matchedUpsert
                 && !action.notMatchedUpsert
                 && !action.matchedDelete

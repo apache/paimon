@@ -18,10 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.mysql.TestCaseInsensitiveCatalogFactory;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -30,7 +27,6 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -103,18 +99,18 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
 
         expected =
                 Arrays.asList(
-                        "+U[100000000000000000000101, scooter, Small 2-wheel scooter, 350]",
-                        "+U[100000000000000000000102, car battery, High-performance car battery, 8.1]",
-                        "+U[100000000000000000000103, 12-pack drill bits, Set of 12 professional-grade drill bits, 0.8]");
+                        "+I[100000000000000000000101, scooter, Small 2-wheel scooter, 350]",
+                        "+I[100000000000000000000102, car battery, High-performance car battery, 8.1]",
+                        "+I[100000000000000000000103, 12-pack drill bits, Set of 12 professional-grade drill bits, 0.8]");
         waitForResult(expected, table1, rowType1, primaryKeys1);
 
         writeRecordsToMongoDB("test-data-4", database, "database");
 
         expected =
                 Arrays.asList(
-                        "+U[100000000000000000000101, user_1, Guangzhou, 123563291234]",
-                        "+U[100000000000000000000102, user_2, Beijing, 1234546591234]",
-                        "+U[100000000000000000000103, user_3, Nanjing, 1235567891234]");
+                        "+I[100000000000000000000101, user_1, Guangzhou, 123563291234]",
+                        "+I[100000000000000000000102, user_2, Beijing, 1234546591234]",
+                        "+I[100000000000000000000103, user_3, Nanjing, 1235567891234]");
         waitForResult(expected, table2, rowType2, primaryKeys2);
     }
 
@@ -187,9 +183,6 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
     @Test
     @Timeout(60)
     public void testDynamicTableCreationInMongoDB() throws Exception {
-        catalog =
-                new TestCaseInsensitiveCatalogFactory()
-                        .createCatalog(CatalogContext.create(new Path(warehouse)));
         String dbName = database + UUID.randomUUID();
         writeRecordsToMongoDB("test-data-5", dbName, "database");
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
@@ -197,11 +190,10 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
         MongoDBSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mongodbConfig)
                         .withTableConfig(getBasicTableConfig())
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"))
                         .build();
-        Field catalogField = ActionBase.class.getDeclaredField("catalog");
-        catalogField.setAccessible(true);
-        Object newCatalog = catalog;
-        catalogField.set(action, newCatalog);
         runActionWithDefaultEnv(action);
 
         waitingTables("t3");

@@ -19,16 +19,26 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.PipelineOptions;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.procedure.ProcedureContext;
 import org.apache.flink.table.procedures.Procedure;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
+import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
 
 /** Base implementation for flink {@link Procedure}. */
 public class ProcedureBase implements Procedure {
@@ -39,8 +49,25 @@ public class ProcedureBase implements Procedure {
         this.catalog = catalog;
     }
 
-    protected String[] execute(StreamExecutionEnvironment env, String defaultJobName)
+    protected List<Map<String, String>> getPartitions(String... partitionStrings) {
+        List<Map<String, String>> partitions = new ArrayList<>();
+        for (String partition : partitionStrings) {
+            partitions.add(parseCommaSeparatedKeyValues(partition));
+        }
+        return partitions;
+    }
+
+    @Nullable
+    protected String nullable(String arg) {
+        return StringUtils.isBlank(arg) ? null : arg;
+    }
+
+    protected String[] execute(
+            ProcedureContext procedureContext, Action action, String defaultJobName)
             throws Exception {
+        StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
+        action.build(env);
+
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultJobName);
         JobClient jobClient = env.executeAsync(name);

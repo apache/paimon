@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.utils.BlockingIterator;
+
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -29,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -147,6 +150,21 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         assertThatThrownBy(
                 () -> sEnv.from("T").execute().print(),
                 "Partial update continuous reading is not supported");
+    }
+
+    @Test
+    public void testStreamingReadChangelogInput() throws TimeoutException {
+        sql(
+                "CREATE TABLE INPUT_T ("
+                        + "a INT, b INT, c INT, PRIMARY KEY (a) NOT ENFORCED)"
+                        + " WITH ('merge-engine'='partial-update', 'changelog-producer'='input');");
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(streamSqlIter("SELECT * FROM INPUT_T"));
+        sql("INSERT INTO INPUT_T VALUES (1, CAST(NULL AS INT), 1)");
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, null, 1));
+        sql("INSERT INTO INPUT_T VALUES (1, 1, CAST(NULL AS INT)), (2, 2, 2)");
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of(1, 1, null), Row.of(2, 2, 2));
     }
 
     @Test

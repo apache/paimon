@@ -36,9 +36,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_DELETE;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_UPSERT;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_BY_SOURCE_DELETE;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_BY_SOURCE_UPSERT;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_INSERT;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildDdl;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
@@ -110,8 +116,31 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         "dt < '02-28'", "v = v || '_nmu', last_action = 'not_matched_upsert'")
                 .withNotMatchedBySourceDelete("dt >= '02-28'");
 
+        String mergeActions =
+                String.format(
+                        "%s,%s,%s,%s,%s",
+                        MATCHED_UPSERT,
+                        MATCHED_DELETE,
+                        NOT_MATCHED_INSERT,
+                        NOT_MATCHED_BY_SOURCE_UPSERT,
+                        NOT_MATCHED_BY_SOURCE_DELETE);
+        String procedureStatement =
+                String.format(
+                        "CALL merge_into('%s.T', '', '', 'default.S', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
+                        database,
+                        mergeActions,
+                        "'T.v <> S.v AND S.v IS NOT NULL', "
+                                + "'v = S.v, last_action = ''matched_upsert''', "
+                                + "'S.v IS NULL', "
+                                + "'', "
+                                + "'S.k, S.v, ''insert'', S.dt', "
+                                + "'dt < ''02-28''', "
+                                + "'v = v || ''_nmu'', last_action = ''not_matched_upsert''', "
+                                + "'dt >= ''02-28'''");
+
         validateActionRunResult(
                 action,
+                procedureStatement,
                 expected,
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
@@ -169,8 +198,14 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("TT.k = S.k AND TT.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
+        String procedureStatement =
+                String.format(
+                        "CALL merge_into('%s.T', 'TT', '', 'S', 'TT.k = S.k AND TT.dt = S.dt', '%s', %s)",
+                        inDefault ? database : "test_db", MATCHED_DELETE, "'S.v IS NULL'");
+
         validateActionRunResult(
                 action,
+                procedureStatement,
                 Arrays.asList(
                         changelogRow("-D", 4, "v_4", "creation", "02-27"),
                         changelogRow("-D", 8, "v_8", "creation", "02-28")),
@@ -205,6 +240,11 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
+        String procedureStatement =
+                String.format(
+                        "CALL merge_into('default.T', '', '', '%s', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
+                        sourceTableName, MATCHED_DELETE, "'S.v IS NULL'");
+
         if (!inDefault) {
             sEnv.executeSql("USE `default`");
             bEnv.executeSql("USE `default`");
@@ -212,6 +252,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         validateActionRunResult(
                 action,
+                procedureStatement,
                 Arrays.asList(
                         changelogRow("-D", 4, "v_4", "creation", "02-27"),
                         changelogRow("-D", 8, "v_8", "creation", "02-28")),
@@ -236,6 +277,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 String.format(
                         "CREATE CATALOG test_cat WITH ('type' = 'paimon', 'warehouse' = '%s')",
                         getTempDirPath());
+        String escapeCatalog = catalog.replaceAll("'", "''");
         String id =
                 TestValuesTableFactory.registerData(
                         Arrays.asList(
@@ -245,8 +287,9 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         String ddl =
                 String.format(
                         "CREATE TEMPORARY TABLE %s (k INT, v STRING, dt STRING)\n"
-                                + "WITH ('connector' = 'values', 'bounded' = 'true', 'data-id' = '%s');",
+                                + "WITH ('connector' = 'values', 'bounded' = 'true', 'data-id' = '%s')",
                         useCatalog ? "S" : "test_cat.`default`.S", id);
+        String escapeDdl = ddl.replaceAll("'", "''");
 
         MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
 
@@ -261,8 +304,22 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         action.withMergeCondition("T.k = S.k AND T.dt = S.dt").withMatchedDelete("S.v IS NULL");
 
+        String procedureStatement =
+                String.format(
+                        "CALL merge_into('%s.T', '', '%s', '%s', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
+                        database,
+                        useCatalog
+                                ? String.format(
+                                        "%s;%s;%s",
+                                        escapeCatalog, "USE CATALOG test_cat", escapeDdl)
+                                : String.format("%s;%s", escapeCatalog, escapeDdl),
+                        useCatalog ? "S" : "test_cat.default.S",
+                        MATCHED_DELETE,
+                        "'S.v IS NULL'");
+
         validateActionRunResult(
                 action,
+                procedureStatement,
                 Arrays.asList(
                         changelogRow("-D", 4, "v_4", "creation", "02-27"),
                         changelogRow("-D", 8, "v_8", "creation", "02-28")),
@@ -287,8 +344,18 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withMatchedUpsert(null, "*");
 
+        String procedureStatement =
+                String.format(
+                        "CALL merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '%s', %s)",
+                        database,
+                        "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                        qualified ? "default.SS" : "SS",
+                        MATCHED_UPSERT,
+                        "'', '*'");
+
         validateActionRunResult(
                 action,
+                procedureStatement,
                 Arrays.asList(
                         changelogRow("-U", 1, "v_1", "creation", "02-27"),
                         changelogRow("+U", 1, "v_1", "unknown", "02-27"),
@@ -321,8 +388,18 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
                 .withNotMatchedInsert("SS.k < 12", "*");
 
+        String procedureStatement =
+                String.format(
+                        "CALL merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '%s', %s)",
+                        database,
+                        "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
+                        qualified ? "default.SS" : "SS",
+                        NOT_MATCHED_INSERT,
+                        "'SS.k < 12', '*'");
+
         validateActionRunResult(
                 action,
+                procedureStatement,
                 Arrays.asList(
                         changelogRow("+I", 8, "v_8", "unknown", "02-29"),
                         changelogRow("+I", 11, "v_11", "unknown", "02-29")),
@@ -416,11 +493,18 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     private void validateActionRunResult(
-            MergeIntoAction action, List<Row> streamingExpected, List<Row> batchExpected)
+            MergeIntoAction action,
+            String procedureStatement,
+            List<Row> streamingExpected,
+            List<Row> batchExpected)
             throws Exception {
         BlockingIterator<Row, Row> iterator =
                 testStreamingRead(buildSimpleQuery("T"), initialRecords);
-        action.run();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            action.run();
+        } else {
+            callProcedure(procedureStatement);
+        }
         // test streaming read
         validateStreamingReadResult(iterator, streamingExpected);
         iterator.close();

@@ -164,9 +164,12 @@ public class HiveSchema {
             // doesn't contain precision and thus may cause casting problems
             Map<String, DataField> paimonFields =
                     tableSchema.get().fields().stream()
-                            .collect(Collectors.toMap(DataField::name, Function.identity()));
+                            .collect(
+                                    Collectors.toMap(
+                                            dataField -> dataField.name().toLowerCase(),
+                                            Function.identity()));
             for (int i = 0; i < columnNames.size(); i++) {
-                String columnName = columnNames.get(i);
+                String columnName = columnNames.get(i).toLowerCase();
                 dataTypes.set(i, paimonFields.get(columnName).type());
                 comments.set(i, paimonFields.get(columnName).description());
             }
@@ -239,7 +242,7 @@ public class HiveSchema {
 
         List<String> mismatched = new ArrayList<>();
         for (int i = 0; i < hiveFieldNames.size(); i++) {
-            if (!Objects.equals(hiveFieldNames.get(i), schemaFieldNames.get(i))
+            if (!hiveFieldNames.get(i).equalsIgnoreCase(schemaFieldNames.get(i))
                     || !Objects.equals(hiveFieldTypeInfos.get(i), schemaFieldTypeInfos.get(i))) {
                 String ddlField =
                         hiveFieldNames.get(i) + " " + hiveFieldTypeInfos.get(i).getTypeName();
@@ -295,7 +298,7 @@ public class HiveSchema {
 
         List<String> mismatched = new ArrayList<>();
         for (int i = 0; i < hivePartitionKeys.size(); i++) {
-            if (!Objects.equals(hivePartitionKeys.get(i), schemaPartitionKeys.get(i))
+            if (!hivePartitionKeys.get(i).equalsIgnoreCase(schemaPartitionKeys.get(i))
                     || !Objects.equals(
                             hivePartitionTypeInfos.get(i), schemaPartitionTypeInfos.get(i))) {
                 String ddlField =
