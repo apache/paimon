@@ -16,6 +16,11 @@
  * limitations under the License.
  */
 
+/* This file is based on source code from JsonDebeziumSchemaSerializer in the doris-flink-connector
+ * (https://github.com/apache/doris-flink-connector/), licensed by the Apache Software Foundation (ASF) under the
+ * Apache License, Version 2.0. See the NOTICE file distributed with this work for additional
+ *  information regarding copyright ownership. */
+
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
