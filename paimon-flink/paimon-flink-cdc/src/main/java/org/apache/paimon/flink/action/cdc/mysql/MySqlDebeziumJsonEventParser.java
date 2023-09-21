@@ -16,11 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from JsonDebeziumSchemaSerializer in the doris-flink-connector
- * (https://github.com/apache/doris-flink-connector/), licensed by the Apache Software Foundation (ASF) under the
- * Apache License, Version 2.0. See the NOTICE file distributed with this work for additional
- *  information regarding copyright ownership. */
-
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
@@ -39,6 +34,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import io.debezium.data.Bits;
@@ -62,7 +58,17 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
@@ -102,7 +108,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 caseSensitive,
                 computedColumns,
                 new TableNameConverter(caseSensitive),
-                ddl -> Optional.empty(),
+                new MySqlTableSchemaBuilder(new HashMap<>(), caseSensitive, typeMapping),
                 null,
                 null,
                 typeMapping);
@@ -271,7 +277,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         return root.payload().source().db();
     }
 
-    private Map<String, String> extractRow(Map<String, Object> recordRow) {
+    private Map<String, String> extractRow(JsonNode recordRow) {
         if (recordRow == null) {
             return new HashMap<>();
         }
@@ -289,13 +295,13 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         for (Map.Entry<String, DebeziumEvent.Field> field : fields.entrySet()) {
             String fieldName = field.getKey();
             String mySqlType = field.getValue().type();
-            Object objectValue = recordRow.get(fieldName);
-            if (objectValue == null) {
+            JsonNode objectValue = recordRow.get(fieldName);
+            if (objectValue == null || objectValue.isNull()) {
                 continue;
             }
 
             String className = field.getValue().name();
-            String oldValue = objectValue.toString();
+            String oldValue = objectValue.asText();
             String newValue = oldValue;
 
             if (Bits.LOGICAL_NAME.equals(className)) {
@@ -385,13 +391,13 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                                 .toString();
             } else if (Point.LOGICAL_NAME.equals(className)
                     || Geometry.LOGICAL_NAME.equals(className)) {
-                Map<String, Object> valueNode = (Map<String, Object>) recordRow.get(fieldName);
                 try {
-                    byte[] wkb = Base64.getDecoder().decode(valueNode.get(Geometry.WKB_FIELD).toString());
+                    byte[] wkb = objectValue.get(Geometry.WKB_FIELD).binaryValue();
                     newValue = MySqlTypeUtils.convertWkbArray(wkb);
                 } catch (Exception e) {
                     throw new IllegalArgumentException(
-                            String.format("Failed to convert %s to geometry JSON.", valueNode), e);
+                            String.format("Failed to convert %s to geometry JSON.", objectValue),
+                            e);
                 }
             }
 

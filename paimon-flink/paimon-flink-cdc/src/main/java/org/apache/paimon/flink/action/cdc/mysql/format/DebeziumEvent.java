@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc.mysql.format;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import io.debezium.relational.history.TableChanges;
 
@@ -80,10 +81,10 @@ public class DebeziumEvent {
         private final Source source;
 
         @JsonProperty(FIELD_BEFORE)
-        private final Map<String, Object> before;
+        private final JsonNode before;
 
         @JsonProperty(FIELD_AFTER)
-        private final Map<String, Object> after;
+        private final JsonNode after;
 
         @JsonProperty(FIELD_HISTORY_RECORD)
         private final String historyRecord;
@@ -94,8 +95,8 @@ public class DebeziumEvent {
         @JsonCreator
         public Payload(
                 @JsonProperty(FIELD_SOURCE) Source source,
-                @JsonProperty(FIELD_BEFORE) Map<String, Object> before,
-                @JsonProperty(FIELD_AFTER) Map<String, Object> after,
+                @JsonProperty(FIELD_BEFORE) JsonNode before,
+                @JsonProperty(FIELD_AFTER) JsonNode after,
                 @JsonProperty(FIELD_HISTORY_RECORD) String historyRecord,
                 @JsonProperty(FIELD_OP) String op) {
             this.source = source;
@@ -111,12 +112,12 @@ public class DebeziumEvent {
         }
 
         @JsonGetter(FIELD_BEFORE)
-        public Map<String, Object> before() {
+        public JsonNode before() {
             return before;
         }
 
         @JsonGetter(FIELD_AFTER)
-        public Map<String, Object> after() {
+        public JsonNode after() {
             return after;
         }
 
@@ -208,7 +209,12 @@ public class DebeziumEvent {
                                     FIELD_BEFORE.equals(item.field)
                                             || FIELD_AFTER.equals(item.field))
                     .flatMap(item -> item.fields.stream())
-                    .collect(Collectors.toMap(Field::field, Function.identity(), (v1, v2) -> v2, LinkedHashMap::new));
+                    .collect(
+                            Collectors.toMap(
+                                    Field::field,
+                                    Function.identity(),
+                                    (v1, v2) -> v2,
+                                    LinkedHashMap::new));
         }
     }
 
