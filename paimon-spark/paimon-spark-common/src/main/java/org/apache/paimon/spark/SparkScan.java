@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.options.Options;
+import org.apache.paimon.spark.cdc.CDCCol;
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -47,10 +49,12 @@ public class SparkScan implements Scan, SupportsReportStatistics {
     private final ReadBuilder readBuilder;
 
     private List<Split> splits;
+    private final Options options;
 
     public SparkScan(Table table, ReadBuilder readBuilder) {
         this.table = table;
         this.readBuilder = readBuilder;
+        this.options = Options.fromMap(table.options());
     }
 
     @Override
@@ -61,7 +65,8 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     @Override
     public StructType readSchema() {
-        return SparkTypeUtils.fromPaimonRowType(readBuilder.readType());
+        StructType schema = SparkTypeUtils.fromPaimonRowType(readBuilder.readType());
+        return options.get(SparkConnectorOptions.READ_CHANGELOG) ? CDCCol.addCDCCols(schema) : schema;
     }
 
     @Override
@@ -76,7 +81,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
             @Override
             public PartitionReaderFactory createReaderFactory() {
-                return new SparkReaderFactory(readBuilder);
+                return new SparkReaderFactory(readBuilder, options);
             }
         };
     }

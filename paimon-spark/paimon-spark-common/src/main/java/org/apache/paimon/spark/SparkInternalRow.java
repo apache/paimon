@@ -47,7 +47,7 @@ public class SparkInternalRow extends org.apache.spark.sql.catalyst.InternalRow 
 
     private final RowType rowType;
 
-    private InternalRow row;
+    protected InternalRow row;
 
     public SparkInternalRow(RowType rowType) {
         this.rowType = rowType;

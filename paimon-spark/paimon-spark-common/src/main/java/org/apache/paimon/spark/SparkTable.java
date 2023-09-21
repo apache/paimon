@@ -21,6 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.spark.cdc.CDCCol;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -79,7 +80,10 @@ public class SparkTable
 
     @Override
     public StructType schema() {
-        return SparkTypeUtils.fromPaimonRowType(table.rowType());
+        StructType schema = SparkTypeUtils.fromPaimonRowType(table.rowType());
+        return Options.fromMap(table.options()).get(SparkConnectorOptions.READ_CHANGELOG)
+                ? CDCCol.addCDCCols(schema)
+                : schema;
     }
 
     @Override

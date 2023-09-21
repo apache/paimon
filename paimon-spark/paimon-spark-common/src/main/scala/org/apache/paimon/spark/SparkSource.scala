@@ -19,6 +19,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.options.Options
+import org.apache.paimon.spark.cdc.CDCCol
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.spark.sources.PaimonSink
 import org.apache.paimon.table.{FileStoreTable, FileStoreTableFactory}
@@ -105,7 +106,14 @@ object SparkSource {
   def toBaseRelation(table: FileStoreTable, _sqlContext: SQLContext): BaseRelation = {
     new BaseRelation {
       override def sqlContext: SQLContext = _sqlContext
-      override def schema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
+      override def schema: StructType = {
+        val schema = SparkTypeUtils.fromPaimonRowType(table.rowType())
+        if (Options.fromMap(table.options).get(SparkConnectorOptions.READ_CHANGELOG)) {
+          CDCCol.addCDCCols(schema)
+        } else {
+          schema
+        }
+      }
     }
   }
 }

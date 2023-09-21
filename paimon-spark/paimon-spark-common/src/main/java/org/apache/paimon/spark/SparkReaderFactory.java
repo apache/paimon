@@ -18,6 +18,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -37,9 +38,11 @@ public class SparkReaderFactory implements PartitionReaderFactory {
     private static final long serialVersionUID = 1L;
 
     private final ReadBuilder readBuilder;
+    private final Options options;
 
-    public SparkReaderFactory(ReadBuilder readBuilder) {
+    public SparkReaderFactory(ReadBuilder readBuilder, Options options) {
         this.readBuilder = readBuilder;
+        this.options = options;
     }
 
     @Override
@@ -56,7 +59,10 @@ public class SparkReaderFactory implements PartitionReaderFactory {
             throw new UncheckedIOException(e);
         }
         RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader);
-        SparkInternalRow row = new SparkInternalRow(readBuilder.readType());
+        SparkInternalRow row =
+                options.get(SparkConnectorOptions.READ_CHANGELOG)
+                        ? new SparkCDCInternalRow(readBuilder.readType())
+                        : new SparkInternalRow(readBuilder.readType());
         return new SparkInputPartitionReader(iterator, row);
     }
 }

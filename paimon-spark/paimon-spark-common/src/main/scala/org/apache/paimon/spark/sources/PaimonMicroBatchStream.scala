@@ -126,7 +126,7 @@ class PaimonMicroBatchStream(
   }
 
   override def createReaderFactory(): PartitionReaderFactory = {
-    new SparkReaderFactory(readBuilder)
+    new SparkReaderFactory(readBuilder, options)
   }
 
   override def initialOffset(): Offset = {
