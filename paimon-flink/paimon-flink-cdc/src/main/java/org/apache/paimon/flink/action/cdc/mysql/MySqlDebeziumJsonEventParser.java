@@ -420,6 +420,11 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     private boolean shouldSynchronizeCurrentTable() {
+        // When database DDL operation, the current table is null.
+        if (currentTable == null) {
+            return false;
+        }
+
         if (excludedTables.contains(currentTable)) {
             return false;
         }
