@@ -91,6 +91,13 @@ public class MongoDBActionUtils {
                     .defaultValue("dynamic")
                     .withDescription("Mode selection: `dynamic` or `specified`.");
 
+    public static final ConfigOption<Boolean> DEFAULT_ID_GENERATION =
+            ConfigOptions.key("default.id.generation")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Determines whether to use the default MongoDB _id generation strategy. If set to true, the default _id generation will remove the outer $oid nesting. If set to false, no additional processing will be done on the _id field.");
+
     static MongoDBSource<String> buildMongodbSource(Configuration mongodbConfig, String tableList) {
         validateMongodbConfig(mongodbConfig);
         MongoDBSourceBuilder<String> sourceBuilder = MongoDBSource.builder();
