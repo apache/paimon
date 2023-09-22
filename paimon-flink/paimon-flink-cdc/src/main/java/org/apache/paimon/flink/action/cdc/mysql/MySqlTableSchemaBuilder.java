@@ -69,9 +69,7 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<TableChang
                             column.scale().orElse(null),
                             typeMapping);
 
-            if (!typeMapping.containsMode(TO_NULLABLE)) {
-                dataType.copy(column.isOptional());
-            }
+            dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
 
             String columnName = column.name();
             if (!caseSensitive) {
