@@ -474,18 +474,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The time zone to parse the long watermark value to TIMESTAMP value. The default value is 'UTC', which means the watermark is defined on TIMESTAMP column or not defined. If the watermark is defined on TIMESTAMP_LTZ column, the time zone of watermark is user configured time zone, the value should be the user configured local time zone. The option value is either a full name such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.</td>
         </tr>
         <tr>
-            <td><h5>snapshot.expire.execution-mode</h5></td>
-            <td style="word-wrap: break-word;">sync</td>
-            <td><p>Enum</p></td>
-            <td>Specifies the execution mode of expire.<br /><br />Possible values:<ul><li>"sync": Execute expire synchronously. If there are too many files, it may take a long time and block stream processing.</li><li>"async": Execute expire asynchronously. If the generation of snapshots is greater than the deletion, there will be a backlog of files.</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>snapshot.expire.limit</h5></td>
-            <td style="word-wrap: break-word;">10</td>
-            <td>Integer</td>
-            <td>The maximum number of snapshots allowed to expire at a time.</td>
-        </tr>
-        <tr>
             <td><h5>snapshot.num-retained.max</h5></td>
             <td style="word-wrap: break-word;">2147483647</td>
             <td>Integer</td>
@@ -502,6 +490,19 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>The maximum time of completed snapshots to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.expire.execution-mode</h5></td>
+            <td style="word-wrap: break-word;">sync</td>
+            <td>Enum</td>
+            <td>Specifies the execution mode of expire.<br /><br />Possible values:<ul><li>"sync": Execute expire synchronously. If there are too many files, it may take a long time and block stream processing.</li><li>"async": Execute expire asynchronously. If the generation of snapshots is greater than the deletion, there will be a backlog of files.</li></ul></td>
+        </tr>
+        </tr>
+        <tr>
+            <td><h5>snapshot.expire.limit</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>The maximum number of snapshots allowed to expire at a time.</td>
         </tr>
         <tr>
             <td><h5>sort-engine</h5></td>
