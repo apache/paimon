@@ -200,7 +200,8 @@ public abstract class FlinkSink<T> implements Serializable {
                     new AutoTagForSavepointCommitterOperator<>(
                             (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
                             table::snapshotManager,
-                            table::tagManager);
+                            table::tagManager,
+                            () -> table.store().newTagDeletion());
         }
         SingleOutputStreamOperator<?> committed =
                 written.transform(
