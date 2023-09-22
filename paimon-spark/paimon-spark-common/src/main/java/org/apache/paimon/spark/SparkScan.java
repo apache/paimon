@@ -66,7 +66,9 @@ public class SparkScan implements Scan, SupportsReportStatistics {
     @Override
     public StructType readSchema() {
         StructType schema = SparkTypeUtils.fromPaimonRowType(readBuilder.readType());
-        return options.get(SparkConnectorOptions.READ_CHANGELOG) ? CDCCol.addCDCCols(schema) : schema;
+        return options.get(SparkConnectorOptions.READ_CHANGELOG)
+                ? CDCCol.addCDCCols(schema)
+                : schema;
     }
 
     @Override
