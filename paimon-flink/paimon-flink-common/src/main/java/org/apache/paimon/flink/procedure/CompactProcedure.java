@@ -79,7 +79,7 @@ public class CompactProcedure extends ProcedureBase {
         String warehouse = ((AbstractCatalog) catalog).warehouse();
         Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
         Map<String, String> tableConf =
-                StringUtils.isEmpty(tableConfString)
+                StringUtils.isBlank(tableConfString)
                         ? Collections.emptyMap()
                         : ActionFactory.parseCommaSeparatedKeyValues(tableConfString);
         Identifier identifier = Identifier.fromString(tableId);
