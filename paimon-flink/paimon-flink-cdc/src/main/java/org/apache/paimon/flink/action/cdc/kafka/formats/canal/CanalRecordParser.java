@@ -66,6 +66,7 @@ public class CanalRecordParser extends RecordParser {
     private static final String OP_UPDATE = "UPDATE";
     private static final String OP_INSERT = "INSERT";
     private static final String OP_DELETE = "DELETE";
+    private static final String OP_ROW = "ROW";
 
     @Override
     protected boolean isDDL() {
@@ -114,6 +115,7 @@ public class CanalRecordParser extends RecordParser {
                     processRecord(data, RowKind.INSERT, records);
                     break;
                 case OP_INSERT:
+                case OP_ROW:
                     processRecord(data, RowKind.INSERT, records);
                     break;
                 case OP_DELETE:
