@@ -374,11 +374,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     }
 
     @VisibleForTesting
-    public Map<String, String> catalogConfig() {
-        return catalogConfig;
-    }
-
-    @VisibleForTesting
     public Map<String, String> tableConfig() {
         return tableConfig;
     }

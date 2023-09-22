@@ -46,6 +46,10 @@ public class MongoDBContainer extends org.testcontainers.containers.MongoDBConta
 
     private static final Pattern COMMENT_PATTERN = Pattern.compile("^(.*)//.*$");
 
+    public static final String PAIMON_USER = "flinkuser";
+
+    public static final String PAIMON_USER_PASSWORD = "a1?~!@#$%^&*(){}[]<>.,+_-=/|:;";
+
     public static final int MONGODB_PORT = 27017;
 
     public MongoDBContainer(String imageName) {

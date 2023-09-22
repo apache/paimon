@@ -89,8 +89,14 @@ class KafkaActionUtils {
     static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
         validateKafkaConfig(kafkaConfig);
         KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
+
+        List<String> topics =
+                kafkaConfig.get(KafkaConnectorOptions.TOPIC).stream()
+                        .flatMap(topic -> Arrays.stream(topic.split(",")))
+                        .collect(Collectors.toList());
+
         kafkaSourceBuilder
-                .setTopics(kafkaConfig.get(KafkaConnectorOptions.TOPIC))
+                .setTopics(topics)
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
         Properties properties = new Properties();

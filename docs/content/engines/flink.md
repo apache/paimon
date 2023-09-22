@@ -70,8 +70,6 @@ You can find the bundled jar in `./paimon-flink/paimon-flink-<flink-version>/tar
 
 ## Quick Start
 
-### Using bundled Jar
-
 **Step 1: Download Flink**
 
 If you haven't downloaded Flink, you can [download Flink](https://flink.apache.org/downloads.html), then extract the archive with the following command.
@@ -245,7 +243,18 @@ Stop the Flink local cluster.
 ./bin/stop-cluster.sh
 ```
 
-### Using Action Jar
+## Savepoint and recover
+
+Because Paimon has its own snapshot management, this may conflict with Flink's checkpoint management, causing
+exceptions when restoring from savepoint (don't worry, it will not cause the storage to be damaged).
+
+It is recommended that you use the following methods to savepoint:
+1. Use [Stop with savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#stopping-a-job-with-savepoint).
+2. Use [Tag with savepoint]({{< ref "maintenance/manage-tags#work-with-flink-savepoint" >}}), and rollback-to-tag
+   before restoring from savepoint.
+
+## Using Action Jar
+
 After the Flink Local Cluster has been started, you can execute the action jar by using the following command
 
 ```

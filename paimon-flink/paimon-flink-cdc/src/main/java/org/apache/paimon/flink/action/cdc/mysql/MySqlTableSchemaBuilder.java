@@ -68,9 +68,10 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
                             scale == null ? null : scale.asInt(),
                             typeMapping);
 
-            if (!typeMapping.containsMode(TO_NULLABLE)) {
-                dataType.copy(element.get("optional").asBoolean());
-            }
+            dataType =
+                    dataType.copy(
+                            typeMapping.containsMode(TO_NULLABLE)
+                                    || element.get("optional").asBoolean());
 
             // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
             fields.put(element.get("name").asText(), dataType);

@@ -48,7 +48,7 @@ class PaimonMicroBatchStream(
     } else {
       false
     }
-    PaimonSourceOffset(initSnapshotId, -1L, scanSnapshot)
+    PaimonSourceOffset(initSnapshotId, PaimonSourceOffset.INIT_OFFSET_INDEX, scanSnapshot)
   }
 
   // the committed offset this is used to detect the validity of subsequent offsets

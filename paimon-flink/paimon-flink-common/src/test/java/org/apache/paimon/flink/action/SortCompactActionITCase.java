@@ -18,19 +18,13 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.options.CatalogOptions;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
@@ -44,7 +38,6 @@ import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,12 +47,9 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Order Rewrite Action tests for {@link SortCompactAction}. */
-public class OrderRewriteActionITCase extends ActionITCaseBase {
+public class SortCompactActionITCase extends ActionITCaseBase {
 
     private static final Random random = new Random();
-
-    private Catalog catalog;
-    @TempDir private java.nio.file.Path path;
 
     private void prepareData(int size, int loop) throws Exception {
         createTable();
@@ -217,45 +207,43 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
     }
 
     private void zorder(List<String> columns) throws Exception {
-        SortCompactAction sortCompactAction =
-                new SortCompactAction(
-                        new Path(path.toUri()).toUri().toString(),
-                        "my_db",
-                        "Orders1",
-                        Collections.emptyMap());
-        sortCompactAction.withOrderStrategy("zorder");
-        sortCompactAction.withOrderColumns(columns);
-        sortCompactAction.run();
+        if (random.nextBoolean()) {
+            new SortCompactAction(warehouse, database, tableName, Collections.emptyMap())
+                    .withOrderStrategy("zorder")
+                    .withOrderColumns(columns)
+                    .run();
+        } else {
+            callProcedure("zorder", columns);
+        }
     }
 
     private void order(List<String> columns) throws Exception {
-        SortCompactAction sortCompactAction =
-                new SortCompactAction(
-                        new Path(path.toUri()).toUri().toString(),
-                        "my_db",
-                        "Orders1",
-                        Collections.emptyMap());
-        sortCompactAction.withOrderStrategy("order");
-        sortCompactAction.withOrderColumns(columns);
-        sortCompactAction.run();
+        if (random.nextBoolean()) {
+            new SortCompactAction(warehouse, database, tableName, Collections.emptyMap())
+                    .withOrderStrategy("order")
+                    .withOrderColumns(columns)
+                    .run();
+        } else {
+            callProcedure("order", columns);
+        }
     }
 
-    public Catalog getCatalog() {
-        if (catalog == null) {
-            Options options = new Options();
-            options.set(CatalogOptions.WAREHOUSE, new Path(path.toUri()).toUri().toString());
-            catalog = CatalogFactory.createCatalog(CatalogContext.create(options));
-        }
-        return catalog;
+    private void callProcedure(String orderStrategy, List<String> orderByColumns) {
+        callProcedure(
+                String.format(
+                        "CALL compact('%s.%s', '%s', '%s')",
+                        database, tableName, orderStrategy, String.join(",", orderByColumns)),
+                false,
+                true);
     }
 
     public void createTable() throws Exception {
-        getCatalog().createDatabase("my_db", true);
-        getCatalog().createTable(identifier(), schema(), true);
+        catalog.createDatabase(database, true);
+        catalog.createTable(identifier(), schema(), true);
     }
 
     public Identifier identifier() {
-        return Identifier.create("my_db", "Orders1");
+        return Identifier.create(database, tableName);
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {
@@ -299,7 +287,7 @@ public class OrderRewriteActionITCase extends ActionITCaseBase {
     }
 
     public Table getTable() throws Exception {
-        return getCatalog().getTable(identifier());
+        return catalog.getTable(identifier());
     }
 
     private static List<CommitMessage> writeOnce(Table table, int p, int size) throws Exception {

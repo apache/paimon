@@ -25,6 +25,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base IT cases for {@link CompactAction} and {@link CompactDatabaseAction} . */
 public class CompactActionITCaseBase extends ActionITCaseBase {
+
     protected void validateResult(
             FileStoreTable table,
             RowType rowType,
@@ -63,8 +65,10 @@ public class CompactActionITCaseBase extends ActionITCaseBase {
     }
 
     protected void checkFileAndRowSize(
-            FileStoreScan scan, Long expectedSnapshotId, Long timeout, int fileNum, long rowCount)
+            FileStoreTable table, Long expectedSnapshotId, Long timeout, int fileNum, long rowCount)
             throws Exception {
+        SnapshotManager snapshotManager = table.snapshotManager();
+        FileStoreScan scan = table.store().newScan();
 
         long start = System.currentTimeMillis();
         while (!Objects.equals(snapshotManager.latestSnapshotId(), expectedSnapshotId)) {

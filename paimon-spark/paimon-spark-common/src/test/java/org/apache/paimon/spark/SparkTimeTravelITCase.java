@@ -18,13 +18,17 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -210,5 +214,42 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class, "Tag 'unknown' doesn't exist."));
+    }
+
+    @Test
+    public void testTravelToTagWithSnapshotExpiration() throws Exception {
+        spark.sql("CREATE TABLE t (k INT, v STRING)");
+
+        // snapshot 1
+        writeTable(
+                "t",
+                GenericRow.of(1, BinaryString.fromString("Hello")),
+                GenericRow.of(2, BinaryString.fromString("Paimon")));
+
+        // snapshot 2
+        writeTable(
+                "t",
+                GenericRow.of(3, BinaryString.fromString("Test")),
+                GenericRow.of(4, BinaryString.fromString("Case")));
+
+        // snapshot 3
+        writeTable(
+                "t",
+                GenericRow.of(5, BinaryString.fromString("Time")),
+                GenericRow.of(6, BinaryString.fromString("Travel")));
+
+        FileStoreTable table = getTable("t");
+        table.createTag("tag2", 2);
+
+        // expire snapshot 1 & 2
+        Map<String, String> expireOptions = new HashMap<>();
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
+        table.copy(expireOptions).store().newExpire().expire();
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
+
+        // time travel to tag2
+        assertThat(spark.sql("SELECT * FROM t VERSION AS OF 'tag2'").collectAsList().toString())
+                .isEqualTo("[[1,Hello], [2,Paimon], [3,Test], [4,Case]]");
     }
 }

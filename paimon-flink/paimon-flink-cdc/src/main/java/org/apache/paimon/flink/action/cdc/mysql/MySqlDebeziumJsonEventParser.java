@@ -214,19 +214,22 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             JsonNode column = columns.get(i);
             JsonNode length = column.get("length");
             JsonNode scale = column.get("scale");
-            DataType type =
+            DataType dataType =
                     MySqlTypeUtils.toDataType(
                             column.get("typeName").asText(),
                             length == null ? null : length.asInt(),
                             scale == null ? null : scale.asInt(),
                             typeMapping);
 
-            if (!typeMapping.containsMode(TO_NULLABLE)) {
-                type = type.copy(column.get("optional").asBoolean());
-            }
+            dataType =
+                    dataType.copy(
+                            typeMapping.containsMode(TO_NULLABLE)
+                                    || column.get("optional").asBoolean());
 
             String fieldName = column.get("name").asText();
-            result.add(new DataField(i, caseSensitive ? fieldName : fieldName.toLowerCase(), type));
+            result.add(
+                    new DataField(
+                            i, caseSensitive ? fieldName : fieldName.toLowerCase(), dataType));
         }
         return result;
     }

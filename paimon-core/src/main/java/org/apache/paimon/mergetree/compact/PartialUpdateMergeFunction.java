@@ -205,7 +205,17 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     SequenceGenerator sequenceGen =
                             new SequenceGenerator(sequenceFieldName, rowType);
                     Arrays.stream(v.split(","))
-                            .map(fieldNames::indexOf)
+                            .map(
+                                    fieldName -> {
+                                        int field = fieldNames.indexOf(fieldName);
+                                        if (field == -1) {
+                                            throw new IllegalArgumentException(
+                                                    String.format(
+                                                            "Field %s can not be found in table schema",
+                                                            fieldName));
+                                        }
+                                        return field;
+                                    })
                             .forEach(
                                     field -> {
                                         if (fieldSequences.containsKey(field)) {

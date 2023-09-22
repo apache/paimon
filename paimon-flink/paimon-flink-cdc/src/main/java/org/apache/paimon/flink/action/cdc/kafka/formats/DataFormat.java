@@ -22,6 +22,7 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.formats.maxwell.MaxwellRecordParser;
 import org.apache.paimon.flink.action.cdc.kafka.formats.ogg.OggRecordParser;
 
 import org.apache.flink.configuration.Configuration;
@@ -38,7 +39,8 @@ import java.util.List;
  */
 public enum DataFormat {
     CANAL_JSON(CanalRecordParser::new),
-    OGG_JSON(OggRecordParser::new);
+    OGG_JSON(OggRecordParser::new),
+    MAXWELL_JSON(MaxwellRecordParser::new);
     // Add more data formats here if needed
 
     private final RecordParserFactory parser;

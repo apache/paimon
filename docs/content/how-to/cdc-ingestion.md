@@ -314,7 +314,7 @@ If a message in a Kafka topic is a change event captured from another database u
         </tr>
         <tr>
          <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/maxwell/ >}}">Maxwell CDC</a></td>
-        <td>False</td>
+        <td>True</td>
         </tr>
         <tr>
          <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/ogg/">OGG CDC</a></td>
@@ -324,7 +324,7 @@ If a message in a Kafka topic is a change event captured from another database u
 </table>
 
 {{< hint info >}}
-In Oracle GoldenGate, the data format synchronized to Kafka does not include field data type information. As a result, Paimon sets the data type for all fields to "String" by default.
+In Oracle GoldenGate and Maxwell, the data format synchronized to Kafka does not include field data type information. As a result, Paimon sets the data type for all fields to "String" by default.
 {{< /hint >}}
 
 ### Synchronizing Tables
@@ -450,8 +450,9 @@ Synchronization from multiple Kafka topics to Paimon database.
 ### Prepare MongoDB Bundled Jar
 
 ```
-flink-sql-connector-mongodb-*.jar
+flink-sql-connector-mongodb-cdc-*.jar
 ```
+only cdc 2.4+ is supported
 
 ### Synchronizing Tables
 

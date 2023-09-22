@@ -25,6 +25,9 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -36,11 +39,14 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchemaUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MySqlSchemaUtils.class);
 
     public static Schema buildSchema(
             DatabaseMetaData metaData,
@@ -77,7 +83,12 @@ public class MySqlSchemaUtils {
                     fieldName = fieldName.toLowerCase();
                 }
 
-                builder.column(fieldName, paimonType, fieldComment);
+                boolean isNullable =
+                        typeMapping.containsMode(TO_NULLABLE)
+                                || isNullableColumn(rs.getString("IS_NULLABLE"));
+                DataType updateType = paimonType.copy(isNullable);
+
+                builder.column(fieldName, updateType, fieldComment);
                 duplicateFields.put(fieldName, 1);
             }
         }
@@ -138,5 +149,18 @@ public class MySqlSchemaUtils {
                         builder.column(
                                 dataField.name(), dataField.type(), dataField.description())));
         return builder.build();
+    }
+
+    private static boolean isNullableColumn(final String value) {
+        if ("YES".equals(value)) {
+            return true;
+        }
+
+        if ("NO".equals(value)) {
+            return false;
+        }
+
+        LOG.error("Unrecognized nullable value: " + value);
+        return true;
     }
 }

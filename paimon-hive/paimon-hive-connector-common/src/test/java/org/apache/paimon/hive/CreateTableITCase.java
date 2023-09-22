@@ -87,8 +87,8 @@ public class CreateTableITCase extends HiveTestBase {
                 new Schema(
                         Lists.newArrayList(
                                 new DataField(0, "col1", DataTypes.INT(), "first comment"),
-                                new DataField(1, "col2", DataTypes.STRING(), "second comment"),
-                                new DataField(2, "col3", DataTypes.DECIMAL(5, 3), "last comment")),
+                                new DataField(1, "Col2", DataTypes.STRING(), "second comment"),
+                                new DataField(2, "COL3", DataTypes.DECIMAL(5, 3), "last comment")),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Maps.newHashMap(),
@@ -106,6 +106,18 @@ public class CreateTableITCase extends HiveTestBase {
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + tablePath.toUri().toString() + "'"));
         assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+
+        List<String> result = hiveShell.executeQuery("SHOW CREATE TABLE " + tableName);
+        assertThat(result)
+                .containsAnyOf(
+                        "CREATE EXTERNAL TABLE `with_paimon_table`(",
+                        "  `col1` int COMMENT 'first comment', ",
+                        "  `col2` string COMMENT 'second comment', ",
+                        "  `col3` decimal(5,3) COMMENT 'last comment')",
+                        "ROW FORMAT SERDE ",
+                        "  'org.apache.paimon.hive.PaimonSerDe' ",
+                        "STORED BY ",
+                        "  'org.apache.paimon.hive.PaimonStorageHandler' ");
     }
 
     @Test

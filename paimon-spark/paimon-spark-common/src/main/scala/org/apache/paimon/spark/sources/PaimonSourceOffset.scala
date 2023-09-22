@@ -22,6 +22,16 @@ import org.apache.paimon.table.source.snapshot.StartingContext
 
 import org.apache.spark.sql.connector.read.streaming.Offset
 
+/**
+ * The implementation of [[Offset]] for paimon spark streaming source.
+ *
+ * @param snapshotId
+ *   the current snapshot id
+ * @param index
+ *   the index position of file in the current snapshot, start from 0
+ * @param scanSnapshot
+ *   whether to scan all files in the current snapshot
+ */
 case class PaimonSourceOffset(snapshotId: Long, index: Long, scanSnapshot: Boolean)
   extends Offset
   with Comparable[PaimonSourceOffset] {
@@ -44,6 +54,9 @@ case class PaimonSourceOffset(snapshotId: Long, index: Long, scanSnapshot: Boole
 }
 
 object PaimonSourceOffset {
+  //  index of the init offset, for we filter offset by (startOffset, endOffset]
+  val INIT_OFFSET_INDEX: Long = -1L
+
   def apply(version: Long, index: Long, scanSnapshot: Boolean): PaimonSourceOffset = {
     new PaimonSourceOffset(
       version,
@@ -56,7 +69,8 @@ object PaimonSourceOffset {
     offset match {
       case o: PaimonSourceOffset => o
       case json: String => JsonUtils.fromJson[PaimonSourceOffset](json)
-      case sc: StartingContext => PaimonSourceOffset(sc.getSnapshotId, -1, sc.getScanFullSnapshot)
+      case sc: StartingContext =>
+        PaimonSourceOffset(sc.getSnapshotId, INIT_OFFSET_INDEX, sc.getScanFullSnapshot)
       case _ => throw new IllegalArgumentException(s"Can't parse $offset to PaimonSourceOffset.")
     }
   }

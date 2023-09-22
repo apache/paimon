@@ -363,7 +363,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.BIGINT(), // _bigint
                             DataTypes.DECIMAL(20, 0), // _bigint_unsigned
                             DataTypes.DECIMAL(20, 0), // _bigint_unsigned_zerofill
-                            DataTypes.DECIMAL(20, 0), // _serial
+                            DataTypes.DECIMAL(20, 0).notNull(), // _serial
                             DataTypes.FLOAT(), // _float
                             DataTypes.FLOAT(), // _float_unsigned
                             DataTypes.FLOAT(), // _float_unsigned_zerofill
@@ -851,8 +851,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .withTableConfig(Collections.singletonMap("table-key", "table-value"))
                         .build();
 
-        assertThat(action.catalogConfig())
-                .containsExactlyEntriesOf(Collections.singletonMap("catalog-key", "catalog-value"));
+        assertThat(action.catalogConfig()).containsEntry("catalog-key", "catalog-value");
         assertThat(action.tableConfig())
                 .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }

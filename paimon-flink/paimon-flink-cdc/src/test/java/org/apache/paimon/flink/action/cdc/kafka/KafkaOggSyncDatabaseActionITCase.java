@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
@@ -461,5 +462,47 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         // check paimon tables
         waitingTables(existedTables);
         assertTableNotExists(notExistedTables);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testCaseInsensitive() throws Exception {
+        final String topic = "case-insensitive";
+        createTestTopic(topic, 1, 1);
+
+        // ---------- Write the ogg json into Kafka -------------------
+
+        writeRecordsToKafka(topic, readLines("kafka/ogg/database/case-insensitive/ogg-data-1.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "ogg-json");
+        kafkaConfig.put("topic", topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"))
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        waitingTables("t1");
+        FileStoreTable table = getFileStoreTable("t1");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys1 = Collections.singletonList("id");
+        List<String> expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175]",
+                        "+I[102, car battery, 12V car battery, 8.100000381469727]");
+        waitForResult(expected, table, rowType, primaryKeys1);
     }
 }

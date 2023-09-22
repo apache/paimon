@@ -21,8 +21,12 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Schema builder for {@link RichCdcMultiplexRecord}. */
 public class RichCdcMultiplexRecordSchemaBuilder
@@ -44,12 +48,16 @@ public class RichCdcMultiplexRecordSchemaBuilder
 
         for (Map.Entry<String, DataType> entry : record.fieldTypes().entrySet()) {
             builder.column(
-                    caseSensitive ? entry.getKey() : entry.getKey().toLowerCase(),
-                    entry.getValue(),
-                    null);
+                    caseSensitiveConversion(entry.getKey(), caseSensitive), entry.getValue(), null);
         }
 
-        Schema schema = builder.primaryKey(record.primaryKeys()).build();
+        List<String> primaryKeys =
+                caseSensitive
+                        ? record.primaryKeys()
+                        : record.primaryKeys().stream()
+                                .map(String::toLowerCase)
+                                .collect(Collectors.toList());
+        Schema schema = builder.primaryKey(primaryKeys).build();
 
         return Optional.of(schema);
     }

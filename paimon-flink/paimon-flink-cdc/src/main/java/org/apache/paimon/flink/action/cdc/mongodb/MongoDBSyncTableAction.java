@@ -201,11 +201,6 @@ public class MongoDBSyncTableAction extends ActionBase {
         return tableConfig;
     }
 
-    @VisibleForTesting
-    public Map<String, String> catalogConfig() {
-        return catalogConfig;
-    }
-
     // ------------------------------------------------------------------------
     //  Flink run methods
     // ------------------------------------------------------------------------

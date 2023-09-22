@@ -45,7 +45,7 @@ public class ForceUpLevel0CompactionTest {
 
         result = compaction.pick(3, Arrays.asList(run(0, 1), run(1, 10)));
         assertThat(result).isPresent();
-        assertThat(result.get().outputLevel()).isEqualTo(1);
+        assertThat(result.get().outputLevel()).isEqualTo(2);
 
         result = compaction.pick(3, Arrays.asList(run(0, 1), run(0, 5), run(2, 10)));
         assertThat(result).isPresent();
