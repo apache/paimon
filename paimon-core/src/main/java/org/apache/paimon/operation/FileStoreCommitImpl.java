@@ -113,6 +113,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
+
     private final CommitMetrics commitMetrics;
 
     public FileStoreCommitImpl(
@@ -1013,6 +1014,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         for (ManifestFileMeta meta : changelogMetas) {
             manifestList.delete(meta.fileName());
         }
+    }
+
+    public CommitMetrics getCommitMetrics() {
+        return commitMetrics;
     }
 
     private static class LevelIdentifier {

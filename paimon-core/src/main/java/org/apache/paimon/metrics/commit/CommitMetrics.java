@@ -19,9 +19,9 @@
 package org.apache.paimon.metrics.commit;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.metrics.AbstractMetricGroup;
 import org.apache.paimon.metrics.DescriptiveStatisticsHistogram;
 import org.apache.paimon.metrics.Histogram;
-import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.groups.GenericMetricGroup;
 import org.apache.paimon.utils.FileStorePathFactory;
 
@@ -30,7 +30,7 @@ public class CommitMetrics {
     private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
     protected static final String GROUP_NAME = "commit";
 
-    private final MetricGroup genericMetricGroup;
+    private final AbstractMetricGroup genericMetricGroup;
 
     public CommitMetrics(FileStorePathFactory pathFactory) {
         this.genericMetricGroup =
@@ -39,7 +39,7 @@ public class CommitMetrics {
         registerGenericCommitMetrics();
     }
 
-    public MetricGroup getGenericMetricGroup() {
+    public AbstractMetricGroup getMetricGroup() {
         return genericMetricGroup;
     }
 
