@@ -19,7 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.spark.cdc.RowKind;
+import org.apache.paimon.spark.cdc.RowKindCol;
 import org.apache.paimon.types.RowType;
 
 import org.apache.spark.unsafe.types.UTF8String;
@@ -31,13 +31,13 @@ public class SparkCDCInternalRow extends SparkInternalRow {
         super(rowType);
     }
 
-    private int getRowKindOrdinal() {
-        return row.getFieldCount() + RowKind.order();
+    private int getRowKindColOrdinal() {
+        return row.getFieldCount() + RowKindCol.order();
     }
 
     @Override
     public boolean isNullAt(int ordinal) {
-        if (ordinal == getRowKindOrdinal()) {
+        if (ordinal == getRowKindColOrdinal()) {
             return false;
         } else {
             return row.isNullAt(ordinal);
@@ -46,7 +46,7 @@ public class SparkCDCInternalRow extends SparkInternalRow {
 
     @Override
     public UTF8String getUTF8String(int ordinal) {
-        if (ordinal == getRowKindOrdinal()) {
+        if (ordinal == getRowKindColOrdinal()) {
             return fromPaimon(BinaryString.fromString(row.getRowKind().shortString()));
         } else {
             return fromPaimon(row.getString(ordinal));

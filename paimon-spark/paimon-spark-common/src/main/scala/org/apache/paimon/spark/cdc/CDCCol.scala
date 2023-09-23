@@ -17,42 +17,21 @@
  */
 package org.apache.paimon.spark.cdc
 
-import org.apache.spark.sql.types.{DataType, StringType, StructType}
+import org.apache.spark.sql.types.{DataType, StringType, StructField, StructType}
 
-sealed trait CDCCol {
-  def name: String
-
-  def order: Int
-
-  def structType: DataType
-
-  def nullAble: Boolean = false
-}
-
-case object RowKind extends CDCCol {
-  override def name: String = "_row_kind"
-
-  override def order: Int = 0
-
-  override def structType: DataType = StringType
+/** RowKind col, see more in [[org.apache.paimon.types.RowType]] */
+case object RowKindCol {
+  val name: String = "_row_kind"
+  val structType: DataType = StringType
+  val nullAble: Boolean = false
+  val order: Int = 0
 }
 
 object CDCCol {
-  val count: Int = 1
 
-  def fromOrder(order: Int): CDCCol = {
-    order match {
-      case o if o == RowKind.order => RowKind
-      case _ => throw new UnsupportedOperationException(s"Unsupported order $order for CDCSchema.");
-    }
-  }
-
+  /** Add CDC cols in row for changelog reading. */
   def addCDCCols(schema: StructType): StructType = {
-    var newSchema = schema
-    for (order <- 0 until count) {
-      val col = fromOrder(order)
-      newSchema = newSchema.add(col.name, col.structType, col.nullAble)
-    }
-    newSchema
+    schema.add(StructField(RowKindCol.name, RowKindCol.structType, RowKindCol.nullAble))
   }
+
 }

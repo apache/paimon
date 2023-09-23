@@ -17,12 +17,15 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.spark.sql.Row
+import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 
 class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
 
-  test("Paimon CDC Source: default scan mode") {
+  import testImplicits._
+
+  test("Paimon CDC Source: batch write and streaming read change-log with default scan mode") {
     withTempDir {
       checkpointDir =>
         val tableName = "T"
@@ -43,7 +46,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
         val table = loadTable(tableName)
         val location = table.location().getPath
 
-        val query = spark.readStream
+        val readStream = spark.readStream
           .format("paimon")
           .option("read.readChangeLog", "true")
           .load(location)
@@ -56,12 +59,12 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
 
         val currentResult = () => spark.sql("SELECT * FROM mem_table")
         try {
-          query.processAllAvailable()
+          readStream.processAllAvailable()
           val expertResult1 = Row(1, "v_1", "+I") :: Row(2, "v_2_new", "+I") :: Nil
           checkAnswer(currentResult(), expertResult1)
 
           spark.sql(s"INSERT INTO $tableName VALUES (1, 'v_1_new'), (3, 'v_3')")
-          query.processAllAvailable()
+          readStream.processAllAvailable()
           val expertResult2 =
             Row(1, "v_1", "+I") :: Row(1, "v_1", "-U") :: Row(1, "v_1_new", "+U") :: Row(
               2,
@@ -69,12 +72,12 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
               "+I") :: Row(3, "v_3", "+I") :: Nil
           checkAnswer(currentResult(), expertResult2)
         } finally {
-          query.stop()
+          readStream.stop()
         }
     }
   }
 
-  test("Paimon CDC Source: from-snapshot scan mode with scan.snapshot-id") {
+  test("Paimon CDC Source: batch write and streaming read change-log with scan.snapshot-id") {
     withTempDir {
       checkpointDir =>
         val tableName = "T"
@@ -95,7 +98,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
         val table = loadTable(tableName)
         val location = table.location().getPath
 
-        val query = spark.readStream
+        val readStream = spark.readStream
           .format("paimon")
           .option("read.readChangeLog", "true")
           .option("scan.mode", "from-snapshot")
@@ -110,7 +113,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
 
         val currentResult = () => spark.sql("SELECT * FROM mem_table")
         try {
-          query.processAllAvailable()
+          readStream.processAllAvailable()
           val expertResult1 = Row(1, "v_1", "+I") :: Row(2, "v_2", "+I") :: Row(
             2,
             "v_2",
@@ -118,7 +121,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
           checkAnswer(currentResult(), expertResult1)
 
           spark.sql(s"INSERT INTO $tableName VALUES (1, 'v_1_new'), (3, 'v_3')")
-          query.processAllAvailable()
+          readStream.processAllAvailable()
           val expertResult2 =
             Row(1, "v_1", "+I") :: Row(1, "v_1", "-U") :: Row(1, "v_1_new", "+U") :: Row(
               2,
@@ -126,7 +129,89 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
               "+I") :: Row(2, "v_2", "-U") :: Row(2, "v_2_new", "+U") :: Row(3, "v_3", "+I") :: Nil
           checkAnswer(currentResult(), expertResult2)
         } finally {
-          query.stop()
+          readStream.stop()
+        }
+    }
+  }
+
+  test("Paimon CDC Source: streaming write and streaming read change-log") {
+    withTempDirs {
+      (checkpointDir1, checkpointDir2) =>
+        val tableName = "T"
+        spark.sql(s"DROP TABLE IF EXISTS $tableName")
+        spark.sql(s"""
+                     |CREATE TABLE $tableName (a INT, b STRING)
+                     |TBLPROPERTIES (
+                     |  'primary-key'='a',
+                     |  'write-mode'='change-log',
+                     |  'bucket'='2',
+                     |  'changelog-producer' = 'lookup')
+                     |""".stripMargin)
+
+        val table = loadTable(tableName)
+        val location = table.location().getPath
+
+        // streaming write
+        val inputData = MemoryStream[(Int, String)]
+        val writeStream = inputData
+          .toDS()
+          .toDF("a", "b")
+          .writeStream
+          .option("checkpointLocation", checkpointDir1.getCanonicalPath)
+          .foreachBatch {
+            (batch: Dataset[Row], _: Long) =>
+              batch.write.format("paimon").mode("append").save(location)
+          }
+          .start()
+
+        // streaming read
+        val readStream = spark.readStream
+          .format("paimon")
+          .option("read.readChangeLog", "true")
+          .option("scan.mode", "from-snapshot")
+          .option("scan.snapshot-id", 1)
+          .load(location)
+          .writeStream
+          .format("memory")
+          .option("checkpointLocation", checkpointDir2.getCanonicalPath)
+          .queryName("mem_table")
+          .outputMode("append")
+          .start()
+
+        val currentResult = () => spark.sql("SELECT * FROM mem_table")
+        try {
+          inputData.addData((1, "v_1"))
+          writeStream.processAllAvailable()
+          readStream.processAllAvailable()
+          val expertResult1 = Row(1, "v_1", "+I") :: Nil
+          checkAnswer(currentResult(), expertResult1)
+
+          inputData.addData((2, "v_2"))
+          writeStream.processAllAvailable()
+          readStream.processAllAvailable()
+          val expertResult2 = Row(1, "v_1", "+I") :: Row(2, "v_2", "+I") :: Nil
+          checkAnswer(currentResult(), expertResult2)
+
+          inputData.addData((2, "v_2_new"))
+          writeStream.processAllAvailable()
+          readStream.processAllAvailable()
+          val expertResult3 = Row(1, "v_1", "+I") :: Row(2, "v_2", "+I") :: Row(
+            2,
+            "v_2",
+            "-U") :: Row(2, "v_2_new", "+U") :: Nil
+          checkAnswer(currentResult(), expertResult3)
+
+          inputData.addData((1, "v_1_new"), (3, "v_3"))
+          writeStream.processAllAvailable()
+          readStream.processAllAvailable()
+          val expertResult4 =
+            Row(1, "v_1", "+I") :: Row(1, "v_1", "-U") :: Row(1, "v_1_new", "+U") :: Row(
+              2,
+              "v_2",
+              "+I") :: Row(2, "v_2", "-U") :: Row(2, "v_2_new", "+U") :: Row(3, "v_3", "+I") :: Nil
+          checkAnswer(currentResult(), expertResult4)
+        } finally {
+          readStream.stop()
         }
     }
   }

@@ -74,5 +74,6 @@ public class SparkConnectorOptions {
             key("read.readChangeLog")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to read changelog");
+                    .withDescription(
+                            "Whether to read row in the form of changelog (add RowKind in row to represent its change type).");
 }
