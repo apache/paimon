@@ -183,6 +183,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
         if (!closed) {
             closed = true;
             metrics.clear();
+            Metrics.getInstance().removeGroup(this);
         }
     }
 
