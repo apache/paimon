@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.kafka.formats;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSchema;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
@@ -64,7 +63,6 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     protected static final String FIELD_TABLE = "table";
     protected static final String FIELD_DATABASE = "database";
     protected static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-    protected final TableNameConverter tableNameConverter;
     protected final boolean caseSensitive;
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
@@ -77,13 +75,9 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     protected String tableName;
 
     public RecordParser(
-            boolean caseSensitive,
-            TypeMapping typeMapping,
-            TableNameConverter tableNameConverter,
-            List<ComputedColumn> computedColumns) {
+            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         this.caseSensitive = caseSensitive;
         this.typeMapping = typeMapping;
-        this.tableNameConverter = tableNameConverter;
         this.computedColumns = computedColumns;
     }
 
@@ -93,7 +87,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
             return null;
         }
         databaseName = extractStringFromRootJson(FIELD_DATABASE);
-        tableName = tableNameConverter.convert(extractStringFromRootJson(FIELD_TABLE));
+        tableName = extractStringFromRootJson(FIELD_TABLE);
         this.setPrimaryField();
         this.setDataField();
         this.validateFormat();
@@ -148,7 +142,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
         validateFormat();
 
         databaseName = extractStringFromRootJson(FIELD_DATABASE);
-        tableName = tableNameConverter.convert(extractStringFromRootJson(FIELD_TABLE));
+        tableName = extractStringFromRootJson(FIELD_TABLE);
 
         extractRecords().forEach(out::collect);
     }

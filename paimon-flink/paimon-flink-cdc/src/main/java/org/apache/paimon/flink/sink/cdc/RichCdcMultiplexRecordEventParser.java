@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
@@ -44,6 +45,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private final NewTableSchemaBuilder<RichCdcMultiplexRecord> schemaBuilder;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
+    private final TableNameConverter tableNameConverter;
     private final Map<String, RichEventParser> parsers = new HashMap<>();
     private final Set<String> includedTables = new HashSet<>();
     private final Set<String> excludedTables = new HashSet<>();
@@ -54,17 +56,19 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private boolean shouldSynchronizeCurrentTable;
     private RichEventParser currentParser;
 
-    public RichCdcMultiplexRecordEventParser() {
-        this(record -> Optional.empty(), null, null);
+    public RichCdcMultiplexRecordEventParser(boolean caseSensitive) {
+        this(record -> Optional.empty(), null, null, new TableNameConverter(caseSensitive));
     }
 
     public RichCdcMultiplexRecordEventParser(
             NewTableSchemaBuilder<RichCdcMultiplexRecord> schemaBuilder,
             @Nullable Pattern includingPattern,
-            @Nullable Pattern excludingPattern) {
+            @Nullable Pattern excludingPattern,
+            TableNameConverter tableNameConverter) {
         this.schemaBuilder = schemaBuilder;
         this.includingPattern = includingPattern;
         this.excludingPattern = excludingPattern;
+        this.tableNameConverter = tableNameConverter;
     }
 
     @Override
@@ -80,7 +84,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
 
     @Override
     public String parseTableName() {
-        return currentTable;
+        return tableNameConverter.convert(currentTable);
     }
 
     @Override

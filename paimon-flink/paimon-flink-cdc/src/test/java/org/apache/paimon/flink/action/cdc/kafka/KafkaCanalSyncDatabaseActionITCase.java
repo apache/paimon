@@ -35,6 +35,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -296,6 +297,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         .withTablePrefix("test_prefix_")
                         .withTableSuffix("_test_suffix")
                         .withTableConfig(getBasicTableConfig())
+                        // test including check with affix
+                        .includingTables(ThreadLocalRandom.current().nextBoolean() ? "t1|t2" : ".*")
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -345,6 +348,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         .withTablePrefix("test_prefix_")
                         .withTableSuffix("_test_suffix")
                         .withTableConfig(getBasicTableConfig())
+                        // test including check with affix
+                        .includingTables(ThreadLocalRandom.current().nextBoolean() ? "t1|t2" : ".*")
                         .build();
         runActionWithDefaultEnv(action);
 

@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.mongodb.strategy.Mongo4VersionStrategy;
 import org.apache.paimon.flink.action.cdc.mongodb.strategy.MongoVersionStrategy;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -61,24 +60,18 @@ public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMulti
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private final List<ComputedColumn> computedColumns;
     private final boolean caseSensitive;
-    private final TableNameConverter tableNameConverter;
     private final Configuration mongodbConfig;
     private JsonNode root;
 
-    public MongoDBRecordParser(
-            boolean caseSensitive,
-            TableNameConverter tableNameConverter,
-            Configuration mongodbConfig) {
-        this(caseSensitive, tableNameConverter, Collections.emptyList(), mongodbConfig);
+    public MongoDBRecordParser(boolean caseSensitive, Configuration mongodbConfig) {
+        this(caseSensitive, Collections.emptyList(), mongodbConfig);
     }
 
     public MongoDBRecordParser(
             boolean caseSensitive,
-            TableNameConverter tableNameConverter,
             List<ComputedColumn> computedColumns,
             Configuration mongodbConfig) {
         this.caseSensitive = caseSensitive;
-        this.tableNameConverter = tableNameConverter;
         this.computedColumns = computedColumns;
         this.mongodbConfig = mongodbConfig;
     }
@@ -87,7 +80,7 @@ public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMulti
     public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) throws Exception {
         root = OBJECT_MAPPER.readValue(value, JsonNode.class);
         String databaseName = extractString(FIELD_DATABASE);
-        String collection = tableNameConverter.convert(extractString(FIELD_TABLE));
+        String collection = extractString(FIELD_TABLE);
         MongoVersionStrategy versionStrategy =
                 VersionStrategyFactory.create(
                         databaseName, collection, caseSensitive, computedColumns, mongodbConfig);

@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -150,7 +149,7 @@ public class MongoDBSyncTableAction extends ActionBase {
         }
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
-                RichCdcMultiplexRecordEventParser::new;
+                () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
 
         CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new CdcSinkBuilder<RichCdcMultiplexRecord>()
@@ -162,7 +161,6 @@ public class MongoDBSyncTableAction extends ActionBase {
                                         .flatMap(
                                                 new MongoDBRecordParser(
                                                         caseSensitive,
-                                                        new TableNameConverter(caseSensitive),
                                                         computedColumns,
                                                         mongodbConfig)))
                         .withParserFactory(parserFactory)

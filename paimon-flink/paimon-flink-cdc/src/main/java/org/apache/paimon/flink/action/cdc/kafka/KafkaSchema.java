@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
@@ -132,9 +131,7 @@ public class KafkaSchema {
         int retryInterval = 1000;
 
         DataFormat format = getDataFormat(kafkaConfig);
-        RecordParser recordParser =
-                format.createParser(
-                        true, new TableNameConverter(true), typeMapping, Collections.emptyList());
+        RecordParser recordParser = format.createParser(true, typeMapping, Collections.emptyList());
 
         while (true) {
             ConsumerRecords<String, String> consumerRecords =
