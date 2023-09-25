@@ -458,7 +458,9 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
             // test schema evolution
             RowType rowType =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.STRING().notNull()
+                            },
                             new String[] {"pk", "v1"});
             waitForResult(
                     Collections.singletonList("+I[1, 1]"),
@@ -472,7 +474,9 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
             rowType =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                                DataTypes.INT().notNull(),
+                                DataTypes.STRING().notNull(),
+                                DataTypes.STRING()
                             },
                             new String[] {"pk", "v1", "v2"});
             waitForResult(
