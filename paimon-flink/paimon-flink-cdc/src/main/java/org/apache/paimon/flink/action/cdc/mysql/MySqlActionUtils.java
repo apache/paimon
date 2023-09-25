@@ -19,14 +19,10 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchema;
+import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemaUtils;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
-import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataType;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
@@ -47,7 +43,6 @@ import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -55,9 +50,6 @@ import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -93,7 +85,8 @@ public class MySqlActionUtils {
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables,
-            TypeMapping typeMapping)
+            TypeMapping typeMapping,
+            boolean caseSensitive)
             throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
@@ -110,12 +103,18 @@ public class MySqlActionUtils {
                         try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
                             while (tables.next()) {
                                 String tableName = tables.getString("TABLE_NAME");
-                                MySqlSchema mySqlSchema =
-                                        MySqlSchema.buildSchema(
-                                                metaData, databaseName, tableName, typeMapping);
+                                String tableComment = tables.getString("REMARKS");
+                                Schema schema =
+                                        MySqlSchemaUtils.buildSchema(
+                                                metaData,
+                                                databaseName,
+                                                tableName,
+                                                tableComment,
+                                                typeMapping,
+                                                caseSensitive);
                                 Identifier identifier = Identifier.create(databaseName, tableName);
                                 if (monitorTablePredication.test(tableName)) {
-                                    mySqlSchemasInfo.addSchema(identifier, mySqlSchema);
+                                    mySqlSchemasInfo.addSchema(identifier, schema);
                                 } else {
                                     excludedTables.add(identifier);
                                 }
@@ -126,31 +125,6 @@ public class MySqlActionUtils {
             }
         }
         return mySqlSchemasInfo;
-    }
-
-    static Schema buildPaimonSchema(
-            MySqlTableInfo mySqlTableInfo,
-            List<String> specifiedPartitionKeys,
-            List<String> specifiedPrimaryKeys,
-            List<ComputedColumn> computedColumns,
-            Map<String, String> tableConfig,
-            boolean caseSensitive) {
-        MySqlSchema mySqlSchema = mySqlTableInfo.schema();
-        LinkedHashMap<String, DataType> sourceColumns =
-                mapKeyCaseConvert(
-                        mySqlSchema.typeMapping(),
-                        caseSensitive,
-                        columnDuplicateErrMsg(mySqlTableInfo.location()));
-        List<String> primaryKeys = listCaseConvert(mySqlSchema.primaryKeys(), caseSensitive);
-
-        return CdcActionCommonUtils.buildPaimonSchema(
-                specifiedPartitionKeys,
-                specifiedPrimaryKeys,
-                computedColumns,
-                tableConfig,
-                sourceColumns,
-                mySqlSchema.comments(),
-                primaryKeys);
     }
 
     static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {
