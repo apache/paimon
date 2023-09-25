@@ -18,7 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import com.mongodb.MongoClientSettings;
@@ -34,14 +35,15 @@ import org.bson.Document;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/** Tests for {@link MongodbSchema}. */
+/** Tests for {@link MongodbSchemaUtils}. */
 public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
 
     @BeforeAll
@@ -81,10 +83,8 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
         mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "testDatabase");
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
-        MongodbSchema schema = MongodbSchema.getMongodbSchema(mongodbConfig);
+        Schema schema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true);
         assertNotNull(schema);
-        assertEquals("testDatabase", schema.databaseName());
-        assertEquals("testCollection", schema.tableName());
     }
 
     @Test
@@ -98,7 +98,9 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "testDatabase");
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
 
-        assertThrows(RuntimeException.class, () -> MongodbSchema.getMongodbSchema(mongodbConfig));
+        assertThrows(
+                RuntimeException.class,
+                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true));
     }
 
     @Test
@@ -108,7 +110,8 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.HOSTS, MONGODB_CONTAINER.getHostAndPort());
         // Expect an exception to be thrown due to missing necessary settings
         assertThrows(
-                NullPointerException.class, () -> MongodbSchema.getMongodbSchema(mongodbConfig));
+                NullPointerException.class,
+                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true));
     }
 
     @Test
@@ -124,17 +127,15 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
 
         // Call the method and check the results
-        MongodbSchema schema = MongodbSchema.getMongodbSchema(mongodbConfig);
+        Schema schema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true);
 
         // Verify the schema
         assertNotNull(schema);
-        assertEquals("testDatabase", schema.databaseName());
-        assertEquals("testCollection", schema.tableName());
 
-        LinkedHashMap<String, DataType> expectedFields = new LinkedHashMap<>();
-        expectedFields.put("name", DataTypes.STRING());
-        expectedFields.put("age", DataTypes.STRING());
-        expectedFields.put("_id", DataTypes.STRING());
+        List<DataField> expectedFields = new ArrayList<>();
+        expectedFields.add(new DataField(0, "_id", DataTypes.STRING().notNull()));
+        expectedFields.add(new DataField(1, "name", DataTypes.STRING()));
+        expectedFields.add(new DataField(2, "age", DataTypes.STRING()));
 
         assertEquals(expectedFields, schema.fields());
     }
@@ -150,7 +151,9 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "invalidDatabase");
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
 
-        assertThrows(RuntimeException.class, () -> MongodbSchema.getMongodbSchema(mongodbConfig));
+        assertThrows(
+                RuntimeException.class,
+                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true));
     }
 
     @Test
@@ -164,6 +167,8 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "testDatabase");
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "invalidCollection");
 
-        assertThrows(RuntimeException.class, () -> MongodbSchema.getMongodbSchema(mongodbConfig));
+        assertThrows(
+                RuntimeException.class,
+                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true));
     }
 }
