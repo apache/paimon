@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.kafka.format.ogg;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -57,11 +56,8 @@ public class OggRecordParser extends RecordParser {
     private static final String OP_DELETE = "D";
 
     public OggRecordParser(
-            boolean caseSensitive,
-            TypeMapping typeMapping,
-            TableNameConverter tableNameConverter,
-            List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, tableNameConverter, computedColumns);
+            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(caseSensitive, typeMapping, computedColumns);
     }
 
     @Override

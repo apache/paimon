@@ -45,7 +45,6 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
-import static org.apache.paimon.flink.sink.cdc.CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
 /**
@@ -221,7 +220,7 @@ public class MultiTablesStoreCompactOperator
                     // table not found, waiting until table is created by
                     //     upstream operators
                 }
-                Thread.sleep(RETRY_SLEEP_TIME.defaultValue().toMillis());
+                Thread.sleep(500);
             }
         }
         return table;

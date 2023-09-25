@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -37,26 +38,27 @@ public class ShardsMergedMySqlTableInfo implements MySqlTableInfo {
 
     private String tableName;
 
-    private MySqlSchema schema;
+    private Schema schema;
 
     public ShardsMergedMySqlTableInfo() {
         this.fromDatabases = new ArrayList<>();
     }
 
-    public void init(Identifier identifier, MySqlSchema schema) {
+    public void init(Identifier identifier, Schema schema) {
         this.fromDatabases.add(identifier.getDatabaseName());
         this.tableName = identifier.getObjectName();
         this.schema = schema;
     }
 
-    public ShardsMergedMySqlTableInfo merge(Identifier otherTableId, MySqlSchema other) {
+    public ShardsMergedMySqlTableInfo merge(Identifier otherTableId, Schema other) {
         checkArgument(
                 otherTableId.getObjectName().equals(tableName),
                 "Table to be merged '%s' should equals to current table name '%s'.",
                 otherTableId.getObjectName(),
                 tableName);
 
-        schema = schema.merge(location(), otherTableId.getFullName(), other);
+        schema =
+                MySqlSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
         fromDatabases.add(otherTableId.getDatabaseName());
         return this;
     }
@@ -84,7 +86,7 @@ public class ShardsMergedMySqlTableInfo implements MySqlTableInfo {
     }
 
     @Override
-    public MySqlSchema schema() {
+    public Schema schema() {
         return checkNotNull(schema, "MySqlSchema hasn't been set.");
     }
 }

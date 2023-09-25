@@ -26,7 +26,6 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
@@ -171,13 +170,9 @@ public class KafkaSyncTableAction extends ActionBase {
         }
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);
         RecordParser recordParser =
-                format.createParser(
-                        caseSensitive,
-                        new TableNameConverter(caseSensitive),
-                        typeMapping,
-                        computedColumns);
+                format.createParser(caseSensitive, typeMapping, computedColumns);
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
-                RichCdcMultiplexRecordEventParser::new;
+                () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
 
         CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new CdcSinkBuilder<RichCdcMultiplexRecord>()

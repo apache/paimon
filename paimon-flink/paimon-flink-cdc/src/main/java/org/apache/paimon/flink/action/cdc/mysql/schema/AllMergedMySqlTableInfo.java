@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,19 +31,20 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class AllMergedMySqlTableInfo implements MySqlTableInfo {
 
     private final List<Identifier> fromTables;
-    private MySqlSchema schema;
+    private Schema schema;
 
     public AllMergedMySqlTableInfo() {
         this.fromTables = new ArrayList<>();
     }
 
-    public void init(Identifier identifier, MySqlSchema schema) {
+    public void init(Identifier identifier, Schema schema) {
         this.fromTables.add(identifier);
         this.schema = schema;
     }
 
-    public AllMergedMySqlTableInfo merge(Identifier otherTableId, MySqlSchema other) {
-        schema = schema.merge(location(), otherTableId.getFullName(), other);
+    public AllMergedMySqlTableInfo merge(Identifier otherTableId, Schema other) {
+        schema =
+                MySqlSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
         fromTables.add(otherTableId);
         return this;
     }
@@ -73,7 +75,7 @@ public class AllMergedMySqlTableInfo implements MySqlTableInfo {
     }
 
     @Override
-    public MySqlSchema schema() {
+    public Schema schema() {
         return checkNotNull(schema, "MySqlSchema hasn't been set.");
     }
 }

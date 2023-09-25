@@ -125,10 +125,8 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
         }
 
         catalog.createDatabase(database, true);
-        TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
-        List<Identifier> excludedTables = new ArrayList<>();
 
+        List<Identifier> excludedTables = new ArrayList<>();
         MongoDBSource<String> source =
                 MongoDBActionUtils.buildMongodbSource(
                         mongodbConfig,
@@ -143,16 +141,19 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
         Pattern includingPattern = Pattern.compile(this.includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
+        TableNameConverter tableNameConverter =
+                new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
         parserFactory =
                 () ->
                         new RichCdcMultiplexRecordEventParser(
-                                schemaBuilder, includingPattern, excludingPattern);
+                                schemaBuilder,
+                                includingPattern,
+                                excludingPattern,
+                                tableNameConverter);
         new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
                 .withInput(
                         env.fromSource(source, WatermarkStrategy.noWatermarks(), "MongoDB Source")
-                                .flatMap(
-                                        new MongoDBRecordParser(
-                                                caseSensitive, tableNameConverter, mongodbConfig)))
+                                .flatMap(new MongoDBRecordParser(caseSensitive, mongodbConfig)))
                 .withParserFactory(parserFactory)
                 .withCatalogLoader(catalogLoader())
                 .withDatabase(database)
