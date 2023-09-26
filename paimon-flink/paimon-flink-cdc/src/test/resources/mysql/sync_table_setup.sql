@@ -314,3 +314,16 @@ CREATE TABLE t2 (
     _date VARCHAR(10),
     PRIMARY KEY (pk)
 );
+
+-- ################################################################################
+--  testMetadataColumns
+-- ################################################################################
+
+CREATE DATABASE metadata;
+USE metadata;
+
+CREATE TABLE test_metadata_columns (
+    pk INT,
+    _date VARCHAR(10),
+    PRIMARY KEY (pk)
+);

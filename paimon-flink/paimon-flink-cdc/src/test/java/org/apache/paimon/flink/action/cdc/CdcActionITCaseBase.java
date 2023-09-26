@@ -213,6 +213,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         protected final List<String> primaryKeys = new ArrayList<>();
         protected final List<String> computedColumnArgs = new ArrayList<>();
         protected final List<String> typeMappingModes = new ArrayList<>();
+        protected final List<String> metadataColumn = new ArrayList<>();
 
         public SyncTableActionBuilder(Map<String, String> sourceConfig) {
             this.sourceConfig = sourceConfig;
@@ -252,6 +253,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
+        public SyncTableActionBuilder<T> withMetadataColumn(List<String> metadataColumn) {
+            this.metadataColumn.addAll(metadataColumn);
+            return this;
+        }
+
         public abstract T build();
     }
 
@@ -270,6 +276,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         @Nullable protected String excludingTables;
         @Nullable protected String mode;
         protected final List<String> typeMappingModes = new ArrayList<>();
+        protected final List<String> metadataColumn = new ArrayList<>();
 
         public SyncDatabaseActionBuilder(Map<String, String> sourceConfig) {
             this.sourceConfig = sourceConfig;
@@ -322,6 +329,11 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
         public SyncDatabaseActionBuilder<T> withTypeMappingModes(String... typeMappingModes) {
             this.typeMappingModes.addAll(Arrays.asList(typeMappingModes));
+            return this;
+        }
+
+        public SyncDatabaseActionBuilder<T> withMetadataColumn(List<String> metadataColumn) {
+            this.metadataColumn.addAll(metadataColumn);
             return this;
         }
 

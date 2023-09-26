@@ -65,6 +65,10 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
                     new ArrayList<>(params.getMultiParameter("computed-column")));
         }
 
+        if (params.has("metadata-column")) {
+            action.withMetadataKeys(new ArrayList<>(params.getMultiParameter("metadata-column")));
+        }
+
         if (params.has("type-mapping")) {
             String[] options = params.get("type-mapping").split(",");
             action.withTypeMapping(TypeMapping.parse(options));
@@ -88,6 +92,7 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
                         + "[--primary-keys <primary-keys>] "
                         + "[--type-mapping <option1,option2...>] "
                         + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
+                        + "[--metadata-column <metadata-column>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
                         + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
@@ -110,6 +115,10 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println("Please see doc for usage of --computed-column.");
+        System.out.println();
+
+        System.out.println(
+                "--metadata-column is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

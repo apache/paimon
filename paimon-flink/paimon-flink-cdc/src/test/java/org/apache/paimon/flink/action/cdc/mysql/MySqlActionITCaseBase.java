@@ -128,6 +128,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
+            args.addAll(listToMultiArgs("--metadata-column", metadataColumn));
 
             MultipleParameterTool params =
                     MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
@@ -164,6 +165,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(nullableToArgs("--mode", mode));
 
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
+            args.addAll(listToArgs("--metadata-column", metadataColumn));
 
             MultipleParameterTool params =
                     MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
