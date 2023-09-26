@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.schema.Schema;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
@@ -36,7 +36,6 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -47,42 +46,11 @@ import java.util.stream.StreamSupport;
 import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.kafkaPropertiesGroupId;
 import static org.apache.paimon.flink.action.cdc.kafka.format.DataFormat.getDataFormat;
 
-/** Utility class to load canal kafka schema. */
-public class KafkaSchema {
+/** Utility class to load kafka schema. */
+public class KafkaSchemaUtils {
 
     private static final int MAX_RETRY = 5;
     private static final int POLL_TIMEOUT_MILLIS = 1000;
-    private final String databaseName;
-    private final String tableName;
-    private final LinkedHashMap<String, DataType> fields;
-    private final List<String> primaryKeys;
-
-    public KafkaSchema(
-            String databaseName,
-            String tableName,
-            LinkedHashMap<String, DataType> fields,
-            List<String> primaryKeys) {
-        this.databaseName = databaseName;
-        this.tableName = tableName;
-        this.fields = fields;
-        this.primaryKeys = primaryKeys;
-    }
-
-    public String tableName() {
-        return tableName;
-    }
-
-    public String databaseName() {
-        return databaseName;
-    }
-
-    public LinkedHashMap<String, DataType> fields() {
-        return fields;
-    }
-
-    public List<String> primaryKeys() {
-        return primaryKeys;
-    }
 
     private static KafkaConsumer<String, String> getKafkaEarliestConsumer(
             Configuration kafkaConfig, String topic) {
@@ -123,8 +91,8 @@ public class KafkaSchema {
      * @return The Kafka schema for the topic.
      * @throws KafkaSchemaRetrievalException If unable to retrieve the schema after max retries.
      */
-    public static KafkaSchema getKafkaSchema(
-            Configuration kafkaConfig, String topic, TypeMapping typeMapping)
+    public static Schema getKafkaSchema(
+            Configuration kafkaConfig, String topic, TypeMapping typeMapping, boolean caseSensitive)
             throws KafkaSchemaRetrievalException {
         KafkaConsumer<String, String> consumer = getKafkaEarliestConsumer(kafkaConfig, topic);
         int retry = 0;
@@ -140,7 +108,7 @@ public class KafkaSchema {
             Stream<ConsumerRecord<String, String>> recordStream =
                     StreamSupport.stream(records.spliterator(), false);
 
-            Optional<KafkaSchema> kafkaSchema =
+            Optional<Schema> kafkaSchema =
                     recordStream
                             .map(record -> recordParser.getKafkaSchema(record.value()))
                             .filter(Objects::nonNull)
@@ -174,25 +142,5 @@ public class KafkaSchema {
         public KafkaSchemaRetrievalException(String message) {
             super(message);
         }
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (!(o instanceof KafkaSchema)) {
-            return false;
-        }
-        KafkaSchema that = (KafkaSchema) o;
-        return databaseName.equals(that.databaseName)
-                && tableName.equals(that.tableName)
-                && fields.equals(that.fields)
-                && primaryKeys.equals(that.primaryKeys);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(databaseName, tableName, fields, primaryKeys);
     }
 }

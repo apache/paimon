@@ -32,15 +32,16 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Utility class to load MySQL table schema with JDBC. */
@@ -56,9 +57,10 @@ public class MySqlSchemaUtils {
             TypeMapping typeMapping,
             boolean caseSensitive)
             throws SQLException {
-        Map<String, Integer> duplicateFields = new HashMap<>();
         Schema.Builder builder = Schema.newBuilder();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
+            Set<String> existedFields = new HashSet<>();
+            Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
                 String fieldType = rs.getString("TYPE_NAME");
@@ -73,23 +75,18 @@ public class MySqlSchemaUtils {
                 if (rs.wasNull()) {
                     scale = null;
                 }
-                DataType paimonType =
-                        MySqlTypeUtils.toDataType(fieldType, precision, scale, typeMapping);
-
-                if (!caseSensitive) {
-                    checkArgument(
-                            !duplicateFields.containsKey(fieldName.toLowerCase()),
-                            columnDuplicateErrMsg(tableName).apply(fieldName));
-                    fieldName = fieldName.toLowerCase();
-                }
-
                 boolean isNullable =
                         typeMapping.containsMode(TO_NULLABLE)
                                 || isNullableColumn(rs.getString("IS_NULLABLE"));
-                DataType updateType = paimonType.copy(isNullable);
+                DataType paimonType =
+                        MySqlTypeUtils.toDataType(fieldType, precision, scale, typeMapping)
+                                .copy(isNullable);
 
-                builder.column(fieldName, updateType, fieldComment);
-                duplicateFields.put(fieldName, 1);
+                fieldName =
+                        columnCaseConvertAndDuplicateCheck(
+                                fieldName, existedFields, caseSensitive, columnDuplicateErrMsg);
+
+                builder.column(fieldName, paimonType, fieldComment);
             }
         }
 
