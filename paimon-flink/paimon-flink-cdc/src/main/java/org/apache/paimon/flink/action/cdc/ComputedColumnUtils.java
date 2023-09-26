@@ -36,15 +36,11 @@ public class ComputedColumnUtils {
 
     public static List<ComputedColumn> buildComputedColumns(
             List<String> computedColumnArgs, Schema schema) {
-        Map<String, DataType> dataFields =
+        Map<String, DataType> typeMapping =
                 schema.fields().stream()
                         .collect(
                                 Collectors.toMap(DataField::name, DataField::type, (v1, v2) -> v2));
-        return buildComputedColumns(computedColumnArgs, dataFields);
-    }
 
-    public static List<ComputedColumn> buildComputedColumns(
-            List<String> computedColumnArgs, Map<String, DataType> typeMapping) {
         List<ComputedColumn> computedColumns = new ArrayList<>();
         for (String columnArg : computedColumnArgs) {
             String[] kv = columnArg.split("=");

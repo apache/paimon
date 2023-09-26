@@ -29,12 +29,11 @@ import org.apache.paimon.types.DataType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -133,6 +132,18 @@ public class CdcActionCommonUtils {
                 : origin.stream().map(String::toLowerCase).collect(Collectors.toList());
     }
 
+    public static String columnCaseConvertAndDuplicateCheck(
+            String column,
+            Set<String> existedFields,
+            boolean caseSensitive,
+            Function<String, String> columnDuplicateErrMsg) {
+        if (caseSensitive) {
+            return column;
+        }
+        checkArgument(existedFields.add(column.toLowerCase()), columnDuplicateErrMsg.apply(column));
+        return column.toLowerCase();
+    }
+
     public static Schema buildPaimonSchema(
             List<String> specifiedPartitionKeys,
             List<String> specifiedPrimaryKeys,
@@ -190,66 +201,6 @@ public class CdcActionCommonUtils {
 
         // comment
         builder.comment(sourceSchema.comment());
-
-        return builder.build();
-    }
-
-    public static Schema buildPaimonSchema(
-            List<String> specifiedPartitionKeys,
-            List<String> specifiedPrimaryKeys,
-            List<ComputedColumn> computedColumns,
-            Map<String, String> tableConfig,
-            LinkedHashMap<String, DataType> sourceColumns,
-            @Nullable List<String> sourceColumnComments,
-            List<String> sourcePrimaryKeys) {
-        Schema.Builder builder = Schema.newBuilder();
-
-        // options
-        builder.options(tableConfig);
-
-        // columns
-        if (sourceColumnComments != null) {
-            checkArgument(
-                    sourceColumns.size() == sourceColumnComments.size(),
-                    "Source table columns count and column comments count should be equal.");
-
-            int i = 0;
-            for (Map.Entry<String, DataType> entry : sourceColumns.entrySet()) {
-                builder.column(entry.getKey(), entry.getValue(), sourceColumnComments.get(i++));
-            }
-        } else {
-            sourceColumns.forEach(builder::column);
-        }
-
-        for (ComputedColumn computedColumn : computedColumns) {
-            builder.column(computedColumn.columnName(), computedColumn.columnType());
-        }
-
-        // primary keys
-        if (!specifiedPrimaryKeys.isEmpty()) {
-            for (String key : specifiedPrimaryKeys) {
-                if (!sourceColumns.containsKey(key)
-                        && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
-                    throw new IllegalArgumentException(
-                            "Specified primary key '"
-                                    + key
-                                    + "' does not exist in source tables or computed columns.");
-                }
-            }
-            builder.primaryKey(specifiedPrimaryKeys);
-        } else if (!sourcePrimaryKeys.isEmpty()) {
-            builder.primaryKey(sourcePrimaryKeys);
-        } else {
-            throw new IllegalArgumentException(
-                    "Primary keys are not specified. "
-                            + "Also, can't infer primary keys from source table schemas because "
-                            + "source tables have no primary keys or have different primary keys.");
-        }
-
-        // partition keys
-        if (!specifiedPartitionKeys.isEmpty()) {
-            builder.partitionKeys(specifiedPartitionKeys);
-        }
 
         return builder.build();
     }

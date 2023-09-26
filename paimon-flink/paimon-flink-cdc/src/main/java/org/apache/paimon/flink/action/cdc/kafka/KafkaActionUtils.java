@@ -18,10 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
@@ -41,7 +37,6 @@ import org.apache.kafka.common.TopicPartition;
 
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -50,9 +45,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 class KafkaActionUtils {
@@ -61,30 +53,6 @@ class KafkaActionUtils {
 
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
-
-    static Schema buildPaimonSchema(
-            KafkaSchema kafkaSchema,
-            List<String> specifiedPartitionKeys,
-            List<String> specifiedPrimaryKeys,
-            List<ComputedColumn> computedColumns,
-            Map<String, String> tableConfig,
-            boolean caseSensitive) {
-        LinkedHashMap<String, DataType> sourceColumns =
-                mapKeyCaseConvert(
-                        kafkaSchema.fields(),
-                        caseSensitive,
-                        columnDuplicateErrMsg(kafkaSchema.tableName()));
-        List<String> primaryKeys = listCaseConvert(kafkaSchema.primaryKeys(), caseSensitive);
-
-        return CdcActionCommonUtils.buildPaimonSchema(
-                specifiedPartitionKeys,
-                specifiedPrimaryKeys,
-                computedColumns,
-                tableConfig,
-                sourceColumns,
-                null,
-                primaryKeys);
-    }
 
     static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
         validateKafkaConfig(kafkaConfig);
