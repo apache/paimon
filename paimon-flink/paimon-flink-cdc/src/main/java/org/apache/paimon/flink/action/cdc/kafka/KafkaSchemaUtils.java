@@ -19,8 +19,8 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
-import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
 import org.apache.paimon.schema.Schema;
 
 import org.apache.flink.configuration.Configuration;
@@ -44,7 +44,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.kafkaPropertiesGroupId;
-import static org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat.getDataFormat;
+import static org.apache.paimon.flink.action.cdc.kafka.format.DataFormat.getDataFormat;
 
 /** Utility class to load kafka schema. */
 public class KafkaSchemaUtils {
