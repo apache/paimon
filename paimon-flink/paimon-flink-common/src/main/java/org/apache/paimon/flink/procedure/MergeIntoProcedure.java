@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MergeIntoAction;
@@ -28,7 +27,6 @@ import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_DELETE;
@@ -85,15 +83,10 @@ public class MergeIntoProcedure extends ProcedureBase {
             String mergeActions,
             String... mergeActionArguments)
             throws Exception {
-        String warehouse = ((AbstractCatalog) catalog).warehouse();
-        Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
         Identifier identifier = Identifier.fromString(targetTableId);
         MergeIntoAction action =
                 new MergeIntoAction(
-                        warehouse,
-                        identifier.getDatabaseName(),
-                        identifier.getObjectName(),
-                        catalogOptions);
+                        identifier.getDatabaseName(), identifier.getObjectName(), catalog);
         action.withTargetAlias(nullable(targetAlias));
 
         if (!sourceSqls.isEmpty()) {

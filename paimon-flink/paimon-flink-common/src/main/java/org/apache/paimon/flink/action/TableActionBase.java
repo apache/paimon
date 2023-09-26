@@ -40,7 +40,7 @@ import java.util.Map;
 public abstract class TableActionBase extends ActionBase {
 
     protected Table table;
-    protected final Identifier identifier;
+    protected Identifier identifier;
 
     TableActionBase(
             String warehouse,
@@ -48,6 +48,15 @@ public abstract class TableActionBase extends ActionBase {
             String tableName,
             Map<String, String> catalogConfig) {
         super(warehouse, catalogConfig);
+        init(databaseName, tableName);
+    }
+
+    TableActionBase(String databaseName, String tableName, Catalog catalog) {
+        super(catalog);
+        init(databaseName, tableName);
+    }
+
+    private void init(String databaseName, String tableName) {
         identifier = new Identifier(databaseName, tableName);
         try {
             table = catalog.getTable(identifier);

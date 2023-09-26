@@ -159,10 +159,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     public abstract String warehouse();
 
-    public Map<String, String> options() {
-        return catalogOptions;
-    }
-
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
 

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.sorter.TableSorter;
@@ -61,7 +62,13 @@ public class SortCompactAction extends CompactAction {
             String tableName,
             Map<String, String> catalogConfig) {
         super(warehouse, database, tableName, catalogConfig);
+    }
 
+    public SortCompactAction(String database, String tableName, Catalog catalog) {
+        super(database, tableName, catalog);
+    }
+
+    protected void disableWriteOnly() {
         checkArgument(
                 table instanceof AppendOnlyFileStoreTable,
                 "Only sort compaction works with append-only table for now.");

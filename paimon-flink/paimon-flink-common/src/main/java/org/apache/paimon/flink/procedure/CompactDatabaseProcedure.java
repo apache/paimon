@@ -18,14 +18,11 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.CompactDatabaseAction;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
-
-import java.util.Map;
 
 import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
 
@@ -104,10 +101,8 @@ public class CompactDatabaseProcedure extends ProcedureBase {
             String excludingTables,
             String tableOptions)
             throws Exception {
-        String warehouse = ((AbstractCatalog) catalog).warehouse();
-        Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
         CompactDatabaseAction action =
-                new CompactDatabaseAction(warehouse, catalogOptions)
+                new CompactDatabaseAction(catalog)
                         .includingDatabases(nullable(includingDatabases))
                         .includingTables(nullable(includingTables))
                         .excludingTables(nullable(excludingTables))

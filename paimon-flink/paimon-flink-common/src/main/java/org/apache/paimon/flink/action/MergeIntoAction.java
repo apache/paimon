@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -75,13 +76,13 @@ public class MergeIntoAction extends TableActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(MergeIntoAction.class);
 
     // primary keys of target table
-    private final List<String> primaryKeys;
+    private List<String> primaryKeys;
 
     // converters for Row to RowData
-    private final List<DataStructureConverter<Object, Object>> converters;
+    private List<DataStructureConverter<Object, Object>> converters;
 
     // field names of target table
-    private final List<String> targetFieldNames;
+    private List<String> targetFieldNames;
 
     // target table
     @Nullable private String targetAlias;
@@ -127,7 +128,15 @@ public class MergeIntoAction extends TableActionBase {
             String tableName,
             Map<String, String> catalogConfig) {
         super(warehouse, database, tableName, catalogConfig);
+        init();
+    }
 
+    public MergeIntoAction(String database, String tableName, Catalog catalog) {
+        super(database, tableName, catalog);
+        init();
+    }
+
+    private void init() {
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(

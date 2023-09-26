@@ -18,15 +18,12 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
 
 import org.apache.flink.table.procedure.ProcedureContext;
-
-import java.util.Map;
 
 /**
  * Compact procedure. Usage:
@@ -72,26 +69,20 @@ public class CompactProcedure extends ProcedureBase {
             String orderByColumns,
             String... partitionStrings)
             throws Exception {
-        String warehouse = ((AbstractCatalog) catalog).warehouse();
-        Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
         Identifier identifier = Identifier.fromString(tableId);
         CompactAction action;
         String jobName;
         if (orderStrategy.isEmpty() && orderByColumns.isEmpty()) {
             action =
                     new CompactAction(
-                            warehouse,
-                            identifier.getDatabaseName(),
-                            identifier.getObjectName(),
-                            catalogOptions);
+                            identifier.getDatabaseName(), identifier.getObjectName(), catalog);
             jobName = "Compact Job";
         } else if (!orderStrategy.isEmpty() && !orderByColumns.isEmpty()) {
             action =
                     new SortCompactAction(
-                                    warehouse,
                                     identifier.getDatabaseName(),
                                     identifier.getObjectName(),
-                                    catalogOptions)
+                                    catalog)
                             .withOrderStrategy(orderStrategy)
                             .withOrderColumns(orderByColumns.split(","));
             jobName = "Sort Compact Job";

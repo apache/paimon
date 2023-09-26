@@ -46,16 +46,28 @@ public abstract class ActionBase implements Action {
 
     protected final Options catalogOptions;
     protected final Catalog catalog;
-    protected final FlinkCatalog flinkCatalog;
+
     protected final String catalogName = "paimon-" + UUID.randomUUID();
-    protected final StreamExecutionEnvironment env;
-    protected final StreamTableEnvironment batchTEnv;
+
+    protected FlinkCatalog flinkCatalog;
+    protected StreamExecutionEnvironment env;
+    protected StreamTableEnvironment batchTEnv;
 
     public ActionBase(String warehouse, Map<String, String> catalogConfig) {
         catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
-
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+        initFlinkEnv();
+    }
+
+    /** For special case that we can directly send a {@link Catalog}. */
+    public ActionBase(Catalog catalog) {
+        this.catalogOptions = new Options();
+        this.catalog = catalog;
+        initFlinkEnv();
+    }
+
+    private void initFlinkEnv() {
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
         env = StreamExecutionEnvironment.getExecutionEnvironment();
         // we enable object reuse, we copy the un-reusable object ourselves.

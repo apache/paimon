@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
@@ -52,6 +53,15 @@ public class CompactAction extends TableActionBase {
             String tableName,
             Map<String, String> catalogConfig) {
         super(warehouse, database, tableName, catalogConfig);
+        disableWriteOnly();
+    }
+
+    public CompactAction(String database, String tableName, Catalog catalog) {
+        super(database, tableName, catalog);
+        disableWriteOnly();
+    }
+
+    protected void disableWriteOnly() {
         if (!(table instanceof FileStoreTable)) {
             throw new UnsupportedOperationException(
                     String.format(

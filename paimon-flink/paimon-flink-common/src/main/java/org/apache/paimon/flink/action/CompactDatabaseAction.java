@@ -74,6 +74,10 @@ public class CompactDatabaseAction extends ActionBase {
         super(warehouse, catalogConfig);
     }
 
+    public CompactDatabaseAction(Catalog catalog) {
+        super(catalog);
+    }
+
     public CompactDatabaseAction includingDatabases(@Nullable String includingDatabases) {
         if (includingDatabases != null) {
             this.databasePattern = Pattern.compile(includingDatabases);
