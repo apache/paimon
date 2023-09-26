@@ -61,6 +61,11 @@ public class Consumer {
             }
 
             String json = fileIO.readFileUtf8(path);
+
+            if (json == null || json.isEmpty()) {
+                return Optional.empty();
+            }
+
             return Optional.of(Consumer.fromJson(json));
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);
