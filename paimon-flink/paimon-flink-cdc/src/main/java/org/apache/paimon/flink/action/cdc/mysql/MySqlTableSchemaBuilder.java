@@ -27,15 +27,17 @@ import io.debezium.relational.Column;
 import io.debezium.relational.Table;
 import io.debezium.relational.history.TableChanges;
 
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Schema builder for MySQL cdc. */
 public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<TableChanges.TableChange> {
@@ -58,7 +60,8 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<TableChang
         List<Column> columns = table.columns();
 
         Schema.Builder builder = Schema.newBuilder();
-        Map<String, Integer> duplicateFields = new HashMap<>();
+        Set<String> existedFields = new HashSet<>();
+        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
 
         // column
         for (Column column : columns) {
@@ -71,16 +74,12 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<TableChang
 
             dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
 
-            String columnName = column.name();
-            if (!caseSensitive) {
-                checkArgument(
-                        !duplicateFields.containsKey(columnName.toLowerCase()),
-                        columnDuplicateErrMsg(tableName).apply(columnName));
-                columnName = columnName.toLowerCase();
-            }
+            String columnName =
+                    columnCaseConvertAndDuplicateCheck(
+                            column.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+
             // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
             builder.column(columnName, dataType, null);
-            duplicateFields.put(columnName, 1);
         }
 
         // primaryKey
