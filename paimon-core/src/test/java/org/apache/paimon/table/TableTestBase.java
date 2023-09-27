@@ -40,11 +40,14 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -116,15 +119,30 @@ public abstract class TableTestBase {
 
     protected List<InternalRow> read(Table table, Pair<ConfigOption<?>, String>... dynamicOptions)
             throws Exception {
+        return read(table, null, dynamicOptions);
+    }
+
+    protected List<InternalRow> read(
+            Table table,
+            @Nullable int[][] projection,
+            Pair<ConfigOption<?>, String>... dynamicOptions)
+            throws Exception {
         Map<String, String> options = new HashMap<>();
         for (Pair<ConfigOption<?>, String> pair : dynamicOptions) {
             options.put(pair.getKey().key(), pair.getValue());
         }
         table = table.copy(options);
         ReadBuilder readBuilder = table.newReadBuilder();
+        if (projection != null) {
+            readBuilder.withProjection(projection);
+        }
         RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
-        InternalRowSerializer serializer = new InternalRowSerializer(table.rowType());
+        InternalRowSerializer serializer =
+                new InternalRowSerializer(
+                        projection == null
+                                ? table.rowType()
+                                : Projection.of(projection).project(table.rowType()));
         List<InternalRow> rows = new ArrayList<>();
         reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
         return rows;
