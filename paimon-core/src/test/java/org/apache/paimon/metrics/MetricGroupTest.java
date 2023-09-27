@@ -34,9 +34,7 @@ public class MetricGroupTest {
         assertThat(group.isClosed()).isFalse();
         // these will fail is the registration is propagated
         group.counter("testcounter");
-        group.gauge(
-                "testgauge",
-                () -> null);
+        group.gauge("testgauge", () -> null);
         assertThat(group.getGroupName()).isEqualTo("commit");
         assertThat(group.getAllTags().size()).isEqualTo(1);
         assertThat(group.getAllTags())
@@ -65,7 +63,8 @@ public class MetricGroupTest {
 
     @Test
     public void testAddAndRemoveMetricGroups() {
-        AbstractMetricGroup metricGroup = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
+        AbstractMetricGroup metricGroup =
+                GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
         assertThat(Metrics.getInstance().getMetricGroups()).containsExactly(metricGroup);
         metricGroup.close();
         assertThat(Metrics.getInstance().getMetricGroups()).isEmpty();
