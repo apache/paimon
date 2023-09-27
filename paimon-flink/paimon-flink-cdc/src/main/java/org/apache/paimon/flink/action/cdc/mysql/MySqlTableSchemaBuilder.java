@@ -59,9 +59,10 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<TableChang
         String tableName = tableChange.getId().toString();
         List<Column> columns = table.columns();
 
-        Schema.Builder builder = Schema.newBuilder();
         Set<String> existedFields = new HashSet<>();
         Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+
+        Schema.Builder builder = Schema.newBuilder();
 
         // column
         for (Column column : columns) {
