@@ -36,12 +36,7 @@ public class MetricGroupTest {
         group.counter("testcounter");
         group.gauge(
                 "testgauge",
-                new Gauge<Object>() {
-                    @Override
-                    public Object getValue() {
-                        return null;
-                    }
-                });
+                () -> null);
         assertThat(group.getGroupName()).isEqualTo("commit");
         assertThat(group.getAllTags().size()).isEqualTo(1);
         assertThat(group.getAllTags())
@@ -65,5 +60,14 @@ public class MetricGroupTest {
 
         // return the old one with the metric name collision
         assertThat(group.counter(name)).isSameAs(counter1);
+        group.close();
+    }
+
+    @Test
+    public void testAddAndRemoveMetricGroups() {
+        AbstractMetricGroup metricGroup = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
+        assertThat(Metrics.getInstance().getMetricGroups()).containsExactly(metricGroup);
+        metricGroup.close();
+        assertThat(Metrics.getInstance().getMetricGroups()).isEmpty();
     }
 }
