@@ -23,11 +23,14 @@ import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
+import org.apache.paimon.metrics.commit.CommitMetrics;
+import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.ThrowingConsumer;
 
@@ -37,6 +40,7 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -333,11 +337,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         for (CommitMessage commitMessage : committable) {
             manifestCommittable.addFileCommittable(commitMessage);
         }
-
-        StreamTableCommit commit = table.newCommit(initialCommitUser);
-        CommitterMetrics metrics =
-                new CommitterMetrics(UnregisteredMetricsGroup.createOperatorIOMetricGroup());
-        StoreCommitter committer = new StoreCommitter(commit, metrics);
+        StoreCommitter committer = createStoreCommitter(table, initialCommitUser, UnregisteredMetricsGroup.createOperatorMetricGroup());
+        CommitterMetrics metrics = committer.getMetrics();
         committer.commit(Collections.singletonList(manifestCommittable));
         assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(275);
         assertThat(metrics.getNumRecordsOutCounter().getCount()).isEqualTo(2);
@@ -390,10 +391,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         return new CommitterOperator<>(
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
-                (user, metricGroup) ->
-                        new StoreCommitter(
-                                table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                new CommitterMetrics(metricGroup)),
+                (user, metricGroup) -> createStoreCommitter(table, user, metricGroup),
                 committableStateManager);
     }
 
@@ -405,15 +403,23 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         return new CommitterOperator<Committable, ManifestCommittable>(
                 true,
                 commitUser == null ? initialCommitUser : commitUser,
-                (user, metricGroup) ->
-                        new StoreCommitter(
-                                table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                new CommitterMetrics(metricGroup)),
+                (user, metricGroup) -> createStoreCommitter(table, user, metricGroup),
                 committableStateManager) {
             @Override
             public void initializeState(StateInitializationContext context) throws Exception {
                 initializeFunction.accept(context);
             }
         };
+    }
+
+    private StoreCommitter createStoreCommitter(FileStoreTable table, String user, OperatorMetricGroup metricGroup) {
+        TableCommitImpl tableCommit = table.newCommit(user);
+        FileStoreCommit storeCommit = tableCommit.getStoreCommit();
+        CommitMetrics commitMetrics = null;
+        if (storeCommit instanceof FileStoreCommitImpl) {
+            commitMetrics = ((FileStoreCommitImpl) storeCommit).getCommitMetrics();
+        }
+        CommitterMetrics metrics = new CommitterMetrics(metricGroup, commitMetrics);
+        return new StoreCommitter(tableCommit, metrics);
     }
 }

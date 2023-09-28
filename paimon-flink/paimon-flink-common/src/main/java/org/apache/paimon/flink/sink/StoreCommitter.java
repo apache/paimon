@@ -38,6 +38,7 @@ import java.util.Map;
 public class StoreCommitter implements Committer<Committable, ManifestCommittable> {
 
     private final TableCommitImpl commit;
+
     @Nullable private final CommitterMetrics metrics;
 
     public StoreCommitter(TableCommit commit, @Nullable CommitterMetrics metrics) {
@@ -121,5 +122,10 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
 
     private static long calcTotalFileRowCount(List<DataFileMeta> files) {
         return files.stream().mapToLong(DataFileMeta::rowCount).reduce(Long::sum).orElse(0);
+    }
+
+    @Nullable
+    public CommitterMetrics getMetrics() {
+        return metrics;
     }
 }

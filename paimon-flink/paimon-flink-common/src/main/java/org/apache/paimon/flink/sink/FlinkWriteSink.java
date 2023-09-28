@@ -21,7 +21,11 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
+import org.apache.paimon.metrics.commit.CommitMetrics;
+import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TableCommitImpl;
 
 import javax.annotation.Nullable;
 
@@ -46,12 +50,18 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
         // a restart.
-        return (user, metricGroup) ->
-                new StoreCommitter(
-                        table.newCommit(user)
-                                .withOverwrite(overwritePartition)
-                                .ignoreEmptyCommit(!streamingCheckpointEnabled),
-                        new CommitterMetrics(metricGroup));
+
+        return (user, metricGroup) -> {
+            TableCommitImpl tableCommit = table.newCommit(user)
+                    .withOverwrite(overwritePartition)
+                    .ignoreEmptyCommit(!streamingCheckpointEnabled);
+            FileStoreCommit storeCommit = tableCommit.getStoreCommit();
+            CommitMetrics commitMetrics = null;
+            if (storeCommit instanceof FileStoreCommitImpl) {
+                commitMetrics = ((FileStoreCommitImpl) storeCommit).getCommitMetrics();
+            }
+            return new StoreCommitter(tableCommit, new CommitterMetrics(metricGroup, commitMetrics));
+        };
     }
 
     @Override

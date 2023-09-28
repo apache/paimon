@@ -23,8 +23,12 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
+import org.apache.paimon.metrics.commit.CommitMetrics;
+import org.apache.paimon.operation.FileStoreCommit;
+import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.TableCommitImpl;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 
@@ -173,9 +177,16 @@ public class StoreMultiCommitter
                                 "Failed to get committer for table %s", tableId.getFullName()),
                         e);
             }
+            TableCommitImpl tableCommit = table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob);
+            FileStoreCommit storeCommit = tableCommit.getStoreCommit();
+            CommitMetrics commitMetrics = null;
+            if (storeCommit instanceof FileStoreCommitImpl) {
+                commitMetrics = ((FileStoreCommitImpl) storeCommit).getCommitMetrics();
+            }
+            metrics.registerCommitMetrics(commitMetrics);
             committer =
                     new StoreCommitter(
-                            table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob), metrics);
+                            tableCommit, metrics);
             tableCommitters.put(tableId, committer);
         }
 

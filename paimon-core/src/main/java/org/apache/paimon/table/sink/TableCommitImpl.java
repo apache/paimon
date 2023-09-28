@@ -254,6 +254,10 @@ public class TableCommitImpl implements InnerTableCommit {
         }
     }
 
+    public FileStoreCommit getStoreCommit() {
+        return commit;
+    }
+
     @Override
     public void close() throws Exception {
         for (CommitCallback commitCallback : commitCallbacks) {
