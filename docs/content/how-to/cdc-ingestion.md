@@ -667,14 +667,7 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 
 * Adding columns.
 
-* Altering column types. More specifically,
-
-  * altering from a string type (char, varchar, text) to another string type with longer length,
-  * altering from a binary type (binary, varbinary, blob) to another binary type with longer length,
-  * altering from an integer type (tinyint, smallint, int, bigint) to another integer type with wider range,
-  * altering from a floating-point type (float, double) to another floating-point type with wider range,
-
-  are supported.
+* Altering column types. See [ChangingColumnType]({{< ref "how-to/altering-tables#changing-column-type" >}}) for supported type conversions.
 
 ## Computed Functions
 

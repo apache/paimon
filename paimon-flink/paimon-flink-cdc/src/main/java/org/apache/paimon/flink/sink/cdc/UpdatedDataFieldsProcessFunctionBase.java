@@ -65,8 +65,9 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
     }
 
     public static boolean canConvert(DataType oldType, DataType newType) {
-        return DataTypeCasts.supportsExplicitCast(oldType, newType)
-                && CastExecutors.resolve(oldType, newType) != null;
+        return oldType.equalsIgnoreNullable(newType)
+                || (DataTypeCasts.supportsExplicitCast(oldType, newType)
+                        && CastExecutors.resolve(oldType, newType) != null);
     }
 
     protected List<SchemaChange> extractSchemaChanges(Identifier identifier, Schema tableChange)

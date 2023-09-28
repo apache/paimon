@@ -262,14 +262,14 @@ CREATE TABLE incompatible_field_2 (
 CREATE TABLE incompatible_pk_1 (
     a INT,
     b BIGINT,
-    c VARCHAR(20),
+    c TIMESTAMP,
     PRIMARY KEY (a, b)
 );
 
 CREATE TABLE incompatible_pk_2 (
     a INT,
     b BIGINT,
-    c VARCHAR(20),
+    c TIMESTAMP,
     PRIMARY KEY (a)
 );
 
