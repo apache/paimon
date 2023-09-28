@@ -122,9 +122,8 @@ public class MySqlSchemaUtils {
                                         + "Current table '%s' field: %s\n"
                                         + "To be merged table '%s' field: %s",
                                 newField.name(), currentTable, dataField, otherTable, newField));
-            } else {
-                currentFields.put(newField.name(), newField);
             }
+            currentFields.put(newField.name(), newField);
         }
         Schema.Builder builder = Schema.newBuilder();
         if (current.primaryKeys().equals(other.primaryKeys())) {
