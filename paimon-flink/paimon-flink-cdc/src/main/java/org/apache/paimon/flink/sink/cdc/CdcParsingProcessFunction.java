@@ -18,15 +18,16 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
-import org.apache.flink.api.java.typeutils.ListTypeInfo;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
-import java.util.List;
+import java.util.Optional;
 
 /**
  * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
@@ -39,8 +40,8 @@ import java.util.List;
  */
 public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> {
 
-    public static final OutputTag<List<DataField>> NEW_DATA_FIELD_LIST_OUTPUT_TAG =
-            new OutputTag<>("new-data-field-list", new ListTypeInfo<>(DataField.class));
+    public static final OutputTag<Schema> NEW_DATA_FIELD_LIST_OUTPUT_TAG =
+            new OutputTag<>("new-data-field-list", TypeInformation.of(Schema.class));
 
     private final EventParser.Factory<T> parserFactory;
 
@@ -59,10 +60,8 @@ public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> 
     public void processElement(T raw, Context context, Collector<CdcRecord> collector)
             throws Exception {
         parser.setRawEvent(raw);
-        List<DataField> schemaChange = parser.parseSchemaChange();
-        if (schemaChange.size() > 0) {
-            context.output(NEW_DATA_FIELD_LIST_OUTPUT_TAG, schemaChange);
-        }
+        Optional<Schema> tableChange = parser.parseSchemaChange();
+        tableChange.ifPresent(schema -> context.output(NEW_DATA_FIELD_LIST_OUTPUT_TAG, schema));
         parser.parseRecords().forEach(collector::collect);
     }
 }

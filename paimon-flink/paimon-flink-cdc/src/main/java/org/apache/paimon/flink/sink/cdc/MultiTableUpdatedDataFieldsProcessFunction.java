@@ -20,9 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -30,11 +28,6 @@ import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
 
 /**
  * A {@link ProcessFunction} to handle schema changes. New schema is represented by a list of {@link
@@ -44,12 +37,10 @@ import java.util.Objects;
  * be 1.
  */
 public class MultiTableUpdatedDataFieldsProcessFunction
-        extends UpdatedDataFieldsProcessFunctionBase<Tuple2<Identifier, List<DataField>>, Void> {
+        extends UpdatedDataFieldsProcessFunctionBase<Tuple2<Identifier, Schema>, Void> {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(MultiTableUpdatedDataFieldsProcessFunction.class);
-
-    private final Map<Identifier, SchemaManager> schemaManagers = new HashMap<>();
 
     public MultiTableUpdatedDataFieldsProcessFunction(Catalog.Loader catalogLoader) {
         super(catalogLoader);
@@ -57,31 +48,13 @@ public class MultiTableUpdatedDataFieldsProcessFunction
 
     @Override
     public void processElement(
-            Tuple2<Identifier, List<DataField>> updatedDataFields,
-            Context context,
-            Collector<Void> collector)
+            Tuple2<Identifier, Schema> tableChange, Context context, Collector<Void> collector)
             throws Exception {
-        Identifier tableId = updatedDataFields.f0;
-        SchemaManager schemaManager =
-                schemaManagers.computeIfAbsent(
-                        tableId,
-                        id -> {
-                            FileStoreTable table;
-                            try {
-                                table = (FileStoreTable) catalog.getTable(tableId);
-                            } catch (Catalog.TableNotExistException e) {
-                                return null;
-                            }
-                            return new SchemaManager(table.fileIO(), table.location());
-                        });
-
-        if (Objects.isNull(schemaManager)) {
-            LOG.error("Failed to get schema manager for table " + tableId);
-        } else {
-            for (SchemaChange schemaChange :
-                    extractSchemaChanges(schemaManager, updatedDataFields.f1)) {
-                applySchemaChange(schemaManager, schemaChange, tableId);
-            }
+        Identifier tableId = tableChange.f0;
+        try {
+            commitSchemaChange(tableChange.f0, tableChange.f1);
+        } catch (Catalog.TableNotExistException e) {
+            LOG.error("Failed to get schema manager for table {}.", tableId);
         }
     }
 }

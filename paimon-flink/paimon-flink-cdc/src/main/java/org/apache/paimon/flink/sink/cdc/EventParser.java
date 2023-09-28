@@ -47,7 +47,7 @@ public interface EventParser<T> {
      *
      * @return empty if there is no schema change
      */
-    List<DataField> parseSchemaChange();
+    Optional<Schema> parseSchemaChange();
 
     /**
      * Parse records from event.

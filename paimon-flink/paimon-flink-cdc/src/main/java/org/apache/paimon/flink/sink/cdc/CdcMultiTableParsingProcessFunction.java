@@ -18,18 +18,18 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
-import org.apache.flink.api.java.typeutils.ListTypeInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
@@ -44,7 +44,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     private final EventParser.Factory<T> parserFactory;
 
     private transient EventParser<T> parser;
-    private transient Map<String, OutputTag<List<DataField>>> updatedDataFieldsOutputTags;
+    private transient Map<String, OutputTag<Schema>> updatedDataFieldsOutputTags;
     private transient Map<String, OutputTag<CdcRecord>> recordOutputTags;
 
     public CdcMultiTableParsingProcessFunction(EventParser.Factory<T> parserFactory) {
@@ -62,22 +62,21 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
     public void processElement(T raw, Context context, Collector<Void> collector) throws Exception {
         parser.setRawEvent(raw);
         String tableName = parser.parseTableName();
-        List<DataField> schemaChange = parser.parseSchemaChange();
-        if (schemaChange.size() > 0) {
-            context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);
-        }
+        Optional<Schema> tableChange = parser.parseSchemaChange();
+        tableChange.ifPresent(
+                schema -> context.output(getUpdatedDataFieldsOutputTag(tableName), schema));
         parser.parseRecords()
                 .forEach(record -> context.output(getRecordOutputTag(tableName), record));
     }
 
-    private OutputTag<List<DataField>> getUpdatedDataFieldsOutputTag(String tableName) {
+    private OutputTag<Schema> getUpdatedDataFieldsOutputTag(String tableName) {
         return updatedDataFieldsOutputTags.computeIfAbsent(
                 tableName, CdcMultiTableParsingProcessFunction::createUpdatedDataFieldsOutputTag);
     }
 
-    public static OutputTag<List<DataField>> createUpdatedDataFieldsOutputTag(String tableName) {
+    public static OutputTag<Schema> createUpdatedDataFieldsOutputTag(String tableName) {
         return new OutputTag<>(
-                "new-data-field-list-" + tableName, new ListTypeInfo<>(DataField.class));
+                "new-data-field-list-" + tableName, TypeInformation.of(Schema.class));
     }
 
     private OutputTag<CdcRecord> getRecordOutputTag(String tableName) {

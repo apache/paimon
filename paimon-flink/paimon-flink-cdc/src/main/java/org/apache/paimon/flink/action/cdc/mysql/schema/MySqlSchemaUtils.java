@@ -42,6 +42,7 @@ import java.util.function.Function;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Utility class to load MySQL table schema with JDBC. */
@@ -114,22 +115,13 @@ public class MySqlSchemaUtils {
             DataField dataField = currentFields.get(newField.name());
             if (Objects.nonNull(dataField)) {
                 DataType oldType = dataField.type();
-                switch (UpdatedDataFieldsProcessFunction.canConvert(oldType, newField.type())) {
-                    case CONVERT:
-                        currentFields.put(newField.name(), newField);
-                        break;
-                    case EXCEPTION:
-                        throw new IllegalArgumentException(
-                                String.format(
-                                        "Column %s have different types when merging schemas.\n"
-                                                + "Current table '%s' field: %s\n"
-                                                + "To be merged table '%s' field: %s",
-                                        newField.name(),
-                                        currentTable,
-                                        dataField,
-                                        otherTable,
-                                        newField));
-                }
+                checkArgument(
+                        UpdatedDataFieldsProcessFunction.canConvert(oldType, newField.type()),
+                        String.format(
+                                "Column %s have different types when merging schemas.\n"
+                                        + "Current table '%s' field: %s\n"
+                                        + "To be merged table '%s' field: %s",
+                                newField.name(), currentTable, dataField, otherTable, newField));
             } else {
                 currentFields.put(newField.name(), newField);
             }

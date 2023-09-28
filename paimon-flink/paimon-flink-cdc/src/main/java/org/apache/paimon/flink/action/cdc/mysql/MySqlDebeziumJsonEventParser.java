@@ -32,7 +32,6 @@ import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Preconditions;
@@ -177,14 +176,14 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
     }
 
     @Override
-    public List<DataField> parseSchemaChange() {
+    public Optional<Schema> parseSchemaChange() {
         if (!shouldSynchronizeCurrentTable || !root.payload().isSchemaChange()) {
-            return Collections.emptyList();
+            return Optional.empty();
         }
 
         DebeziumEvent.Payload payload = root.payload();
         if (!payload.hasHistoryRecord()) {
-            return Collections.emptyList();
+            return Optional.empty();
         }
 
         TableChanges.TableChange tableChange = null;
@@ -198,15 +197,15 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 LOG.error(
                         "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
                                 + payload.historyRecord());
-                return Collections.emptyList();
+                return Optional.empty();
             }
         } catch (Exception e) {
             LOG.info("Failed to parse history record for schema changes", e);
-            return Collections.emptyList();
+            return Optional.empty();
         }
 
         Optional<Schema> schema = schemaBuilder.build(tableChange);
-        return schema.get().fields();
+        return schema;
     }
 
     @Override

@@ -20,14 +20,12 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
-
-import java.util.List;
 
 /**
  * A {@link ProcessFunction} to handle schema changes. New schema is represented by a list of {@link
@@ -37,7 +35,7 @@ import java.util.List;
  * be 1.
  */
 public class UpdatedDataFieldsProcessFunction
-        extends UpdatedDataFieldsProcessFunctionBase<List<DataField>, Void> {
+        extends UpdatedDataFieldsProcessFunctionBase<Schema, Void> {
 
     private final SchemaManager schemaManager;
 
@@ -51,11 +49,8 @@ public class UpdatedDataFieldsProcessFunction
     }
 
     @Override
-    public void processElement(
-            List<DataField> updatedDataFields, Context context, Collector<Void> collector)
+    public void processElement(Schema tableChange, Context context, Collector<Void> collector)
             throws Exception {
-        for (SchemaChange schemaChange : extractSchemaChanges(schemaManager, updatedDataFields)) {
-            applySchemaChange(schemaManager, schemaChange, identifier);
-        }
+        commitSchemaChange(identifier, tableChange);
     }
 }

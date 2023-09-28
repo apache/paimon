@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 
 import org.apache.flink.api.common.typeinfo.TypeHint;
@@ -32,7 +33,7 @@ import org.apache.flink.util.OutputTag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
+import java.util.Optional;
 
 /**
  * A {@link ProcessFunction} to parse CDC change event to either a list of {@link DataField}s or
@@ -52,12 +53,10 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
     public static final OutputTag<CdcMultiplexRecord> DYNAMIC_OUTPUT_TAG =
             new OutputTag<>("paimon-dynamic-table", TypeInformation.of(CdcMultiplexRecord.class));
 
-    public static final OutputTag<Tuple2<Identifier, List<DataField>>>
-            DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG =
-                    new OutputTag<>(
-                            "paimon-dynamic-table-schema-change",
-                            TypeInformation.of(
-                                    new TypeHint<Tuple2<Identifier, List<DataField>>>() {}));
+    public static final OutputTag<Tuple2<Identifier, Schema>> DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG =
+            new OutputTag<>(
+                    "paimon-dynamic-table-schema-change",
+                    TypeInformation.of(new TypeHint<Tuple2<Identifier, Schema>>() {}));
 
     private final EventParser.Factory<T> parserFactory;
     private final String database;
@@ -95,8 +94,7 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
         parser.parseNewTable()
                 .ifPresent(
                         schema -> {
-                            Identifier identifier =
-                                    new Identifier(database, parser.parseTableName());
+                            Identifier identifier = new Identifier(database, tableName);
                             try {
                                 catalog.createTable(identifier, schema, true);
                             } catch (Exception e) {
@@ -104,12 +102,12 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                             }
                         });
 
-        List<DataField> schemaChange = parser.parseSchemaChange();
-        if (schemaChange.size() > 0) {
-            context.output(
-                    DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG,
-                    Tuple2.of(Identifier.create(database, tableName), schemaChange));
-        }
+        Optional<Schema> tableChange = parser.parseSchemaChange();
+        tableChange.ifPresent(
+                schema ->
+                        context.output(
+                                DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG,
+                                Tuple2.of(Identifier.create(database, tableName), schema)));
 
         parser.parseRecords()
                 .forEach(
