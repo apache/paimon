@@ -107,7 +107,6 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
             }
         }
 
-        // option change
         return result;
     }
 
