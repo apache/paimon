@@ -37,7 +37,7 @@ under the License.
         <flink.version>1.17.1</flink.version>
         <flink.mysql.cdc.version>2.3.0</flink.mysql.cdc.version>
         <flink.mongodb.cdc.version>2.4.1</flink.mongodb.cdc.version>
-        <avro.version>1.11.1</avro.version>
+        <avro.version>1.11.3</avro.version>
         <geometry.version>2.2.0</geometry.version>
         <json-path.version>2.8.0</json-path.version>
         <mongodb.testcontainers.version>1.18.3</mongodb.testcontainers.version>
