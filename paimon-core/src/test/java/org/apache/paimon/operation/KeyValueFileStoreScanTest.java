@@ -25,6 +25,7 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
@@ -144,6 +145,34 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
+    public void testWithValueFilter() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<KeyValue> data = generateData(100, Math.abs(random.nextInt(1000)));
+        writeData(data, 0);
+        data = generateData(100, Math.abs(random.nextInt(1000)) + 1000);
+        writeData(data, 1);
+        data = generateData(100, Math.abs(random.nextInt(1000)) + 2000);
+        writeData(data, 2);
+        generateData(100, Math.abs(random.nextInt(1000)) + 3000);
+        Snapshot snapshot = writeData(data, 3);
+
+        KeyValueFileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id());
+        List<ManifestEntry> files = scan.plan().files();
+
+        scan = store.newScan();
+        scan.withSnapshot(snapshot.id());
+        scan.withValueFilter(
+                new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE)
+                        .between(1, 1000, 2000));
+
+        List<ManifestEntry> filesFiltered = scan.plan().files();
+
+        assertThat(files.size()).isEqualTo(4);
+        assertThat(filesFiltered.size()).isEqualTo(1);
+    }
+
+    @Test
     public void testWithBucket() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(random.nextInt(1000) + 1);
@@ -247,8 +276,21 @@ public class KeyValueFileStoreScanTest {
         return data;
     }
 
+    private List<KeyValue> generateData(int numRecords, int hr) {
+        List<KeyValue> data = new ArrayList<>();
+        for (int i = 0; i < numRecords; i++) {
+            data.add(gen.nextInsert("", hr, null, null, null));
+        }
+        return data;
+    }
+
     private Snapshot writeData(List<KeyValue> kvs) throws Exception {
         List<Snapshot> snapshots = store.commitData(kvs, gen::getPartition, this::getBucket);
+        return snapshots.get(snapshots.size() - 1);
+    }
+
+    private Snapshot writeData(List<KeyValue> kvs, int bucket) throws Exception {
+        List<Snapshot> snapshots = store.commitData(kvs, gen::getPartition, b -> bucket);
         return snapshots.get(snapshots.size() - 1);
     }
 
