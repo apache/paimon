@@ -78,7 +78,7 @@ public class MongoDBActionUtils {
                     .defaultValue("dynamic")
                     .withDescription("Mode selection: `dynamic` or `specified`.");
 
-    static MongoDBSource<String> buildMongodbSource(Configuration mongodbConfig, String tableList) {
+    public static MongoDBSource<String> buildMongodbSource(Configuration mongodbConfig, String tableList) {
         validateMongodbConfig(mongodbConfig);
         MongoDBSourceBuilder<String> sourceBuilder = MongoDBSource.builder();
 

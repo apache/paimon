@@ -63,7 +63,7 @@ public class MySqlActionUtils {
                     .withDescription(
                             "Whether capture the scan the newly added tables or not, by default is true.");
 
-    static Connection getConnection(Configuration mySqlConfig, boolean tinyint1NotBool)
+    public static Connection getConnection(Configuration mySqlConfig, boolean tinyint1NotBool)
             throws Exception {
         String url =
                 String.format(
@@ -81,7 +81,7 @@ public class MySqlActionUtils {
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
     }
 
-    static MySqlSchemasInfo getMySqlTableInfos(
+    public static MySqlSchemasInfo getMySqlTableInfos(
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables,
@@ -127,7 +127,7 @@ public class MySqlActionUtils {
         return mySqlSchemasInfo;
     }
 
-    static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {
+    public static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {
         validateMySqlConfig(mySqlConfig);
         MySqlSourceBuilder<String> sourceBuilder = MySqlSource.builder();
 
