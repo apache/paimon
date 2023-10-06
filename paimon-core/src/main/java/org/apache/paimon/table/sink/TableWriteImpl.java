@@ -71,6 +71,11 @@ public class TableWriteImpl<T>
     }
 
     @Override
+    public long getMemoryPreemptCount() {
+        return write.getMemoryPreemptCount();
+    }
+
+    @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
         return this;

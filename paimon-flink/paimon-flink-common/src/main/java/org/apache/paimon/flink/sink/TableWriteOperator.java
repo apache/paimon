@@ -92,6 +92,11 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         state = new StoreSinkWriteState(context, stateFilter);
 
         write = storeSinkWriteProvider.provide(table, commitUser, state, ioManager, memoryPool);
+        addWriterMetric();
+    }
+
+    void addWriterMetric() {
+        getMetricGroup().gauge("writer_preempt_count", () -> write.getMemoryPreemptCount());
     }
 
     protected abstract boolean containLogSystem();

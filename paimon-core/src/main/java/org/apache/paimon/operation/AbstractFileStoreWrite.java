@@ -74,6 +74,8 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
 
+    private MemoryPoolFactory memoryPoolFactory;
+
     protected AbstractFileStoreWrite(
             String commitUser,
             SnapshotManager snapshotManager,
@@ -95,7 +97,16 @@ public abstract class AbstractFileStoreWrite<T>
 
     @Override
     public FileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
+        this.memoryPoolFactory = memoryPoolFactory;
         return this;
+    }
+
+    public long getMemoryPreemptCount() {
+        if (memoryPoolFactory != null) {
+            return this.memoryPoolFactory.getMemoryPreemptCount();
+        } else {
+            return -1L;
+        }
     }
 
     @Override

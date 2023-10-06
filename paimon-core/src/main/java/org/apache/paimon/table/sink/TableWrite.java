@@ -32,6 +32,7 @@ import org.apache.paimon.table.Table;
  */
 @Public
 public interface TableWrite extends AutoCloseable {
+    long getMemoryPreemptCount();
 
     /** With {@link IOManager}, this is needed if 'write-buffer-spillable' is set to true. */
     TableWrite withIOManager(IOManager ioManager);

@@ -160,6 +160,11 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
     }
 
     @Override
+    public long getMemoryPreemptCount() {
+        return write.getMemoryPreemptCount();
+    }
+
+    @Override
     public SinkRecord toLogRecord(SinkRecord record) {
         return write.toLogRecord(record);
     }

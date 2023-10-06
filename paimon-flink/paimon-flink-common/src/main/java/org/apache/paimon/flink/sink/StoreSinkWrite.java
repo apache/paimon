@@ -40,6 +40,8 @@ public interface StoreSinkWrite {
 
     SinkRecord write(InternalRow rowData) throws Exception;
 
+    long getMemoryPreemptCount();
+
     SinkRecord toLogRecord(SinkRecord record);
 
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
