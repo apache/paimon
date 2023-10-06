@@ -60,13 +60,4 @@ public class MetricGroupTest {
         assertThat(group.counter(name)).isSameAs(counter1);
         group.close();
     }
-
-    @Test
-    public void testAddAndRemoveMetricGroups() {
-        AbstractMetricGroup metricGroup =
-                GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
-        assertThat(Metrics.getInstance().getMetricGroups()).containsExactly(metricGroup);
-        metricGroup.close();
-        assertThat(Metrics.getInstance().getMetricGroups()).isEmpty();
-    }
 }

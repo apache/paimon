@@ -31,6 +31,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.options.Options;
@@ -194,7 +195,8 @@ public class TestChangelogDataReadWrite {
                                 null, // not used, we only create an empty writer
                                 null,
                                 options,
-                                EXTRACTOR)
+                                EXTRACTOR,
+                                new MetricRepository(tablePath.getName(), "default"))
                         .createWriterContainer(partition, bucket, true)
                         .writer;
         ((MemoryOwner) writer)

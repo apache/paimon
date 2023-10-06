@@ -26,6 +26,7 @@ import org.apache.paimon.index.HashIndexMaintainer;
 import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
@@ -77,8 +78,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
-            MergeFunctionFactory<KeyValue> mfFactory) {
-        super(fileIO, schemaManager, schemaId, options, partitionType);
+            MergeFunctionFactory<KeyValue> mfFactory,
+            MetricRepository metricRepository) {
+        super(fileIO, schemaManager, schemaId, options, partitionType, metricRepository);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
@@ -147,7 +149,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newScan(true).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 options,
-                keyValueFieldsExtractor);
+                keyValueFieldsExtractor,
+                metricRepository);
     }
 
     private Map<String, FileStorePathFactory> format2PathFactory() {

@@ -27,7 +27,9 @@ import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.metrics.MetricGroup;
+import org.apache.paimon.metrics.MetricRepository;
+import org.apache.paimon.metrics.groups.WriterMetricGroup;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
@@ -35,6 +37,8 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.Restorable;
 import org.apache.paimon.utils.SnapshotManager;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -74,27 +78,37 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
 
+    protected MetricRepository metricRepository;
+    protected MetricGroup writeMetricGroup;
+
     protected AbstractFileStoreWrite(
             String commitUser,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            @Nullable IndexMaintainer.Factory<T> indexFactory) {
+            @Nullable IndexMaintainer.Factory<T> indexFactory,
+            @Nullable MetricRepository metricRepository) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFactory = indexFactory;
 
         this.writers = new HashMap<>();
+        this.metricRepository = metricRepository;
+        if (metricRepository != null) {
+            Map<String, String> externTags = Maps.newHashMap();
+            externTags.put("commitUser", commitUser);
+            writeMetricGroup =
+                    WriterMetricGroup.createWriterMetricGroup(
+                            metricRepository.getTableName(),
+                            metricRepository.getMetricName(),
+                            externTags);
+            metricRepository.registerMetricGroup(writeMetricGroup);
+        }
     }
 
     @Override
     public FileStoreWrite<T> withIOManager(IOManager ioManager) {
         this.ioManager = ioManager;
-        return this;
-    }
-
-    @Override
-    public FileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         return this;
     }
 
@@ -366,6 +380,10 @@ public abstract class AbstractFileStoreWrite<T>
     @VisibleForTesting
     public ExecutorService getCompactExecutor() {
         return lazyCompactExecutor;
+    }
+
+    protected boolean needCollectMetric() {
+        return metricRepository != null;
     }
 
     protected void notifyNewWriter(RecordWriter<T> writer) {}

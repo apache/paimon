@@ -33,6 +33,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreCommitImpl;
@@ -100,7 +101,8 @@ public class TestFileStore extends KeyValueFileStore {
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
-            MergeFunctionFactory<KeyValue> mfFactory) {
+            MergeFunctionFactory<KeyValue> mfFactory,
+            MetricRepository metricRepository) {
         super(
                 FileIOFinder.find(new Path(root)),
                 new SchemaManager(FileIOFinder.find(new Path(root)), options.path()),
@@ -112,7 +114,8 @@ public class TestFileStore extends KeyValueFileStore {
                 keyType,
                 valueType,
                 keyValueFieldsExtractor,
-                mfFactory);
+                mfFactory,
+                metricRepository);
         this.root = root;
         this.fileIO = FileIOFinder.find(new Path(root));
         this.keySerializer = new InternalRowSerializer(keyType);
@@ -600,7 +603,7 @@ public class TestFileStore extends KeyValueFileStore {
 
             // disable dynamic-partition-overwrite in FileStoreCommit layer test
             conf.set(CoreOptions.DYNAMIC_PARTITION_OVERWRITE, false);
-
+            String tableName = new Path(root).getName();
             return new TestFileStore(
                     root,
                     new CoreOptions(conf),
@@ -608,7 +611,8 @@ public class TestFileStore extends KeyValueFileStore {
                     keyType,
                     valueType,
                     keyValueFieldsExtractor,
-                    mfFactory);
+                    mfFactory,
+                    new MetricRepository(tableName, "testMetricGroup"));
         }
     }
 }

@@ -18,7 +18,8 @@
 
 package org.apache.paimon.metrics;
 
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Core of Paimon metrics system. */
 public class Metrics {
@@ -28,7 +29,7 @@ public class Metrics {
      * The metrics groups. All the commit & compaction & scan metric groups are collected in this
      * group container, there is no need to distinguish the groups by group name for reporters.
      */
-    private final ConcurrentLinkedQueue<MetricGroup> metricGroups = new ConcurrentLinkedQueue<>();
+    private final Map<String, MetricRepository> metricRepositorys = new ConcurrentHashMap<>();
 
     private Metrics() {}
 
@@ -40,17 +41,18 @@ public class Metrics {
      * Add a metric group. Which is called by metrics instances, like commit / compaction metrics
      * instances.
      */
-    public void addGroup(AbstractMetricGroup group) {
-        metricGroups.add(group);
+    public void addMetricRepository(
+            String metricRepositoryName, MetricRepository metricRepository) {
+        metricRepositorys.put(metricRepositoryName, metricRepository);
     }
 
     /** Remove a metric group. Called when closing the corresponding instances, like committer. */
-    public void removeGroup(AbstractMetricGroup group) {
-        metricGroups.remove(group);
+    public void removeMetricRepository(String metricRepositoryName) {
+        metricRepositorys.remove(metricRepositoryName);
     }
 
     /** Get metric groups. */
-    public ConcurrentLinkedQueue<MetricGroup> getMetricGroups() {
-        return metricGroups;
+    public Map<String, MetricRepository> getMetricRepositorys() {
+        return metricRepositorys;
     }
 }

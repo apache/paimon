@@ -37,6 +37,8 @@ public class MemoryPoolFactory {
 
     private Iterable<MemoryOwner> owners;
 
+    private long memoryPreemptCount;
+
     public MemoryPoolFactory(MemorySegmentPool innerPool) {
         this.innerPool = innerPool;
         this.totalPages = innerPool.freePages();
@@ -55,6 +57,10 @@ public class MemoryPoolFactory {
     public void notifyNewOwner(MemoryOwner owner) {
         checkNotNull(owners);
         owner.setMemoryPool(createSubPool(owner));
+    }
+
+    public long getMemoryPreemptCount() {
+        return memoryPreemptCount;
     }
 
     @VisibleForTesting
@@ -81,6 +87,7 @@ public class MemoryPoolFactory {
         if (max != null) {
             try {
                 max.flushMemory();
+                memoryPreemptCount++;
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }

@@ -24,6 +24,7 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -57,8 +58,9 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            @Nullable IndexMaintainer.Factory<T> indexFactory) {
-        super(commitUser, snapshotManager, scan, indexFactory);
+            @Nullable IndexMaintainer.Factory<T> indexFactory,
+            MetricRepository metricRepository) {
+        super(commitUser, snapshotManager, scan, indexFactory, metricRepository);
         this.options = options;
         this.cacheManager =
                 new CacheManager(
@@ -69,6 +71,9 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
     @Override
     public FileStoreWrite<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
         this.writeBufferPool = memoryPoolFactory.addOwners(this::memoryOwners);
+        if (needCollectMetric()) {
+            writeMetricGroup.gauge("MemoryPreemptCount", memoryPoolFactory::getMemoryPreemptCount);
+        }
         return this;
     }
 

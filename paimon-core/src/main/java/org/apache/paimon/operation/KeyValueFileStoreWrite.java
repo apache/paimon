@@ -50,6 +50,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
@@ -101,8 +102,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
             CoreOptions options,
-            KeyValueFieldsExtractor extractor) {
-        super(commitUser, snapshotManager, scan, options, indexFactory);
+            KeyValueFieldsExtractor extractor,
+            MetricRepository metricRepository) {
+        super(commitUser, snapshotManager, scan, options, indexFactory, metricRepository);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;

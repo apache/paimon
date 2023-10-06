@@ -52,7 +52,6 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
     public AbstractMetricGroup(Map<String, String> tags) {
         this.tags = tags;
-        Metrics.getInstance().addGroup(this);
     }
 
     @Override
@@ -183,7 +182,6 @@ public abstract class AbstractMetricGroup implements MetricGroup {
         if (!closed) {
             closed = true;
             metrics.clear();
-            Metrics.getInstance().removeGroup(this);
         }
     }
 

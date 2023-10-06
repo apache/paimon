@@ -31,6 +31,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.table.BucketMode;
@@ -81,8 +82,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            CoreOptions options) {
-        super(commitUser, snapshotManager, scan, options, null);
+            CoreOptions options,
+            MetricRepository metricRepository) {
+        super(commitUser, snapshotManager, scan, options, null, metricRepository);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;

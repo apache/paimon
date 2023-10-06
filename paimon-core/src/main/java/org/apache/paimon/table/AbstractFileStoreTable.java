@@ -26,6 +26,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
@@ -77,6 +78,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final Path path;
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
+    protected transient MetricRepository metricRepository;
 
     public AbstractFileStoreTable(
             FileIO fileIO,
@@ -84,7 +86,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             TableSchema tableSchema,
             CatalogEnvironment catalogEnvironment) {
         this.fileIO = fileIO;
-        this.path = path;
+        this.path = Preconditions.checkNotNull(path);
         if (!tableSchema.options().containsKey(PATH.key())) {
             // make sure table is always available
             Map<String, String> newOptions = new HashMap<>(tableSchema.options());
@@ -457,5 +459,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    @Override
+    public MetricRepository metricRepository(String tableName, String metricName) {
+        this.metricRepository = new MetricRepository(tableName, metricName);
+        return this.metricRepository;
     }
 }

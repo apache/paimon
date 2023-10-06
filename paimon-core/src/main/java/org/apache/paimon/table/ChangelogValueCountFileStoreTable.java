@@ -95,7 +95,8 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
                             new RowType(extractor.keyFields(tableSchema)),
                             countType,
                             extractor,
-                            ValueCountMergeFunction.factory());
+                            ValueCountMergeFunction.factory(),
+                            metricRepository);
         }
         return lazyStore;
     }

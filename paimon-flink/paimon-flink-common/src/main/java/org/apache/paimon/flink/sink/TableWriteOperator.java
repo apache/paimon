@@ -20,15 +20,22 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
+import org.apache.paimon.metrics.Gauge;
+import org.apache.paimon.metrics.Metric;
+import org.apache.paimon.metrics.MetricGroup;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.Queue;
 
 /** An abstract class for table write operator. */
 public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, Committable> {
@@ -40,6 +47,8 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
     private transient StoreSinkWriteState state;
     protected transient StoreSinkWrite write;
+
+    private MetricRepository metricRepository;
 
     public TableWriteOperator(
             FileStoreTable table,
@@ -64,20 +73,50 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
         boolean containLogSystem = containLogSystem();
         int numTasks = getRuntimeContext().getNumberOfParallelSubtasks();
+        final int subtaskIndex = getRuntimeContext().getIndexOfThisSubtask();
         StateValueFilter stateFilter =
                 (tableName, partition, bucket) -> {
                     int task =
                             containLogSystem
                                     ? ChannelComputer.select(bucket, numTasks)
                                     : ChannelComputer.select(partition, bucket, numTasks);
-                    return task == getRuntimeContext().getIndexOfThisSubtask();
+                    return task == subtaskIndex;
                 };
 
+        metricRepository =
+                this.table.metricRepository(
+                        table.name(),
+                        String.format(
+                                "%s-%d-%d",
+                                "WriterMetric",
+                                getRuntimeContext().getAttemptNumber(),
+                                subtaskIndex));
         initStateAndWriter(
                 context,
                 stateFilter,
                 getContainingTask().getEnvironment().getIOManager(),
                 commitUser);
+        registerMetrics(metricRepository);
+    }
+
+    private void registerMetrics(MetricRepository metricRepository) {
+        OperatorMetricGroup flinkMetricGroup = getMetricGroup();
+        Queue<MetricGroup> metricGroups = metricRepository.getMetricGroups();
+        while (!metricGroups.isEmpty()) {
+            Map<String, Metric> metrics = metricGroups.poll().getMetrics();
+            for (Map.Entry<String, Metric> metricWithName : metrics.entrySet()) {
+                String name = metricWithName.getKey();
+                Metric metric = metricWithName.getValue();
+                switch (metric.getMetricType()) {
+                    case GAUGE:
+                        Gauge gauge = (Gauge) metric;
+                        flinkMetricGroup.gauge(name, gauge::getValue);
+                        break;
+                    default:
+                        // waiting for completing.
+                }
+            }
+        }
     }
 
     @VisibleForTesting
@@ -106,6 +145,7 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
 
     @Override
     public void close() throws Exception {
+        metricRepository.close();
         super.close();
         if (write != null) {
             write.close();

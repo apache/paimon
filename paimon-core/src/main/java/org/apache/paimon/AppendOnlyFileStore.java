@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
@@ -51,8 +52,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
             CoreOptions options,
             RowType partitionType,
             RowType bucketKeyType,
-            RowType rowType) {
-        super(fileIO, schemaManager, schemaId, options, partitionType);
+            RowType rowType,
+            MetricRepository metricRepository) {
+        super(fileIO, schemaManager, schemaId, options, partitionType, metricRepository);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
     }
@@ -95,7 +97,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 pathFactory(),
                 snapshotManager(),
                 newScan(true).withManifestCacheFilter(manifestFilter),
-                options);
+                options,
+                metricRepository);
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite) {

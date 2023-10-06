@@ -26,6 +26,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.metrics.MetricRepository;
 import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
@@ -57,6 +58,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final long schemaId;
     protected final CoreOptions options;
     protected final RowType partitionType;
+    protected final MetricRepository metricRepository;
 
     @Nullable private final SegmentsCache<String> writeManifestCache;
 
@@ -65,7 +67,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
             SchemaManager schemaManager,
             long schemaId,
             CoreOptions options,
-            RowType partitionType) {
+            RowType partitionType,
+            MetricRepository metricRepository) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
@@ -76,6 +79,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 writeManifestCache.getBytes() == 0
                         ? null
                         : new SegmentsCache<>(options.pageSize(), writeManifestCache);
+        this.metricRepository = metricRepository;
     }
 
     public FileStorePathFactory pathFactory() {
