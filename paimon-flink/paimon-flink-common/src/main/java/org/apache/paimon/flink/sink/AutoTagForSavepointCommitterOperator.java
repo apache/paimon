@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -45,10 +46,10 @@ import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
+import java.util.NavigableSet;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Commit {@link Committable} for each snapshot using the {@link CommitterOperator}. At the same
@@ -68,22 +69,28 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
 
     private final SerializableSupplier<TagManager> tagManagerFactory;
 
-    private final Set<Long> identifiersForTags;
+    private final SerializableSupplier<TagDeletion> tagDeletionFactory;
+
+    private final NavigableSet<Long> identifiersForTags;
 
     protected SnapshotManager snapshotManager;
 
     protected TagManager tagManager;
+
+    protected TagDeletion tagDeletion;
 
     private transient ListState<Long> identifiersForTagsState;
 
     public AutoTagForSavepointCommitterOperator(
             CommitterOperator<CommitT, GlobalCommitT> commitOperator,
             SerializableSupplier<SnapshotManager> snapshotManagerFactory,
-            SerializableSupplier<TagManager> tagManagerFactory) {
+            SerializableSupplier<TagManager> tagManagerFactory,
+            SerializableSupplier<TagDeletion> tagDeletionFactory) {
         this.commitOperator = commitOperator;
         this.tagManagerFactory = tagManagerFactory;
         this.snapshotManagerFactory = snapshotManagerFactory;
-        this.identifiersForTags = new HashSet<>();
+        this.tagDeletionFactory = tagDeletionFactory;
+        this.identifiersForTags = new TreeSet<>();
     }
 
     @Override
@@ -94,6 +101,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         } finally {
             snapshotManager = snapshotManagerFactory.get();
             tagManager = tagManagerFactory.get();
+            tagDeletion = tagDeletionFactory.get();
 
             identifiersForTagsState =
                     commitOperator
@@ -127,8 +135,10 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
     @Override
     public void notifyCheckpointComplete(long checkpointId) throws Exception {
         commitOperator.notifyCheckpointComplete(checkpointId);
-        if (identifiersForTags.remove(checkpointId)) {
-            createTagForIdentifiers(Collections.singletonList(checkpointId));
+        Set<Long> headSet = identifiersForTags.headSet(checkpointId, true);
+        if (!headSet.isEmpty()) {
+            createTagForIdentifiers(new ArrayList<>(headSet));
+            headSet.clear();
         }
     }
 
@@ -136,6 +146,10 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
     public void notifyCheckpointAborted(long checkpointId) throws Exception {
         commitOperator.notifyCheckpointAborted(checkpointId);
         identifiersForTags.remove(checkpointId);
+        String tagName = SAVEPOINT_TAG_PREFIX + checkpointId;
+        if (tagManager.tagExists(tagName)) {
+            tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+        }
     }
 
     private void createTagForIdentifiers(List<Long> identifiers) {

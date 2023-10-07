@@ -29,12 +29,11 @@ import org.apache.paimon.types.DataType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -133,32 +132,40 @@ public class CdcActionCommonUtils {
                 : origin.stream().map(String::toLowerCase).collect(Collectors.toList());
     }
 
+    public static String columnCaseConvertAndDuplicateCheck(
+            String column,
+            Set<String> existedFields,
+            boolean caseSensitive,
+            Function<String, String> columnDuplicateErrMsg) {
+        if (caseSensitive) {
+            return column;
+        }
+        String columnLowerCase = column.toLowerCase();
+        checkArgument(existedFields.add(columnLowerCase), columnDuplicateErrMsg.apply(column));
+        return columnLowerCase;
+    }
+
     public static Schema buildPaimonSchema(
             List<String> specifiedPartitionKeys,
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
             Map<String, String> tableConfig,
-            LinkedHashMap<String, DataType> sourceColumns,
-            @Nullable List<String> sourceColumnComments,
-            List<String> sourcePrimaryKeys) {
+            Schema sourceSchema) {
         Schema.Builder builder = Schema.newBuilder();
 
         // options
         builder.options(tableConfig);
+        builder.options(sourceSchema.options());
 
-        // columns
-        if (sourceColumnComments != null) {
-            checkArgument(
-                    sourceColumns.size() == sourceColumnComments.size(),
-                    "Source table columns count and column comments count should be equal.");
-
-            int i = 0;
-            for (Map.Entry<String, DataType> entry : sourceColumns.entrySet()) {
-                builder.column(entry.getKey(), entry.getValue(), sourceColumnComments.get(i++));
-            }
-        } else {
-            sourceColumns.forEach(builder::column);
-        }
+        // fields
+        sourceSchema
+                .fields()
+                .forEach(
+                        dataField ->
+                                builder.column(
+                                        dataField.name(),
+                                        dataField.type(),
+                                        dataField.description()));
 
         for (ComputedColumn computedColumn : computedColumns) {
             builder.column(computedColumn.columnName(), computedColumn.columnType());
@@ -166,6 +173,9 @@ public class CdcActionCommonUtils {
 
         // primary keys
         if (!specifiedPrimaryKeys.isEmpty()) {
+            Map<String, Integer> sourceColumns =
+                    sourceSchema.fields().stream()
+                            .collect(Collectors.toMap(DataField::name, entity -> 1));
             for (String key : specifiedPrimaryKeys) {
                 if (!sourceColumns.containsKey(key)
                         && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
@@ -176,8 +186,8 @@ public class CdcActionCommonUtils {
                 }
             }
             builder.primaryKey(specifiedPrimaryKeys);
-        } else if (!sourcePrimaryKeys.isEmpty()) {
-            builder.primaryKey(sourcePrimaryKeys);
+        } else if (!sourceSchema.primaryKeys().isEmpty()) {
+            builder.primaryKey(sourceSchema.primaryKeys());
         } else {
             throw new IllegalArgumentException(
                     "Primary keys are not specified. "
@@ -189,6 +199,9 @@ public class CdcActionCommonUtils {
         if (!specifiedPartitionKeys.isEmpty()) {
             builder.partitionKeys(specifiedPartitionKeys);
         }
+
+        // comment
+        builder.comment(sourceSchema.comment());
 
         return builder.build();
     }

@@ -35,6 +35,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -261,6 +262,8 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         .withTablePrefix("TEST_PREFIX_")
                         .withTableSuffix("_TEST_SUFFIX")
                         .withTableConfig(getBasicTableConfig())
+                        // test including check with affix
+                        .includingTables(ThreadLocalRandom.current().nextBoolean() ? "T1|T2" : ".*")
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -312,6 +315,8 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         .withTablePrefix("TEST_PREFIX_")
                         .withTableSuffix("_TEST_SUFFIX")
                         .withTableConfig(getBasicTableConfig())
+                        // test including check with affix
+                        .includingTables(ThreadLocalRandom.current().nextBoolean() ? "T1|T2" : ".*")
                         .build();
         runActionWithDefaultEnv(action);
 

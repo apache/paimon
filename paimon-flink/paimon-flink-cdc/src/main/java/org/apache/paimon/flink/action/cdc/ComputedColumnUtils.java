@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
 
@@ -25,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -32,7 +35,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class ComputedColumnUtils {
 
     public static List<ComputedColumn> buildComputedColumns(
-            List<String> computedColumnArgs, Map<String, DataType> typeMapping) {
+            List<String> computedColumnArgs, Schema schema) {
+        Map<String, DataType> typeMapping =
+                schema.fields().stream()
+                        .collect(
+                                Collectors.toMap(DataField::name, DataField::type, (v1, v2) -> v2));
+
         List<ComputedColumn> computedColumns = new ArrayList<>();
         for (String columnArg : computedColumnArgs) {
             String[] kv = columnArg.split("=");

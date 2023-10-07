@@ -363,7 +363,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.BIGINT(), // _bigint
                             DataTypes.DECIMAL(20, 0), // _bigint_unsigned
                             DataTypes.DECIMAL(20, 0), // _bigint_unsigned_zerofill
-                            DataTypes.DECIMAL(20, 0), // _serial
+                            DataTypes.DECIMAL(20, 0).notNull(), // _serial
                             DataTypes.FLOAT(), // _float
                             DataTypes.FLOAT(), // _float_unsigned
                             DataTypes.FLOAT(), // _float_unsigned_zerofill
@@ -621,8 +621,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Column v1 have different types when merging schemas.\n"
-                                        + "Current table '{paimon_sync_table.incompatible_field_2}' fields: [_id INT,v1 INT]\n"
-                                        + "To be merged table 'paimon_sync_table.incompatible_field_1' fields: [_id INT,v1 TIMESTAMP(0)]"));
+                                        + "Current table '{paimon_sync_table.incompatible_field_2}' field: `v1` INT ''\n"
+                                        + "To be merged table 'paimon_sync_table.incompatible_field_1' field: `v1` TIMESTAMP(0) ''"));
     }
 
     @Test
@@ -761,7 +761,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.STRING(),
                             DataTypes.STRING(),
                             DataTypes.STRING(),
-                            DataTypes.INT()
+                            DataTypes.INT().notNull()
                         },
                         new String[] {
                             "pk",

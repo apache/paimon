@@ -228,7 +228,7 @@ public class MySqlTypeUtils {
                 return DataTypes.TIME();
             case DATETIME:
             case TIMESTAMP:
-                if (length == null) {
+                if (length == null || length <= 0) {
                     // default precision is 0
                     // see https://dev.mysql.com/doc/refman/8.0/en/date-and-time-type-syntax.html
                     return DataTypes.TIMESTAMP(0);
@@ -241,7 +241,7 @@ public class MySqlTypeUtils {
                     } else {
                         return DataTypes.TIMESTAMP(0);
                     }
-                } else if (length >= 0 && length <= TimestampType.MAX_PRECISION) {
+                } else if (length <= TimestampType.MAX_PRECISION) {
                     return DataTypes.TIMESTAMP(length);
                 } else {
                     throw new UnsupportedOperationException(

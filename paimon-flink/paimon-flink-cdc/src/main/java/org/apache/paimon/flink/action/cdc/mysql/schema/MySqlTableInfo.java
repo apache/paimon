@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
 
 import java.util.List;
 
@@ -36,5 +37,5 @@ public interface MySqlTableInfo {
     /** Convert to corresponding Paimon table name. */
     String toPaimonTableName();
 
-    MySqlSchema schema();
+    Schema schema();
 }
