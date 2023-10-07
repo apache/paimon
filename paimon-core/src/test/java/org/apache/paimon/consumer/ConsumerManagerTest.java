@@ -18,6 +18,8 @@
 
 package org.apache.paimon.consumer;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.DateTimeUtils;
 
@@ -25,6 +27,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -83,5 +89,24 @@ public class ConsumerManagerTest {
         manager.resetConsumer("id2", new Consumer(3));
         manager.expire(expireDateTime);
         assertThat(manager.consumer("id2")).map(Consumer::nextSnapshot).get().isEqualTo(3L);
+    }
+    @Test
+    public void testReadConsumer() throws Exception {
+        manager.resetConsumer("id1", new Consumer(5));
+        Optional<Consumer> consumer = manager.consumer("id1");
+        System.out.println(consumer.get().toJson());
+        FileIO fileIO =LocalFileIO.create();
+        org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(tempDir.toUri() + "/consumer/consumer-id1");
+        try (PositionOutputStream out = fileIO.newOutputStream(path, true)) {
+            OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+            //writer.write();
+            writer.flush();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+
+        Optional<Consumer> consumer1 = manager.consumer("id1");
+        System.out.println(consumer1.get().toJson());
+
     }
 }
