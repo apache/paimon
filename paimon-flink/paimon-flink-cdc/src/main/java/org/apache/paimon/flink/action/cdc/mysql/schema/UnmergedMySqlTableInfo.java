@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
 
 import java.util.Collections;
 import java.util.List;
@@ -27,9 +28,9 @@ import java.util.List;
 public class UnmergedMySqlTableInfo implements MySqlTableInfo {
 
     private final Identifier identifier;
-    private final MySqlSchema schema;
+    private final Schema schema;
 
-    public UnmergedMySqlTableInfo(Identifier identifier, MySqlSchema schema) {
+    public UnmergedMySqlTableInfo(Identifier identifier, Schema schema) {
         this.identifier = identifier;
         this.schema = schema;
     }
@@ -57,7 +58,7 @@ public class UnmergedMySqlTableInfo implements MySqlTableInfo {
     }
 
     @Override
-    public MySqlSchema schema() {
+    public Schema schema() {
         return schema;
     }
 }

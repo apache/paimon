@@ -23,22 +23,24 @@ import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
+import io.debezium.relational.Column;
+import io.debezium.relational.Table;
+import io.debezium.relational.history.TableChanges;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 
 /** Schema builder for MySQL cdc. */
-public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> {
+public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<TableChanges.TableChange> {
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
@@ -52,46 +54,43 @@ public class MySqlTableSchemaBuilder implements NewTableSchemaBuilder<JsonNode> 
     }
 
     @Override
-    public Optional<Schema> build(JsonNode tableChange) {
-        JsonNode jsonTable = tableChange.get("table");
-        String tableName = tableChange.get("id").asText();
-        ArrayNode columns = (ArrayNode) jsonTable.get("columns");
-        LinkedHashMap<String, DataType> fields = new LinkedHashMap<>();
+    public Optional<Schema> build(TableChanges.TableChange tableChange) {
+        Table table = tableChange.getTable();
+        String tableName = tableChange.getId().toString();
+        List<Column> columns = table.columns();
 
-        for (JsonNode element : columns) {
-            JsonNode length = element.get("length");
-            JsonNode scale = element.get("scale");
-            DataType dataType =
-                    MySqlTypeUtils.toDataType(
-                            element.get("typeExpression").asText(),
-                            length == null ? null : length.asInt(),
-                            scale == null ? null : scale.asInt(),
-                            typeMapping);
-
-            if (!typeMapping.containsMode(TO_NULLABLE)) {
-                dataType.copy(element.get("optional").asBoolean());
-            }
-
-            // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
-            fields.put(element.get("name").asText(), dataType);
-        }
-
-        ArrayNode arrayNode = (ArrayNode) jsonTable.get("primaryKeyColumnNames");
-        List<String> primaryKeys = new ArrayList<>();
-        for (JsonNode primary : arrayNode) {
-            primaryKeys.add(primary.asText());
-        }
-
-        fields = mapKeyCaseConvert(fields, caseSensitive, columnDuplicateErrMsg(tableName));
-        primaryKeys = listCaseConvert(primaryKeys, caseSensitive);
+        Set<String> existedFields = new HashSet<>();
+        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
 
         Schema.Builder builder = Schema.newBuilder();
-        builder.options(tableConfig);
-        for (Map.Entry<String, DataType> entry : fields.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue());
-        }
-        Schema schema = builder.primaryKey(primaryKeys).build();
 
-        return Optional.of(schema);
+        // column
+        for (Column column : columns) {
+            DataType dataType =
+                    MySqlTypeUtils.toDataType(
+                            column.typeExpression(),
+                            column.length(),
+                            column.scale().orElse(null),
+                            typeMapping);
+
+            dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
+
+            String columnName =
+                    columnCaseConvertAndDuplicateCheck(
+                            column.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+
+            // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
+            builder.column(columnName, dataType, null);
+        }
+
+        // primaryKey
+        List<String> primaryKeys = table.primaryKeyColumnNames();
+        primaryKeys = listCaseConvert(primaryKeys, caseSensitive);
+        builder.primaryKey(primaryKeys);
+
+        // options
+        builder.options(tableConfig);
+
+        return Optional.of(builder.build());
     }
 }

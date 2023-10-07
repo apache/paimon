@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
 
 import com.mongodb.ConnectionString;
@@ -37,65 +37,32 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
+import java.util.function.Function;
 
 import static com.ververica.cdc.connectors.mongodb.internal.MongoDBEnvelope.encodeValue;
 import static org.apache.flink.util.Preconditions.checkNotNull;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.FIELD_NAME;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.START_MODE;
 
 /**
- * Represents the schema of a MongoDB collection.
+ * Build schema from a MongoDB collection.
  *
- * <p>This class provides methods to retrieve and manage the schema details of a MongoDB collection,
- * including the database name, table (collection) name, fields, and primary keys. The schema can be
- * acquired in two modes: SPECIFIED and DYNAMIC. In the SPECIFIED mode, the schema details are
- * provided explicitly, while in the DYNAMIC mode, the schema is inferred from the first document in
- * the collection.
- *
- * <p>The class also provides utility methods to generate schema fields and create a new MongoDB
- * schema instance.
+ * <p>The schema can be acquired in two modes: SPECIFIED and DYNAMIC. In the SPECIFIED mode, the
+ * schema details are provided explicitly, while in the DYNAMIC mode, the schema is inferred from
+ * the first document in the collection.
  */
-public class MongodbSchema {
+public class MongodbSchemaUtils {
 
     private static final String ID_FIELD = "_id";
-    private final String databaseName;
-    private final String tableName;
-    private final LinkedHashMap<String, DataType> fields;
-    private final List<String> primaryKeys;
-
-    public MongodbSchema(
-            String databaseName,
-            String tableName,
-            LinkedHashMap<String, DataType> fields,
-            List<String> primaryKeys) {
-        this.databaseName = databaseName;
-        this.tableName = tableName;
-        this.fields = fields;
-        this.primaryKeys = primaryKeys;
-    }
-
-    public String tableName() {
-        return tableName;
-    }
-
-    public String databaseName() {
-        return databaseName;
-    }
-
-    public LinkedHashMap<String, DataType> fields() {
-        return fields;
-    }
-
-    public List<String> primaryKeys() {
-        return primaryKeys;
-    }
 
     /**
-     * Utility class for creating a MongoDB schema based on the provided configuration. The schema
-     * can be created in one of the two modes:
+     * The schema can be created in one of the two modes:
      *
      * <ul>
      *   <li><b>SPECIFIED</b>: In this mode, the schema is created based on the explicit column
@@ -110,7 +77,7 @@ public class MongodbSchema {
      * name, and optionally, the username and password for authentication. For the SPECIFIED mode,
      * the field names should also be specified in the configuration.
      */
-    public static MongodbSchema getMongodbSchema(Configuration mongodbConfig) {
+    public static Schema getMongodbSchema(Configuration mongodbConfig, boolean caseSensitive) {
         SchemaAcquisitionMode mode = getModeFromConfig(mongodbConfig);
         String databaseName =
                 Objects.requireNonNull(
@@ -127,13 +94,8 @@ public class MongodbSchema {
                         Objects.requireNonNull(
                                         mongodbConfig.get(FIELD_NAME), "Field names cannot be null")
                                 .split(",");
-                LinkedHashMap<String, DataType> schemaFields =
-                        generateSchemaFields(Arrays.asList(columnNames));
-                return new MongodbSchema(
-                        databaseName,
-                        collectionName,
-                        schemaFields,
-                        Collections.singletonList(ID_FIELD));
+
+                return createMongodbSchema(collectionName, columnNames, caseSensitive);
             case DYNAMIC:
                 String hosts =
                         Objects.requireNonNull(
@@ -165,7 +127,7 @@ public class MongodbSchema {
                     }
 
                     return createMongodbSchema(
-                            databaseName, collectionName, getColumnNames(firstDocument));
+                            collectionName, getColumnNames(firstDocument), caseSensitive);
                 } catch (Exception e) {
                     throw new RuntimeException(
                             "Failed to create schema from MongoDB collection", e);
@@ -175,7 +137,7 @@ public class MongodbSchema {
         }
     }
 
-    public static String buildConnectionString(
+    private static String buildConnectionString(
             @Nullable String username,
             @Nullable String password,
             String scheme,
@@ -204,40 +166,25 @@ public class MongodbSchema {
         return document != null ? new ArrayList<>(document.keySet()) : Collections.emptyList();
     }
 
-    private static LinkedHashMap<String, DataType> generateSchemaFields(List<String> columnNames) {
-        LinkedHashMap<String, DataType> schemaFields = new LinkedHashMap<>();
-        for (String columnName : columnNames) {
-            schemaFields.put(columnName, DataTypes.STRING());
-        }
-        return schemaFields;
+    private static Schema createMongodbSchema(
+            String collectionName, String[] columnNames, boolean caseSensitive) {
+        return createMongodbSchema(collectionName, Arrays.asList(columnNames), caseSensitive);
     }
 
-    private static MongodbSchema createMongodbSchema(
-            String databaseName, String collectionName, List<String> columnNames) {
-        return new MongodbSchema(
-                databaseName,
-                collectionName,
-                generateSchemaFields(columnNames),
-                Collections.singletonList(ID_FIELD));
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
+    private static Schema createMongodbSchema(
+            String collectionName, List<String> columnNames, boolean caseSensitive) {
+        Schema.Builder builder = Schema.newBuilder();
+        Set<String> existedFields = new HashSet<>();
+        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(collectionName);
+        for (String column : columnNames) {
+            builder.column(
+                    columnCaseConvertAndDuplicateCheck(
+                            column, existedFields, caseSensitive, columnDuplicateErrMsg),
+                    DataTypes.STRING());
         }
-        if (!(o instanceof MongodbSchema)) {
-            return false;
-        }
-        MongodbSchema that = (MongodbSchema) o;
-        return databaseName.equals(that.databaseName)
-                && tableName.equals(that.tableName)
-                && fields.equals(that.fields)
-                && primaryKeys.equals(that.primaryKeys);
-    }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(databaseName, tableName, fields, primaryKeys);
+        builder.primaryKey(ID_FIELD);
+
+        return builder.build();
     }
 }

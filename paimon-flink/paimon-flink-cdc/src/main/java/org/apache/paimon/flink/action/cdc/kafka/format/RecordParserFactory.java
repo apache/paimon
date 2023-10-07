@@ -16,10 +16,9 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.formats;
+package org.apache.paimon.flink.action.cdc.kafka.format;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import java.util.List;
@@ -40,13 +39,9 @@ public interface RecordParserFactory {
      *
      * @param caseSensitive Indicates whether the parser should be case-sensitive.
      * @param typeMapping Data type mapping options.
-     * @param tableNameConverter Converter to transform table names.
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link RecordParser}.
      */
     RecordParser createParser(
-            boolean caseSensitive,
-            TypeMapping typeMapping,
-            TableNameConverter tableNameConverter,
-            List<ComputedColumn> computedColumns);
+            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns);
 }

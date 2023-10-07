@@ -18,13 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataType;
-
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
-
 import com.ververica.cdc.connectors.base.options.SourceOptions;
 import com.ververica.cdc.connectors.base.options.StartupOptions;
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
@@ -36,15 +29,10 @@ import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -70,7 +58,6 @@ public class MongoDBActionUtils {
     private static final String INITIAL_MODE = "initial";
     private static final String LATEST_OFFSET_MODE = "latest-offset";
     private static final String TIMESTAMP_MODE = "timestamp";
-    private static final String PRIMARY_KEY = "_id";
 
     public static final ConfigOption<String> FIELD_NAME =
             ConfigOptions.key("field.name")
@@ -90,6 +77,13 @@ public class MongoDBActionUtils {
                     .stringType()
                     .defaultValue("dynamic")
                     .withDescription("Mode selection: `dynamic` or `specified`.");
+
+    public static final ConfigOption<Boolean> DEFAULT_ID_GENERATION =
+            ConfigOptions.key("default.id.generation")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Determines whether to use the default MongoDB _id generation strategy. If set to true, the default _id generation will remove the outer $oid nesting. If set to false, no additional processing will be done on the _id field.");
 
     static MongoDBSource<String> buildMongodbSource(Configuration mongodbConfig, String tableList) {
         validateMongodbConfig(mongodbConfig);
@@ -157,27 +151,5 @@ public class MongoDBActionUtils {
                 String.format(
                         "mongodb-conf [%s] must be specified.",
                         MongoDBSourceOptions.DATABASE.key()));
-    }
-
-    static Schema buildPaimonSchema(
-            MongodbSchema mongodbSchema,
-            List<String> specifiedPartitionKeys,
-            List<ComputedColumn> computedColumns,
-            Map<String, String> tableConfig,
-            boolean caseSensitive) {
-        LinkedHashMap<String, DataType> sourceColumns =
-                mapKeyCaseConvert(
-                        mongodbSchema.fields(),
-                        caseSensitive,
-                        columnDuplicateErrMsg(mongodbSchema.tableName()));
-
-        return CdcActionCommonUtils.buildPaimonSchema(
-                specifiedPartitionKeys,
-                Lists.newArrayList(PRIMARY_KEY),
-                computedColumns,
-                tableConfig,
-                sourceColumns,
-                null,
-                Collections.emptyList());
     }
 }

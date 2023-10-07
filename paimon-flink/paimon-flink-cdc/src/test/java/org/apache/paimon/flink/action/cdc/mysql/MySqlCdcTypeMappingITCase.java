@@ -133,8 +133,9 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 IntStream.range(0, allTypeNums)
                         .mapToObj(i -> DataTypes.STRING())
                         .toArray(DataType[]::new);
-        types[0] = types[0].notNull();
-        types[1] = types[1].notNull();
+        types[0] = types[0].notNull(); // id
+        types[1] = types[1].notNull(); // pt
+        types[22] = types[22].notNull(); // _serial SERIAL
 
         RowType rowType =
                 RowType.of(
@@ -297,7 +298,6 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                                 + "NULL, "
                                 + "NULL"
                                 + "]");
-
         waitForResult(expected, getFileStoreTable(tableName), rowType, Arrays.asList("pt", "_id"));
     }
 
@@ -458,7 +458,9 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
             // test schema evolution
             RowType rowType =
                     RowType.of(
-                            new DataType[] {DataTypes.INT().notNull(), DataTypes.STRING()},
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.STRING().notNull()
+                            },
                             new String[] {"pk", "v1"});
             waitForResult(
                     Collections.singletonList("+I[1, 1]"),
@@ -472,7 +474,9 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
             rowType =
                     RowType.of(
                             new DataType[] {
-                                DataTypes.INT().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                                DataTypes.INT().notNull(),
+                                DataTypes.STRING().notNull(),
+                                DataTypes.STRING()
                             },
                             new String[] {"pk", "v1", "v2"});
             waitForResult(

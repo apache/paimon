@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql.schema;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.schema.Schema;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -29,15 +30,15 @@ import java.util.stream.Collectors;
 /** Utility class to manage MySQL tables and their schemas. */
 public class MySqlSchemasInfo {
 
-    private final Map<Identifier, MySqlSchema> pkTableSchemas;
-    private final Map<Identifier, MySqlSchema> nonPkTableSchemas;
+    private final Map<Identifier, Schema> pkTableSchemas;
+    private final Map<Identifier, Schema> nonPkTableSchemas;
 
     public MySqlSchemasInfo() {
         this.pkTableSchemas = new HashMap<>();
         this.nonPkTableSchemas = new HashMap<>();
     }
 
-    public void addSchema(Identifier identifier, MySqlSchema mysqlSchema) {
+    public void addSchema(Identifier identifier, Schema mysqlSchema) {
         if (mysqlSchema.primaryKeys().isEmpty()) {
             nonPkTableSchemas.put(identifier, mysqlSchema);
         } else {
@@ -57,9 +58,9 @@ public class MySqlSchemasInfo {
     public MySqlTableInfo mergeAll() {
         boolean initialized = false;
         AllMergedMySqlTableInfo merged = new AllMergedMySqlTableInfo();
-        for (Map.Entry<Identifier, MySqlSchema> entry : pkTableSchemas.entrySet()) {
+        for (Map.Entry<Identifier, Schema> entry : pkTableSchemas.entrySet()) {
             Identifier id = entry.getKey();
-            MySqlSchema schema = entry.getValue();
+            Schema schema = entry.getValue();
             if (!initialized) {
                 merged.init(id, schema);
                 initialized = true;
@@ -85,11 +86,11 @@ public class MySqlSchemasInfo {
     /** Merge schemas for tables that have the same table name. */
     private List<MySqlTableInfo> mergeShards() {
         Map<String, ShardsMergedMySqlTableInfo> nameSchemaMap = new HashMap<>();
-        for (Map.Entry<Identifier, MySqlSchema> entry : pkTableSchemas.entrySet()) {
+        for (Map.Entry<Identifier, Schema> entry : pkTableSchemas.entrySet()) {
             Identifier id = entry.getKey();
             String tableName = id.getObjectName();
 
-            MySqlSchema toBeMerged = entry.getValue();
+            Schema toBeMerged = entry.getValue();
             ShardsMergedMySqlTableInfo current = nameSchemaMap.get(tableName);
             if (current == null) {
                 current = new ShardsMergedMySqlTableInfo();

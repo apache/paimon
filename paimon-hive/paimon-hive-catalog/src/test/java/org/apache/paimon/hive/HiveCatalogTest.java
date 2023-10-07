@@ -20,10 +20,10 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.hive.utils.CommonTestUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.CommonTestUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 

@@ -45,6 +45,7 @@ import javax.annotation.Nullable;
 import java.io.Serializable;
 import java.util.UUID;
 
+import static org.apache.flink.configuration.ClusterOptions.ENABLE_FINE_GRAINED_RESOURCE_MANAGEMENT;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_LOOKUP_WAIT;
@@ -200,7 +201,8 @@ public abstract class FlinkSink<T> implements Serializable {
                     new AutoTagForSavepointCommitterOperator<>(
                             (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
                             table::snapshotManager,
-                            table::tagManager);
+                            table::tagManager,
+                            () -> table.store().newTagDeletion());
         }
         SingleOutputStreamOperator<?> committed =
                 written.transform(
@@ -209,25 +211,36 @@ public abstract class FlinkSink<T> implements Serializable {
                         committerOperator);
         Options options = Options.fromMap(table.options());
         configureGlobalCommitter(
-                committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
+                committed,
+                options.get(SINK_COMMITTER_CPU),
+                options.get(SINK_COMMITTER_MEMORY),
+                conf);
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     public static void configureGlobalCommitter(
             SingleOutputStreamOperator<?> committed,
             double cpuCores,
-            @Nullable MemorySize heapMemory) {
+            @Nullable MemorySize heapMemory,
+            ReadableConfig conf) {
         committed.setParallelism(1).setMaxParallelism(1);
-        if (heapMemory != null) {
-            SlotSharingGroup slotSharingGroup =
-                    SlotSharingGroup.newBuilder(committed.getName())
-                            .setCpuCores(cpuCores)
-                            .setTaskHeapMemory(
-                                    new org.apache.flink.configuration.MemorySize(
-                                            heapMemory.getBytes()))
-                            .build();
-            committed.slotSharingGroup(slotSharingGroup);
+        if (heapMemory == null) {
+            return;
         }
+
+        if (!conf.get(ENABLE_FINE_GRAINED_RESOURCE_MANAGEMENT)) {
+            throw new RuntimeException(
+                    "To support the 'sink.committer-cpu' and 'sink.committer-memory' configurations, you must enable fine-grained resource management. Please set 'cluster.fine-grained-resource-management.enabled' to 'true' in your Flink configuration.");
+        }
+
+        SlotSharingGroup slotSharingGroup =
+                SlotSharingGroup.newBuilder(committed.getName())
+                        .setCpuCores(cpuCores)
+                        .setTaskHeapMemory(
+                                new org.apache.flink.configuration.MemorySize(
+                                        heapMemory.getBytes()))
+                        .build();
+        committed.slotSharingGroup(slotSharingGroup);
     }
 
     public static void assertStreamingConfiguration(StreamExecutionEnvironment env) {

@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -39,10 +38,13 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.assertSchemaCompatible;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.buildPaimonSchema;
 import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -126,31 +128,31 @@ public class MongoDBSyncTableAction extends ActionBase {
             validateCaseInsensitive();
         }
 
-        MongodbSchema mongodbSchema = MongodbSchema.getMongodbSchema(mongodbConfig);
+        Schema mongodbSchema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, caseSensitive);
         catalog.createDatabase(database, true);
         List<ComputedColumn> computedColumns =
-                buildComputedColumns(computedColumnArgs, mongodbSchema.fields());
+                buildComputedColumns(computedColumnArgs, mongodbSchema);
 
         Identifier identifier = new Identifier(database, table);
         FileStoreTable table;
-
+        Schema fromMongodb =
+                buildPaimonSchema(
+                        partitionKeys,
+                        Collections.emptyList(),
+                        computedColumns,
+                        tableConfig,
+                        mongodbSchema);
         // Check if table exists before trying to get or create it
         if (catalog.tableExists(identifier)) {
             table = (FileStoreTable) catalog.getTable(identifier);
+            assertSchemaCompatible(table.schema(), fromMongodb.fields());
         } else {
-            Schema fromMongodb =
-                    MongoDBActionUtils.buildPaimonSchema(
-                            mongodbSchema,
-                            partitionKeys,
-                            computedColumns,
-                            tableConfig,
-                            caseSensitive);
             catalog.createTable(identifier, fromMongodb, false);
             table = (FileStoreTable) catalog.getTable(identifier);
         }
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
-                RichCdcMultiplexRecordEventParser::new;
+                () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
 
         CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new CdcSinkBuilder<RichCdcMultiplexRecord>()
@@ -162,7 +164,6 @@ public class MongoDBSyncTableAction extends ActionBase {
                                         .flatMap(
                                                 new MongoDBRecordParser(
                                                         caseSensitive,
-                                                        new TableNameConverter(caseSensitive),
                                                         computedColumns,
                                                         mongodbConfig)))
                         .withParserFactory(parserFactory)
