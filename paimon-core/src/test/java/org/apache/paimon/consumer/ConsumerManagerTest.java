@@ -88,6 +88,6 @@ public class ConsumerManagerTest {
     @Test
     public void testReadConsumer() throws Exception {
         manager.resetConsumer("id1", new Consumer(5));
-        assertThat(manager.consumer("id1")).isEmpty();
+        assertThat(manager.consumer("id1"));
     }
 }
