@@ -34,7 +34,7 @@ import java.util.Map;
  */
 public interface CdcMetadataConverter extends Serializable {
 
-    Map<String, String> read(JsonNode var1);
+    Map<String, String> read(JsonNode payload);
 
     DataType getDataType();
 

@@ -26,7 +26,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import io.debezium.connector.AbstractSourceInfo;
 
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -50,11 +50,9 @@ public enum MySqlMetadataProcessor {
 
                 @Override
                 public Map<String, String> read(JsonNode record) {
-                    String dbName =
+                    String table =
                             record.get("source").get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
-                    Map<String, String> resultMap = new HashMap<>();
-                    resultMap.put("table_name", dbName);
-                    return resultMap;
+                    return Collections.singletonMap("table_name", table);
                 }
 
                 @Override
@@ -77,11 +75,9 @@ public enum MySqlMetadataProcessor {
 
                 @Override
                 public Map<String, String> read(JsonNode record) {
-                    String dbName =
+                    String database =
                             record.get("source").get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
-                    Map<String, String> resultMap = new HashMap<>();
-                    resultMap.put("database_name", dbName);
-                    return resultMap;
+                    return Collections.singletonMap("database_name", database);
                 }
 
                 @Override
@@ -107,11 +103,9 @@ public enum MySqlMetadataProcessor {
 
                 @Override
                 public Map<String, String> read(JsonNode record) {
-                    String dbName =
+                    String timestamp =
                             record.get("source").get(AbstractSourceInfo.TIMESTAMP_KEY).asText();
-                    Map<String, String> resultMap = new HashMap<>();
-                    resultMap.put("op_ts", dbName);
-                    return resultMap;
+                    return Collections.singletonMap("op_ts", timestamp);
                 }
 
                 @Override
