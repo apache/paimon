@@ -909,4 +909,24 @@ under the License.
             </plugins>
         </pluginManagement>
     </build>
+
+    <!--
+    Uncomment the following "repositories" tag if your maven fails to download paimon-shade snapshot files.
+    We comment these tags by default because downloading from apache repositories is very slow for both github and developers.
+    -->
+
+    <!--
+    <repositories>
+        <repository>
+            <id>apache-releases</id>
+            <name>apache releases</name>
+            <url>https://repository.apache.org/content/repositories/releases/</url>
+        </repository>
+        <repository>
+            <id>apache-snapshots</id>
+            <name>apache snapshots</name>
+            <url>https://repository.apache.org/content/repositories/snapshots/</url>
+        </repository>
+    </repositories>
+    -->
 </project>
