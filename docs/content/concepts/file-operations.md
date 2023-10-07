@@ -253,6 +253,7 @@ Let's trigger the full-compaction now, and run a dedicated compaction job throug
     --table <table-name> \
     [--partition <partition-name>] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--table-conf <paimon-table-dynamic-conf> [--table-conf <paimon-table-dynamic-conf>] ...]
 ```
 
 an example would be (suppose you're already in Flink home)
