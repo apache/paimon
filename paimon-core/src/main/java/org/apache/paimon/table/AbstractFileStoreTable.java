@@ -160,10 +160,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
-        if (dynamicOptions == null || dynamicOptions.isEmpty()) {
-            return this;
-        }
-
         Map<String, String> options = tableSchema.options();
         // check option is not immutable
         dynamicOptions.forEach(
