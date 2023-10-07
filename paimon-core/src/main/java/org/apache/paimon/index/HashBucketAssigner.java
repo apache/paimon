@@ -157,6 +157,7 @@ public class HashBucketAssigner {
                 indexFileHandler,
                 partition,
                 targetBucketRowNumber,
-                (hash) -> computeAssignId(hash) == assignId);
+                (hash) -> computeAssignId(hash) == assignId,
+                (bucket) -> computeAssignId(bucket) == assignId);
     }
 }
