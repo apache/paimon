@@ -97,7 +97,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     /** Note: Keep this thread-safe. */
     @Override
-    protected boolean filterByStats(List<ManifestEntry> entries) {
+    protected boolean filterWholeBucketByStats(List<ManifestEntry> entries) {
         // entries come from the same bucket, if any of it doesn't meet the request, we could filter
         // the bucket.
         if (valueFilter != null) {

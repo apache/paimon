@@ -83,16 +83,13 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
         writeAndCheckFileResultForColumnType(
                 schemas -> {
                     FileStoreTable table = createFileStoreTable(schemas);
-                    /**
-                     * Changelog with key table doesn't support filter in value, it will scan all
-                     * data. TODO support filter value in future.
-                     */
                     Predicate predicate =
                             new PredicateBuilder(table.schema().logicalRowType())
                                     .between(6, 200L, 500L);
                     List<DataSplit> splits =
                             table.newSnapshotReader().withFilter(predicate).read().dataSplits();
-                    checkFilterRowCount(toDataFileMetas(splits), 3L);
+                    // filter value by whole bucket
+                    checkFilterRowCount(toDataFileMetas(splits), 2L);
                     return splits.stream()
                             .flatMap(s -> s.dataFiles().stream())
                             .collect(Collectors.toList());
@@ -100,10 +97,6 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                 (files, schemas) -> {
                     FileStoreTable table = createFileStoreTable(schemas);
 
-                    /**
-                     * Changelog with key table doesn't support filter in value, it will scan all
-                     * data. TODO support filter value in future.
-                     */
                     List<DataSplit> splits =
                             table.newSnapshotReader()
                                     .withFilter(
@@ -111,7 +104,8 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
                                                     .between(6, 200F, 500F))
                                     .read()
                                     .dataSplits();
-                    checkFilterRowCount(toDataFileMetas(splits), 6L);
+                    // filtered and only 3 rows left
+                    checkFilterRowCount(toDataFileMetas(splits), 3L);
                 },
                 getPrimaryKeyNames(),
                 tableConfig,

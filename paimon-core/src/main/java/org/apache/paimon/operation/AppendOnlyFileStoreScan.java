@@ -82,7 +82,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     }
 
     @Override
-    protected boolean filterByStats(List<ManifestEntry> entries) {
+    protected boolean filterWholeBucketByStats(List<ManifestEntry> entries) {
         // We don't need to filter per-bucket entries here
         return true;
     }

@@ -129,16 +129,15 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                             new PredicateBuilder(table.schema().logicalRowType());
                     // results of field "a" in (1120, -] in SCHEMA_1_FIELDS, "a" is not existed in
                     // SCHEMA_0_FIELDS
-                    Predicate predicate = builder.greaterThan(3, 1120);
+                    Predicate predicate = builder.greaterOrEqual(3, 1120);
                     List<DataSplit> splits =
                             table.newSnapshotReader().withFilter(predicate).read().dataSplits();
                     checkFilterRowCount(toDataFileMetas(splits), 12L);
 
-                    /**
-                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
-                     * get value stats. The test for filtering the primary key and partition already
-                     * exists.
-                     */
+                    predicate = builder.greaterThan(3, 1120);
+                    splits = table.newSnapshotReader().withFilter(predicate).read().dataSplits();
+                    // filtered the whole bucket
+                    checkFilterRowCount(toDataFileMetas(splits), 7L);
                 },
                 getPrimaryKeyNames(),
                 tableConfig,

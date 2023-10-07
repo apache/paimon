@@ -45,6 +45,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -283,10 +284,15 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         // but we can do this by filter the whole bucket files
         files =
                 files.stream()
-                        .collect(Collectors.groupingBy(ManifestEntry::bucket))
+                        .collect(
+                                Collectors.groupingBy(
+                                        // we use LinkedHashMap to avoid disorder
+                                        file -> Pair.of(file.partition(), file.bucket()),
+                                        LinkedHashMap::new,
+                                        Collectors.toList()))
                         .values()
                         .stream()
-                        .filter(this::filterByStats)
+                        .filter(this::filterWholeBucketByStats)
                         .flatMap(Collection::stream)
                         .collect(Collectors.toList());
 
@@ -355,7 +361,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     protected abstract boolean filterByStats(ManifestEntry entry);
 
     /** Note: Keep this thread-safe. */
-    protected abstract boolean filterByStats(List<ManifestEntry> entries);
+    protected abstract boolean filterWholeBucketByStats(List<ManifestEntry> entries);
 
     /** Note: Keep this thread-safe. */
     private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
