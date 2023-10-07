@@ -258,6 +258,15 @@ Paimon's snapshot is similar to flink's checkpoint, and both will automatically 
 allows snapshots to be retained for a long time. Therefore, we can combine the two features of paimon's tag and flink's 
 savepoint to achieve incremental recovery of job from the specified savepoint.
 
+{{< hint warning >}}
+Starting from Flink 1.15 intermediate savepoints (savepoints other than created with 
+[stop-with-savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#stopping-a-job-with-savepoint)) 
+are not used for recovery and do not commit any side effects. 
+
+For savepoint created with [stop-with-savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#stopping-a-job-with-savepoint), 
+tags will be created automatically. For other savepoints, tags will be created after the next checkpoint succeeds.
+{{< /hint >}}
+
 **Step 1: Enable automatically create tags for savepoint.**
 
 You can set `sink.savepoint.auto-tag` to `true` to enable the feature of automatically creating tags for savepoint.

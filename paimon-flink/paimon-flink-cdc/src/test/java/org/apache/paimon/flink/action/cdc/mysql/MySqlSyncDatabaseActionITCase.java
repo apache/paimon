@@ -298,6 +298,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .withTablePrefix("test_prefix_")
                         .withTableSuffix("_test_suffix")
+                        // test including check with affix
+                        .includingTables(ThreadLocalRandom.current().nextBoolean() ? "t1|t2" : ".*")
                         .build();
         runActionWithDefaultEnv(action);
 

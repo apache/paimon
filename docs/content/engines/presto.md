@@ -121,7 +121,7 @@ CREATE SCHEMA paimon.test_db;
 ```
 CREATE TABLE paimon.test_db.orders (
     order_key bigint,
-    orders_tatus varchar,
+    order_status varchar,
     total_price decimal(18,4),
     order_date date
 )

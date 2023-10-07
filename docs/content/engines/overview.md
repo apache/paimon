@@ -42,7 +42,7 @@ Apache Spark and Apache Hive.
 | Presto | 0.236 - 0.280 |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |
 
 Ongoing engines:
-- Doris: Under development, [Support Paimon catalog](https://github.com/apache/doris/issues/18433), [Doris Roadmap 2023](https://github.com/apache/doris/issues/16392).
+- Doris: Experimental feature. See: [Paimon Catalog](https://doris.apache.org/docs/dev/lakehouse/multi-catalog/paimon).
 - Seatunnel: Under development, [Introduce paimon connector](https://github.com/apache/incubator-seatunnel/pull/4178).
 - Starrocks: Under discussion
 

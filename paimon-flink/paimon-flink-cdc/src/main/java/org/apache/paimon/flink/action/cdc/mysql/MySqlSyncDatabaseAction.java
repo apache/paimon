@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
@@ -201,7 +202,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         tableName ->
                                 shouldMonitorTable(tableName, includingPattern, excludingPattern),
                         excludedTables,
-                        typeMapping);
+                        typeMapping,
+                        caseSensitive);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
@@ -223,13 +225,12 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                             database, tableNameConverter.convert(tableInfo.toPaimonTableName()));
             FileStoreTable table;
             Schema fromMySql =
-                    MySqlActionUtils.buildPaimonSchema(
-                            tableInfo,
+                    CdcActionCommonUtils.buildPaimonSchema(
                             Collections.emptyList(),
                             Collections.emptyList(),
                             Collections.emptyList(),
                             tableConfig,
-                            caseSensitive);
+                            tableInfo.schema());
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 table = table.copy(tableConfig);

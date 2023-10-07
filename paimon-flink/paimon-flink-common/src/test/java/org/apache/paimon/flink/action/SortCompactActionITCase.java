@@ -24,6 +24,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -206,9 +207,36 @@ public class SortCompactActionITCase extends ActionITCaseBase {
                 .isLessThan(filesFilterOrder.size() / (double) filesOrder.size());
     }
 
+    @Test
+    public void testTableConf() throws Exception {
+        createTable();
+        SortCompactAction sortCompactAction =
+                new SortCompactAction(
+                                warehouse,
+                                database,
+                                tableName,
+                                Collections.emptyMap(),
+                                Collections.singletonMap(
+                                        FlinkConnectorOptions.SINK_PARALLELISM.key(), "20"))
+                        .withOrderStrategy("zorder")
+                        .withOrderColumns(Collections.singletonList("f0"));
+
+        Assertions.assertThat(
+                        sortCompactAction
+                                .table
+                                .options()
+                                .get(FlinkConnectorOptions.SINK_PARALLELISM.key()))
+                .isEqualTo("20");
+    }
+
     private void zorder(List<String> columns) throws Exception {
         if (random.nextBoolean()) {
-            new SortCompactAction(warehouse, database, tableName, Collections.emptyMap())
+            new SortCompactAction(
+                            warehouse,
+                            database,
+                            tableName,
+                            Collections.emptyMap(),
+                            Collections.emptyMap())
                     .withOrderStrategy("zorder")
                     .withOrderColumns(columns)
                     .run();
@@ -219,7 +247,12 @@ public class SortCompactActionITCase extends ActionITCaseBase {
 
     private void order(List<String> columns) throws Exception {
         if (random.nextBoolean()) {
-            new SortCompactAction(warehouse, database, tableName, Collections.emptyMap())
+            new SortCompactAction(
+                            warehouse,
+                            database,
+                            tableName,
+                            Collections.emptyMap(),
+                            Collections.emptyMap())
                     .withOrderStrategy("order")
                     .withOrderColumns(columns)
                     .run();

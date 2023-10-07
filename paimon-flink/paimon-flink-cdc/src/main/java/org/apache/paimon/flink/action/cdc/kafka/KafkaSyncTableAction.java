@@ -24,12 +24,10 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.formats.DataFormat;
-import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -49,6 +47,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.assertSchemaCompatible;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.buildPaimonSchema;
 import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 
 /**
@@ -146,40 +146,33 @@ public class KafkaSyncTableAction extends ActionBase {
     public void build(StreamExecutionEnvironment env) throws Exception {
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
         String topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
-        KafkaSchema kafkaSchema = KafkaSchema.getKafkaSchema(kafkaConfig, topic, typeMapping);
 
         catalog.createDatabase(database, true);
         boolean caseSensitive = catalog.caseSensitive();
+        Schema kafkaSchema =
+                KafkaSchemaUtils.getKafkaSchema(kafkaConfig, topic, typeMapping, caseSensitive);
 
         Identifier identifier = new Identifier(database, table);
         List<ComputedColumn> computedColumns =
-                buildComputedColumns(computedColumnArgs, kafkaSchema.fields());
-        Schema fromCanal =
-                KafkaActionUtils.buildPaimonSchema(
-                        kafkaSchema,
-                        partitionKeys,
-                        primaryKeys,
-                        computedColumns,
-                        tableConfig,
-                        caseSensitive);
+                buildComputedColumns(computedColumnArgs, kafkaSchema);
+        Schema fromKafka =
+                buildPaimonSchema(
+                        partitionKeys, primaryKeys, computedColumns, tableConfig, kafkaSchema);
+
         try {
+
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = fileStoreTable.copy(tableConfig);
-            CdcActionCommonUtils.assertSchemaCompatible(
-                    fileStoreTable.schema(), fromCanal.fields());
+            assertSchemaCompatible(fileStoreTable.schema(), fromKafka.fields());
         } catch (Catalog.TableNotExistException e) {
-            catalog.createTable(identifier, fromCanal, false);
+            catalog.createTable(identifier, fromKafka, false);
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);
         RecordParser recordParser =
-                format.createParser(
-                        caseSensitive,
-                        new TableNameConverter(caseSensitive),
-                        typeMapping,
-                        computedColumns);
+                format.createParser(caseSensitive, typeMapping, computedColumns);
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
-                RichCdcMultiplexRecordEventParser::new;
+                () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
 
         CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new CdcSinkBuilder<RichCdcMultiplexRecord>()

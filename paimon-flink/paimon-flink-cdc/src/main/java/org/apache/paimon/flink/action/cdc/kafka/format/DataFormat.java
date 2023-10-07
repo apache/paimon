@@ -16,14 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.formats;
+package org.apache.paimon.flink.action.cdc.kafka.format;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.formats.canal.CanalRecordParser;
-import org.apache.paimon.flink.action.cdc.kafka.formats.maxwell.MaxwellRecordParser;
-import org.apache.paimon.flink.action.cdc.kafka.formats.ogg.OggRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.maxwell.MaxwellRecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.ogg.OggRecordParser;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
@@ -54,16 +53,12 @@ public enum DataFormat {
      * configurations.
      *
      * @param caseSensitive Indicates whether the parser should be case-sensitive.
-     * @param tableNameConverter Converter to transform table names.
      * @param computedColumns List of computed columns to be considered by the parser.
      * @return A new instance of {@link RecordParser}.
      */
     public RecordParser createParser(
-            boolean caseSensitive,
-            TableNameConverter tableNameConverter,
-            TypeMapping typeMapping,
-            List<ComputedColumn> computedColumns) {
-        return parser.createParser(caseSensitive, typeMapping, tableNameConverter, computedColumns);
+            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        return parser.createParser(caseSensitive, typeMapping, computedColumns);
     }
 
     /**

@@ -59,8 +59,9 @@ public class SortCompactAction extends CompactAction {
             String warehouse,
             String database,
             String tableName,
-            Map<String, String> catalogConfig) {
-        super(warehouse, database, tableName, catalogConfig);
+            Map<String, String> catalogConfig,
+            Map<String, String> tableConf) {
+        super(warehouse, database, tableName, catalogConfig, tableConf);
 
         checkArgument(
                 table instanceof AppendOnlyFileStoreTable,

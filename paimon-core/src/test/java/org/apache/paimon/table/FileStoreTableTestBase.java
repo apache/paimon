@@ -1068,6 +1068,19 @@ public abstract class FileStoreTableTestBase {
         commit.close();
     }
 
+    @Test
+    public void testSchemaPathOption() throws Exception {
+        String fakePath = "fake path";
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(CoreOptions.PATH, fakePath));
+        String originSchemaPath = table.schema().options().get(CoreOptions.PATH.key());
+        assertThat(originSchemaPath).isEqualTo(fakePath);
+        // reset PATH of schema option to table location
+        table = table.copy(Collections.emptyMap());
+        String schemaPath = table.schema().options().get(CoreOptions.PATH.key());
+        String tablePath = table.location().toString();
+        assertThat(schemaPath).isEqualTo(tablePath);
+    }
+
     protected List<String> getResult(
             TableRead read,
             List<Split> splits,

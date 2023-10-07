@@ -159,7 +159,11 @@ public class MySqlSyncTableAction extends ActionBase {
 
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig, monitorTablePredication(), new ArrayList<>(), typeMapping);
+                        mySqlConfig,
+                        monitorTablePredication(),
+                        new ArrayList<>(),
+                        typeMapping,
+                        caseSensitive);
         validateMySqlTableInfos(mySqlSchemasInfo);
 
         catalog.createDatabase(database, true);
@@ -167,15 +171,14 @@ public class MySqlSyncTableAction extends ActionBase {
         MySqlTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
         Identifier identifier = new Identifier(database, table);
         List<ComputedColumn> computedColumns =
-                buildComputedColumns(computedColumnArgs, tableInfo.schema().typeMapping());
+                buildComputedColumns(computedColumnArgs, tableInfo.schema());
         Schema fromMySql =
-                MySqlActionUtils.buildPaimonSchema(
-                        tableInfo,
+                CdcActionCommonUtils.buildPaimonSchema(
                         partitionKeys,
                         primaryKeys,
                         computedColumns,
                         tableConfig,
-                        caseSensitive);
+                        tableInfo.schema());
         try {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = fileStoreTable.copy(tableConfig);

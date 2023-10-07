@@ -44,6 +44,11 @@ public class Metrics {
         metricGroups.add(group);
     }
 
+    /** Remove a metric group. Called when closing the corresponding instances, like committer. */
+    public void removeGroup(AbstractMetricGroup group) {
+        metricGroups.remove(group);
+    }
+
     /** Get metric groups. */
     public ConcurrentLinkedQueue<MetricGroup> getMetricGroups() {
         return metricGroups;

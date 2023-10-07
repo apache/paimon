@@ -16,12 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.formats.ogg;
+package org.apache.paimon.flink.action.cdc.kafka.format.ogg;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.formats.RecordParser;
+import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 
@@ -57,11 +56,8 @@ public class OggRecordParser extends RecordParser {
     private static final String OP_DELETE = "D";
 
     public OggRecordParser(
-            boolean caseSensitive,
-            TypeMapping typeMapping,
-            TableNameConverter tableNameConverter,
-            List<ComputedColumn> computedColumns) {
-        super(caseSensitive, typeMapping, tableNameConverter, computedColumns);
+            boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
+        super(caseSensitive, typeMapping, computedColumns);
     }
 
     @Override
@@ -106,7 +102,6 @@ public class OggRecordParser extends RecordParser {
                 break;
             case OP_DELETE:
                 checkNotNull(root.get(FIELD_BEFORE), errorMessageTemplate, FIELD_BEFORE);
-                checkNotNull(root.get(fieldData), errorMessageTemplate, "null");
                 break;
         }
     }

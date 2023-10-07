@@ -19,8 +19,9 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.configuration.Configuration;
@@ -28,14 +29,14 @@ import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link KafkaSchema}. */
+/** Tests for {@link KafkaSchemaUtils}. */
 public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
@@ -53,18 +54,17 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("value.format", "canal-json");
         kafkaConfig.put("topic", topic);
 
-        KafkaSchema kafkaSchema =
-                KafkaSchema.getKafkaSchema(
-                        Configuration.fromMap(kafkaConfig), topic, TypeMapping.defaultMapping());
-        Map<String, DataType> fields = new LinkedHashMap<>();
-        fields.put("pt", DataTypes.INT());
-        fields.put("_id", DataTypes.INT());
-        fields.put("v1", DataTypes.VARCHAR(10));
-        String tableName = "schema_evolution_1";
-        String databasesName = "paimon_sync_table";
+        Schema kafkaSchema =
+                KafkaSchemaUtils.getKafkaSchema(
+                        Configuration.fromMap(kafkaConfig),
+                        topic,
+                        TypeMapping.defaultMapping(),
+                        true);
+        List<DataField> fields = new ArrayList<>();
+        fields.add(new DataField(0, "pt", DataTypes.INT()));
+        fields.add(new DataField(1, "_id", DataTypes.INT().notNull()));
+        fields.add(new DataField(2, "v1", DataTypes.VARCHAR(10)));
         assertThat(kafkaSchema.fields()).isEqualTo(fields);
-        assertThat(kafkaSchema.tableName()).isEqualTo(tableName);
-        assertThat(kafkaSchema.databaseName()).isEqualTo(databasesName);
     }
 
     @Test
