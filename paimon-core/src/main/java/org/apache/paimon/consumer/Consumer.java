@@ -30,9 +30,7 @@ import java.io.IOException;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Consumer which contains next snapshot.
- */
+/** Consumer which contains next snapshot. */
 public class Consumer {
 
     private static final String FIELD_NEXT_SNAPSHOT = "nextSnapshot";

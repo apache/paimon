@@ -90,16 +90,18 @@ public class ConsumerManagerTest {
         manager.expire(expireDateTime);
         assertThat(manager.consumer("id2")).map(Consumer::nextSnapshot).get().isEqualTo(3L);
     }
+
     @Test
     public void testReadConsumer() throws Exception {
         manager.resetConsumer("id1", new Consumer(5));
         Optional<Consumer> consumer = manager.consumer("id1");
         System.out.println(consumer.get().toJson());
-        FileIO fileIO =LocalFileIO.create();
-        org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(tempDir.toUri() + "/consumer/consumer-id1");
+        FileIO fileIO = LocalFileIO.create();
+        org.apache.paimon.fs.Path path =
+                new org.apache.paimon.fs.Path(tempDir.toUri() + "/consumer/consumer-id1");
         try (PositionOutputStream out = fileIO.newOutputStream(path, true)) {
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-            //writer.write();
+            // writer.write();
             writer.flush();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
@@ -107,6 +109,5 @@ public class ConsumerManagerTest {
 
         Optional<Consumer> consumer1 = manager.consumer("id1");
         System.out.println(consumer1.get().toJson());
-
     }
 }
