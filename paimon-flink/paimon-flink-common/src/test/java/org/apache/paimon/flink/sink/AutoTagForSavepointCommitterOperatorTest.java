@@ -74,17 +74,23 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
         assertThat(table.tagManager().tagCount()).isEqualTo(0);
 
-        // notify savepoint success
-        testHarness.notifyOfCompletedCheckpoint(checkpointId);
-        Snapshot snapshot = table.snapshotManager().latestSnapshot();
-        assertThat(snapshot).isNotNull();
-        assertThat(snapshot.id()).isEqualTo(checkpointId);
+        // trigger next checkpoint
+        processCommittable(testHarness, write, ++checkpointId, ++timestamp, GenericRow.of(3, 20L));
+        testHarness.snapshotWithLocalState(checkpointId, timestamp, CheckpointType.CHECKPOINT);
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
 
+        // notify checkpoint success and tag for savepoint-2
+        testHarness.notifyOfCompletedCheckpoint(checkpointId);
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(3);
+        assertThat(table.tagManager().tagCount()).isEqualTo(1);
+
+        Snapshot snapshot = table.snapshotManager().snapshot(2);
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.id()).isEqualTo(2);
         Map<Snapshot, String> tags = table.tagManager().tags();
         assertThat(tags).containsOnlyKeys(snapshot);
         assertThat(tags.get(snapshot))
-                .isEqualTo(
-                        AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + checkpointId);
+                .isEqualTo(AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + 2);
     }
 
     @Test
@@ -136,6 +142,38 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                         AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + checkpointId);
     }
 
+    @Test
+    public void testAbortSavepointAndCleanTag() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+        StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+
+        long checkpointId = 1L, timestamp = 1L;
+        processCommittable(testHarness, write, checkpointId, timestamp, GenericRow.of(1, 10L));
+
+        // trigger savepoint but not notified
+        testHarness.snapshotWithLocalState(
+                checkpointId, timestamp, SavepointType.savepoint(SavepointFormatType.CANONICAL));
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(0);
+        assertThat(table.tagManager().tagCount()).isEqualTo(0);
+
+        // trigger checkpoint and notify complete
+        processCommittable(testHarness, write, ++checkpointId, timestamp, GenericRow.of(1, 10L));
+        testHarness.snapshotWithLocalState(checkpointId, timestamp, CheckpointType.CHECKPOINT);
+        testHarness.notifyOfCompletedCheckpoint(checkpointId);
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2);
+        assertThat(table.tagManager().tagCount()).isEqualTo(1);
+
+        // abort savepoint 1
+        testHarness.getOneInputOperator().notifyCheckpointAborted(1);
+        assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2);
+        assertThat(table.tagManager().tagCount()).isEqualTo(0);
+    }
+
     private void processCommittable(
             OneInputStreamOperatorTestHarness<Committable, Committable> testHarness,
             StreamTableWrite write,
@@ -161,7 +199,8 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                 (CommitterOperator<Committable, ManifestCommittable>)
                         super.createCommitterOperator(table, commitUser, committableStateManager),
                 table::snapshotManager,
-                table::tagManager);
+                table::tagManager,
+                () -> table.store().newTagDeletion());
     }
 
     @Override
@@ -175,6 +214,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                         super.createCommitterOperator(
                                 table, commitUser, committableStateManager, initializeFunction),
                 table::snapshotManager,
-                table::tagManager);
+                table::tagManager,
+                () -> table.store().newTagDeletion());
     }
 }
