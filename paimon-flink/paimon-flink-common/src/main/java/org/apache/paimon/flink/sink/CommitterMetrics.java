@@ -19,12 +19,13 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.utils.CounterMetricMutableWrapper;
+import org.apache.paimon.flink.utils.GaugeMetricMutableWrapper;
+import org.apache.paimon.flink.utils.HistogramMetricMutableWrapper;
 import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.commit.CommitMetrics;
 
 import org.apache.flink.metrics.Counter;
-import org.apache.flink.metrics.Gauge;
-import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.MeterView;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
@@ -39,16 +40,17 @@ import java.util.Map;
 public class CommitterMetrics {
 
     private static final String SINK_METRIC_GROUP = "sink";
-
     private final Counter numBytesOutCounter;
     private final Counter numRecordsOutCounter;
     private final OperatorMetricGroup metricGroup;
+    public final MetricGroup commitMetricGroup;
 
     public CommitterMetrics(OperatorMetricGroup metricGroup) {
         this(metricGroup, null);
     }
 
-    public CommitterMetrics(OperatorMetricGroup metricGroup, @Nullable CommitMetrics commitMetrics) {
+    public CommitterMetrics(
+            OperatorMetricGroup metricGroup, @Nullable CommitMetrics commitMetrics) {
         this.metricGroup = metricGroup;
         OperatorIOMetricGroup operatorIOMetricGroup = metricGroup.getIOMetricGroup();
         MetricGroup sinkMetricGroup = operatorIOMetricGroup.addGroup(SINK_METRIC_GROUP);
@@ -63,28 +65,41 @@ public class CommitterMetrics {
                 MetricNames.IO_NUM_RECORDS_OUT_RATE, new MeterView(numRecordsOutCounter));
 
         // Paimon Commit Metrics
-        registerCommitMetrics(commitMetrics);
+        commitMetricGroup = registerCommitMetrics(commitMetrics);
     }
 
-    public void registerCommitMetrics(CommitMetrics commitMetrics) {
+    public MetricGroup registerCommitMetrics(CommitMetrics commitMetrics) {
         if (commitMetrics != null) {
-            MetricGroup commitMetricGroup = metricGroup.addGroup("commit");
-            for (Map.Entry<String, Metric> metric : commitMetrics.getMetricGroup().getMetrics().entrySet()) {
+            MetricGroup commitMetricGroup = metricGroup.addGroup(CommitMetrics.GROUP_NAME);
+            for (Map.Entry<String, Metric> metric :
+                    commitMetrics.getMetricGroup().getMetrics().entrySet()) {
                 switch (metric.getValue().getMetricType()) {
                     case COUNTER:
-                        commitMetricGroup.counter(metric.getKey(), (Counter) metric.getValue());
+                        commitMetricGroup.counter(
+                                metric.getKey(),
+                                new CounterMetricMutableWrapper(
+                                        (org.apache.paimon.metrics.Counter) metric.getValue()));
                         break;
                     case GAUGE:
-                        commitMetricGroup.gauge(metric.getKey(), (Gauge<?>) metric.getValue());
+                        commitMetricGroup.gauge(
+                                metric.getKey(),
+                                new GaugeMetricMutableWrapper(
+                                        (org.apache.paimon.metrics.Gauge<?>) metric.getValue()));
                         break;
                     case HISTOGRAM:
-                        commitMetricGroup.histogram(metric.getKey(), (Histogram) metric.getValue());
+                        commitMetricGroup.histogram(
+                                metric.getKey(),
+                                new HistogramMetricMutableWrapper(
+                                        (org.apache.paimon.metrics.Histogram) metric.getValue()));
                         break;
                     default:
-                        throw new UnsupportedOperationException("Custom metric types are not supported.");
+                        throw new UnsupportedOperationException(
+                                "Custom metric types are not supported.");
                 }
             }
+            return commitMetricGroup;
         }
+        return null;
     }
 
     public void increaseNumBytesOut(long numBytesOut) {

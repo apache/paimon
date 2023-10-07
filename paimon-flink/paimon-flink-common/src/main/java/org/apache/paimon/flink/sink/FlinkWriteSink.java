@@ -52,15 +52,17 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
         // a restart.
 
         return (user, metricGroup) -> {
-            TableCommitImpl tableCommit = table.newCommit(user)
-                    .withOverwrite(overwritePartition)
-                    .ignoreEmptyCommit(!streamingCheckpointEnabled);
+            TableCommitImpl tableCommit =
+                    table.newCommit(user)
+                            .withOverwrite(overwritePartition)
+                            .ignoreEmptyCommit(!streamingCheckpointEnabled);
             FileStoreCommit storeCommit = tableCommit.getStoreCommit();
             CommitMetrics commitMetrics = null;
             if (storeCommit instanceof FileStoreCommitImpl) {
                 commitMetrics = ((FileStoreCommitImpl) storeCommit).getCommitMetrics();
             }
-            return new StoreCommitter(tableCommit, new CommitterMetrics(metricGroup, commitMetrics));
+            return new StoreCommitter(
+                    tableCommit, new CommitterMetrics(metricGroup, commitMetrics));
         };
     }
 

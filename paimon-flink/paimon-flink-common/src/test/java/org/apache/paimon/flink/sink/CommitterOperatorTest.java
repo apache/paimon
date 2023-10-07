@@ -337,7 +337,11 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         for (CommitMessage commitMessage : committable) {
             manifestCommittable.addFileCommittable(commitMessage);
         }
-        StoreCommitter committer = createStoreCommitter(table, initialCommitUser, UnregisteredMetricsGroup.createOperatorMetricGroup());
+        StoreCommitter committer =
+                createStoreCommitter(
+                        table,
+                        initialCommitUser,
+                        UnregisteredMetricsGroup.createOperatorMetricGroup());
         CommitterMetrics metrics = committer.getMetrics();
         committer.commit(Collections.singletonList(manifestCommittable));
         assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(275);
@@ -412,7 +416,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         };
     }
 
-    private StoreCommitter createStoreCommitter(FileStoreTable table, String user, OperatorMetricGroup metricGroup) {
+    private StoreCommitter createStoreCommitter(
+            FileStoreTable table, String user, OperatorMetricGroup metricGroup) {
         TableCommitImpl tableCommit = table.newCommit(user);
         FileStoreCommit storeCommit = tableCommit.getStoreCommit();
         CommitMetrics commitMetrics = null;

@@ -177,16 +177,15 @@ public class StoreMultiCommitter
                                 "Failed to get committer for table %s", tableId.getFullName()),
                         e);
             }
-            TableCommitImpl tableCommit = table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob);
+            TableCommitImpl tableCommit =
+                    table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob);
             FileStoreCommit storeCommit = tableCommit.getStoreCommit();
             CommitMetrics commitMetrics = null;
             if (storeCommit instanceof FileStoreCommitImpl) {
                 commitMetrics = ((FileStoreCommitImpl) storeCommit).getCommitMetrics();
             }
             metrics.registerCommitMetrics(commitMetrics);
-            committer =
-                    new StoreCommitter(
-                            tableCommit, metrics);
+            committer = new StoreCommitter(tableCommit, metrics);
             tableCommitters.put(tableId, committer);
         }
 
