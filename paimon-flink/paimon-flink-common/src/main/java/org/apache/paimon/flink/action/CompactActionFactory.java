@@ -44,11 +44,22 @@ public class CompactActionFactory implements ActionFactory {
         CompactAction action;
         if (params.has("order-strategy")) {
             action =
-                    new SortCompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig)
+                    new SortCompactAction(
+                                    tablePath.f0,
+                                    tablePath.f1,
+                                    tablePath.f2,
+                                    catalogConfig,
+                                    optionalConfigMap(params, "table-conf"))
                             .withOrderStrategy(params.get("order-strategy"))
                             .withOrderColumns(getRequiredValue(params, "order-by").split(","));
         } else {
-            action = new CompactAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
+            action =
+                    new CompactAction(
+                            tablePath.f0,
+                            tablePath.f1,
+                            tablePath.f2,
+                            catalogConfig,
+                            optionalConfigMap(params, "table-conf"));
         }
 
         if (params.has("partition")) {
@@ -70,6 +81,7 @@ public class CompactActionFactory implements ActionFactory {
                 "  compact --warehouse <warehouse-path> --database <database-name> "
                         + "--table <table-name> [--partition <partition-name>]"
                         + "[--order-strategy <order-strategy>]"
+                        + "[--table-conf <key>=<value>]"
                         + "[--order-by <order-columns>]");
         System.out.println(
                 "  compact --warehouse s3://path/to/warehouse --database <database-name> "
@@ -101,6 +113,7 @@ public class CompactActionFactory implements ActionFactory {
                         + "--table test_table "
                         + "--order-strategy zorder "
                         + "--order-by a,b,c "
+                        + "--table-conf sink.parallelism=9 "
                         + "--catalog-conf s3.endpoint=https://****.com "
                         + "--catalog-conf s3.access-key=***** "
                         + "--catalog-conf s3.secret-key=***** ");

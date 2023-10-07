@@ -274,8 +274,7 @@ public class PartitionsTable implements ReadonlyTable {
                 // Grouping and summing
                 Partition rowData =
                         groupedData.computeIfAbsent(
-                                partitionId,
-                                key -> new Partition(partitionId, recordCount, fileSizeInBytes));
+                                partitionId, key -> new Partition(partitionId, 0, 0));
                 rowData.recordCount += recordCount;
                 rowData.fileSizeInBytes += fileSizeInBytes;
             }

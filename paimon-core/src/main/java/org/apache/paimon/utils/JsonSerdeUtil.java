@@ -179,6 +179,32 @@ public class JsonSerdeUtil {
     }
 
     /**
+     * Parses the provided JSON string and casts it to the specified type of {@link JsonNode}.
+     *
+     * <p>This method is useful when the exact subtype of {@link JsonNode} is known beforehand and
+     * needs to be enforced.
+     *
+     * @param <T> The type of the JsonNode to return. Must be a subtype of {@link JsonNode}.
+     * @param json The JSON string to parse.
+     * @param clazz The expected class type of the parsed JSON.
+     * @return The parsed JSON as an instance of the specified type.
+     * @throws JsonProcessingException If there's an error during JSON parsing.
+     * @throws IllegalArgumentException If the parsed JSON is not of the expected type.
+     */
+    public static <T extends JsonNode> T asSpecificNodeType(String json, Class<T> clazz)
+            throws JsonProcessingException {
+        JsonNode resultNode = OBJECT_MAPPER_INSTANCE.readTree(json);
+        if (!clazz.isInstance(resultNode)) {
+            throw new IllegalArgumentException(
+                    "Expected node of type "
+                            + clazz.getName()
+                            + " but was "
+                            + resultNode.getClass().getName());
+        }
+        return clazz.cast(resultNode);
+    }
+
+    /**
      * Converts the given Java object into its corresponding {@link JsonNode} representation.
      *
      * <p>This method utilizes the Jackson {@link ObjectMapper}'s valueToTree functionality to

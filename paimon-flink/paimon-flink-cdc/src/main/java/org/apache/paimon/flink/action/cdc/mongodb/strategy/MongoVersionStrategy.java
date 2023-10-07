@@ -27,7 +27,6 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import com.jayway.jsonpath.JsonPath;
@@ -42,6 +41,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.DEFAULT_ID_GENERATION;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.FIELD_NAME;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.PARSER_PATH;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.START_MODE;
@@ -49,7 +49,8 @@ import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.STAR
 /** Interface for processing strategies tailored for different MongoDB versions. */
 public interface MongoVersionStrategy {
 
-    ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    String ID_FIELD = "_id";
+    String OID_FIELD = "$oid";
 
     /**
      * Extracts records from the provided JsonNode.
@@ -66,11 +67,7 @@ public interface MongoVersionStrategy {
      * @return A list of primary keys.
      */
     default List<String> extractPrimaryKeys() {
-        return Collections.singletonList("_id");
-    }
-
-    default Map<String, String> extractRow(String record) {
-        return JsonSerdeUtil.parseJsonMap(record, String.class);
+        return Collections.singletonList(ID_FIELD);
     }
 
     /**
@@ -92,8 +89,17 @@ public interface MongoVersionStrategy {
             throws JsonProcessingException {
         SchemaAcquisitionMode mode =
                 SchemaAcquisitionMode.valueOf(mongodbConfig.getString(START_MODE).toUpperCase());
-        ObjectNode objectNode = (ObjectNode) OBJECT_MAPPER.readTree(jsonNode.asText());
-        JsonNode document = objectNode.set("_id", objectNode.get("_id").get("$oid"));
+        ObjectNode objectNode =
+                JsonSerdeUtil.asSpecificNodeType(jsonNode.asText(), ObjectNode.class);
+        JsonNode idNode = objectNode.get(ID_FIELD);
+        if (idNode == null) {
+            throw new IllegalArgumentException(
+                    "The provided MongoDB JSON document does not contain an _id field.");
+        }
+        JsonNode document =
+                mongodbConfig.getBoolean(DEFAULT_ID_GENERATION)
+                        ? objectNode.set(ID_FIELD, idNode.get(OID_FIELD))
+                        : objectNode;
         Map<String, String> row;
         switch (mode) {
             case SPECIFIED:
