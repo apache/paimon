@@ -478,13 +478,17 @@ To use this feature through `flink run`, run the following shell command.
 
 Here are a few points to take note of:
 
-1. The "mongodb-conf" introduces the "schema.start.mode" parameter on top of the MongoDB CDC source configuration."schema.start.mode" provides two modes: "dynamic" (default) and "specified".
-In "dynamic" mode, MongoDB schema information is parsed at one level, which forms the basis for schema change evolution.
-In "specified" mode, synchronization takes place according to specified criteria.
-This can be done by configuring "field.name" to specify the synchronization fields and "parser.path" to specify the JSON parsing path for those fields.
-The difference between the two is that the "specify" mode requires the user to explicitly identify the fields to be used and create a mapping table based on those fields.
+1. The `mongodb-conf` introduces the `schema.start.mode` parameter on top of the MongoDB CDC source configuration.`schema.start.mode` provides two modes: `dynamic` (default) and `specified`.
+In `dynamic` mode, MongoDB schema information is parsed at one level, which forms the basis for schema change evolution.
+In `specified` mode, synchronization takes place according to specified criteria.
+This can be done by configuring `field.name` to specify the synchronization fields and `parser.path` to specify the JSON parsing path for those fields.
+The difference between the two is that the `specify` mode requires the user to explicitly identify the fields to be used and create a mapping table based on those fields.
 Dynamic mode, on the other hand, ensures that Paimon and MongoDB always keep the top-level fields consistent, eliminating the need to focus on specific fields.
 Further processing of the data table is required when using values from nested fields.
+2. The `mongodb-conf` introduces the `default.id.generation` parameter as an enhancement to the MongoDB CDC source configuration. The `default.id.generation` setting offers two distinct behaviors: when set to true and when set to false.
+When `default.id.generation` is set to true, the MongoDB CDC source adheres to the default `_id` generation strategy, which involves stripping the outer $oid nesting to provide a more straightforward identifier. This mode simplifies the `_id` representation, making it more direct and user-friendly.
+On the contrary, when `default.id.generation` is set to false, the MongoDB CDC source retains the original `_id` structure, without any additional processing. This mode offers users the flexibility to work with the raw `_id` format as provided by MongoDB, preserving any nested elements like `$oid`.
+The choice between the two hinges on the user's preference: the former for a cleaner, simplified `_id` and the latter for a direct representation of MongoDB's `_id` structure.
 
 {{< generated/mongodb_operator >}}
 
