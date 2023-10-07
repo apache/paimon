@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
@@ -243,6 +244,25 @@ public class CompactActionITCase extends CompactActionITCaseBase {
         checkFileAndRowSize(table, 3L, 0L, 1, 6);
     }
 
+    @Test
+    public void testTableConf() throws Exception {
+        prepareTable(
+                Arrays.asList("dt", "hh"), Arrays.asList("dt", "hh", "k"), Collections.emptyMap());
+
+        CompactAction compactAction =
+                new CompactAction(
+                                warehouse,
+                                database,
+                                tableName,
+                                Collections.emptyMap(),
+                                Collections.singletonMap(
+                                        FlinkConnectorOptions.SCAN_PARALLELISM.key(), "6"))
+                        .withPartitions(getSpecifiedPartitions());
+
+        assertThat(compactAction.table.options().get(FlinkConnectorOptions.SCAN_PARALLELISM.key()))
+                .isEqualTo("6");
+    }
+
     private FileStoreTable prepareTable(
             List<String> partitionKeys, List<String> primaryKeys, Map<String, String> tableOptions)
             throws Exception {
@@ -281,7 +301,7 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     private void callProcedure(boolean isStreaming) {
         callProcedure(
                 String.format(
-                        "CALL compact('%s.%s', '', '', '%s', '%s')",
+                        "CALL compact('%s.%s', '', '', '', '%s', '%s')",
                         database, tableName, "dt=20221208,hh=15", "dt=20221209,hh=15"),
                 isStreaming,
                 !isStreaming);

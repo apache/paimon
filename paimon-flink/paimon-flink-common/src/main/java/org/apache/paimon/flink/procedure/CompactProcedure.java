@@ -21,11 +21,14 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -62,7 +65,7 @@ public class CompactProcedure extends ProcedureBase {
             String orderStrategy,
             String orderByColumns)
             throws Exception {
-        return call(procedureContext, tableId, orderStrategy, orderByColumns, new String[0]);
+        return call(procedureContext, tableId, orderStrategy, orderByColumns, "", new String[0]);
     }
 
     public String[] call(
@@ -70,10 +73,15 @@ public class CompactProcedure extends ProcedureBase {
             String tableId,
             String orderStrategy,
             String orderByColumns,
+            String tableConfString,
             String... partitionStrings)
             throws Exception {
         String warehouse = ((AbstractCatalog) catalog).warehouse();
         Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
+        Map<String, String> tableConf =
+                StringUtils.isBlank(tableConfString)
+                        ? Collections.emptyMap()
+                        : ActionFactory.parseCommaSeparatedKeyValues(tableConfString);
         Identifier identifier = Identifier.fromString(tableId);
         CompactAction action;
         String jobName;
@@ -83,7 +91,8 @@ public class CompactProcedure extends ProcedureBase {
                             warehouse,
                             identifier.getDatabaseName(),
                             identifier.getObjectName(),
-                            catalogOptions);
+                            catalogOptions,
+                            tableConf);
             jobName = "Compact Job";
         } else if (!orderStrategy.isEmpty() && !orderByColumns.isEmpty()) {
             action =
@@ -91,7 +100,8 @@ public class CompactProcedure extends ProcedureBase {
                                     warehouse,
                                     identifier.getDatabaseName(),
                                     identifier.getObjectName(),
-                                    catalogOptions)
+                                    catalogOptions,
+                                    tableConf)
                             .withOrderStrategy(orderStrategy)
                             .withOrderColumns(orderByColumns.split(","));
             jobName = "Sort Compact Job";

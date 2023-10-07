@@ -245,7 +245,8 @@ object WriteIntoPaimonTable {
               indexFileHandler,
               partition,
               targetBucketRowNumber,
-              (_) => true))
+              (_) => true,
+              buckFilter))
           val bucket = index.assign(hash, buckFilter)
           val sparkInternalRow = toRow(row)
           sparkInternalRow.setInt(bucketColIndex, bucket)
