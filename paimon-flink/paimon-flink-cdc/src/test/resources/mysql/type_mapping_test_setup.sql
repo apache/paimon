@@ -276,8 +276,8 @@ CREATE DATABASE char_to_string_test;
 USE char_to_string_test;
 
 CREATE TABLE t1 (
-    pk INT NOT NULL,
-    v1 VARCHAR(10),
+    pk INT,
+    v1 VARCHAR(10) NOT NULL,
     PRIMARY KEY (pk)
 );
 
