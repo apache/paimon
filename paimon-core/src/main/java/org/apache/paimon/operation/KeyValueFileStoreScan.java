@@ -29,12 +29,16 @@ import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.List;
+
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
-    private final FieldStatsConverters fieldStatsConverters;
+    private final FieldStatsConverters fieldKeyStatsConverters;
+    private final FieldStatsConverters fieldValueStatsConverters;
 
     private Predicate keyFilter;
+    private Predicate valueFilter;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
@@ -58,14 +62,22 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 numOfBuckets,
                 checkNumOfBuckets,
                 scanManifestParallelism);
-        this.fieldStatsConverters =
+        this.fieldKeyStatsConverters =
                 new FieldStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)), schemaId);
+        this.fieldValueStatsConverters =
+                new FieldStatsConverters(
+                        sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)), schemaId);
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
         this.keyFilter = predicate;
         this.bucketKeyFilter.pushdown(predicate);
+        return this;
+    }
+
+    public KeyValueFileStoreScan withValueFilter(Predicate predicate) {
+        this.valueFilter = predicate;
         return this;
     }
 
@@ -78,7 +90,30 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                         entry.file()
                                 .keyStats()
                                 .fields(
-                                        fieldStatsConverters.getOrCreate(entry.file().schemaId()),
+                                        fieldKeyStatsConverters.getOrCreate(
+                                                entry.file().schemaId()),
                                         entry.file().rowCount()));
+    }
+
+    /** Note: Keep this thread-safe. */
+    @Override
+    protected boolean filterWholeBucketByStats(List<ManifestEntry> entries) {
+        // entries come from the same bucket, if any of it doesn't meet the request, we could filter
+        // the bucket.
+        if (valueFilter != null) {
+            for (ManifestEntry entry : entries) {
+                if (valueFilter.test(
+                        entry.file().rowCount(),
+                        entry.file()
+                                .valueStats()
+                                .fields(
+                                        fieldValueStatsConverters.getOrCreate(
+                                                entry.file().schemaId()),
+                                        entry.file().rowCount()))) {
+                    return true;
+                }
+            }
+        }
+        return valueFilter == null;
     }
 }

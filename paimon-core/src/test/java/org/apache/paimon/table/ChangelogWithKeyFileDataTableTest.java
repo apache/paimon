@@ -72,7 +72,6 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                                             "1|22|122|1122|S012|S22"));
 
                     // filter with "a" = 1122 in scan and read
-                    /// TODO: changelog with key only supports to filter key
                     splits =
                             toSplits(
                                     table.newSnapshotReader()
@@ -83,9 +82,6 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
                     assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
                             .hasSameElementsAs(
                                     Arrays.asList(
-                                            "2|12|112|null|null|null",
-                                            "2|15|115|null|null|null",
-                                            "2|16|116|null|null|null",
                                             "1|11|111|null|null|null",
                                             "1|13|113|null|null|null",
                                             "1|14|114|null|null|null",

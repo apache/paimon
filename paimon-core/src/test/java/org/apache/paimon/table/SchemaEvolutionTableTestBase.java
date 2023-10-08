@@ -130,7 +130,7 @@ public abstract class SchemaEvolutionTableTestBase {
         fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
         tableConfig.set(CoreOptions.PATH, tablePath.toString());
-        tableConfig.set(CoreOptions.BUCKET, 2);
+        tableConfig.set(CoreOptions.BUCKET, 1);
     }
 
     @AfterEach

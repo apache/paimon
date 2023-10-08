@@ -214,6 +214,28 @@ public class TestKeyValueGenerator {
                         rowSerializer.toBinaryRow(convertToRow(order)).copy());
     }
 
+    public KeyValue nextInsert(
+            String dt,
+            int hr,
+            @Nullable Long itemId,
+            @Nullable int[] priceMount,
+            @Nullable String comment) {
+        Order order = new Order();
+        order.dt = dt;
+        order.hr = hr;
+        order.itemId = itemId;
+        order.priceAmount = priceMount;
+        order.comment = comment;
+        return new KeyValue()
+                .replace(
+                        KEY_SERIALIZER
+                                .toBinaryRow(GenericRow.of(order.shopId, order.orderId))
+                                .copy(),
+                        sequenceNumber++,
+                        RowKind.INSERT,
+                        rowSerializer.toBinaryRow(convertToRow(order)).copy());
+    }
+
     // used for FileStoreExpireDeleteDirTest to generate data in specified partition
     public KeyValue nextPartitionedData(RowKind kind, Object... partitionSpec) {
         Order order = new Order();

@@ -28,6 +28,8 @@ import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.List;
+
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
@@ -77,5 +79,11 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                                 .fields(
                                         fieldStatsConverters.getOrCreate(entry.file().schemaId()),
                                         entry.file().rowCount()));
+    }
+
+    @Override
+    protected boolean filterWholeBucketByStats(List<ManifestEntry> entries) {
+        // We don't need to filter per-bucket entries here
+        return true;
     }
 }
