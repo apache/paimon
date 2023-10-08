@@ -47,14 +47,14 @@ import java.util.stream.Collectors;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-class KafkaActionUtils {
+public class KafkaActionUtils {
 
     public static final String PROPERTIES_PREFIX = "properties.";
 
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
 
-    static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
+    public static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
         validateKafkaConfig(kafkaConfig);
         KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
 

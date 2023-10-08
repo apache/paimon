@@ -81,7 +81,7 @@ public class MySqlActionUtils {
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
     }
 
-    static MySqlSchemasInfo getMySqlTableInfos(
+    public static MySqlSchemasInfo getMySqlTableInfos(
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables,
@@ -127,7 +127,7 @@ public class MySqlActionUtils {
         return mySqlSchemasInfo;
     }
 
-    static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {
+    public static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {
         validateMySqlConfig(mySqlConfig);
         MySqlSourceBuilder<String> sourceBuilder = MySqlSource.builder();
 
