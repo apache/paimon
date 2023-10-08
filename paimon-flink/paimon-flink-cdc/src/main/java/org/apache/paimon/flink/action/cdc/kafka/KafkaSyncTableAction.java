@@ -166,7 +166,6 @@ public class KafkaSyncTableAction extends ActionBase {
                         new CdcMetadataConverter[] {});
 
         try {
-
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = fileStoreTable.copy(tableConfig);
             assertSchemaCompatible(fileStoreTable.schema(), fromKafka.fields());

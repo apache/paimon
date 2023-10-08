@@ -461,6 +461,7 @@ CREATE TABLE t1 (
    k INT,
    v1 VARCHAR(10),
    PRIMARY KEY (k)
+);
 
 -- ################################################################################
 --  testMetadataColumns

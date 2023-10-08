@@ -136,7 +136,6 @@ public class MongoDBSyncTableAction extends ActionBase {
                 buildComputedColumns(computedColumnArgs, mongodbSchema);
 
         Identifier identifier = new Identifier(database, table);
-
         Schema fromMongodb =
                 buildPaimonSchema(
                         partitionKeys,
