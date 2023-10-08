@@ -47,6 +47,7 @@ import java.util.stream.Collectors;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
+/** Utils for Kafka Action. */
 public class KafkaActionUtils {
 
     public static final String PROPERTIES_PREFIX = "properties.";
