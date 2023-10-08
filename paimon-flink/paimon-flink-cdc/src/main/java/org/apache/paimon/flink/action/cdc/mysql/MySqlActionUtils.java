@@ -127,7 +127,8 @@ public class MySqlActionUtils {
         return mySqlSchemasInfo;
     }
 
-    public static MySqlSource<String> buildMySqlSource(Configuration mySqlConfig, String tableList) {
+    public static MySqlSource<String> buildMySqlSource(
+            Configuration mySqlConfig, String tableList) {
         validateMySqlConfig(mySqlConfig);
         MySqlSourceBuilder<String> sourceBuilder = MySqlSource.builder();
 
