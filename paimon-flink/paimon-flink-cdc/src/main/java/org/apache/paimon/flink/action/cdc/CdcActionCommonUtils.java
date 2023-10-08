@@ -150,7 +150,8 @@ public class CdcActionCommonUtils {
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
             Map<String, String> tableConfig,
-            Schema sourceSchema) {
+            Schema sourceSchema,
+            CdcMetadataConverter[] metadataConverters) {
         Schema.Builder builder = Schema.newBuilder();
 
         // options
@@ -169,6 +170,10 @@ public class CdcActionCommonUtils {
 
         for (ComputedColumn computedColumn : computedColumns) {
             builder.column(computedColumn.columnName(), computedColumn.columnType());
+        }
+
+        for (CdcMetadataConverter metadataConverter : metadataConverters) {
+            builder.column(metadataConverter.getColumnName(), metadataConverter.getDataType());
         }
 
         // primary keys

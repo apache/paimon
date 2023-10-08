@@ -1248,6 +1248,74 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }
 
+    @Test
+    @Timeout(60)
+    public void testMetadataColumns() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "metadata");
+
+        MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withMode(mode.configString())
+                        .withMetadataColumn(Arrays.asList("table_name", "database_name"))
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("INSERT INTO metadata.t1 VALUES (1, 'db1_1')");
+            statement.executeUpdate("INSERT INTO metadata.t1 VALUES (2, 'db1_2')");
+
+            statement.executeUpdate("INSERT INTO metadata.t1 VALUES (3, 'db2_3')");
+            statement.executeUpdate("INSERT INTO metadata.t1 VALUES (4, 'db2_4')");
+
+            FileStoreTable table = getFileStoreTable("t1");
+            RowType rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(),
+                                DataTypes.VARCHAR(10),
+                                DataTypes.STRING().notNull(),
+                                DataTypes.STRING().notNull()
+                            },
+                            new String[] {"k", "v1", "table_name", "database_name"});
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, db1_1, t1, metadata]",
+                            "+I[2, db1_2, t1, metadata]",
+                            "+I[3, db2_3, t1, metadata]",
+                            "+I[4, db2_4, t1, metadata]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+
+            statement.executeUpdate("INSERT INTO metadata.t2 VALUES (1, 'db1_1')");
+            statement.executeUpdate("INSERT INTO metadata.t2 VALUES (2, 'db1_2')");
+            statement.executeUpdate("INSERT INTO metadata.t2 VALUES (3, 'db1_3')");
+            statement.executeUpdate("INSERT INTO metadata.t2 VALUES (4, 'db1_4')");
+            table = getFileStoreTable("t2");
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(),
+                                DataTypes.VARCHAR(10),
+                                DataTypes.STRING().notNull(),
+                                DataTypes.STRING().notNull()
+                            },
+                            new String[] {"k", "v1", "table_name", "database_name"});
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, db1_1, t2, metadata]",
+                            "+I[2, db1_2, t2, metadata]",
+                            "+I[3, db1_3, t2, metadata]",
+                            "+I[4, db1_4, t2, metadata]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("k"));
+        }
+    }
+
     private class SyncNewTableJob implements Runnable {
 
         private final int ith;

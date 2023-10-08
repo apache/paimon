@@ -25,6 +25,7 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
@@ -55,6 +56,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.schemaCompatible;
@@ -117,6 +119,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
     private final List<Identifier> excludedTables = new ArrayList<>();
+    private List<String> metadataColumn = new ArrayList<>();
 
     public MySqlSyncDatabaseAction(
             String warehouse,
@@ -179,6 +182,11 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         return this;
     }
 
+    public MySqlSyncDatabaseAction withMetadataKeys(List<String> metadataKeys) {
+        this.metadataColumn = metadataKeys;
+        return this;
+    }
+
     @Override
     public void build(StreamExecutionEnvironment env) throws Exception {
         checkArgument(
@@ -218,6 +226,17 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
 
+        CdcMetadataConverter[] metadataConverters =
+                metadataColumn.stream()
+                        .map(
+                                key ->
+                                        Stream.of(MySqlMetadataProcessor.values())
+                                                .filter(m -> m.getKey().equals(key))
+                                                .findFirst()
+                                                .orElseThrow(IllegalStateException::new))
+                        .map(MySqlMetadataProcessor::getConverter)
+                        .toArray(CdcMetadataConverter[]::new);
+
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
         for (MySqlTableInfo tableInfo : mySqlTableInfos) {
             Identifier identifier =
@@ -230,7 +249,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                             Collections.emptyList(),
                             Collections.emptyList(),
                             tableConfig,
-                            tableInfo.schema());
+                            tableInfo.schema(),
+                            metadataConverters);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 table = table.copy(tableConfig);
@@ -280,7 +300,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 schemaBuilder,
                                 includingPattern,
                                 excludingPattern,
-                                typeMapping);
+                                typeMapping,
+                                metadataConverters);
 
         String database = this.database;
         MultiTablesSinkMode mode = this.mode;

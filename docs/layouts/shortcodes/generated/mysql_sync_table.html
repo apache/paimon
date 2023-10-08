@@ -64,6 +64,10 @@ under the License.
         <td>The definitions of computed columns. The argument field is from MySQL table field name. See <a href="#computed-functions">here</a> for a complete list of configurations. </td>
     </tr>
     <tr>
+        <td><h5>--metadata-column</h5></td>
+        <td>--metadata-column is used to specify which metadata columns to include in the output schema of the connector. Metadata columns provide additional information related to the source data, such as the `table_name`, `database_name`, and `op_ts`. Each configuration should be specified in the format "key=value". See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#available-metadata">document</a> for a complete list of available metadata.</td>
+    </tr>
+    <tr>
         <td><h5>--mysql-conf</h5></td>
         <td>The configuration for Flink CDC MySQL sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name and table-name are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document</a> for a complete list of configurations.</td>
     </tr>

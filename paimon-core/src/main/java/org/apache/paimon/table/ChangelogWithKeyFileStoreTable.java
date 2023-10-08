@@ -136,7 +136,6 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             // if we perform filter push down on values, data file 1 will be chosen, but data
             // file 2 will be ignored, and the final result will be key = a, value = 1 while the
             // correct result is an empty set
-            // TODO support value filter
             List<Predicate> keyFilters =
                     pickTransformFieldMapping(
                             splitAnd(predicate),
@@ -145,6 +144,9 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             if (keyFilters.size() > 0) {
                 ((KeyValueFileStoreScan) scan).withKeyFilter(and(keyFilters));
             }
+
+            // support value filter in bucket level
+            ((KeyValueFileStoreScan) scan).withValueFilter(predicate);
         };
     }
 

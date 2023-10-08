@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.kafka.format.DataFormat;
@@ -157,7 +158,12 @@ public class KafkaSyncTableAction extends ActionBase {
                 buildComputedColumns(computedColumnArgs, kafkaSchema);
         Schema fromKafka =
                 buildPaimonSchema(
-                        partitionKeys, primaryKeys, computedColumns, tableConfig, kafkaSchema);
+                        partitionKeys,
+                        primaryKeys,
+                        computedColumns,
+                        tableConfig,
+                        kafkaSchema,
+                        new CdcMetadataConverter[] {});
 
         try {
 

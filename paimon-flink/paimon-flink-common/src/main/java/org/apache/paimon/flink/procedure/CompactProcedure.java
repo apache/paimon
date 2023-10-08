@@ -40,11 +40,12 @@ import java.util.Map;
  *  -- compact a table (tableId should be 'database_name.table_name')
  *  CALL compact('tableId')
  *
- *  -- compact a table with sorting
- *  CALL compact('tableId', 'orderStrategy', 'orderByColumns')
+ *  -- compact specific partitions ('pt1=A,pt2=a;pt1=B,pt2=b', ...)
+ *  CALL compact('tableId', 'pt1=A,pt2=a;pt1=B,pt2=b')
  *
- *  -- compact specific partitions ('pt1=A,pt2=a', 'pt1=B,pt2=b', ...)
- *  CALL compact('tableId', '', '', partition1, partition2, ...)
+ *  -- compact a table with sorting
+ *  CALL compact('tableId', 'partitions', 'ORDER/ZORDER', 'col1,col2', 'sink.parallelism=6')
+ *
  * </code></pre>
  */
 public class CompactProcedure extends ProcedureBase {
@@ -56,32 +57,38 @@ public class CompactProcedure extends ProcedureBase {
     }
 
     public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
-        return call(procedureContext, tableId, "", "");
+        return call(procedureContext, tableId, "");
+    }
+
+    public String[] call(ProcedureContext procedureContext, String tableId, String partitions)
+            throws Exception {
+        return call(procedureContext, tableId, partitions, "", "", "");
     }
 
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
+            String partitions,
             String orderStrategy,
             String orderByColumns)
             throws Exception {
-        return call(procedureContext, tableId, orderStrategy, orderByColumns, "", new String[0]);
+        return call(procedureContext, tableId, partitions, orderStrategy, orderByColumns, "");
     }
 
     public String[] call(
             ProcedureContext procedureContext,
             String tableId,
+            String partitions,
             String orderStrategy,
             String orderByColumns,
-            String tableConfString,
-            String... partitionStrings)
+            String tableOptions)
             throws Exception {
         String warehouse = ((AbstractCatalog) catalog).warehouse();
         Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
         Map<String, String> tableConf =
-                StringUtils.isBlank(tableConfString)
+                StringUtils.isBlank(tableOptions)
                         ? Collections.emptyMap()
-                        : ActionFactory.parseCommaSeparatedKeyValues(tableConfString);
+                        : ActionFactory.parseCommaSeparatedKeyValues(tableOptions);
         Identifier identifier = Identifier.fromString(tableId);
         CompactAction action;
         String jobName;
@@ -110,8 +117,8 @@ public class CompactProcedure extends ProcedureBase {
                     "You must specify 'order strategy' and 'order by columns' both.");
         }
 
-        if (partitionStrings.length != 0) {
-            action.withPartitions(getPartitions(partitionStrings));
+        if (!(StringUtils.isBlank(partitions) || "ALL".equals(partitions))) {
+            action.withPartitions(getPartitions(partitions.split(";")));
         }
 
         return execute(procedureContext, action, jobName);

@@ -112,7 +112,7 @@ Example: compact table
     --catalog-conf s3.secret-key=*****
 ```
 
-You can use `-D execution.runtime-mode=batch` to control batch or streaming mode. If you submit a batch job, all
+You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=batch` (for the ON-YARN scenario) to control batch or streaming mode. If you submit a batch job, all
 current table files will be compacted. If you submit a streaming job, the job will continuously monitor new changes
 to the table and perform compactions as needed.
 

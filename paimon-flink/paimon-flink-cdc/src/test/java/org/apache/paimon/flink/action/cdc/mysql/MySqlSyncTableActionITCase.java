@@ -896,6 +896,45 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
+    @Timeout(60)
+    public void testMetadataColumns() throws Exception {
+        try (Statement statement = getStatement()) {
+            statement.execute("USE metadata");
+            statement.executeUpdate("INSERT INTO test_metadata_columns VALUES (1, '2023-07-30')");
+            statement.executeUpdate("INSERT INTO test_metadata_columns VALUES (2, '2023-07-30')");
+        }
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "metadata");
+        mySqlConfig.put("table-name", "test_metadata_columns");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withMetadataColumn(Arrays.asList("table_name", "database_name"))
+                        .build();
+
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10),
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING().notNull()
+                        },
+                        new String[] {"pk", "_date", "table_name", "database_name"});
+        waitForResult(
+                Arrays.asList(
+                        "+I[1, 2023-07-30, test_metadata_columns, metadata]",
+                        "+I[2, 2023-07-30, test_metadata_columns, metadata]"),
+                table,
+                rowType,
+                Collections.singletonList("pk"));
+    }
+
+    @Test
     public void testCatalogAndTableConfig() {
         MySqlSyncTableAction action =
                 syncTableActionBuilder(getBasicMySqlConfig())
