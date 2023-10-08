@@ -25,6 +25,7 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
+import java.util.Arrays;
 import java.util.Optional;
 
 /** Factory to create {@link MySqlSyncDatabaseAction}. */
@@ -58,6 +59,9 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .includingTables(params.get("including-tables"))
                 .excludingTables(params.get("excluding-tables"))
                 .withMode(MultiTablesSinkMode.fromString(params.get("mode")));
+        if (params.has("metadata-column")) {
+            action.withMetadataKeys(Arrays.asList(params.get("metadata-column").split(",")));
+        }
 
         if (params.has("type-mapping")) {
             String[] options = params.get("type-mapping").split(",");
@@ -87,6 +91,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--including-tables <mysql-table-name|name-regular-expr>] "
                         + "[--excluding-tables <mysql-table-name|name-regular-expr>] "
                         + "[--mode <sync-mode>] "
+                        + "[--metadata-column <metadata-column>] "
                         + "[--type-mapping <option1,option2...>] "
                         + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
                         + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
@@ -129,6 +134,10 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "start a sink for each table, the synchronization of the new table requires restarting the job;");
         System.out.println(
                 "  2. 'combined': start a single combined sink for all tables, the new table will be automatically synchronized.");
+        System.out.println();
+
+        System.out.println(
+                "--metadata-column is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
         System.out.println();
 
         System.out.println(

@@ -86,6 +86,7 @@ To use this feature through `flink run`, run the following shell command.
     [--primary-keys <primary-keys>] \
     [--type-mapping <option1,option2...>] \
     [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
+    [--metadata-column <metadata-column>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
     [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
@@ -169,6 +170,7 @@ To use this feature through `flink run`, run the following shell command.
     [--including-tables <mysql-table-name|name-regular-expr>] \
     [--excluding-tables <mysql-table-name|name-regular-expr>] \
     [--mode <sync-mode>] \
+    [--metadata-column <metadata-column>] \
     [--type-mapping <option1,option2...>] \
     [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \

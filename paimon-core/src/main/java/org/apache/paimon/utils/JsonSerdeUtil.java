@@ -204,5 +204,20 @@ public class JsonSerdeUtil {
         return clazz.cast(resultNode);
     }
 
+    /**
+     * Converts the given Java object into its corresponding {@link JsonNode} representation.
+     *
+     * <p>This method utilizes the Jackson {@link ObjectMapper}'s valueToTree functionality to
+     * transform any Java object into a JsonNode, which can be useful for various JSON tree
+     * manipulations without serializing the object into a string format first.
+     *
+     * @param <T> The type of the input object.
+     * @param value The Java object to be converted.
+     * @return The JsonNode representation of the given object.
+     */
+    public static <T> JsonNode toTree(T value) {
+        return OBJECT_MAPPER_INSTANCE.valueToTree(value);
+    }
+
     private JsonSerdeUtil() {}
 }

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.mysql.format;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnore;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
@@ -140,6 +141,7 @@ public class DebeziumEvent {
         }
 
         /** Get table changes in history record. */
+        @JsonIgnore
         public Iterator<TableChanges.TableChange> getTableChanges() throws IOException {
             return DebeziumEventUtils.getTableChanges(historyRecord).iterator();
         }
