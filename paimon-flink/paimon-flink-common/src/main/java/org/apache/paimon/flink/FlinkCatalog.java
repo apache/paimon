@@ -267,8 +267,28 @@ public class FlinkCatalog extends AbstractCatalog {
                     "Creating table in default database is disabled, please specify a database name.");
         }
 
-        CatalogTable catalogTable = (CatalogTable) table;
+        Identifier identifier = toIdentifier(tablePath);
         Map<String, String> options = table.getOptions();
+        Schema paimonSchema = buildPaimonSchema(identifier, (CatalogTable) table, options);
+
+        boolean unRegisterLogSystem = false;
+        try {
+            catalog.createTable(identifier, paimonSchema, ignoreIfExists);
+        } catch (Catalog.TableAlreadyExistException e) {
+            unRegisterLogSystem = true;
+            throw new TableAlreadyExistException(getName(), tablePath);
+        } catch (Catalog.DatabaseNotExistException e) {
+            unRegisterLogSystem = true;
+            throw new DatabaseNotExistException(getName(), e.database());
+        } finally {
+            if (logStoreAutoRegister && unRegisterLogSystem) {
+                unRegisterLogSystem(identifier, options, classLoader);
+            }
+        }
+    }
+
+    protected Schema buildPaimonSchema(
+            Identifier identifier, CatalogTable catalogTable, Map<String, String> options) {
         String connector = options.get(CONNECTOR.key());
         options.remove(CONNECTOR.key());
         if (!StringUtils.isNullOrWhitespaceOnly(connector)
@@ -281,7 +301,6 @@ public class FlinkCatalog extends AbstractCatalog {
                             + " You can create TEMPORARY table instead if you want to create the table of other connector.");
         }
 
-        Identifier identifier = toIdentifier(tablePath);
         if (logStoreAutoRegister) {
             // Although catalog.createTable will copy the default options, but we need this info
             // here before create table, such as table-default.kafka.bootstrap.servers defined in
@@ -293,27 +312,14 @@ public class FlinkCatalog extends AbstractCatalog {
             options.put(REGISTER_TIMEOUT.key(), logStoreAutoRegisterTimeout.toString());
             registerLogSystem(catalog, identifier, options, classLoader);
         }
+
         // remove table path
         String specific = options.remove(PATH.key());
         if (specific != null || logStoreAutoRegister) {
             catalogTable = catalogTable.copy(options);
         }
 
-        boolean unRegisterLogSystem = false;
-        try {
-            catalog.createTable(
-                    identifier, FlinkCatalog.fromCatalogTable(catalogTable), ignoreIfExists);
-        } catch (Catalog.TableAlreadyExistException e) {
-            unRegisterLogSystem = true;
-            throw new TableAlreadyExistException(getName(), tablePath);
-        } catch (Catalog.DatabaseNotExistException e) {
-            unRegisterLogSystem = true;
-            throw new DatabaseNotExistException(getName(), e.database());
-        } finally {
-            if (logStoreAutoRegister && unRegisterLogSystem) {
-                unRegisterLogSystem(identifier, options, classLoader);
-            }
-        }
+        return fromCatalogTable(catalogTable);
     }
 
     private List<SchemaChange> toSchemaChange(TableChange change) {
