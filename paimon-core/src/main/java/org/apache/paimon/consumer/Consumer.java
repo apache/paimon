@@ -28,6 +28,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 /** Consumer which contains next snapshot. */
 public class Consumer {
@@ -35,6 +36,8 @@ public class Consumer {
     private static final String FIELD_NEXT_SNAPSHOT = "nextSnapshot";
 
     private final long nextSnapshot;
+    private static final int READ_CONSUMER_RETRY_NUM = 3;
+    private static final int READ_CONSUMER_RETRY_INTERVAL = 100;
 
     @JsonCreator
     public Consumer(@JsonProperty(FIELD_NEXT_SNAPSHOT) long nextSnapshot) {
@@ -60,10 +63,30 @@ public class Consumer {
                 return Optional.empty();
             }
 
-            String json = fileIO.readFileUtf8(path);
-            return Optional.of(Consumer.fromJson(json));
+            int retryNumber = 0;
+            Exception exception = null;
+            while (retryNumber++ < READ_CONSUMER_RETRY_NUM) {
+                try {
+                    String json = fileIO.readFileUtf8(path);
+                    Optional<Consumer> consumer = Optional.of(Consumer.fromJson(json));
+                    exception = null;
+                    return consumer;
+                } catch (Exception ignored) {
+                    exception = ignored;
+                }
+                try {
+                    TimeUnit.MILLISECONDS.sleep(READ_CONSUMER_RETRY_INTERVAL);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException(e);
+                }
+            }
+            if (exception != null) {
+                throw new RuntimeException("Fails to read snapshot from path " + path, exception);
+            }
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);
         }
+        return Optional.empty();
     }
 }

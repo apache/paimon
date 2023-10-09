@@ -84,4 +84,10 @@ public class ConsumerManagerTest {
         manager.expire(expireDateTime);
         assertThat(manager.consumer("id2")).map(Consumer::nextSnapshot).get().isEqualTo(3L);
     }
+
+    @Test
+    public void testReadConsumer() throws Exception {
+        manager.resetConsumer("id1", new Consumer(5));
+        assertThat(manager.consumer("id1"));
+    }
 }
