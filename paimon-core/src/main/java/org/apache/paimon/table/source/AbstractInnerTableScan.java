@@ -79,20 +79,16 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
 
     protected StartingScanner createStartingScanner(boolean isStreaming) {
         SnapshotManager snapshotManager = snapshotReader.snapshotManager();
-        CoreOptions.StreamingCompactionType type =
-                options.toConfiguration().get(CoreOptions.STREAMING_COMPACT);
+        CoreOptions.StreamScanMode type =
+                options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         switch (type) {
-            case NORMAL:
-                {
-                    checkArgument(
-                            isStreaming,
-                            "Set 'streaming-compact' in batch mode. This is unexpected.");
-                    return new ContinuousCompactorStartingScanner(snapshotManager);
-                }
-            case BUCKET_UNAWARE:
-                {
-                    return new FullStartingScanner(snapshotManager);
-                }
+            case COMPACT_BUCKET_TABLE:
+                checkArgument(
+                        isStreaming, "Set 'streaming-compact' in batch mode. This is unexpected.");
+                return new ContinuousCompactorStartingScanner(snapshotManager);
+            case COMPACT_APPEND_NO_BUCKET:
+            case FILE_MONITOR:
+                return new FullStartingScanner(snapshotManager);
         }
 
         // read from consumer id

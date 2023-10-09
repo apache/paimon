@@ -231,18 +231,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 .collect(Collectors.toList());
     }
 
-    /** Get splits from an overwritten snapshot files. */
     @Override
-    public Plan readOverwrittenChanges() {
+    public Plan readChanges() {
         withMode(ScanMode.DELTA);
         FileStoreScan.Plan plan = scan.plan();
-        long snapshotId = plan.snapshotId();
-
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-        if (snapshot.commitKind() != Snapshot.CommitKind.OVERWRITE) {
-            throw new IllegalStateException(
-                    "Cannot read overwrite splits from a non-overwrite snapshot.");
-        }
 
         Map<BinaryRow, Map<Integer, List<DataFileMeta>>> beforeFiles =
                 groupByPartFiles(plan.files(FileKind.DELETE));

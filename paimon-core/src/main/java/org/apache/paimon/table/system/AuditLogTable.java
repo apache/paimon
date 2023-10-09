@@ -253,8 +253,8 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
-        public Plan readOverwrittenChanges() {
-            return snapshotReader.readOverwrittenChanges();
+        public Plan readChanges() {
+            return snapshotReader.readChanges();
         }
 
         @Override
