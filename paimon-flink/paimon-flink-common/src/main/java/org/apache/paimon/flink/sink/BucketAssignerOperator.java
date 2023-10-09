@@ -43,7 +43,7 @@ public class BucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, 
 
     private final AbstractFileStoreTable table;
     private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
-    private final boolean compactSink;
+    private final boolean overwrite;
 
     private transient BucketAssigner assigner;
     private transient PartitionKeyExtractor<T> extractor;
@@ -52,11 +52,11 @@ public class BucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, 
             String commitUser,
             Table table,
             SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction,
-            boolean compactSink) {
+            boolean overwrite) {
         this.initialCommitUser = commitUser;
         this.table = (AbstractFileStoreTable) table;
         this.extractorFunction = extractorFunction;
-        this.compactSink = compactSink;
+        this.overwrite = overwrite;
     }
 
     @Override
@@ -71,7 +71,7 @@ public class BucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, 
                         context, "commit_user_state", String.class, initialCommitUser);
 
         this.assigner =
-                compactSink
+                overwrite
                         ? new SimpleHashBucketAssigner(
                                 getRuntimeContext().getNumberOfParallelSubtasks(),
                                 getRuntimeContext().getIndexOfThisSubtask(),
