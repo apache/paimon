@@ -45,12 +45,12 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
 
         KafkaSyncTableAction action =
                 new KafkaSyncTableAction(
-                                tablePath.f0,
-                                tablePath.f1,
-                                tablePath.f2,
-                                optionalConfigMap(params, "catalog-conf"),
-                                optionalConfigMap(params, "kafka-conf"))
-                        .withTableConfig(optionalConfigMap(params, "table-conf"));
+                        tablePath.f0,
+                        tablePath.f1,
+                        tablePath.f2,
+                        optionalConfigMap(params, "catalog-conf"),
+                        optionalConfigMap(params, "kafka-conf"));
+        action.withTableConfig(optionalConfigMap(params, "table-conf"));
 
         if (params.has("partition-keys")) {
             action.withPartitionKeys(params.get("partition-keys").split(","));

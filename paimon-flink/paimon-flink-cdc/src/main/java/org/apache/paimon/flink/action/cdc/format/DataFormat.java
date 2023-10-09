@@ -16,22 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.format;
+package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.format.canal.CanalRecordParser;
-import org.apache.paimon.flink.action.cdc.kafka.format.maxwell.MaxwellRecordParser;
-import org.apache.paimon.flink.action.cdc.kafka.format.ogg.OggRecordParser;
-
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
+import org.apache.paimon.flink.action.cdc.format.canal.CanalRecordParser;
+import org.apache.paimon.flink.action.cdc.format.maxwell.MaxwellRecordParser;
+import org.apache.paimon.flink.action.cdc.format.ogg.OggRecordParser;
 
 import java.util.List;
 
 /**
- * Enumerates the supported data formats and provides a mechanism to create their associated {@link
- * RecordParser}.
+ * Enumerates the supported data formats for message queue and provides a mechanism to create their
+ * associated {@link RecordParser}.
  *
  * <p>Each data format is associated with a specific implementation of {@link RecordParserFactory},
  * which can be used to create instances of {@link RecordParser} for that format.
@@ -61,21 +58,12 @@ public enum DataFormat {
         return parser.createParser(caseSensitive, typeMapping, computedColumns);
     }
 
-    /**
-     * Determines the appropriate {@link DataFormat} based on the provided Kafka configuration.
-     *
-     * @param kafkaConfig The Kafka configuration containing the desired data format.
-     * @return The corresponding {@link DataFormat}.
-     * @throws UnsupportedOperationException If the specified format in the configuration is not
-     *     supported.
-     */
-    public static DataFormat getDataFormat(Configuration kafkaConfig) {
-        String formatStr = kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT);
+    public static DataFormat fromConfigString(String format) {
         try {
-            return DataFormat.valueOf(formatStr.replace("-", "_").toUpperCase());
+            return DataFormat.valueOf(format.replace("-", "_").toUpperCase());
         } catch (Exception e) {
             throw new UnsupportedOperationException(
-                    String.format("This format: %s is not supported.", formatStr));
+                    String.format("This format: %s is not supported.", format));
         }
     }
 }

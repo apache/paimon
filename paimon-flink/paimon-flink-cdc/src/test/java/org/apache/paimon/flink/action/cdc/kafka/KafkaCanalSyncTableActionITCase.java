@@ -38,7 +38,7 @@ import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** IT cases for {@link KafkaCanalSyncTableActionITCase}. */
+/** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
     @Test

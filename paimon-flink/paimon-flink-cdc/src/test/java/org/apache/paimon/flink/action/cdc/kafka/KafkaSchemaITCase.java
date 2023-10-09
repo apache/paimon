@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -34,9 +35,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getDataFormat;
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getKafkaEarliestConsumer;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link KafkaSchemaUtils}. */
+/** Tests for building schema from Kafka. */
 public class KafkaSchemaITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
@@ -50,16 +53,16 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", topic);
+        Configuration kafkaConfig = Configuration.fromMap(getBasicKafkaConfig());
+        kafkaConfig.setString("value.format", "canal-json");
+        kafkaConfig.setString("topic", topic);
 
         Schema kafkaSchema =
-                KafkaSchemaUtils.getKafkaSchema(
-                        Configuration.fromMap(kafkaConfig),
+                MessageQueueSchemaUtils.getSchema(
+                        getKafkaEarliestConsumer(kafkaConfig, topic),
                         topic,
-                        TypeMapping.defaultMapping(),
-                        true);
+                        getDataFormat(kafkaConfig),
+                        TypeMapping.defaultMapping());
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "pt", DataTypes.INT()));
         fields.add(new DataField(1, "_id", DataTypes.INT().notNull()));
