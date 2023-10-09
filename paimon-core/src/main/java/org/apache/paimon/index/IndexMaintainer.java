@@ -20,6 +20,8 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryRow;
 
+import javax.annotation.Nullable;
+
 import java.util.List;
 
 /** Maintainer to maintain index. */
@@ -31,6 +33,7 @@ public interface IndexMaintainer<T> {
 
     /** Factory to restore {@link IndexMaintainer}. */
     interface Factory<T> {
-        IndexMaintainer<T> createOrRestore(Long snapshotId, BinaryRow partition, int bucket);
+        IndexMaintainer<T> createOrRestore(
+                @Nullable Long snapshotId, BinaryRow partition, int bucket);
     }
 }

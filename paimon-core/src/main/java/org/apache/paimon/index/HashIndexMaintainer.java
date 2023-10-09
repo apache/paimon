@@ -19,10 +19,13 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.IntHashSet;
 import org.apache.paimon.utils.IntIterator;
+
+import javax.annotation.Nullable;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -40,7 +43,10 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
     private boolean modified;
 
     private HashIndexMaintainer(
-            IndexFileHandler fileHandler, Long snapshotId, BinaryRow partition, int bucket) {
+            IndexFileHandler fileHandler,
+            @Nullable Long snapshotId,
+            BinaryRow partition,
+            int bucket) {
         this.fileHandler = fileHandler;
         IntHashSet hashcode = new IntHashSet();
         if (snapshotId != null) {
@@ -93,6 +99,11 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
         return Collections.emptyList();
     }
 
+    @VisibleForTesting
+    public boolean isEmpty() {
+        return hashcode.size() == 0;
+    }
+
     /** Factory to restore {@link HashIndexMaintainer}. */
     public static class Factory implements IndexMaintainer.Factory<KeyValue> {
 
@@ -104,7 +115,7 @@ public class HashIndexMaintainer implements IndexMaintainer<KeyValue> {
 
         @Override
         public IndexMaintainer<KeyValue> createOrRestore(
-                Long snapshotId, BinaryRow partition, int bucket) {
+                @Nullable Long snapshotId, BinaryRow partition, int bucket) {
             return new HashIndexMaintainer(handler, snapshotId, partition, bucket);
         }
     }

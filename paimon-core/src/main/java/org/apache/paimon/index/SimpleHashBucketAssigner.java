@@ -24,7 +24,7 @@ import org.apache.paimon.utils.Int2ShortHashMap;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Only for batch sort compact bucket assign. */
+/** When we need to overwrite the table, we should use this to avoid loading index. */
 public class SimpleHashBucketAssigner implements BucketAssigner {
 
     private final int numAssigners;

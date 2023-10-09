@@ -18,12 +18,24 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileHandler;
+import org.apache.paimon.manifest.IndexManifestEntry;
+import org.apache.paimon.table.AbstractFileStoreTable;
+
 import org.apache.flink.types.Row;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for batch file store. */
@@ -73,5 +85,33 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
                         + "VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
         assertThat(sql("SELECT DISTINCT bucket FROM T$files"))
                 .containsExactlyInAnyOrder(Row.of(0), Row.of(1), Row.of(2));
+    }
+
+    @Test
+    public void testOverwrite() throws Exception {
+        sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
+        assertThat(sql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 1, 1),
+                        Row.of(1, 2, 2),
+                        Row.of(1, 3, 3),
+                        Row.of(1, 4, 4),
+                        Row.of(1, 5, 5));
+
+        // overwrite the whole table, we should update the index file by this sql
+        sql("INSERT OVERWRITE T SELECT * FROM T LIMIT 4");
+
+        AbstractFileStoreTable table =
+                (AbstractFileStoreTable)
+                        (CatalogFactory.createCatalog(CatalogContext.create(new Path(path))))
+                                .getTable(Identifier.create("default", "T"));
+        IndexFileHandler indexFileHandler = table.store().newIndexFileHandler();
+        List<BinaryRow> partitions = table.newScan().listPartitions();
+        List<IndexManifestEntry> entries = new ArrayList<>();
+        partitions.forEach(p -> entries.addAll(indexFileHandler.scan(HASH_INDEX, p)));
+
+        Long records =
+                entries.stream().map(entry -> entry.indexFile().rowCount()).reduce(Long::sum).get();
+        Assertions.assertThat(records).isEqualTo(4);
     }
 }

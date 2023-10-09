@@ -330,7 +330,8 @@ public abstract class AbstractFileStoreWrite<T>
         IndexMaintainer<T> indexMaintainer =
                 indexFactory == null
                         ? null
-                        : indexFactory.createOrRestore(latestSnapshotId, partition, bucket);
+                        : indexFactory.createOrRestore(
+                                ignorePreviousFiles ? null : latestSnapshotId, partition, bucket);
         RecordWriter<T> writer =
                 createWriter(partition.copy(), bucket, restoreFiles, null, compactExecutor());
         notifyNewWriter(writer);

@@ -44,7 +44,6 @@ public class FlinkSinkBuilder {
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
-    private boolean compactSink = false;
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -79,11 +78,6 @@ public class FlinkSinkBuilder {
         return this;
     }
 
-    public FlinkSinkBuilder forCompact(boolean compactSink) {
-        this.compactSink = compactSink;
-        return this;
-    }
-
     public DataStreamSink<?> build() {
         DataStream<InternalRow> input = MapToInternalRow.map(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
@@ -101,9 +95,9 @@ public class FlinkSinkBuilder {
             case FIXED:
                 return buildForFixedBucket(input);
             case DYNAMIC:
-                return buildDynamicBucketSink(input, false, compactSink);
+                return buildDynamicBucketSink(input, false);
             case GLOBAL_DYNAMIC:
-                return buildDynamicBucketSink(input, true, compactSink);
+                return buildDynamicBucketSink(input, true);
             case UNAWARE:
                 return buildUnawareBucketSink(input);
             default:
@@ -112,9 +106,9 @@ public class FlinkSinkBuilder {
     }
 
     private DataStreamSink<?> buildDynamicBucketSink(
-            DataStream<InternalRow> input, boolean globalIndex, boolean compactSink) {
+            DataStream<InternalRow> input, boolean globalIndex) {
         checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
-        return compactSink
+        return overwritePartition != null
                 ? new DynamicBucketCompactSink(table, overwritePartition).build(input, parallelism)
                 : globalIndex
                         ? new GlobalDynamicBucketSink(table, overwritePartition)
