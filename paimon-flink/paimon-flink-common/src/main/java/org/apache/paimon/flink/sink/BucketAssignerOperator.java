@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.index.BucketAssigner;
 import org.apache.paimon.index.HashBucketAssigner;
+import org.apache.paimon.index.SimpleBucketAssigner;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
@@ -32,7 +34,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /** Assign bucket for the input record, output record with bucket. */
-public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, Integer>>
+public class BucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, Integer>>
         implements OneInputStreamOperator<T, Tuple2<T, Integer>> {
 
     private static final long serialVersionUID = 1L;
@@ -41,17 +43,20 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
 
     private final AbstractFileStoreTable table;
     private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
+    private final boolean compactSink;
 
-    private transient HashBucketAssigner assigner;
+    private transient BucketAssigner assigner;
     private transient PartitionKeyExtractor<T> extractor;
 
-    public HashBucketAssignerOperator(
+    public BucketAssignerOperator(
             String commitUser,
             Table table,
-            SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction) {
+            SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction,
+            boolean compactSink) {
         this.initialCommitUser = commitUser;
         this.table = (AbstractFileStoreTable) table;
         this.extractorFunction = extractorFunction;
+        this.compactSink = compactSink;
     }
 
     @Override
@@ -66,13 +71,18 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                         context, "commit_user_state", String.class, initialCommitUser);
 
         this.assigner =
-                new HashBucketAssigner(
-                        table.snapshotManager(),
-                        commitUser,
-                        table.store().newIndexFileHandler(),
-                        getRuntimeContext().getNumberOfParallelSubtasks(),
-                        getRuntimeContext().getIndexOfThisSubtask(),
-                        table.coreOptions().dynamicBucketTargetRowNum());
+                compactSink
+                        ? new SimpleBucketAssigner(
+                                getRuntimeContext().getNumberOfParallelSubtasks(),
+                                getRuntimeContext().getIndexOfThisSubtask(),
+                                table.coreOptions().dynamicBucketTargetRowNum())
+                        : new HashBucketAssigner(
+                                table.snapshotManager(),
+                                commitUser,
+                                table.store().newIndexFileHandler(),
+                                getRuntimeContext().getNumberOfParallelSubtasks(),
+                                getRuntimeContext().getIndexOfThisSubtask(),
+                                table.coreOptions().dynamicBucketTargetRowNum());
         this.extractor = extractorFunction.apply(table.schema());
     }
 
@@ -81,7 +91,10 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
         T value = streamRecord.getValue();
         int bucket =
                 assigner.assign(
-                        extractor.partition(value), extractor.trimmedPrimaryKey(value).hashCode());
+                        // If compactSink, we don't have to calculate hashcode. Because
+                        // `SimpleBucketAssigner` doesn't need.
+                        extractor.partition(value),
+                        compactSink ? 0 : extractor.trimmedPrimaryKey(value).hashCode());
         output.collect(new StreamRecord<>(new Tuple2<>(value, bucket)));
     }
 

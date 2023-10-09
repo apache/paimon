@@ -48,9 +48,9 @@ import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** Order Rewrite Action tests for {@link SortCompactAction}. */
-public class SortCompactActionITCase extends ActionITCaseBase {
+public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
 
-    private static final Random random = new Random();
+    private static final Random RANDOM = new Random();
 
     private void prepareData(int size, int loop) throws Exception {
         createTable();
@@ -230,7 +230,7 @@ public class SortCompactActionITCase extends ActionITCaseBase {
     }
 
     private void zorder(List<String> columns) throws Exception {
-        if (random.nextBoolean()) {
+        if (RANDOM.nextBoolean()) {
             new SortCompactAction(
                             warehouse,
                             database,
@@ -246,7 +246,7 @@ public class SortCompactActionITCase extends ActionITCaseBase {
     }
 
     private void order(List<String> columns) throws Exception {
-        if (random.nextBoolean()) {
+        if (RANDOM.nextBoolean()) {
             new SortCompactAction(
                             warehouse,
                             database,
@@ -270,12 +270,12 @@ public class SortCompactActionITCase extends ActionITCaseBase {
                 true);
     }
 
-    public void createTable() throws Exception {
+    private void createTable() throws Exception {
         catalog.createDatabase(database, true);
         catalog.createTable(identifier(), schema(), true);
     }
 
-    public Identifier identifier() {
+    private Identifier identifier() {
         return Identifier.create(database, tableName);
     }
 
@@ -319,7 +319,7 @@ public class SortCompactActionITCase extends ActionITCaseBase {
         return messages;
     }
 
-    public Table getTable() throws Exception {
+    private Table getTable() throws Exception {
         return catalog.getTable(identifier());
     }
 
@@ -356,8 +356,8 @@ public class SortCompactActionITCase extends ActionITCaseBase {
     }
 
     private static byte[] randomBytes() {
-        byte[] binary = new byte[random.nextInt(10)];
-        random.nextBytes(binary);
+        byte[] binary = new byte[RANDOM.nextInt(10)];
+        RANDOM.nextBytes(binary);
         return binary;
     }
 }

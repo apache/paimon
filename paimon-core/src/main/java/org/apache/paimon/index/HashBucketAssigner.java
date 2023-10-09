@@ -34,7 +34,7 @@ import java.util.Set;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign bucket for key hashcode. */
-public class HashBucketAssigner {
+public class HashBucketAssigner implements BucketAssigner {
 
     private static final Logger LOG = LoggerFactory.getLogger(HashBucketAssigner.class);
 
@@ -64,6 +64,7 @@ public class HashBucketAssigner {
     }
 
     /** Assign a bucket for key hash of a record. */
+    @Override
     public int assign(BinaryRow partition, int hash) {
         int recordAssignId = computeAssignId(hash);
         checkArgument(
@@ -88,6 +89,7 @@ public class HashBucketAssigner {
     }
 
     /** Prepare commit to clear outdated partition index. */
+    @Override
     public void prepareCommit(long commitIdentifier) {
         long latestCommittedIdentifier;
         if (partitionIndex.values().stream()
