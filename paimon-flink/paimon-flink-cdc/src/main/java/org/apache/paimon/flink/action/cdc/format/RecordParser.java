@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.format;
+package org.apache.paimon.flink.action.cdc.format;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
@@ -90,7 +90,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     }
 
     @Nullable
-    public Schema getKafkaSchema(String record) {
+    public Schema buildSchema(String record) {
         this.parseRootJson(record);
         if (this.isDDL()) {
             return null;

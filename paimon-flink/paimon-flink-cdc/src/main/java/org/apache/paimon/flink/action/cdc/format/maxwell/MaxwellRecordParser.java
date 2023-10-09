@@ -16,11 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka.format.maxwell;
+package org.apache.paimon.flink.action.cdc.format.maxwell;
 
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka;
+package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
@@ -24,32 +24,31 @@ import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.schema.Schema;
 
 import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 
 import java.util.Map;
 
-/** Synchronize table from Kafka. */
-public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
+/** Synchronize table from Pulsar. */
+public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
 
-    public KafkaSyncTableAction(
+    public PulsarSyncTableAction(
             String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
-            Map<String, String> kafkaConfig) {
-        super(warehouse, database, table, catalogConfig, kafkaConfig);
+            Map<String, String> pulsarConfig) {
+        super(warehouse, database, table, catalogConfig, pulsarConfig);
     }
 
     @Override
     protected Source<String, ?, ?> buildSource() {
-        return KafkaActionUtils.buildKafkaSource(mqConfig);
+        return PulsarActionUtils.buildPulsarSource(mqConfig);
     }
 
     @Override
     protected Schema buildSchema() {
-        String topic = mqConfig.get(KafkaConnectorOptions.TOPIC).get(0);
+        String topic = mqConfig.get(PulsarActionUtils.TOPIC).split(",")[0].trim();
         try (MessageQueueSchemaUtils.ConsumerWrapper consumer =
-                KafkaActionUtils.getKafkaEarliestConsumer(mqConfig, topic)) {
+                PulsarActionUtils.createPulsarConsumer(mqConfig, topic)) {
             return MessageQueueSchemaUtils.getSchema(consumer, topic, getDataFormat(), typeMapping);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -58,16 +57,16 @@ public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
 
     @Override
     protected DataFormat getDataFormat() {
-        return KafkaActionUtils.getDataFormat(mqConfig);
+        return PulsarActionUtils.getDataFormat(mqConfig);
     }
 
     @Override
     protected String sourceName() {
-        return "Kafka Source";
+        return "Pulsar Source";
     }
 
     @Override
     protected String jobName() {
-        return String.format("Kafka-Paimon Table Sync: %s.%s", database, table);
+        return String.format("Pulsar-Paimon Table Sync: %s.%s", database, table);
     }
 }

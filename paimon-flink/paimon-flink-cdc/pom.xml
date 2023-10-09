@@ -41,6 +41,7 @@ under the License.
         <geometry.version>2.2.0</geometry.version>
         <json-path.version>2.8.0</json-path.version>
         <mongodb.testcontainers.version>1.18.3</mongodb.testcontainers.version>
+        <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
     </properties>
 
     <dependencies>
@@ -101,6 +102,14 @@ under the License.
             <version>${flink.version}</version>
             <scope>provided</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-pulsar</artifactId>
+            <version>${flink.connector.pulsar.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
 
         <dependency>
             <groupId>com.ververica</groupId>
@@ -274,6 +283,13 @@ under the License.
             <groupId>org.testcontainers</groupId>
             <artifactId>mongodb</artifactId>
             <version>${mongodb.testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>pulsar</artifactId>
+            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -24,8 +24,8 @@ import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.kafka.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.kafka.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -44,6 +44,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getDataFormat;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -151,7 +152,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
 
         KafkaSource<String> source = KafkaActionUtils.buildKafkaSource(kafkaConfig);
 
-        DataFormat format = DataFormat.getDataFormat(kafkaConfig);
+        DataFormat format = getDataFormat(kafkaConfig);
         RecordParser recordParser =
                 format.createParser(caseSensitive, typeMapping, Collections.emptyList());
         RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
