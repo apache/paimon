@@ -85,7 +85,8 @@ public class MongoDBActionUtils {
                     .withDescription(
                             "Determines whether to use the default MongoDB _id generation strategy. If set to true, the default _id generation will remove the outer $oid nesting. If set to false, no additional processing will be done on the _id field.");
 
-    static MongoDBSource<String> buildMongodbSource(Configuration mongodbConfig, String tableList) {
+    public static MongoDBSource<String> buildMongodbSource(
+            Configuration mongodbConfig, String tableList) {
         validateMongodbConfig(mongodbConfig);
         MongoDBSourceBuilder<String> sourceBuilder = MongoDBSource.builder();
 
