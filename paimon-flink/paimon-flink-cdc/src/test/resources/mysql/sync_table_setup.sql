@@ -281,6 +281,14 @@ CREATE TABLE test_computed_column (
     PRIMARY KEY (pk)
 );
 
+CREATE TABLE test_options_change (
+   pk INT,
+   _date DATE,
+   _datetime DATETIME,
+   _timestamp TIMESTAMP,
+   PRIMARY KEY (pk)
+);
+
 -- ################################################################################
 --  testSyncShard
 -- ################################################################################

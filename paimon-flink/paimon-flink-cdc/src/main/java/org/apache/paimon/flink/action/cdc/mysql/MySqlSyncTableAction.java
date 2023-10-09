@@ -92,6 +92,7 @@ public class MySqlSyncTableAction extends ActionBase {
     private final String database;
     private final String table;
     private final Configuration mySqlConfig;
+    private FileStoreTable fileStoreTable;
 
     private List<String> partitionKeys = new ArrayList<>();
     private List<String> primaryKeys = new ArrayList<>();
@@ -177,7 +178,6 @@ public class MySqlSyncTableAction extends ActionBase {
 
         MySqlTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
         Identifier identifier = new Identifier(database, table);
-        FileStoreTable table;
         List<ComputedColumn> computedColumns =
                 buildComputedColumns(computedColumnArgs, tableInfo.schema());
 
@@ -201,23 +201,25 @@ public class MySqlSyncTableAction extends ActionBase {
                         tableInfo.schema(),
                         metadataConverters);
         try {
-            table = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = fileStoreTable.copy(tableConfig);
             if (computedColumns.size() > 0) {
                 List<String> computedFields =
                         computedColumns.stream()
                                 .map(ComputedColumn::columnName)
                                 .collect(Collectors.toList());
-                List<String> fieldNames = table.schema().fieldNames();
+                List<String> fieldNames = fileStoreTable.schema().fieldNames();
                 checkArgument(
                         new HashSet<>(fieldNames).containsAll(computedFields),
                         " Exists Table should contain all computed columns %s, but are %s.",
                         computedFields,
                         fieldNames);
             }
-            CdcActionCommonUtils.assertSchemaCompatible(table.schema(), fromMySql.fields());
+            CdcActionCommonUtils.assertSchemaCompatible(
+                    fileStoreTable.schema(), fromMySql.fields());
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromMySql, false);
-            table = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
 
         String tableList =
@@ -244,7 +246,7 @@ public class MySqlSyncTableAction extends ActionBase {
                                 env.fromSource(
                                         source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
                         .withParserFactory(parserFactory)
-                        .withTable(table)
+                        .withTable(fileStoreTable)
                         .withIdentifier(identifier)
                         .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -306,6 +308,11 @@ public class MySqlSyncTableAction extends ActionBase {
     @VisibleForTesting
     public Map<String, String> tableConfig() {
         return tableConfig;
+    }
+
+    @VisibleForTesting
+    public FileStoreTable fileStoreTable() {
+        return fileStoreTable;
     }
 
     // ------------------------------------------------------------------------

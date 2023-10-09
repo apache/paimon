@@ -89,6 +89,7 @@ public class KafkaSyncTableAction extends ActionBase {
     private final String database;
     private final String table;
     private final Configuration kafkaConfig;
+    private FileStoreTable fileStoreTable;
 
     private List<String> partitionKeys = new ArrayList<>();
     private List<String> primaryKeys = new ArrayList<>();
@@ -153,7 +154,6 @@ public class KafkaSyncTableAction extends ActionBase {
                 KafkaSchemaUtils.getKafkaSchema(kafkaConfig, topic, typeMapping, caseSensitive);
 
         Identifier identifier = new Identifier(database, table);
-        FileStoreTable table;
         List<ComputedColumn> computedColumns =
                 buildComputedColumns(computedColumnArgs, kafkaSchema);
         Schema fromKafka =
@@ -166,11 +166,12 @@ public class KafkaSyncTableAction extends ActionBase {
                         new CdcMetadataConverter[] {});
 
         try {
-            table = (FileStoreTable) catalog.getTable(identifier);
-            assertSchemaCompatible(table.schema(), fromKafka.fields());
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = fileStoreTable.copy(tableConfig);
+            assertSchemaCompatible(fileStoreTable.schema(), fromKafka.fields());
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromKafka, false);
-            table = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
         DataFormat format = DataFormat.getDataFormat(kafkaConfig);
         RecordParser recordParser =
@@ -187,7 +188,7 @@ public class KafkaSyncTableAction extends ActionBase {
                                                 "Kafka Source")
                                         .flatMap(recordParser))
                         .withParserFactory(parserFactory)
-                        .withTable(table)
+                        .withTable(fileStoreTable)
                         .withIdentifier(identifier)
                         .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -200,6 +201,11 @@ public class KafkaSyncTableAction extends ActionBase {
     @VisibleForTesting
     public Map<String, String> tableConfig() {
         return tableConfig;
+    }
+
+    @VisibleForTesting
+    public FileStoreTable fileStoreTable() {
+        return fileStoreTable;
     }
 
     // ------------------------------------------------------------------------

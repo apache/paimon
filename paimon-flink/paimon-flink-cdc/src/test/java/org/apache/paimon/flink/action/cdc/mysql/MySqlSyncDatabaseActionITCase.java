@@ -1185,6 +1185,57 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
+    @Timeout(60)
+    public void testNewlyAddedTablesOptionsChange() throws Exception {
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + "newly_added_tables_option_schange");
+            statement.executeUpdate("INSERT INTO t1 VALUES (1, 'one')");
+            statement.executeUpdate("INSERT INTO t1 VALUES (3, 'three')");
+        }
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "newly_added_tables_option_schange");
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", "1");
+        tableConfig.put("sink.parallelism", "1");
+
+        MySqlSyncDatabaseAction action1 =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(tableConfig)
+                        .withMode(COMBINED.configString())
+                        .build();
+
+        JobClient jobClient = runActionWithDefaultEnv(action1);
+
+        waitingTables("t1");
+        jobClient.cancel();
+
+        tableConfig.put("sink.savepoint.auto-tag", "true");
+        tableConfig.put("tag.num-retained-max", "5");
+        tableConfig.put("tag.automatic-creation", "process-time");
+        tableConfig.put("tag.creation-period", "hourly");
+        tableConfig.put("tag.creation-delay", "600000");
+        tableConfig.put("snapshot.time-retained", "1h");
+        tableConfig.put("snapshot.num-retained.min", "5");
+        tableConfig.put("snapshot.num-retained.max", "10");
+        tableConfig.put("changelog-producer", "input");
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + "newly_added_tables_option_schange");
+            statement.executeUpdate("CREATE TABLE t2 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+            statement.executeUpdate("INSERT INTO t2 VALUES (1, 'Hi')");
+        }
+
+        MySqlSyncDatabaseAction action2 =
+                syncDatabaseActionBuilder(mySqlConfig).withTableConfig(tableConfig).build();
+        runActionWithDefaultEnv(action2);
+        waitingTables("t2");
+
+        Map<String, String> tableOptions = getFileStoreTable("t2").options();
+        assertThat(tableOptions).containsAllEntriesOf(tableConfig).containsKey("path");
+    }
+
+    @Test
     public void testCatalogAndTableConfig() {
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(getBasicMySqlConfig())

@@ -845,6 +845,58 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
+    public void testOptionsChange() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_options_change");
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", "1");
+        tableConfig.put("sink.parallelism", "1");
+
+        MySqlSyncTableAction action1 =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pk", "pt")
+                        .withComputedColumnArgs("pt=substring(_date,5)")
+                        .withTableConfig(tableConfig)
+                        .build();
+        JobClient jobClient = runActionWithDefaultEnv(action1);
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + DATABASE_NAME);
+            statement.executeUpdate(
+                    "INSERT INTO test_options_change VALUES (1, '2023-03-23', '2022-01-01 14:30', '2021-09-15 15:00:10')");
+            statement.executeUpdate(
+                    "INSERT INTO test_options_change VALUES (2, '2023-03-23', null, null)");
+        }
+        waitingTables(tableName);
+        jobClient.cancel();
+
+        tableConfig.put("sink.savepoint.auto-tag", "true");
+        tableConfig.put("tag.num-retained-max", "5");
+        tableConfig.put("tag.automatic-creation", "process-time");
+        tableConfig.put("tag.creation-period", "hourly");
+        tableConfig.put("tag.creation-delay", "600000");
+        tableConfig.put("snapshot.time-retained", "1h");
+        tableConfig.put("snapshot.num-retained.min", "5");
+        tableConfig.put("snapshot.num-retained.max", "10");
+        tableConfig.put("changelog-producer", "input");
+
+        MySqlSyncTableAction action2 =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pk", "pt")
+                        .withComputedColumnArgs("pt=substring(_date,5)")
+                        .withTableConfig(tableConfig)
+                        .build();
+        runActionWithDefaultEnv(action2);
+
+        Map<String, String> dynamicOptions = action2.fileStoreTable().options();
+        assertThat(dynamicOptions).containsAllEntriesOf(tableConfig);
+    }
+
+    @Test
+    @Timeout(60)
     public void testMetadataColumns() throws Exception {
         try (Statement statement = getStatement()) {
             statement.execute("USE metadata");

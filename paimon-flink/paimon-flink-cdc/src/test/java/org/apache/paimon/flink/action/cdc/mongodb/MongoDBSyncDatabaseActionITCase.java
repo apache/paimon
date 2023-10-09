@@ -24,11 +24,13 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -276,5 +278,46 @@ public class MongoDBSyncDatabaseActionITCase extends MongoDBActionITCaseBase {
         runActionWithDefaultEnv(action);
 
         testSchemaEvolutionImpl("test_prefix_t1_test_suffix", "test_prefix_t2_test_suffix", dbName);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testNewlyAddedTablesOptionsChange() throws Exception {
+        String dbName = database + UUID.randomUUID();
+        writeRecordsToMongoDB("test-data-5", dbName, "database");
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", dbName);
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("bucket", "1");
+        tableConfig.put("sink.parallelism", "1");
+
+        MongoDBSyncDatabaseAction action1 =
+                syncDatabaseActionBuilder(mongodbConfig).withTableConfig(tableConfig).build();
+
+        JobClient jobClient = runActionWithDefaultEnv(action1);
+
+        waitingTables("t3");
+        jobClient.cancel();
+
+        tableConfig.put("sink.savepoint.auto-tag", "true");
+        tableConfig.put("tag.num-retained-max", "5");
+        tableConfig.put("tag.automatic-creation", "process-time");
+        tableConfig.put("tag.creation-period", "hourly");
+        tableConfig.put("tag.creation-delay", "600000");
+        tableConfig.put("snapshot.time-retained", "1h");
+        tableConfig.put("snapshot.num-retained.min", "5");
+        tableConfig.put("snapshot.num-retained.max", "10");
+        tableConfig.put("changelog-producer", "input");
+
+        writeRecordsToMongoDB("test-data-6", dbName, "database");
+
+        MongoDBSyncDatabaseAction action2 =
+                syncDatabaseActionBuilder(mongodbConfig).withTableConfig(tableConfig).build();
+        runActionWithDefaultEnv(action2);
+        waitingTables("t4");
+
+        FileStoreTable table = getFileStoreTable("t4");
+        Map<String, String> tableOptions = table.options();
+        assertThat(tableOptions).containsAllEntriesOf(tableConfig);
     }
 }

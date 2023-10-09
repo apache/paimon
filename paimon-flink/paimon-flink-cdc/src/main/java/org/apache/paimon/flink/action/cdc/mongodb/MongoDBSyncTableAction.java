@@ -73,6 +73,7 @@ public class MongoDBSyncTableAction extends ActionBase {
     private final String database;
     private final String table;
     private final Configuration mongodbConfig;
+    private FileStoreTable fileStoreTable;
     private List<String> partitionKeys = new ArrayList<>();
     private Map<String, String> tableConfig = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
@@ -135,7 +136,6 @@ public class MongoDBSyncTableAction extends ActionBase {
                 buildComputedColumns(computedColumnArgs, mongodbSchema);
 
         Identifier identifier = new Identifier(database, table);
-        FileStoreTable table;
         Schema fromMongodb =
                 buildPaimonSchema(
                         partitionKeys,
@@ -146,11 +146,12 @@ public class MongoDBSyncTableAction extends ActionBase {
                         new CdcMetadataConverter[] {});
         // Check if table exists before trying to get or create it
         if (catalog.tableExists(identifier)) {
-            table = (FileStoreTable) catalog.getTable(identifier);
-            assertSchemaCompatible(table.schema(), fromMongodb.fields());
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = fileStoreTable.copy(tableConfig);
+            assertSchemaCompatible(fileStoreTable.schema(), fromMongodb.fields());
         } else {
             catalog.createTable(identifier, fromMongodb, false);
-            table = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
@@ -169,7 +170,7 @@ public class MongoDBSyncTableAction extends ActionBase {
                                                         computedColumns,
                                                         mongodbConfig)))
                         .withParserFactory(parserFactory)
-                        .withTable(table)
+                        .withTable(fileStoreTable)
                         .withIdentifier(identifier)
                         .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
@@ -202,6 +203,11 @@ public class MongoDBSyncTableAction extends ActionBase {
     @VisibleForTesting
     public Map<String, String> tableConfig() {
         return tableConfig;
+    }
+
+    @VisibleForTesting
+    public FileStoreTable fileStoreTable() {
+        return fileStoreTable;
     }
 
     // ------------------------------------------------------------------------

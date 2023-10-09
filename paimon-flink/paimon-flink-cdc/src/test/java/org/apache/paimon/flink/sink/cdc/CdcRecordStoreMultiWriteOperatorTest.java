@@ -718,7 +718,8 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                                         true,
                                         memoryPoolFactory),
                         commitUser,
-                        Options.fromMap(new HashMap<>()));
+                        Options.fromMap(new HashMap<>()),
+                        new HashMap<>());
         TypeSerializer<CdcMultiplexRecord> inputSerializer = new JavaSerializer<>();
         TypeSerializer<MultiTableCommittable> outputSerializer =
                 new MultiTableCommittableTypeInfo().createSerializer(new ExecutionConfig());

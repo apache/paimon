@@ -43,9 +43,12 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
 
     private Map<Identifier, CdcRecordChannelComputer> channelComputers;
     private Catalog catalog;
+    private final Map<String, String> dynamicOptions;
 
-    public CdcMultiplexRecordChannelComputer(Catalog.Loader catalogLoader) {
+    public CdcMultiplexRecordChannelComputer(
+            Catalog.Loader catalogLoader, Map<String, String> dynamicOptions) {
         this.catalogLoader = catalogLoader;
+        this.dynamicOptions = dynamicOptions;
     }
 
     @Override
@@ -73,6 +76,7 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                     FileStoreTable table;
                     try {
                         table = (FileStoreTable) catalog.getTable(id);
+                        table.copy(dynamicOptions);
                     } catch (Catalog.TableNotExistException e) {
                         LOG.error("Failed to get table " + id.getFullName());
                         return null;
