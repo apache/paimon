@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.index.BucketAssigner;
 import org.apache.paimon.index.HashBucketAssigner;
-import org.apache.paimon.index.SimpleBucketAssigner;
+import org.apache.paimon.index.SimpleHashBucketAssigner;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
@@ -72,7 +72,7 @@ public class BucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, 
 
         this.assigner =
                 compactSink
-                        ? new SimpleBucketAssigner(
+                        ? new SimpleHashBucketAssigner(
                                 getRuntimeContext().getNumberOfParallelSubtasks(),
                                 getRuntimeContext().getIndexOfThisSubtask(),
                                 table.coreOptions().dynamicBucketTargetRowNum())
@@ -91,10 +91,7 @@ public class BucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, 
         T value = streamRecord.getValue();
         int bucket =
                 assigner.assign(
-                        // If compactSink, we don't have to calculate hashcode. Because
-                        // `SimpleBucketAssigner` doesn't need.
-                        extractor.partition(value),
-                        compactSink ? 0 : extractor.trimmedPrimaryKey(value).hashCode());
+                        extractor.partition(value), extractor.trimmedPrimaryKey(value).hashCode());
         output.collect(new StreamRecord<>(new Tuple2<>(value, bucket)));
     }
 

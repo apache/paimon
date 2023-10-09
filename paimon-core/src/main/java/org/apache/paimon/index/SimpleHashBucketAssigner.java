@@ -19,12 +19,13 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.utils.Int2ShortHashMap;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /** Only for batch sort compact bucket assign. */
-public class SimpleBucketAssigner implements BucketAssigner {
+public class SimpleHashBucketAssigner implements BucketAssigner {
 
     private final int numAssigners;
     private final int assignId;
@@ -32,7 +33,7 @@ public class SimpleBucketAssigner implements BucketAssigner {
 
     private final Map<BinaryRow, SimplePartitionIndex> partitionIndex;
 
-    public SimpleBucketAssigner(int numAssigners, int assignId, long targetBucketRowNumber) {
+    public SimpleHashBucketAssigner(int numAssigners, int assignId, long targetBucketRowNumber) {
         this.numAssigners = numAssigners;
         this.assignId = assignId;
         this.targetBucketRowNumber = targetBucketRowNumber;
@@ -43,7 +44,7 @@ public class SimpleBucketAssigner implements BucketAssigner {
     public int assign(BinaryRow partition, int hash) {
         SimplePartitionIndex index =
                 this.partitionIndex.computeIfAbsent(partition, p -> new SimplePartitionIndex());
-        return index.assign();
+        return index.assign(hash);
     }
 
     @Override
@@ -51,9 +52,10 @@ public class SimpleBucketAssigner implements BucketAssigner {
         // do nothing
     }
 
-    /** Simple partition bucket assigner. */
+    /** Simple partition bucket hash assigner. */
     private class SimplePartitionIndex {
 
+        public final Int2ShortHashMap hash2Bucket = new Int2ShortHashMap();
         private final Map<Integer, Long> bucketInformation;
         private int currentBucket;
 
@@ -62,12 +64,18 @@ public class SimpleBucketAssigner implements BucketAssigner {
             loadNewBucket();
         }
 
-        public int assign() {
+        public int assign(int hash) {
+            // the same hash should go into the same bucket
+            if (hash2Bucket.containsKey(hash)) {
+                return hash2Bucket.get(hash);
+            }
+
             Long num = bucketInformation.computeIfAbsent(currentBucket, i -> 0L);
             if (num >= targetBucketRowNumber) {
                 loadNewBucket();
             }
             bucketInformation.compute(currentBucket, (i, l) -> l == null ? 1L : l + 1);
+            hash2Bucket.put(hash, (short) currentBucket);
             return currentBucket;
         }
 

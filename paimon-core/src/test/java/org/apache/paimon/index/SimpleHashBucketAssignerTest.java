@@ -23,26 +23,47 @@ import org.apache.paimon.data.BinaryRow;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/** Tests for {@link SimpleBucketAssigner}. */
-public class SimpleBucketAssignerTest {
+/** Tests for {@link SimpleHashBucketAssigner}. */
+public class SimpleHashBucketAssignerTest {
 
     @Test
     public void testAssign() {
-        SimpleBucketAssigner simpleBucketAssigner = new SimpleBucketAssigner(2, 0, 100);
+        SimpleHashBucketAssigner simpleHashBucketAssigner = new SimpleHashBucketAssigner(2, 0, 100);
 
         BinaryRow binaryRow = BinaryRow.EMPTY_ROW;
+        int hash = 0;
 
         for (int i = 0; i < 100; i++) {
-            int bucket = simpleBucketAssigner.assign(binaryRow, 0);
+            int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
             Assertions.assertThat(bucket).isEqualTo(0);
         }
 
         for (int i = 0; i < 100; i++) {
-            int bucket = simpleBucketAssigner.assign(binaryRow, 0);
+            int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
             Assertions.assertThat(bucket).isEqualTo(2);
         }
 
-        int bucket = simpleBucketAssigner.assign(binaryRow, 0);
+        int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
         Assertions.assertThat(bucket).isEqualTo(4);
+    }
+
+    @Test
+    public void testAssignWithSameHash() {
+        SimpleHashBucketAssigner simpleHashBucketAssigner = new SimpleHashBucketAssigner(2, 0, 100);
+
+        BinaryRow binaryRow = BinaryRow.EMPTY_ROW;
+        int hash = 0;
+
+        for (int i = 0; i < 100; i++) {
+            int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
+            Assertions.assertThat(bucket).isEqualTo(0);
+        }
+
+        // reset hash, the record will go into bucket 0
+        hash = 0;
+        for (int i = 0; i < 100; i++) {
+            int bucket = simpleHashBucketAssigner.assign(binaryRow, hash++);
+            Assertions.assertThat(bucket).isEqualTo(0);
+        }
     }
 }
