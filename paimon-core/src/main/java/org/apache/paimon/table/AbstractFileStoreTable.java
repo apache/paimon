@@ -458,4 +458,10 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
     }
+
+    @Override
+    public void registerService(String hostname, int port) {
+        // TODO implement this
+        // register address to DFS.
+    }
 }

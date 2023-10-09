@@ -48,6 +48,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.TreeSet;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
@@ -94,6 +95,10 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         levels.addDropFileCallback(this);
     }
 
+    public Levels levels() {
+        return levels;
+    }
+
     @VisibleForTesting
     Cache<String, LookupFile> lookupFiles() {
         return lookupFiles;
@@ -106,7 +111,13 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
 
     @Nullable
     public KeyValue lookup(InternalRow key, int startLevel) throws IOException {
-        return LookupUtils.lookup(levels, key, startLevel, this::lookup);
+        return LookupUtils.lookup(levels, key, startLevel, this::lookup, this::lookupLevel0);
+    }
+
+    @Nullable
+    private KeyValue lookupLevel0(InternalRow key, TreeSet<DataFileMeta> level0)
+            throws IOException {
+        return LookupUtils.lookupLevel0(keyComparator, key, level0, this::lookup);
     }
 
     @Nullable

@@ -37,6 +37,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.query.TableQuery;
+import org.apache.paimon.table.query.TableQueryImpl;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -47,6 +49,7 @@ import org.apache.paimon.table.source.ValueContentRowDataRecordIterator;
 import org.apache.paimon.types.RowType;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.predicate.PredicateBuilder.and;
@@ -205,5 +208,10 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                             record.row().getRowKind(),
                             record.row());
                 });
+    }
+
+    @Override
+    public TableQuery newQuery() {
+        return new TableQueryImpl(store().newWrite(UUID.randomUUID().toString()));
     }
 }

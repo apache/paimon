@@ -131,6 +131,13 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.options = options;
     }
 
+    public LookupLevels createLookupLevels(
+            BinaryRow partition, int bucket, List<DataFileMeta> files) {
+        return createLookupLevels(
+                new Levels(keyComparatorSupplier.get(), files, options.numLevels()),
+                readerFactoryBuilder.build(partition, bucket));
+    }
+
     @Override
     protected MergeTreeWriter createWriter(
             BinaryRow partition,
