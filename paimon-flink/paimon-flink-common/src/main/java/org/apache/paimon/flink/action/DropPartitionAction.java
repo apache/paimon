@@ -56,5 +56,6 @@ public class DropPartitionAction extends TableActionBase {
     @Override
     public void run() throws Exception {
         commit.dropPartitions(partitions, BatchWriteBuilder.COMMIT_IDENTIFIER);
+        commit.close();
     }
 }

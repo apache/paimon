@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.operation.FileStoreCommitImpl;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.PartitionExpire;
@@ -262,9 +261,7 @@ public class TableCommitImpl implements InnerTableCommit {
         }
         IOUtils.closeQuietly(lock);
         expireMainExecutor.shutdownNow();
-        if (commit instanceof FileStoreCommitImpl) {
-            ((FileStoreCommitImpl) commit).getCommitMetrics().getMetricGroup().close();
-        }
+        commit.close();
     }
 
     @Override

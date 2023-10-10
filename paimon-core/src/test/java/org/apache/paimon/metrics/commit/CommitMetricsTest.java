@@ -89,8 +89,7 @@ public class CommitMetricsTest {
     /** Tests that the metrics are updated properly. */
     @Test
     public void testMetricsAreUpdated() {
-        Map<String, Metric> registeredGenericMetrics =
-                commitMetrics.getMetricGroup().getMetrics();
+        Map<String, Metric> registeredGenericMetrics = commitMetrics.getMetricGroup().getMetrics();
 
         // Check initial values
         Gauge<Long> lastCommitDuration =

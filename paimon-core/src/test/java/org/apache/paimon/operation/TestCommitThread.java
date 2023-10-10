@@ -128,6 +128,7 @@ public class TestCommitThread extends Thread {
                 throw new RuntimeException(e);
             }
         }
+        commit.close();
     }
 
     private void doCommit() throws Exception {

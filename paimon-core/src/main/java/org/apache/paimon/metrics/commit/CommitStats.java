@@ -98,10 +98,7 @@ public class CommitStats {
 
     @VisibleForTesting
     protected static long numChangedBuckets(List<ManifestEntry>... changes) {
-        return changedPartBuckets(changes).values().stream()
-                .map(Set::size)
-                .reduce((a, b) -> a + b)
-                .orElseGet(() -> 0);
+        return changedPartBuckets(changes).values().stream().mapToLong(Set::size).sum();
     }
 
     @VisibleForTesting

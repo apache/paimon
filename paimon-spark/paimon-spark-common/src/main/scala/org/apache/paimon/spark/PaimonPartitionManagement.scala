@@ -64,6 +64,7 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
         commit.dropPartitions(
           Collections.singletonList(partitionMap),
           BatchWriteBuilder.COMMIT_IDENTIFIER)
+        commit.close();
       case _ =>
         throw new UnsupportedOperationException(
           "Only AbstractFileStoreTable supports drop partitions.")

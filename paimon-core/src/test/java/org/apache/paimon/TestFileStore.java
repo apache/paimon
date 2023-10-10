@@ -211,6 +211,7 @@ public class TestFileStore extends KeyValueFileStore {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
         commit.dropPartitions(partitions, Long.MAX_VALUE);
+        commit.close();
 
         Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
         assertThat(snapshotIdAfterCommit).isNotNull();
@@ -299,6 +300,8 @@ public class TestFileStore extends KeyValueFileStore {
             snapshotIdBeforeCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;
         }
         commitFunction.accept(commit, committable);
+        commit.close();
+
         Long snapshotIdAfterCommit = snapshotManager.latestSnapshotId();
         if (snapshotIdAfterCommit == null) {
             snapshotIdAfterCommit = Snapshot.FIRST_SNAPSHOT_ID - 1;

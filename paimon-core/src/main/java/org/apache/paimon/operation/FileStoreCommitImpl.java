@@ -216,99 +216,80 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 compactTableFiles,
                 compactChangelog,
                 appendIndexFiles);
-
-        if (!ignoreEmptyCommit
-                || !appendTableFiles.isEmpty()
-                || !appendChangelog.isEmpty()
-                || !appendIndexFiles.isEmpty()) {
-            // Optimization for common path.
-            // Step 1:
-            // Read manifest entries from changed partitions here and check for conflicts.
-            // If there are no other jobs committing at the same time,
-            // we can skip conflict checking in tryCommit method.
-            // This optimization is mainly used to decrease the number of times we read from files.
-            latestSnapshot = snapshotManager.latestSnapshot();
-            if (latestSnapshot != null) {
-                // it is possible that some partitions only have compact changes,
-                // so we need to contain all changes
-                baseEntries.addAll(
-                        readAllEntriesFromChangedPartitions(
-                                latestSnapshot, appendTableFiles, compactTableFiles));
-                try {
+        try {
+            if (!ignoreEmptyCommit
+                    || !appendTableFiles.isEmpty()
+                    || !appendChangelog.isEmpty()
+                    || !appendIndexFiles.isEmpty()) {
+                // Optimization for common path.
+                // Step 1:
+                // Read manifest entries from changed partitions here and check for conflicts.
+                // If there are no other jobs committing at the same time,
+                // we can skip conflict checking in tryCommit method.
+                // This optimization is mainly used to decrease the number of times we read from
+                // files.
+                latestSnapshot = snapshotManager.latestSnapshot();
+                if (latestSnapshot != null) {
+                    // it is possible that some partitions only have compact changes,
+                    // so we need to contain all changes
+                    baseEntries.addAll(
+                            readAllEntriesFromChangedPartitions(
+                                    latestSnapshot, appendTableFiles, compactTableFiles));
                     noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
-                } finally {
-                    reportCommit(
-                            Collections.emptyList(),
-                            Collections.emptyList(),
-                            Collections.emptyList(),
-                            Collections.emptyList(),
-                            0,
-                            0,
-                            1);
+                    safeLatestSnapshotId = latestSnapshot.id();
                 }
-                safeLatestSnapshotId = latestSnapshot.id();
+
+                attempts +=
+                        tryCommit(
+                                appendTableFiles,
+                                appendChangelog,
+                                appendIndexFiles,
+                                committable.identifier(),
+                                committable.watermark(),
+                                committable.logOffsets(),
+                                Snapshot.CommitKind.APPEND,
+                                safeLatestSnapshotId);
+                generatedSnapshot += 1;
             }
 
-            attempts +=
-                    tryCommit(
-                            appendTableFiles,
-                            appendChangelog,
-                            appendIndexFiles,
-                            committable.identifier(),
-                            committable.watermark(),
-                            committable.logOffsets(),
-                            Snapshot.CommitKind.APPEND,
-                            safeLatestSnapshotId);
-            generatedSnapshot += 1;
-        }
-
-        if (!compactTableFiles.isEmpty() || !compactChangelog.isEmpty()) {
-            // Optimization for common path.
-            // Step 2:
-            // Add appendChanges to the manifest entries read above and check for conflicts.
-            // If there are no other jobs committing at the same time,
-            // we can skip conflict checking in tryCommit method.
-            // This optimization is mainly used to decrease the number of times we read from files.
-            if (safeLatestSnapshotId != null) {
-                baseEntries.addAll(appendTableFiles);
-                try {
+            if (!compactTableFiles.isEmpty() || !compactChangelog.isEmpty()) {
+                // Optimization for common path.
+                // Step 2:
+                // Add appendChanges to the manifest entries read above and check for conflicts.
+                // If there are no other jobs committing at the same time,
+                // we can skip conflict checking in tryCommit method.
+                // This optimization is mainly used to decrease the number of times we read from
+                // files.
+                if (safeLatestSnapshotId != null) {
+                    baseEntries.addAll(appendTableFiles);
                     noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
-                } finally {
-                    long commitDuration = (System.nanoTime() - started) / 1_000_000;
-                    reportCommit(
-                            appendTableFiles,
-                            appendChangelog,
-                            Collections.emptyList(),
-                            Collections.emptyList(),
-                            commitDuration,
-                            generatedSnapshot,
-                            attempts + 1);
+                    // assume this compact commit follows just after the append commit created above
+                    safeLatestSnapshotId += 1;
                 }
-                // assume this compact commit follows just after the append commit created above
-                safeLatestSnapshotId += 1;
-            }
 
-            attempts +=
-                    tryCommit(
-                            compactTableFiles,
-                            compactChangelog,
-                            Collections.emptyList(),
-                            committable.identifier(),
-                            committable.watermark(),
-                            committable.logOffsets(),
-                            Snapshot.CommitKind.COMPACT,
-                            safeLatestSnapshotId);
-            generatedSnapshot += 1;
+                attempts +=
+                        tryCommit(
+                                compactTableFiles,
+                                compactChangelog,
+                                Collections.emptyList(),
+                                committable.identifier(),
+                                committable.watermark(),
+                                committable.logOffsets(),
+                                Snapshot.CommitKind.COMPACT,
+                                safeLatestSnapshotId);
+                generatedSnapshot += 1;
+            }
+        } finally {
+            long commitDuration = (System.nanoTime() - started) / 1_000_000;
+            reportCommit(
+                    appendTableFiles,
+                    appendChangelog,
+                    compactTableFiles,
+                    compactChangelog,
+                    commitDuration,
+                    generatedSnapshot,
+                    attempts);
         }
-        long commitDuration = (System.nanoTime() - started) / 1_000_000;
-        reportCommit(
-                appendTableFiles,
-                appendChangelog,
-                compactTableFiles,
-                compactChangelog,
-                commitDuration,
-                generatedSnapshot,
-                attempts);
     }
 
     private void reportCommit(
@@ -492,6 +473,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
             }
         }
+    }
+
+    @Override
+    public void close() {
+        commitMetrics.getMetricGroup().close();
     }
 
     private void collectChanges(

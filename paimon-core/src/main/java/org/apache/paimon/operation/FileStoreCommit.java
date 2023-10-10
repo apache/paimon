@@ -78,4 +78,7 @@ public interface FileStoreCommit {
 
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);
+
+    /** Close the commit. */
+    void close();
 }
