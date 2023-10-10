@@ -20,20 +20,10 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryRow;
 
-import javax.annotation.Nullable;
+/** Assigner a bucket for a record, just used in dynamic bucket table. */
+public interface BucketAssigner {
 
-import java.util.List;
+    int assign(BinaryRow partition, int hash);
 
-/** Maintainer to maintain index. */
-public interface IndexMaintainer<T> {
-
-    void notifyNewRecord(T record);
-
-    List<IndexFileMeta> prepareCommit();
-
-    /** Factory to restore {@link IndexMaintainer}. */
-    interface Factory<T> {
-        IndexMaintainer<T> createOrRestore(
-                @Nullable Long snapshotId, BinaryRow partition, int bucket);
-    }
+    void prepareCommit(long commitIdentifier);
 }

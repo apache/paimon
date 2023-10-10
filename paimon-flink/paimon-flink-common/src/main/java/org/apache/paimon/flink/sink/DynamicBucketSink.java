@@ -57,7 +57,8 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         String initialCommitUser = UUID.randomUUID().toString();
 
         // Topology:
-        // input -- shuffle by key hash --> bucket-assigner -- shuffle by bucket --> writer -->
+        // input -- shuffle by key hash --> bucket-assigner -- shuffle by partition & bucket -->
+        // writer -->
         // committer
 
         // 1. shuffle by key hash
@@ -70,7 +71,8 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
 
         // 2. bucket-assigner
         HashBucketAssignerOperator<T> assignerOperator =
-                new HashBucketAssignerOperator<>(initialCommitUser, table, extractorFunction());
+                new HashBucketAssignerOperator<>(
+                        initialCommitUser, table, extractorFunction(), false);
         TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(partitionByKeyHash.getType(), BasicTypeInfo.INT_TYPE_INFO);
         DataStream<Tuple2<T, Integer>> bucketAssigned =
@@ -78,7 +80,7 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
                         .transform("dynamic-bucket-assigner", rowWithBucketType, assignerOperator)
                         .setParallelism(partitionByKeyHash.getParallelism());
 
-        // 3. shuffle by bucket
+        // 3. shuffle by partition & bucket
         DataStream<Tuple2<T, Integer>> partitionByBucket =
                 partition(bucketAssigned, channelComputer2(), parallelism);
 

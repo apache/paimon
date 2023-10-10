@@ -44,6 +44,7 @@ public class FlinkSinkBuilder {
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
+    private boolean compactSink = false;
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -78,6 +79,11 @@ public class FlinkSinkBuilder {
         return this;
     }
 
+    public FlinkSinkBuilder forCompact(boolean compactSink) {
+        this.compactSink = compactSink;
+        return this;
+    }
+
     public DataStreamSink<?> build() {
         DataStream<InternalRow> input = MapToInternalRow.map(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
@@ -108,9 +114,14 @@ public class FlinkSinkBuilder {
     private DataStreamSink<?> buildDynamicBucketSink(
             DataStream<InternalRow> input, boolean globalIndex) {
         checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
-        return globalIndex
-                ? new GlobalDynamicBucketSink(table, overwritePartition).build(input, parallelism)
-                : new RowDynamicBucketSink(table, overwritePartition).build(input, parallelism);
+        return compactSink && !globalIndex
+                // todo support global index sort compact
+                ? new DynamicBucketCompactSink(table, overwritePartition).build(input, parallelism)
+                : globalIndex
+                        ? new GlobalDynamicBucketSink(table, overwritePartition)
+                                .build(input, parallelism)
+                        : new RowDynamicBucketSink(table, overwritePartition)
+                                .build(input, parallelism);
     }
 
     private DataStreamSink<?> buildForFixedBucket(DataStream<InternalRow> input) {

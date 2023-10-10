@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.index.BucketAssigner;
 import org.apache.paimon.index.HashBucketAssigner;
+import org.apache.paimon.index.SimpleHashBucketAssigner;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
@@ -41,17 +43,20 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
 
     private final AbstractFileStoreTable table;
     private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
+    private final boolean overwrite;
 
-    private transient HashBucketAssigner assigner;
+    private transient BucketAssigner assigner;
     private transient PartitionKeyExtractor<T> extractor;
 
     public HashBucketAssignerOperator(
             String commitUser,
             Table table,
-            SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction) {
+            SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction,
+            boolean overwrite) {
         this.initialCommitUser = commitUser;
         this.table = (AbstractFileStoreTable) table;
         this.extractorFunction = extractorFunction;
+        this.overwrite = overwrite;
     }
 
     @Override
@@ -66,13 +71,18 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                         context, "commit_user_state", String.class, initialCommitUser);
 
         this.assigner =
-                new HashBucketAssigner(
-                        table.snapshotManager(),
-                        commitUser,
-                        table.store().newIndexFileHandler(),
-                        getRuntimeContext().getNumberOfParallelSubtasks(),
-                        getRuntimeContext().getIndexOfThisSubtask(),
-                        table.coreOptions().dynamicBucketTargetRowNum());
+                overwrite
+                        ? new SimpleHashBucketAssigner(
+                                getRuntimeContext().getNumberOfParallelSubtasks(),
+                                getRuntimeContext().getIndexOfThisSubtask(),
+                                table.coreOptions().dynamicBucketTargetRowNum())
+                        : new HashBucketAssigner(
+                                table.snapshotManager(),
+                                commitUser,
+                                table.store().newIndexFileHandler(),
+                                getRuntimeContext().getNumberOfParallelSubtasks(),
+                                getRuntimeContext().getIndexOfThisSubtask(),
+                                table.coreOptions().dynamicBucketTargetRowNum());
         this.extractor = extractorFunction.apply(table.schema());
     }
 

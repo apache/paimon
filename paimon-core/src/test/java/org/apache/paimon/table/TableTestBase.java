@@ -180,7 +180,6 @@ public abstract class TableTestBase {
         }
     }
 
-    // schema with all the basic types.
     protected Schema schemaDefault() {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.INT());
