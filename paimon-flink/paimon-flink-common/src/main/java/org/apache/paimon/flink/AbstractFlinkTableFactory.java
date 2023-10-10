@@ -315,7 +315,7 @@ public abstract class AbstractFlinkTableFactory
 
         String template =
                 String.format(
-                        "(%s|\\*)\\.(%s|\\*)\\.(%s|\\*)\\.(%s|\\*)\\.(.+)",
+                        "(%s)\\.(%s|\\*)\\.(%s|\\*)\\.(%s|\\*)\\.(.+)",
                         FlinkConnectorOptions.TABLE_DYNAMIC_OPTION_PREFIX,
                         context.getObjectIdentifier().getCatalogName(),
                         context.getObjectIdentifier().getDatabaseName(),
