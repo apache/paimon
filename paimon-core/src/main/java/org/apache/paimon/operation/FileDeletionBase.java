@@ -41,6 +41,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -210,35 +211,41 @@ public abstract class FileDeletionBase {
         }
     }
 
-    public Iterable<ManifestEntry> tryReadManifestEntries(String manifestListName) {
-        return readManifestEntries(tryReadManifestList(manifestListName));
-    }
-
-    /** Try to read base and delta manifest lists at one time. */
-    protected Iterable<ManifestEntry> tryReadDataManifestEntries(Snapshot snapshot) {
+    protected List<String> tryReadDataManifests(Snapshot snapshot) {
         List<ManifestFileMeta> manifestFileMetas = tryReadManifestList(snapshot.baseManifestList());
         manifestFileMetas.addAll(tryReadManifestList(snapshot.deltaManifestList()));
-
-        return readManifestEntries(manifestFileMetas);
+        return readManifestFileNames(manifestFileMetas);
     }
 
-    /** Cancel reading when any file is failed to read. */
-    private List<ManifestEntry> readManifestEntries(List<ManifestFileMeta> manifestFileMetas) {
-        try {
-            return manifestFileMetas.stream()
-                    .map(ManifestFileMeta::fileName)
-                    .flatMap(f -> manifestFile.read(f).stream())
-                    .collect(Collectors.toList());
-        } catch (Exception e) {
-            LOG.warn("Failed to read manifest files.", e);
-            return Collections.emptyList();
-        }
+    protected List<String> readManifestFileNames(List<ManifestFileMeta> manifestFileMetas) {
+        return manifestFileMetas.stream()
+                .map(ManifestFileMeta::fileName)
+                .collect(Collectors.toCollection(LinkedList::new));
     }
 
+    /**
+     * NOTE: This method is used for building data file skipping set. If failed to read some
+     * manifests, it will throw exception which callers must handle.
+     */
     protected void addMergedDataFiles(
-            Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, Snapshot snapshot) {
-        Iterable<ManifestEntry> entries = tryReadDataManifestEntries(snapshot);
-        for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
+            Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, Snapshot snapshot)
+            throws Exception {
+        // read data manifests
+        List<String> files = tryReadDataManifests(snapshot);
+
+        // try merging
+        Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
+        for (String file : files) {
+            List<ManifestEntry> entries;
+            try {
+                entries = manifestFile.read(file);
+            } catch (Exception e) {
+                throw new Exception("Failed to read manifest file " + file, e);
+            }
+            ManifestEntry.mergeEntries(entries, map);
+        }
+
+        for (ManifestEntry entry : map.values()) {
             dataFiles
                     .computeIfAbsent(entry.partition(), p -> new HashMap<>())
                     .computeIfAbsent(entry.bucket(), b -> new HashSet<>())

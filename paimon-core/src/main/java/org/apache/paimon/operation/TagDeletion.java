@@ -28,9 +28,12 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 
-import java.util.ArrayList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,6 +41,8 @@ import java.util.function.Predicate;
 
 /** Delete tag files. */
 public class TagDeletion extends FileDeletionBase {
+
+    private static final Logger LOG = LoggerFactory.getLogger(TagDeletion.class);
 
     public TagDeletion(
             FileIO fileIO,
@@ -50,7 +55,7 @@ public class TagDeletion extends FileDeletionBase {
 
     @Override
     public void cleanUnusedDataFiles(Snapshot taggedSnapshot, Predicate<ManifestEntry> skipper) {
-        cleanUnusedDataFiles(tryReadDataManifestEntries(taggedSnapshot), skipper);
+        cleanUnusedDataFiles(tryReadDataManifests(taggedSnapshot), skipper);
     }
 
     @Override
@@ -59,28 +64,39 @@ public class TagDeletion extends FileDeletionBase {
         cleanUnusedManifests(taggedSnapshot, skippingSet, false);
     }
 
-    public void cleanUnusedDataFiles(
-            Iterable<ManifestEntry> entries, Predicate<ManifestEntry> skipper) {
-        List<Path> dataFileToDelete = new ArrayList<>();
-        for (ManifestEntry entry : ManifestEntry.mergeEntries(entries)) {
-            if (!skipper.test(entry)) {
-                Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
-                dataFileToDelete.add(new Path(bucketPath, entry.file().fileName()));
-                for (String file : entry.file().extraFiles()) {
-                    dataFileToDelete.add(new Path(bucketPath, file));
-                }
+    private void cleanUnusedDataFiles(
+            List<String> manifestFileNames, Predicate<ManifestEntry> skipper) {
+        Set<Path> dataFileToDelete = new HashSet<>();
+        for (String manifest : manifestFileNames) {
+            List<ManifestEntry> manifestEntries;
+            try {
+                manifestEntries = manifestFile.read(manifest);
+            } catch (Exception e) {
+                // We want to delete the data file, so just ignore the unavailable files
+                LOG.info("Failed to read manifest " + manifest + ". Ignore it.", e);
+                continue;
+            }
 
-                recordDeletionBuckets(entry);
+            for (ManifestEntry entry : manifestEntries) {
+                if (!skipper.test(entry)) {
+                    Path bucketPath = pathFactory.bucketPath(entry.partition(), entry.bucket());
+                    dataFileToDelete.add(new Path(bucketPath, entry.file().fileName()));
+                    for (String file : entry.file().extraFiles()) {
+                        dataFileToDelete.add(new Path(bucketPath, file));
+                    }
+
+                    recordDeletionBuckets(entry);
+                }
             }
         }
         deleteFiles(dataFileToDelete, fileIO::deleteQuietly);
     }
 
-    public Predicate<ManifestEntry> dataFileSkipper(Snapshot fromSnapshot) {
+    public Predicate<ManifestEntry> dataFileSkipper(Snapshot fromSnapshot) throws Exception {
         return dataFileSkipper(Collections.singletonList(fromSnapshot));
     }
 
-    public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> fromSnapshots) {
+    public Predicate<ManifestEntry> dataFileSkipper(List<Snapshot> fromSnapshots) throws Exception {
         Map<BinaryRow, Map<Integer, Set<String>>> skipped = new HashMap<>();
         for (Snapshot snapshot : fromSnapshots) {
             addMergedDataFiles(skipped, snapshot);

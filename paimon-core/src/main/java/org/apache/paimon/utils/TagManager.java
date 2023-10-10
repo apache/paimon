@@ -24,6 +24,9 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.TagDeletion;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -37,6 +40,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Tag}. */
 public class TagManager {
+
+    private static final Logger LOG = LoggerFactory.getLogger(TagManager.class);
 
     private static final String TAG_PREFIX = "tag-";
 
@@ -116,9 +121,22 @@ public class TagManager {
         skippedSnapshots.add(right);
 
         // delete data files and empty directories
-        Predicate<ManifestEntry> dataFileSkipper = tagDeletion.dataFileSkipper(skippedSnapshots);
-        tagDeletion.cleanUnusedDataFiles(taggedSnapshot, dataFileSkipper);
-        tagDeletion.cleanDataDirectories();
+        Predicate<ManifestEntry> dataFileSkipper = null;
+        boolean success = true;
+        try {
+            dataFileSkipper = tagDeletion.dataFileSkipper(skippedSnapshots);
+        } catch (Exception e) {
+            LOG.info(
+                    String.format(
+                            "Skip cleaning data files of tag '%s' due to failed to build skipping set.",
+                            tagName),
+                    e);
+            success = false;
+        }
+        if (success) {
+            tagDeletion.cleanUnusedDataFiles(taggedSnapshot, dataFileSkipper);
+            tagDeletion.cleanDataDirectories();
+        }
 
         // delete manifests
         tagDeletion.cleanUnusedManifests(

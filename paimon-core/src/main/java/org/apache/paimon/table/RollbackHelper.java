@@ -26,6 +26,9 @@ import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -39,6 +42,8 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Helper class for {@link Table#rollbackTo} including utils to clean snapshots. */
 public class RollbackHelper {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RollbackHelper.class);
 
     private final SnapshotManager snapshotManager;
     private final TagManager tagManager;
@@ -136,13 +141,24 @@ public class RollbackHelper {
         }
 
         // delete data files
-        Predicate<ManifestEntry> dataFileSkipper = tagDeletion.dataFileSkipper(retainedSnapshot);
-        for (Snapshot s : toBeCleaned) {
-            tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
+        Predicate<ManifestEntry> dataFileSkipper = null;
+        boolean success = true;
+        try {
+            dataFileSkipper = tagDeletion.dataFileSkipper(retainedSnapshot);
+        } catch (Exception e) {
+            LOG.info(
+                    "Skip cleaning data files for deleted tags due to failed to build skipping set.",
+                    e);
+            success = false;
         }
 
-        // delete directories
-        tagDeletion.cleanDataDirectories();
+        if (success) {
+            for (Snapshot s : toBeCleaned) {
+                tagDeletion.cleanUnusedDataFiles(s, dataFileSkipper);
+            }
+            // delete directories
+            tagDeletion.cleanDataDirectories();
+        }
 
         return toBeCleaned;
     }
