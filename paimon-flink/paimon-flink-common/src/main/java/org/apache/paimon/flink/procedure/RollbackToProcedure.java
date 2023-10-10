@@ -25,7 +25,7 @@ import org.apache.paimon.table.Table;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
- * Drop partition procedure. Usage:
+ * Rollback procedure. Usage:
  *
  * <pre><code>
  *  -- rollback to a snapshot

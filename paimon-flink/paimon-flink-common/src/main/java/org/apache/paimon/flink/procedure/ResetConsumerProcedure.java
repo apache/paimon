@@ -27,10 +27,14 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /**
- * Drop partition procedure. Usage:
+ * Reset consumer procedure. Usage:
  *
  * <pre><code>
+ *  -- reset the new next snapshot id in the consumer
  *  CALL reset_consumer('tableId', 'consumerId', nextSnapshotId)
+ *
+ *  -- delete consumer
+ *  CALL reset_consumer('tableId', 'consumerId')
  * </code></pre>
  */
 public class ResetConsumerProcedure extends ProcedureBase {
@@ -48,6 +52,17 @@ public class ResetConsumerProcedure extends ProcedureBase {
         ConsumerManager consumerManager =
                 new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
         consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
+
+        return new String[] {"Success"};
+    }
+
+    public String[] call(ProcedureContext procedureContext, String tableId, String consumerId)
+            throws Catalog.TableNotExistException {
+        FileStoreTable fileStoreTable =
+                (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
+        ConsumerManager consumerManager =
+                new ConsumerManager(fileStoreTable.fileIO(), fileStoreTable.location());
+        consumerManager.deleteConsumer(consumerId);
 
         return new String[] {"Success"};
     }

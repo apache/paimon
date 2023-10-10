@@ -68,6 +68,10 @@ public class ConsumerManager implements Serializable {
         }
     }
 
+    public void deleteConsumer(String consumerId) {
+        fileIO.deleteQuietly(consumerPath(consumerId));
+    }
+
     public OptionalLong minNextSnapshot() {
         try {
             return listOriginalVersionedFiles(fileIO, consumerDirectory(), CONSUMER_PREFIX)
