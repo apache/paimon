@@ -33,11 +33,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  */
 public class CreateTagProcedure extends ProcedureBase {
 
-    public static final String NAME = "create_tag";
-
-    public CreateTagProcedure(Catalog catalog) {
-        super(catalog);
-    }
+    public static final String IDENTIFIER = "create_tag";
 
     public String[] call(
             ProcedureContext procedureContext, String tableId, String tagName, long snapshotId)
@@ -46,5 +42,10 @@ public class CreateTagProcedure extends ProcedureBase {
         table.createTag(tagName, snapshotId);
 
         return new String[] {"Success"};
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

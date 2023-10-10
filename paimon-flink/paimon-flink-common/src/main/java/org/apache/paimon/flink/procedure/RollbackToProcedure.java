@@ -37,11 +37,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  */
 public class RollbackToProcedure extends ProcedureBase {
 
-    public static final String NAME = "rollback_to";
-
-    public RollbackToProcedure(Catalog catalog) {
-        super(catalog);
-    }
+    public static final String IDENTIFIER = "rollback_to";
 
     public String[] call(ProcedureContext procedureContext, String tableId, long snapshotId)
             throws Catalog.TableNotExistException {
@@ -57,5 +53,10 @@ public class RollbackToProcedure extends ProcedureBase {
         table.rollbackTo(tagName);
 
         return new String[] {"Success"};
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

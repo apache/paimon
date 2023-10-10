@@ -35,11 +35,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  */
 public class ResetConsumerProcedure extends ProcedureBase {
 
-    public static final String NAME = "reset_consumer";
-
-    public ResetConsumerProcedure(Catalog catalog) {
-        super(catalog);
-    }
+    public static final String IDENTIFIER = "reset_consumer";
 
     public String[] call(
             ProcedureContext procedureContext,
@@ -54,5 +50,10 @@ public class ResetConsumerProcedure extends ProcedureBase {
         consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
 
         return new String[] {"Success"};
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

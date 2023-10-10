@@ -33,11 +33,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  */
 public class DeleteTagProcedure extends ProcedureBase {
 
-    public static final String NAME = "delete_tag";
-
-    public DeleteTagProcedure(Catalog catalog) {
-        super(catalog);
-    }
+    public static final String IDENTIFIER = "delete_tag";
 
     public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
             throws Catalog.TableNotExistException {
@@ -45,5 +41,10 @@ public class DeleteTagProcedure extends ProcedureBase {
         table.deleteTag(tagName);
 
         return new String[] {"Success"};
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

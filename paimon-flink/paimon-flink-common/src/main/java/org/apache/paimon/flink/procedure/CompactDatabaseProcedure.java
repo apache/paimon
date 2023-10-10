@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.action.CompactDatabaseAction;
 import org.apache.paimon.utils.StringUtils;
 
@@ -56,11 +55,7 @@ import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKe
  */
 public class CompactDatabaseProcedure extends ProcedureBase {
 
-    public static final String NAME = "compact_database";
-
-    public CompactDatabaseProcedure(Catalog catalog) {
-        super(catalog);
-    }
+    public static final String IDENTIFIER = "compact_database";
 
     public String[] call(ProcedureContext procedureContext) throws Exception {
         return call(procedureContext, "");
@@ -117,5 +112,10 @@ public class CompactDatabaseProcedure extends ProcedureBase {
         }
 
         return execute(procedureContext, action, "Compact database job");
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }
