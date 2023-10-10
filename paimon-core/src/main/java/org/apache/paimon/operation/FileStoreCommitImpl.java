@@ -114,7 +114,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
 
-    private final CommitMetrics commitMetrics;
+    private CommitMetrics commitMetrics;
 
     public FileStoreCommitImpl(
             FileIO fileIO,
@@ -153,7 +153,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
-        this.commitMetrics = new CommitMetrics(pathFactory);
+        this.commitMetrics = null;
     }
 
     @Override
@@ -281,14 +281,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         } finally {
             long commitDuration = (System.nanoTime() - started) / 1_000_000;
-            reportCommit(
-                    appendTableFiles,
-                    appendChangelog,
-                    compactTableFiles,
-                    compactChangelog,
-                    commitDuration,
-                    generatedSnapshot,
-                    attempts);
+            if (this.commitMetrics != null) {
+                reportCommit(
+                        appendTableFiles,
+                        appendChangelog,
+                        compactTableFiles,
+                        compactChangelog,
+                        commitDuration,
+                        generatedSnapshot,
+                        attempts);
+            }
         }
     }
 
@@ -476,8 +478,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void close() {
-        commitMetrics.getMetricGroup().close();
+    public FileStoreCommit withMetrics(CommitMetrics metrics) {
+        this.commitMetrics = metrics;
+        return this;
     }
 
     private void collectChanges(
@@ -1000,10 +1003,6 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         for (ManifestFileMeta meta : changelogMetas) {
             manifestList.delete(meta.fileName());
         }
-    }
-
-    public CommitMetrics getCommitMetrics() {
-        return commitMetrics;
     }
 
     private static class LevelIdentifier {

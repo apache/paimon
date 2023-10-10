@@ -18,8 +18,6 @@
 
 package org.apache.paimon.metrics.commit;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.metrics.Gauge;
@@ -27,13 +25,9 @@ import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.Metrics;
-import org.apache.paimon.types.IntType;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +39,6 @@ import static org.assertj.core.api.Assertions.offset;
 
 /** Tests for {@link CommitMetrics}. */
 public class CommitMetricsTest {
-    @TempDir static java.nio.file.Path tempDir;
     private static final String TABLE_NAME = "myTable";
 
     private CommitMetrics commitMetrics;
@@ -278,13 +271,6 @@ public class CommitMetricsTest {
     }
 
     private CommitMetrics getCommitMetrics() {
-        Path path = new Path(tempDir.toString(), TABLE_NAME);
-        FileStorePathFactory pathFactory =
-                new FileStorePathFactory(
-                        path,
-                        RowType.of(new IntType()),
-                        "default",
-                        CoreOptions.FILE_FORMAT.defaultValue().toString());
-        return new CommitMetrics(pathFactory);
+        return new CommitMetrics(TABLE_NAME);
     }
 }

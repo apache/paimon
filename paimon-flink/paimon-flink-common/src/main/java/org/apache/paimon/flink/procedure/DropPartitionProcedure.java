@@ -51,7 +51,7 @@ public class DropPartitionProcedure extends ProcedureBase {
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
         FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
         commit.dropPartitions(getPartitions(partitionStrings), BatchWriteBuilder.COMMIT_IDENTIFIER);
-        commit.close();
+
         return new String[] {"Success"};
     }
 

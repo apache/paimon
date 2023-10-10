@@ -101,7 +101,6 @@ public class PartitionExpire {
         if (expired.size() > 0) {
             commit.dropPartitions(expired, commitIdentifier);
         }
-        commit.close();
     }
 
     private Map<String, String> toPartitionString(Object[] array) {

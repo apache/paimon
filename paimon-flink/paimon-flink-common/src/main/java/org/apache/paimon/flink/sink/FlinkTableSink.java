@@ -170,20 +170,16 @@ public class FlinkTableSink extends FlinkTableSinkBase
     public Optional<Long> executeDeletion() {
         FileStoreCommit commit =
                 ((AbstractFileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
-        try {
-            long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
-            if (deletePredicate == null) {
-                commit.purgeTable(identifier);
-                return Optional.empty();
-            } else if (deleteIsDropPartition()) {
-                commit.dropPartitions(Collections.singletonList(deletePartitions()), identifier);
-                return Optional.empty();
-            } else {
-                return Optional.of(
-                        TableUtils.deleteWhere(table, Collections.singletonList(deletePredicate)));
-            }
-        } finally {
-            commit.close();
+        long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
+        if (deletePredicate == null) {
+            commit.purgeTable(identifier);
+            return Optional.empty();
+        } else if (deleteIsDropPartition()) {
+            commit.dropPartitions(Collections.singletonList(deletePartitions()), identifier);
+            return Optional.empty();
+        } else {
+            return Optional.of(
+                    TableUtils.deleteWhere(table, Collections.singletonList(deletePredicate)));
         }
     }
 

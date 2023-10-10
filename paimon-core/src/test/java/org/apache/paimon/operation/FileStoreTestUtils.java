@@ -107,7 +107,6 @@ public class FileStoreTestUtils {
         }
 
         commit.commit(committable, Collections.emptyMap());
-        commit.close();
 
         writers.values().stream()
                 .flatMap(m -> m.values().stream())

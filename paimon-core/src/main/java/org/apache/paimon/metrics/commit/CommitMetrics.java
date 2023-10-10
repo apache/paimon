@@ -23,7 +23,6 @@ import org.apache.paimon.metrics.AbstractMetricGroup;
 import org.apache.paimon.metrics.DescriptiveStatisticsHistogram;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.groups.GenericMetricGroup;
-import org.apache.paimon.utils.FileStorePathFactory;
 
 /** Metrics to measure a commit. */
 public class CommitMetrics {
@@ -32,10 +31,8 @@ public class CommitMetrics {
 
     private final AbstractMetricGroup genericMetricGroup;
 
-    public CommitMetrics(FileStorePathFactory pathFactory) {
-        this.genericMetricGroup =
-                GenericMetricGroup.createGenericMetricGroup(
-                        pathFactory.root().getName(), GROUP_NAME);
+    public CommitMetrics(String table) {
+        this.genericMetricGroup = GenericMetricGroup.createGenericMetricGroup(table, GROUP_NAME);
         registerGenericCommitMetrics();
     }
 

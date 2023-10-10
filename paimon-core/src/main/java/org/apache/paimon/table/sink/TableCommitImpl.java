@@ -21,6 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.metrics.commit.CommitMetrics;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
@@ -75,6 +76,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
     private ExecutorService expireMainExecutor;
     private AtomicReference<Throwable> expireError;
+    private final CommitMetrics commitMetrics;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -85,8 +87,10 @@ public class TableCommitImpl implements InnerTableCommit {
             Lock lock,
             @Nullable Duration consumerExpireTime,
             ConsumerManager consumerManager,
-            ExpireExecutionMode expireExecutionMode) {
-        commit.withLock(lock);
+            ExpireExecutionMode expireExecutionMode,
+            String table) {
+        this.commitMetrics = new CommitMetrics(table);
+        commit.withLock(lock).withMetrics(commitMetrics);
         if (expire != null) {
             expire.withLock(lock);
         }
@@ -261,7 +265,7 @@ public class TableCommitImpl implements InnerTableCommit {
         }
         IOUtils.closeQuietly(lock);
         expireMainExecutor.shutdownNow();
-        commit.close();
+        commitMetrics.getMetricGroup().close();
     }
 
     @Override

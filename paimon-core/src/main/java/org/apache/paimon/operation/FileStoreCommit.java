@@ -20,6 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.manifest.ManifestCommittable;
+import org.apache.paimon.metrics.commit.CommitMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import java.util.List;
@@ -79,6 +80,6 @@ public interface FileStoreCommit {
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);
 
-    /** Close the commit. */
-    void close();
+    /** With metrics to measure commits. */
+    FileStoreCommit withMetrics(CommitMetrics metrics);
 }
