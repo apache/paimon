@@ -18,11 +18,13 @@
 
 package org.apache.paimon.sort.zorder;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.ZOrderByteUtils;
 
 import org.assertj.core.api.Assertions;
@@ -66,5 +68,48 @@ public class ZIndexerTest {
                 Assertions.assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
             }
         }
+    }
+
+    @Test
+    public void testZIndexerForVarchar() {
+        RowType rowType = RowType.of(new VarCharType(), new VarCharType());
+
+        int varTypeSize = 10;
+        ZIndexer zIndexer = new ZIndexer(rowType, Arrays.asList("f0", "f1"), varTypeSize);
+        zIndexer.open();
+
+        for (int i = 0; i < 1000; i++) {
+            BinaryString a = BinaryString.fromString(randomString(varTypeSize + 1));
+            BinaryString b = BinaryString.fromString(randomString(varTypeSize));
+
+            InternalRow internalRow = GenericRow.of(a, b);
+
+            byte[] zOrder = zIndexer.index(internalRow);
+
+            byte[][] zCache = new byte[2][];
+            ByteBuffer byteBuffer = ByteBuffer.allocate(varTypeSize);
+            ZOrderByteUtils.stringToOrderedBytes(a.toString(), varTypeSize, byteBuffer);
+            zCache[0] = Arrays.copyOf(byteBuffer.array(), varTypeSize);
+
+            ZOrderByteUtils.stringToOrderedBytes(b.toString(), varTypeSize, byteBuffer);
+            zCache[1] = Arrays.copyOf(byteBuffer.array(), varTypeSize);
+
+            byte[] expectedZOrder =
+                    ZOrderByteUtils.interleaveBits(zCache, zCache.length * varTypeSize);
+
+            for (int j = 0; j < zCache.length * varTypeSize; j++) {
+                Assertions.assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
+            }
+        }
+    }
+
+    public static String randomString(int length) {
+        byte[] buffer = new byte[length];
+
+        for (int i = 0; i < length; i += 1) {
+            buffer[i] = (byte) ('a' + RANDOM.nextInt(26));
+        }
+
+        return new String(buffer);
     }
 }
