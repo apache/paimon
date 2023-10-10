@@ -303,7 +303,7 @@ NOTE: The consumer will prevent expiration of the snapshot. You can specify 'con
 lifetime of consumers.
 {{< /hint >}}
 
-You can reset a consumer with a given consumer ID and next snapshot ID.
+You can reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.
 
 {{< hint info >}}
 First, you need to stop the streaming task using this consumer ID, and then execute the reset consumer action job.
@@ -323,9 +323,11 @@ Run the following command:
     --database <database-name> \ 
     --table <table-name> \
     --consumer-id <consumer-id> \
-    --next-snapshot <next-snapshot-id> \
+    [--next-snapshot <next-snapshot-id>] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
 ```
+
+please don't specify --next-snapshot parameter if you want to delete the consumer.
 
 {{< /tab >}}
 

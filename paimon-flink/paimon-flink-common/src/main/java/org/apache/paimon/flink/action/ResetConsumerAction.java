@@ -23,23 +23,27 @@ import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.table.FileStoreTable;
 
 import java.util.Map;
+import java.util.Objects;
 
 /** Reset consumer action for Flink. */
 public class ResetConsumerAction extends TableActionBase {
 
     private final String consumerId;
-    private final long nextSnapshotId;
+    private Long nextSnapshotId;
 
     protected ResetConsumerAction(
             String warehouse,
             String databaseName,
             String tableName,
             Map<String, String> catalogConfig,
-            String consumerId,
-            long nextSnapshotId) {
+            String consumerId) {
         super(warehouse, databaseName, tableName, catalogConfig);
         this.consumerId = consumerId;
+    }
+
+    public ResetConsumerAction withNextSnapshotIds(Long nextSnapshotId) {
         this.nextSnapshotId = nextSnapshotId;
+        return this;
     }
 
     @Override
@@ -47,6 +51,10 @@ public class ResetConsumerAction extends TableActionBase {
         FileStoreTable dataTable = (FileStoreTable) table;
         ConsumerManager consumerManager =
                 new ConsumerManager(dataTable.fileIO(), dataTable.location());
-        consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
+        if (Objects.isNull(nextSnapshotId)) {
+            consumerManager.deleteConsumer(consumerId);
+        } else {
+            consumerManager.resetConsumer(consumerId, new Consumer(nextSnapshotId));
+        }
     }
 }
