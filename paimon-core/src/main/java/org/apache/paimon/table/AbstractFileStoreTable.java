@@ -128,7 +128,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 splitGenerator(),
                 nonPartitionFilterConsumer(),
-                DefaultValueAssigner.create(tableSchema));
+                DefaultValueAssigner.create(tableSchema),
+                name());
     }
 
     @Override

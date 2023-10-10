@@ -28,8 +28,10 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
@@ -72,6 +74,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private ScanMode scanMode = ScanMode.ALL;
     private RecordComparator lazyPartitionComparator;
 
+    private final String tableName;
+
     public SnapshotReaderImpl(
             FileStoreScan scan,
             TableSchema tableSchema,
@@ -79,7 +83,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
             SnapshotManager snapshotManager,
             SplitGenerator splitGenerator,
             BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer,
-            DefaultValueAssigner defaultValueAssigner) {
+            DefaultValueAssigner defaultValueAssigner,
+            String tableName) {
+        this.tableName = tableName;
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.options = options;
@@ -170,6 +176,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
         scan.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withMetricRegistry(MetricRegistry registry) {
+        scan.withMetrics(new ScanMetrics(registry, tableName));
         return this;
     }
 
