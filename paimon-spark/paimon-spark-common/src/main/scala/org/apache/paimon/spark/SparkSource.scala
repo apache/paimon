@@ -21,7 +21,8 @@ import org.apache.paimon.catalog.CatalogContext
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.spark.sources.PaimonSink
-import org.apache.paimon.table.{FileStoreTable, FileStoreTableFactory}
+import org.apache.paimon.table.{DataTable, FileStoreTable, FileStoreTableFactory}
+import org.apache.paimon.table.system.AuditLogTable
 
 import org.apache.spark.sql.{DataFrame, SaveMode => SparkSaveMode, SparkSession, SQLContext}
 import org.apache.spark.sql.connector.catalog.{SessionConfigSupport, Table}
@@ -70,17 +71,22 @@ class SparkSource
       mode: SparkSaveMode,
       parameters: Map[String, String],
       data: DataFrame): BaseRelation = {
-    val table = loadTable(parameters.asJava)
+    val table = loadTable(parameters.asJava).asInstanceOf[FileStoreTable]
     WriteIntoPaimonTable(table, SaveMode.transform(mode), data, Options.fromMap(parameters.asJava))
       .run(sqlContext.sparkSession)
     SparkSource.toBaseRelation(table, sqlContext)
   }
 
-  private def loadTable(options: JMap[String, String]): FileStoreTable = {
+  private def loadTable(options: JMap[String, String]): DataTable = {
     val catalogContext = CatalogContext.create(
       Options.fromMap(options),
       SparkSession.active.sessionState.newHadoopConf())
-    FileStoreTableFactory.create(catalogContext)
+    val table = FileStoreTableFactory.create(catalogContext)
+    if (Options.fromMap(options).get(SparkConnectorOptions.READ_CHANGELOG)) {
+      new AuditLogTable(table)
+    } else {
+      table
+    }
   }
 
   override def createSink(
@@ -91,7 +97,7 @@ class SparkSource
     if (outputMode != OutputMode.Append && outputMode != OutputMode.Complete) {
       throw new RuntimeException("Paimon supports only Complete and Append output mode.")
     }
-    val table = loadTable(parameters.asJava)
+    val table = loadTable(parameters.asJava).asInstanceOf[FileStoreTable]
     val options = Options.fromMap(parameters.asJava)
     new PaimonSink(sqlContext, table, partitionColumns, outputMode, options)
   }

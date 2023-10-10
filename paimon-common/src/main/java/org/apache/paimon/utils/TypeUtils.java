@@ -51,6 +51,15 @@ public class TypeUtils {
                 Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()));
     }
 
+    public static RowType project(RowType inputType, List<String> names) {
+        List<DataField> fields = inputType.getFields();
+        List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
+        return new RowType(
+                names.stream()
+                        .map(k -> fields.get(fieldNames.indexOf(k)))
+                        .collect(Collectors.toList()));
+    }
+
     public static Object castFromString(String s, DataType type) {
         return castFromStringInternal(s, type, false);
     }

@@ -57,6 +57,12 @@ under the License.
             <td>The minimum number of rows returned in a single batch, which used to create MinRowsReadLimit with read.stream.maxTriggerDelayMs together.</td>
         </tr>
         <tr>
+            <td><h5>read.changelog</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to read row in the form of changelog (add rowkind column in row to represent its change type).</td>
+        </tr>
+        <tr>
             <td><h5>write.merge-schema</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>

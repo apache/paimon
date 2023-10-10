@@ -69,4 +69,11 @@ public class SparkConnectorOptions {
                     .noDefaultValue()
                     .withDescription(
                             "The maximum delay between two adjacent batches, which used to create MinRowsReadLimit with read.stream.minRowsPerTrigger together.");
+
+    public static final ConfigOption<Boolean> READ_CHANGELOG =
+            key("read.changelog")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to read row in the form of changelog (add rowkind column in row to represent its change type).");
 }
