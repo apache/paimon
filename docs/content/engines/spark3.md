@@ -419,7 +419,6 @@ val query = spark.readStream
 */
 ```
 
-
 ## Spark Type Conversion
 
 This section lists all supported type conversion between Spark and Paimon.
