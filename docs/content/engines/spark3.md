@@ -399,7 +399,7 @@ val query = spark.readStream
 ```
 
 Paimon Structured Streaming supports read row in the form of changelog (add rowkind column in row to represent its 
-change type) by setting `read.changeLog` to true (default is false).
+change type) by setting `read.changelog` to true (default is false).
 
 **Example:**
 
@@ -407,7 +407,7 @@ change type) by setting `read.changeLog` to true (default is false).
 // no any scan-related configs are provided, that will use latest-full scan mode.
 val query = spark.readStream
   .format("paimon")
-  .option("read.changeLog", "true")
+  .option("read.changelog", "true")
   .load("/path/to/paimon/source/table")
   .writeStream
   .format("console")

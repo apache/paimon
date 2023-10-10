@@ -48,7 +48,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
 
         val readStream = spark.readStream
           .format("paimon")
-          .option("read.changeLog", "true")
+          .option("read.changelog", "true")
           .load(location)
           .writeStream
           .format("memory")
@@ -100,7 +100,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
 
         val readStream = spark.readStream
           .format("paimon")
-          .option("read.changeLog", "true")
+          .option("read.changelog", "true")
           .option("scan.mode", "from-snapshot")
           .option("scan.snapshot-id", 1)
           .load(location)
@@ -167,7 +167,7 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
         // streaming read
         val readStream = spark.readStream
           .format("paimon")
-          .option("read.changeLog", "true")
+          .option("read.changelog", "true")
           .option("scan.mode", "from-snapshot")
           .option("scan.snapshot-id", 1)
           .load(location)
