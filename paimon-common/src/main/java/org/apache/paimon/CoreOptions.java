@@ -897,8 +897,8 @@ public class CoreOptions implements Serializable {
                                     + "This can reduce job startup time and excessive initialization of index, "
                                     + "but please note that this may also cause data duplication.");
 
-    public static final ConfigOption<Integer> ZORDER_VARTYPE_SIZE =
-            key("zorder.vartype.size")
+    public static final ConfigOption<Integer> ZORDER_VAR_LENGTH_CONTRIBUTION =
+            key("zorder.var-length-contribution")
                     .intType()
                     .defaultValue(8)
                     .withDescription(
@@ -1343,7 +1343,7 @@ public class CoreOptions implements Serializable {
     }
 
     public int varTypeSize() {
-        return options.get(ZORDER_VARTYPE_SIZE);
+        return options.get(ZORDER_VAR_LENGTH_CONTRIBUTION);
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -204,7 +205,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         schemaBuilder.option("scan.parallelism", "6");
         schemaBuilder.option("sink.parallelism", "3");
         schemaBuilder.option("dynamic-bucket.target-row-num", "100");
-        schemaBuilder.option("zorder.vartype.size", "14");
+        schemaBuilder.option(CoreOptions.ZORDER_VAR_LENGTH_CONTRIBUTION.key(), "14");
         schemaBuilder.primaryKey("f0");
         return schemaBuilder.build();
     }
