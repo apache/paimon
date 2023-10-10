@@ -30,6 +30,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
@@ -45,6 +46,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -498,6 +501,111 @@ public class FileDeletionTest {
         for (String manifestListName : manifestLists) {
             assertPathNotExists(fileIO, pathFactory.toManifestListPath(manifestListName));
         }
+    }
+
+    /**
+     * When a data file is upgraded, it will have a {@link FileKind#ADD} and a {@link
+     * FileKind#DELETE} entries. This test ensure that if the ADD entry cannot be read correctly
+     * when expiring, the data file won't be deleted. In this test we manually separate the ADD
+     * entry and delete entry into two manifest file and delete the ADD entry manifest file to
+     * simulate the read exception.
+     */
+    @Test
+    public void testExpireWithMissingManifest() throws Exception {
+        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        SnapshotManager snapshotManager = store.snapshotManager();
+        TestKeyValueGenerator gen =
+                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
+        BinaryRow partition = gen.getPartition(gen.next());
+
+        // snapshot 1: commit A to bucket 0
+        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
+        List<KeyValue> kvs = partitionedData(5, gen);
+        writeData(store, kvs, partition, 0, writers);
+        commitData(store, commitIdentifier++, writers);
+
+        // snapshot 2: compact
+        writers.values().stream()
+                .flatMap(m -> m.values().stream())
+                .forEach(
+                        writer -> {
+                            try {
+                                writer.compact(true);
+                                writer.sync();
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+        FileStoreTestUtils.commitData(store, commitIdentifier++, writers);
+
+        // check that there are one data file and get its path
+        FileStorePathFactory pathFactory = store.pathFactory();
+        Path bucket0 = pathFactory.bucketPath(partition, 0);
+        List<Path> datafiles =
+                Files.walk(Paths.get(bucket0.toString()))
+                        .filter(Files::isRegularFile)
+                        .filter(p -> p.getFileName().toString().startsWith("data"))
+                        .map(p -> new Path(p.toString()))
+                        .collect(Collectors.toList());
+        assertThat(datafiles.size()).isEqualTo(1);
+        Path dataFileA = datafiles.get(0);
+
+        // check the snapshot 2 has two delta manifests entry (-A, level=0), (+A, level=5)
+        Snapshot snapshot2 = snapshotManager.snapshot(2);
+        ManifestList manifestList = store.manifestListFactory().create();
+        ManifestFile manifestFile = store.manifestFileFactory().create();
+
+        String deltaManifestList = snapshot2.deltaManifestList();
+        List<ManifestFileMeta> manifestFileMetas = manifestList.read(snapshot2.deltaManifestList());
+        assertThat(manifestFileMetas.size()).isEqualTo(1);
+
+        String deltaManifestFile = manifestFileMetas.get(0).fileName();
+        List<ManifestEntry> entries = manifestFile.read(deltaManifestFile);
+        assertThat(entries.size()).isEqualTo(2);
+
+        ManifestEntry addEntry = null, deleteEntry = null;
+        for (ManifestEntry entry : entries) {
+            assertThat(entry.file().fileName()).isEqualTo(dataFileA.getName());
+            if (entry.kind() == FileKind.ADD) {
+                assertThat(addEntry).isNull();
+                addEntry = entry;
+                assertThat(entry.file().level()).isGreaterThan(0);
+            } else {
+                assertThat(deleteEntry).isNull();
+                deleteEntry = entry;
+                assertThat(entry.file().level()).isEqualTo(0);
+            }
+        }
+        assertThat(addEntry).isNotNull();
+        assertThat(deleteEntry).isNotNull();
+
+        // separate two entries to two manifest files and delete the (+A, level=5) manifest
+        fileIO.deleteQuietly(pathFactory.toManifestListPath(deltaManifestList));
+        fileIO.deleteQuietly(pathFactory.toManifestFilePath(deltaManifestFile));
+
+        List<ManifestFileMeta> newAddManifests =
+                manifestFile.write(Collections.singletonList(addEntry));
+        assertThat(newAddManifests.size()).isEqualTo(1);
+        String newAddManifestFileName = newAddManifests.get(0).fileName();
+        fileIO.deleteQuietly(pathFactory.toManifestFilePath(newAddManifestFileName));
+
+        List<ManifestFileMeta> newDeleteManifests =
+                manifestFile.write(Collections.singletonList(deleteEntry));
+        assertThat(newDeleteManifests.size()).isEqualTo(1);
+
+        List<ManifestFileMeta> newManifests =
+                Arrays.asList(newAddManifests.get(0), newDeleteManifests.get(0));
+
+        String newManifestListName = manifestList.write(newManifests);
+
+        fileIO.rename(
+                pathFactory.toManifestListPath(newManifestListName),
+                pathFactory.toManifestListPath(deltaManifestList));
+
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
+
+        // check data file
+        assertPathExists(fileIO, dataFileA);
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode) throws Exception {

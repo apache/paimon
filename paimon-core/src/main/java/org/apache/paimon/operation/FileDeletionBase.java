@@ -32,8 +32,6 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FileUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.Iterables;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,11 +41,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -227,32 +222,17 @@ public abstract class FileDeletionBase {
         return readManifestEntries(manifestFileMetas);
     }
 
-    protected Iterable<ManifestEntry> readManifestEntries(
-            List<ManifestFileMeta> manifestFileMetas) {
-        Queue<String> files =
-                manifestFileMetas.stream()
-                        .map(ManifestFileMeta::fileName)
-                        .collect(Collectors.toCollection(LinkedList::new));
-        return Iterables.concat(
-                (Iterable<Iterable<ManifestEntry>>)
-                        () ->
-                                new Iterator<Iterable<ManifestEntry>>() {
-                                    @Override
-                                    public boolean hasNext() {
-                                        return files.size() > 0;
-                                    }
-
-                                    @Override
-                                    public Iterable<ManifestEntry> next() {
-                                        String file = files.poll();
-                                        try {
-                                            return manifestFile.read(file);
-                                        } catch (Exception e) {
-                                            LOG.warn("Failed to read manifest file " + file, e);
-                                            return Collections.emptyList();
-                                        }
-                                    }
-                                });
+    /** Cancel reading when any file is failed to read. */
+    private List<ManifestEntry> readManifestEntries(List<ManifestFileMeta> manifestFileMetas) {
+        try {
+            return manifestFileMetas.stream()
+                    .map(ManifestFileMeta::fileName)
+                    .flatMap(f -> manifestFile.read(f).stream())
+                    .collect(Collectors.toList());
+        } catch (Exception e) {
+            LOG.warn("Failed to read manifest files.", e);
+            return Collections.emptyList();
+        }
     }
 
     protected void addMergedDataFiles(
