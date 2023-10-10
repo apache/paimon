@@ -70,7 +70,8 @@ public class ZorderSorter extends TableSorter {
      */
     private DataStream<RowData> sortStreamByZOrder(
             DataStream<RowData> inputStream, FileStoreTable table) {
-        final ZIndexer zIndexer = new ZIndexer(table.rowType(), orderColNames);
+        final ZIndexer zIndexer =
+                new ZIndexer(table.rowType(), orderColNames, table.coreOptions().varTypeSize());
         return SortUtils.sortStreamByKey(
                 inputStream,
                 table,

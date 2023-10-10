@@ -897,6 +897,13 @@ public class CoreOptions implements Serializable {
                                     + "This can reduce job startup time and excessive initialization of index, "
                                     + "but please note that this may also cause data duplication.");
 
+    public static final ConfigOption<Integer> ZORDER_VARTYPE_SIZE =
+            key("zorder.vartype.size")
+                    .intType()
+                    .defaultValue(8)
+                    .withDescription(
+                            "The bytes of types (CHAR, VARCHAR, BINARY, VARBINARY) devote to the zorder sort.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1333,6 +1340,10 @@ public class CoreOptions implements Serializable {
 
     public String crossPartitionUpsertBootstrapMinPartition() {
         return options.get(CROSS_PARTITION_UPSERT_BOOTSTRAP_MIN_PARTITION);
+    }
+
+    public int varTypeSize() {
+        return options.get(ZORDER_VARTYPE_SIZE);
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -114,6 +115,42 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                 .isLessThan(filesFilter.size() / (double) files.size());
     }
 
+    @Test
+    public void testDynamicBucketSortWithStringType() throws Exception {
+        createTable();
+
+        commit(writeData(100));
+        PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
+        Predicate predicate =
+                predicateBuilder.between(
+                        4,
+                        BinaryString.fromString("000000000" + 100),
+                        BinaryString.fromString("000000000" + 200));
+
+        List<ManifestEntry> files = ((FileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> filesFilter =
+                ((ChangelogWithKeyFileStoreTable) getTable())
+                        .store()
+                        .newScan()
+                        .withValueFilter(predicate)
+                        .plan()
+                        .files();
+
+        zorder(Arrays.asList("f4"));
+
+        List<ManifestEntry> filesZorder =
+                ((FileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> filesFilterZorder =
+                ((ChangelogWithKeyFileStoreTable) getTable())
+                        .store()
+                        .newScan()
+                        .withValueFilter(predicate)
+                        .plan()
+                        .files();
+        Assertions.assertThat(filesFilterZorder.size() / (double) filesZorder.size())
+                .isLessThan(filesFilter.size() / (double) files.size());
+    }
+
     private void zorder(List<String> columns) throws Exception {
         if (RANDOM.nextBoolean()) {
             new SortCompactAction(
@@ -162,10 +199,12 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         schemaBuilder.column("f1", DataTypes.BIGINT());
         schemaBuilder.column("f2", DataTypes.BIGINT());
         schemaBuilder.column("f3", DataTypes.BIGINT());
+        schemaBuilder.column("f4", DataTypes.STRING());
         schemaBuilder.option("bucket", "-1");
         schemaBuilder.option("scan.parallelism", "6");
         schemaBuilder.option("sink.parallelism", "3");
         schemaBuilder.option("dynamic-bucket.target-row-num", "100");
+        schemaBuilder.option("zorder.vartype.size", "14");
         schemaBuilder.primaryKey("f0");
         return schemaBuilder.build();
     }
@@ -204,12 +243,19 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     }
 
     private static InternalRow data(int bucket) {
+        String in = String.valueOf(Math.abs(RANDOM.nextInt(10000)));
+        int count = 4 - in.length();
+        for (int i = 0; i < count; i++) {
+            in = "0" + in;
+        }
+        assert in.length() == 4;
         GenericRow row =
                 GenericRow.of(
                         RANDOM.nextLong(),
                         (long) RANDOM.nextInt(10000),
                         (long) RANDOM.nextInt(10000),
-                        (long) RANDOM.nextInt(10000));
+                        (long) RANDOM.nextInt(10000),
+                        BinaryString.fromString("00000000" + in));
         return new DynamicBucketRow(row, bucket);
     }
 }

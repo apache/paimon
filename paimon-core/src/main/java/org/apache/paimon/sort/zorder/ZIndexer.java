@@ -67,8 +67,13 @@ public class ZIndexer implements Serializable {
     private transient ByteBuffer reuse;
 
     public ZIndexer(RowType rowType, List<String> orderColumns) {
+        this(rowType, orderColumns, PRIMITIVE_BUFFER_SIZE);
+    }
+
+    public ZIndexer(RowType rowType, List<String> orderColumns, int varTypeSize) {
         List<String> fields = rowType.getFieldNames();
         fieldsIndex = new int[orderColumns.size()];
+        int varTypeCount = 0;
         for (int i = 0; i < fieldsIndex.length; i++) {
             int index = fields.indexOf(orderColumns.get(i));
             if (index == -1) {
@@ -79,9 +84,22 @@ public class ZIndexer implements Serializable {
                                 + fields);
             }
             fieldsIndex[i] = index;
+
+            if (isVarType(rowType.getFieldTypes().get(index))) {
+                varTypeCount++;
+            }
         }
-        this.functionSet = constructFunctionMap(rowType.getFields());
-        this.totalBytes = PRIMITIVE_BUFFER_SIZE * this.fieldsIndex.length;
+        this.functionSet = constructFunctionMap(rowType.getFields(), varTypeSize);
+        this.totalBytes =
+                PRIMITIVE_BUFFER_SIZE * (this.fieldsIndex.length - varTypeCount)
+                        + varTypeSize * varTypeCount;
+    }
+
+    private static boolean isVarType(DataType dataType) {
+        return dataType instanceof CharType
+                || dataType instanceof VarCharType
+                || dataType instanceof BinaryType
+                || dataType instanceof VarBinaryType;
     }
 
     public void open() {
@@ -104,28 +122,32 @@ public class ZIndexer implements Serializable {
         return ZOrderByteUtils.interleaveBits(columnBytes, totalBytes, reuse);
     }
 
-    public Set<RowProcessor> constructFunctionMap(List<DataField> fields) {
+    public Set<RowProcessor> constructFunctionMap(List<DataField> fields, int varTypeSize) {
         Set<RowProcessor> zorderFunctionSet = new LinkedHashSet<>();
         // Construct zorderFunctionSet and fill dataTypes, rowFields
         for (int index : fieldsIndex) {
             DataField field = fields.get(index);
-            zorderFunctionSet.add(zmapColumnToCalculator(field, index));
+            zorderFunctionSet.add(zmapColumnToCalculator(field, index, varTypeSize));
         }
         return zorderFunctionSet;
     }
 
-    public static RowProcessor zmapColumnToCalculator(DataField field, int index) {
+    public static RowProcessor zmapColumnToCalculator(DataField field, int index, int varTypeSize) {
         DataType type = field.type();
-        return new RowProcessor(type.accept(new TypeVisitor(index)));
+        return new RowProcessor(
+                type.accept(new TypeVisitor(index, varTypeSize)),
+                isVarType(type) ? varTypeSize : PRIMITIVE_BUFFER_SIZE);
     }
 
     /** Type Visitor to generate function map from row column to z-index. */
     public static class TypeVisitor implements DataTypeVisitor<ZProcessFunction>, Serializable {
 
         private final int fieldIndex;
+        private final int varTypeSize;
 
-        public TypeVisitor(int index) {
+        public TypeVisitor(int index, int varTypeSize) {
             this.fieldIndex = index;
+            this.varTypeSize = varTypeSize;
         }
 
         @Override
@@ -140,9 +162,9 @@ public class ZIndexer implements Serializable {
                                                 binaryString.getSegments(),
                                                 binaryString.getOffset(),
                                                 Math.min(
-                                                        PRIMITIVE_BUFFER_SIZE,
+                                                        varTypeSize,
                                                         binaryString.getSizeInBytes())),
-                                        PRIMITIVE_BUFFER_SIZE,
+                                        varTypeSize,
                                         reuse)
                                 .array();
             };
@@ -160,9 +182,9 @@ public class ZIndexer implements Serializable {
                                                 binaryString.getSegments(),
                                                 binaryString.getOffset(),
                                                 Math.min(
-                                                        PRIMITIVE_BUFFER_SIZE,
+                                                        varTypeSize,
                                                         binaryString.getSizeInBytes())),
-                                        PRIMITIVE_BUFFER_SIZE,
+                                        varTypeSize,
                                         reuse)
                                 .array();
             };
@@ -186,7 +208,7 @@ public class ZIndexer implements Serializable {
                     row.isNullAt(fieldIndex)
                             ? NULL_BYTES
                             : ZOrderByteUtils.byteTruncateOrFill(
-                                            row.getBinary(fieldIndex), PRIMITIVE_BUFFER_SIZE, reuse)
+                                            row.getBinary(fieldIndex), varTypeSize, reuse)
                                     .array();
         }
 
@@ -196,7 +218,7 @@ public class ZIndexer implements Serializable {
                     row.isNullAt(fieldIndex)
                             ? NULL_BYTES
                             : ZOrderByteUtils.byteTruncateOrFill(
-                                            row.getBinary(fieldIndex), PRIMITIVE_BUFFER_SIZE, reuse)
+                                            row.getBinary(fieldIndex), varTypeSize, reuse)
                                     .array();
         }
 
@@ -342,13 +364,15 @@ public class ZIndexer implements Serializable {
 
         private transient ByteBuffer reuse;
         private final ZProcessFunction process;
+        private final int byteSize;
 
-        public RowProcessor(ZProcessFunction process) {
+        public RowProcessor(ZProcessFunction process, int byteSize) {
             this.process = process;
+            this.byteSize = byteSize;
         }
 
         public void open() {
-            reuse = ByteBuffer.allocate(PRIMITIVE_BUFFER_SIZE);
+            reuse = ByteBuffer.allocate(byteSize);
         }
 
         public byte[] zvalue(InternalRow o) {
