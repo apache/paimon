@@ -130,8 +130,8 @@ public class CompactorSourceBuilder {
         return new HashMap<String, String>() {
             {
                 put(
-                        CoreOptions.STREAMING_COMPACT.key(),
-                        CoreOptions.StreamingCompactionType.NORMAL.getValue());
+                        CoreOptions.STREAM_SCAN_MODE.key(),
+                        CoreOptions.StreamScanMode.COMPACT_BUCKET_TABLE.getValue());
                 put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), null);
             }
         };

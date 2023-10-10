@@ -54,6 +54,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.system.AuditLogTable;
+import org.apache.paimon.table.system.FileMonitorTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -62,6 +63,7 @@ import org.apache.paimon.utils.CompatibilityTestUtils;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -967,6 +969,84 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 readBuilder.newScan().plan().splits(),
                                 BATCH_ROW_TO_STRING))
                 .containsExactly("1|10|200|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @Test
+    public void testInnerStreamScanMode() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        FileMonitorTable monitorTable = new FileMonitorTable(table);
+        ReadBuilder readBuilder = monitorTable.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+        TableRead read = readBuilder.newRead();
+
+        // 1. first write
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        BatchTableWrite write = writeBuilder.newWrite();
+        BatchTableCommit commit = writeBuilder.newCommit();
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 11, 101L));
+        commit.commit(write.prepareCommit());
+
+        List<InternalRow> results = new ArrayList<>();
+        read.createReader(scan.plan()).forEachRemaining(results::add);
+        read.createReader(scan.plan()).forEachRemaining(results::add);
+        assertThat(results).hasSize(1);
+        FileMonitorTable.FileChange change = FileMonitorTable.toFileChange(results.get(0));
+        assertThat(change.beforeFiles()).hasSize(0);
+        assertThat(change.dataFiles()).hasSize(1);
+        results.clear();
+
+        // 2. second write and compact
+
+        write.close();
+        commit.close();
+        writeBuilder = table.newBatchWriteBuilder();
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 11, 101L));
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(write.prepareCommit());
+
+        // 2.1 read add file
+
+        read.createReader(scan.plan()).forEachRemaining(results::add);
+        assertThat(results).hasSize(1);
+        change = FileMonitorTable.toFileChange(results.get(0));
+        assertThat(change.beforeFiles()).hasSize(0);
+        assertThat(change.dataFiles()).hasSize(1);
+        results.clear();
+
+        // 2.2 read compact
+
+        read.createReader(scan.plan()).forEachRemaining(results::add);
+        assertThat(results).hasSize(1);
+        change = FileMonitorTable.toFileChange(results.get(0));
+        assertThat(change.beforeFiles()).hasSize(2);
+        assertThat(change.dataFiles()).hasSize(1);
+        results.clear();
+
+        // 3 overwrite
+        write.close();
+        commit.close();
+        writeBuilder = table.newBatchWriteBuilder().withOverwrite();
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 11, 101L));
+        commit.commit(write.prepareCommit());
+
+        read.createReader(scan.plan()).forEachRemaining(results::add);
+        assertThat(results).hasSize(1);
+        change = FileMonitorTable.toFileChange(results.get(0));
+        assertThat(change.beforeFiles()).hasSize(1);
+        assertThat(change.dataFiles()).hasSize(1);
+
+        write.close();
+        commit.close();
     }
 
     @Override

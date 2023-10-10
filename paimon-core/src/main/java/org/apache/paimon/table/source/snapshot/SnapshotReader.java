@@ -60,8 +60,8 @@ public interface SnapshotReader {
     /** Get splits plan from snapshot. */
     Plan read();
 
-    /** Get splits plan from an overwritten snapshot. */
-    Plan readOverwrittenChanges();
+    /** Get splits plan from file changes. */
+    Plan readChanges();
 
     Plan readIncrementalDiff(Snapshot before);
 

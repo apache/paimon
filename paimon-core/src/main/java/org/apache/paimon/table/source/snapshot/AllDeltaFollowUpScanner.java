@@ -19,17 +19,18 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.source.snapshot.SnapshotReader.Plan;
+import org.apache.paimon.table.source.ScanMode;
 
-/** Helper class for the follow-up planning of {@link StreamTableScan}. */
-public interface FollowUpScanner {
+/** {@link FollowUpScanner} for read all file changes. */
+public class AllDeltaFollowUpScanner implements FollowUpScanner {
 
-    boolean shouldScanSnapshot(Snapshot snapshot);
+    @Override
+    public boolean shouldScanSnapshot(Snapshot snapshot) {
+        return true;
+    }
 
-    Plan scan(long snapshotId, SnapshotReader snapshotReader);
-
-    default Plan getOverwriteChangesPlan(long snapshotId, SnapshotReader snapshotReader) {
-        return snapshotReader.withSnapshot(snapshotId).readChanges();
+    @Override
+    public SnapshotReader.Plan scan(long snapshotId, SnapshotReader snapshotReader) {
+        return snapshotReader.withMode(ScanMode.DELTA).withSnapshot(snapshotId).readChanges();
     }
 }

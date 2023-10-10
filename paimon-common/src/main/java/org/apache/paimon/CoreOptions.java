@@ -671,12 +671,13 @@ public class CoreOptions implements Serializable {
                             "Full compaction will be constantly triggered after delta commits.");
 
     @ExcludeFromDocumentation("Internal use only")
-    public static final ConfigOption<StreamingCompactionType> STREAMING_COMPACT =
-            key("streaming-compact")
-                    .enumType(StreamingCompactionType.class)
-                    .defaultValue(StreamingCompactionType.NONE)
+    public static final ConfigOption<StreamScanMode> STREAM_SCAN_MODE =
+            key("stream-scan-mode")
+                    .enumType(StreamScanMode.class)
+                    .defaultValue(StreamScanMode.NONE)
                     .withDescription(
-                            "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' dedicated streaming compaction job.");
+                            "Only used to force TableScan to construct suitable 'StartingUpScanner' and 'FollowUpScanner' "
+                                    + "dedicated internal streaming scan.");
 
     public static final ConfigOption<StreamingReadMode> STREAMING_READ_MODE =
             key("streaming-read-mode")
@@ -1615,16 +1616,18 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Compaction type when trigger a compaction action. */
-    public enum StreamingCompactionType implements DescribedEnum {
-        NONE("none", "Not a streaming compaction."),
-        NORMAL("normal", "Compaction for traditional bucket table."),
-        BUCKET_UNAWARE("unaware", "Compaction for unaware bucket table.");
+    /** Inner stream scan mode for some internal requirements. */
+    public enum StreamScanMode implements DescribedEnum {
+        NONE("none", "No requirement."),
+        COMPACT_BUCKET_TABLE("compact-bucket-table", "Compaction for traditional bucket table."),
+        COMPACT_APPEND_NO_BUCKET(
+                "compact-append-no-bucket", "Compaction for append table with bucket unaware."),
+        FILE_MONITOR("file-monitor", "Monitor data file changes.");
 
         private final String value;
         private final String description;
 
-        StreamingCompactionType(String value, String description) {
+        StreamScanMode(String value, String description) {
             this.value = value;
             this.description = description;
         }
@@ -1641,22 +1644,6 @@ public class CoreOptions implements Serializable {
 
         public String getValue() {
             return value;
-        }
-
-        @VisibleForTesting
-        public static StreamingCompactionType fromValue(String value) {
-            for (StreamingCompactionType formatType : StreamingCompactionType.values()) {
-                if (formatType.value.equals(value)) {
-                    return formatType;
-                }
-            }
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid format type %s, only support [%s]",
-                            value,
-                            StringUtils.join(
-                                    Arrays.stream(StreamingCompactionType.values()).iterator(),
-                                    ",")));
         }
     }
 

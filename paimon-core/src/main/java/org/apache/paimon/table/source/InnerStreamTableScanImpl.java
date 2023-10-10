@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousAppendAndCompactFollowUpScanner;
@@ -185,17 +186,15 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     }
 
     private FollowUpScanner createFollowUpScanner() {
-        CoreOptions.StreamingCompactionType type =
-                options.toConfiguration().get(CoreOptions.STREAMING_COMPACT);
+        CoreOptions.StreamScanMode type =
+                options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         switch (type) {
-            case NORMAL:
-                {
-                    return new ContinuousCompactorFollowUpScanner();
-                }
-            case BUCKET_UNAWARE:
-                {
-                    return new ContinuousAppendAndCompactFollowUpScanner();
-                }
+            case COMPACT_BUCKET_TABLE:
+                return new ContinuousCompactorFollowUpScanner();
+            case COMPACT_APPEND_NO_BUCKET:
+                return new ContinuousAppendAndCompactFollowUpScanner();
+            case FILE_MONITOR:
+                return new AllDeltaFollowUpScanner();
         }
 
         CoreOptions.ChangelogProducer changelogProducer = options.changelogProducer();

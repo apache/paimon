@@ -172,8 +172,8 @@ public class AppendOnlyTableCompactionCoordinator {
         return new HashMap<String, String>() {
             {
                 put(
-                        CoreOptions.STREAMING_COMPACT.key(),
-                        CoreOptions.StreamingCompactionType.BUCKET_UNAWARE.getValue());
+                        CoreOptions.STREAM_SCAN_MODE.key(),
+                        CoreOptions.StreamScanMode.COMPACT_APPEND_NO_BUCKET.getValue());
             }
         };
     }
