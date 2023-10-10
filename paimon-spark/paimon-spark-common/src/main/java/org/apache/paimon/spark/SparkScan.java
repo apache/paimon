@@ -19,7 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream;
-import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
@@ -83,7 +83,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     @Override
     public MicroBatchStream toMicroBatchStream(String checkpointLocation) {
-        return new PaimonMicroBatchStream((FileStoreTable) table, readBuilder, checkpointLocation);
+        return new PaimonMicroBatchStream((DataTable) table, readBuilder, checkpointLocation);
     }
 
     protected List<Split> splits() {

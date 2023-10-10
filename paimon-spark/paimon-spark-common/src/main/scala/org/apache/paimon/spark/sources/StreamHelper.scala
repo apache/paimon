@@ -20,11 +20,11 @@ package org.apache.paimon.spark.sources
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.spark.SparkTypeUtils
-import org.apache.paimon.spark.commands.WithFileStoreTable
-import org.apache.paimon.table.source.{DataSplit, InnerStreamTableScan, ScanMode}
+import org.apache.paimon.table.DataTable
+import org.apache.paimon.table.source.{DataSplit, InnerStreamTableScan}
 import org.apache.paimon.table.source.TableScan.Plan
 import org.apache.paimon.table.source.snapshot.StartingContext
-import org.apache.paimon.utils.RowDataPartitionComputer
+import org.apache.paimon.utils.{RowDataPartitionComputer, TypeUtils}
 
 import org.apache.spark.sql.connector.read.streaming.ReadLimit
 import org.apache.spark.sql.execution.datasources.PartitioningUtils
@@ -35,7 +35,9 @@ import scala.collection.mutable
 
 case class IndexedDataSplit(snapshotId: Long, index: Long, entry: DataSplit)
 
-trait StreamHelper extends WithFileStoreTable {
+trait StreamHelper {
+
+  def table: DataTable
 
   val initOffset: PaimonSourceOffset
 
@@ -44,12 +46,12 @@ trait StreamHelper extends WithFileStoreTable {
   private lazy val streamScan: InnerStreamTableScan = table.newStreamScan()
 
   private lazy val partitionSchema: StructType =
-    SparkTypeUtils.fromPaimonRowType(table.schema().logicalPartitionType())
+    SparkTypeUtils.fromPaimonRowType(TypeUtils.project(table.rowType(), table.primaryKeys()))
 
   private lazy val partitionComputer: RowDataPartitionComputer = new RowDataPartitionComputer(
-    new CoreOptions(table.schema.options).partitionDefaultName,
-    table.schema.logicalPartitionType,
-    table.schema.partitionKeys.asScala.toArray
+    new CoreOptions(table.options).partitionDefaultName,
+    TypeUtils.project(table.rowType(), table.primaryKeys()),
+    table.partitionKeys().asScala.toArray
   )
 
   // Used to get the initial offset.

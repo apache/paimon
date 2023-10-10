@@ -19,7 +19,7 @@ package org.apache.paimon.spark.sources
 
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{PaimonImplicits, SparkConnectorOptions, SparkInputPartition, SparkReaderFactory}
-import org.apache.paimon.table.FileStoreTable
+import org.apache.paimon.table.DataTable
 import org.apache.paimon.table.source.ReadBuilder
 
 import org.apache.spark.internal.Logging
@@ -29,7 +29,7 @@ import org.apache.spark.sql.connector.read.streaming.{MicroBatchStream, Offset, 
 import scala.collection.mutable
 
 class PaimonMicroBatchStream(
-    originTable: FileStoreTable,
+    originTable: DataTable,
     readBuilder: ReadBuilder,
     checkpointLocation: String)
   extends MicroBatchStream
@@ -144,6 +144,6 @@ class PaimonMicroBatchStream(
 
   override def stop(): Unit = {}
 
-  override def table: FileStoreTable = originTable
+  override def table: DataTable = originTable
 
 }
