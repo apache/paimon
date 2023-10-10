@@ -46,11 +46,11 @@ trait StreamHelper {
   private lazy val streamScan: InnerStreamTableScan = table.newStreamScan()
 
   private lazy val partitionSchema: StructType =
-    SparkTypeUtils.fromPaimonRowType(TypeUtils.project(table.rowType(), table.primaryKeys()))
+    SparkTypeUtils.fromPaimonRowType(TypeUtils.project(table.rowType(), table.partitionKeys()))
 
   private lazy val partitionComputer: RowDataPartitionComputer = new RowDataPartitionComputer(
     new CoreOptions(table.options).partitionDefaultName,
-    TypeUtils.project(table.rowType(), table.primaryKeys()),
+    TypeUtils.project(table.rowType(), table.partitionKeys()),
     table.partitionKeys().asScala.toArray
   )
 
