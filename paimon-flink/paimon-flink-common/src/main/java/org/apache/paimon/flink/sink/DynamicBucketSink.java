@@ -70,8 +70,9 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
                 partition(input, channelComputer1(), assignerParallelism);
 
         // 2. bucket-assigner
-        BucketAssignerOperator<T> assignerOperator =
-                new BucketAssignerOperator<>(initialCommitUser, table, extractorFunction(), false);
+        HashBucketAssignerOperator<T> assignerOperator =
+                new HashBucketAssignerOperator<>(
+                        initialCommitUser, table, extractorFunction(), false);
         TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(partitionByKeyHash.getType(), BasicTypeInfo.INT_TYPE_INFO);
         DataStream<Tuple2<T, Integer>> bucketAssigned =

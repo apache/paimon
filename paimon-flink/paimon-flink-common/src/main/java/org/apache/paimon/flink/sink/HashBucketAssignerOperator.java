@@ -34,7 +34,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /** Assign bucket for the input record, output record with bucket. */
-public class BucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, Integer>>
+public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, Integer>>
         implements OneInputStreamOperator<T, Tuple2<T, Integer>> {
 
     private static final long serialVersionUID = 1L;
@@ -48,7 +48,7 @@ public class BucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2<T, 
     private transient BucketAssigner assigner;
     private transient PartitionKeyExtractor<T> extractor;
 
-    public BucketAssignerOperator(
+    public HashBucketAssignerOperator(
             String commitUser,
             Table table,
             SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction,

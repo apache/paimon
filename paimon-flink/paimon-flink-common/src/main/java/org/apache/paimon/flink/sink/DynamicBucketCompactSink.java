@@ -48,8 +48,9 @@ public class DynamicBucketCompactSink extends RowDynamicBucketSink {
         // for each record, and sink them to table.
 
         // bucket-assigner
-        BucketAssignerOperator<InternalRow> assignerOperator =
-                new BucketAssignerOperator<>(initialCommitUser, table, extractorFunction(), true);
+        HashBucketAssignerOperator<InternalRow> assignerOperator =
+                new HashBucketAssignerOperator<>(
+                        initialCommitUser, table, extractorFunction(), true);
         TupleTypeInfo<Tuple2<InternalRow, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(input.getType(), BasicTypeInfo.INT_TYPE_INFO);
         DataStream<Tuple2<InternalRow, Integer>> bucketAssigned =
