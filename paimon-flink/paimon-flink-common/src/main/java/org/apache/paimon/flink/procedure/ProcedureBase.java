@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.factories.Factory;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.utils.StringUtils;
@@ -41,12 +42,13 @@ import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYN
 import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
 
 /** Base implementation for flink {@link Procedure}. */
-public class ProcedureBase implements Procedure {
+public abstract class ProcedureBase implements Procedure, Factory {
 
-    protected final Catalog catalog;
+    protected Catalog catalog;
 
-    ProcedureBase(Catalog catalog) {
+    ProcedureBase withCatalog(Catalog catalog) {
         this.catalog = catalog;
+        return this;
     }
 
     protected List<Map<String, String>> getPartitions(String... partitionStrings) {

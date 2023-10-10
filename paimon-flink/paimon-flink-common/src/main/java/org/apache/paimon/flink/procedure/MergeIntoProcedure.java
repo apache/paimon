@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MergeIntoAction;
 import org.apache.paimon.flink.action.MergeIntoActionFactory;
@@ -69,11 +68,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  */
 public class MergeIntoProcedure extends ProcedureBase {
 
-    public static final String NAME = "merge_into";
-
-    public MergeIntoProcedure(Catalog catalog) {
-        super(catalog);
-    }
+    public static final String IDENTIFIER = "merge_into";
 
     public String[] call(
             ProcedureContext procedureContext,
@@ -188,5 +183,10 @@ public class MergeIntoProcedure extends ProcedureBase {
             default:
                 throw new UnsupportedOperationException("Unknown merge action: " + mergeAction);
         }
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

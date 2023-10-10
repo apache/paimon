@@ -19,10 +19,11 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.factories.FactoryException;
+import org.apache.paimon.factories.FactoryUtil;
 
 import org.apache.flink.table.procedures.Procedure;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -32,43 +33,23 @@ public class ProcedureUtil {
 
     private ProcedureUtil() {}
 
-    private static final List<String> SYSTEM_PROCEDURES = new ArrayList<>();
-
-    static {
-        SYSTEM_PROCEDURES.add(CompactProcedure.NAME);
-        SYSTEM_PROCEDURES.add(CompactDatabaseProcedure.NAME);
-        SYSTEM_PROCEDURES.add(CreateTagProcedure.NAME);
-        SYSTEM_PROCEDURES.add(DeleteTagProcedure.NAME);
-        SYSTEM_PROCEDURES.add(DropPartitionProcedure.NAME);
-        SYSTEM_PROCEDURES.add(MergeIntoProcedure.NAME);
-        SYSTEM_PROCEDURES.add(ResetConsumerProcedure.NAME);
-        SYSTEM_PROCEDURES.add(RollbackToProcedure.NAME);
-    }
-
     public static List<String> listProcedures() {
-        return Collections.unmodifiableList(SYSTEM_PROCEDURES);
+        return Collections.unmodifiableList(
+                FactoryUtil.discoverIdentifiers(
+                        ProcedureBase.class.getClassLoader(), ProcedureBase.class));
     }
 
     public static Optional<Procedure> getProcedure(Catalog catalog, String procedureName) {
-        switch (procedureName) {
-            case CompactProcedure.NAME:
-                return Optional.of(new CompactProcedure(catalog));
-            case CompactDatabaseProcedure.NAME:
-                return Optional.of(new CompactDatabaseProcedure(catalog));
-            case CreateTagProcedure.NAME:
-                return Optional.of(new CreateTagProcedure(catalog));
-            case DeleteTagProcedure.NAME:
-                return Optional.of(new DeleteTagProcedure(catalog));
-            case DropPartitionProcedure.NAME:
-                return Optional.of(new DropPartitionProcedure(catalog));
-            case MergeIntoProcedure.NAME:
-                return Optional.of(new MergeIntoProcedure(catalog));
-            case ResetConsumerProcedure.NAME:
-                return Optional.of(new ResetConsumerProcedure(catalog));
-            case RollbackToProcedure.NAME:
-                return Optional.of(new RollbackToProcedure(catalog));
-            default:
-                return Optional.empty();
+        try {
+            ProcedureBase procedure =
+                    FactoryUtil.discoverFactory(
+                                    ProcedureBase.class.getClassLoader(),
+                                    ProcedureBase.class,
+                                    procedureName)
+                            .withCatalog(catalog);
+            return Optional.of(procedure);
+        } catch (FactoryException e) {
+            return Optional.empty();
         }
     }
 }

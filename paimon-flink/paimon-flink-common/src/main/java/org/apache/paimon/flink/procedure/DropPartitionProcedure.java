@@ -39,11 +39,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  */
 public class DropPartitionProcedure extends ProcedureBase {
 
-    public static final String NAME = "drop_partition";
-
-    public DropPartitionProcedure(Catalog catalog) {
-        super(catalog);
-    }
+    public static final String IDENTIFIER = "drop_partition";
 
     public String[] call(
             ProcedureContext procedureContext, String tableId, String... partitionStrings)
@@ -57,5 +53,10 @@ public class DropPartitionProcedure extends ProcedureBase {
         commit.dropPartitions(getPartitions(partitionStrings), BatchWriteBuilder.COMMIT_IDENTIFIER);
 
         return new String[] {"Success"};
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }

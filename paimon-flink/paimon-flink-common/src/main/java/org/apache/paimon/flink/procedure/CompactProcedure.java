@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.CompactAction;
@@ -50,11 +49,7 @@ import java.util.Map;
  */
 public class CompactProcedure extends ProcedureBase {
 
-    public static final String NAME = "compact";
-
-    public CompactProcedure(Catalog catalog) {
-        super(catalog);
-    }
+    public static final String IDENTIFIER = "compact";
 
     public String[] call(ProcedureContext procedureContext, String tableId) throws Exception {
         return call(procedureContext, tableId, "");
@@ -122,5 +117,10 @@ public class CompactProcedure extends ProcedureBase {
         }
 
         return execute(procedureContext, action, jobName);
+    }
+
+    @Override
+    public String identifier() {
+        return IDENTIFIER;
     }
 }
