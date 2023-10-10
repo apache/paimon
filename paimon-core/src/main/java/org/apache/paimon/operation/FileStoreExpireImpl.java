@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -33,6 +34,7 @@ import java.util.List;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Predicate;
 
 /**
  * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
@@ -178,8 +180,19 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
             Snapshot snapshot = snapshotManager.snapshot(id);
             // expire merge tree files and collect changed buckets
-            snapshotDeletion.cleanUnusedDataFiles(
-                    snapshot, snapshotDeletion.dataFileSkipper(taggedSnapshots, id));
+            Predicate<ManifestEntry> skipper;
+            try {
+                skipper = snapshotDeletion.dataFileSkipper(taggedSnapshots, id);
+            } catch (Exception e) {
+                LOG.info(
+                        String.format(
+                                "Skip cleaning data files of snapshot '%s' due to failed to build skipping set.",
+                                id),
+                        e);
+                continue;
+            }
+
+            snapshotDeletion.cleanUnusedDataFiles(snapshot, skipper);
         }
 
         // delete changelog files
