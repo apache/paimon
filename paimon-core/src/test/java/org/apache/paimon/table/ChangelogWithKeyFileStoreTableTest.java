@@ -111,6 +111,32 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                             + COMPATIBILITY_BATCH_ROW_TO_STRING.apply(rowData);
 
     @Test
+    public void testAsyncReader() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.FILE_READER_ASYNC_THRESHOLD.key(), "1"));
+
+        for (int i = 0; i < 20; i++) {
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            BatchTableWrite write = writeBuilder.newWrite();
+            BatchTableCommit commit = writeBuilder.newCommit();
+            for (int j = 0; j < 1000; j++) {
+                write.write(rowData(1, i * j, 100L * i * j));
+            }
+            commit.commit(write.prepareCommit());
+            write.close();
+            commit.close();
+        }
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = readBuilder.newRead();
+        assertThat(getResult(read, splits, BATCH_ROW_TO_STRING)).hasSize(8845);
+    }
+
+    @Test
     public void testBatchWriteBuilder() throws Exception {
         FileStoreTable table = createFileStoreTable();
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();

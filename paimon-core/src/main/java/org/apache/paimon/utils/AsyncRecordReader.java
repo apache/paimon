@@ -38,6 +38,8 @@ public class AsyncRecordReader<T> implements RecordReader<T> {
     private final BlockingQueue<Element> queue;
     private final Future<Void> future;
 
+    private boolean isEnd = false;
+
     public AsyncRecordReader(RecordReader<T> reader) {
         this.queue = new LinkedBlockingQueue<>();
         this.future =
@@ -62,9 +64,14 @@ public class AsyncRecordReader<T> implements RecordReader<T> {
     @Nullable
     @Override
     public RecordIterator<T> readBatch() throws IOException {
+        if (isEnd) {
+            return null;
+        }
+
         try {
             Element element = queue.take();
             if (element.isEnd) {
+                isEnd = true;
                 return null;
             }
 
