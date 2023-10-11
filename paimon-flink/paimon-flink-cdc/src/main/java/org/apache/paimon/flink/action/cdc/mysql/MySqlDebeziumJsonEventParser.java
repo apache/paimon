@@ -81,6 +81,7 @@ import java.util.regex.Pattern;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /** {@link EventParser} for MySQL Debezium JSON. */
 public class MySqlDebeziumJsonEventParser implements EventParser<String> {
@@ -310,7 +311,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
             String fieldName = field.getKey();
             String mySqlType = field.getValue().type();
             JsonNode objectValue = recordRow.get(fieldName);
-            if (objectValue == null || objectValue.isNull()) {
+            if (isNull(objectValue)) {
                 continue;
             }
 

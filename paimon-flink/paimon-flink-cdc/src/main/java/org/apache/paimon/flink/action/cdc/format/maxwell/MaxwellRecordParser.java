@@ -29,7 +29,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * The {@code MaxwellRecordParser} class extends the abstract {@link RecordParser} and is designed
@@ -60,7 +61,7 @@ public class MaxwellRecordParser extends RecordParser {
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
         String operation = extractStringFromRootJson(FIELD_TYPE);
-        JsonNode data = root.get(fieldData);
+        JsonNode data = root.get(dataField());
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         switch (operation) {
             case OP_INSERT:
@@ -83,20 +84,20 @@ public class MaxwellRecordParser extends RecordParser {
     protected void validateFormat() {
         String errorMessageTemplate =
                 "Didn't find '%s' node in json. Please make sure your topic's format is correct.";
-        checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
-        checkNotNull(root.get(FIELD_DATABASE), errorMessageTemplate, FIELD_DATABASE);
-        checkNotNull(root.get(FIELD_TYPE), errorMessageTemplate, FIELD_TYPE);
-        checkNotNull(root.get(fieldData), errorMessageTemplate, fieldData);
-        checkNotNull(root.get(fieldPrimaryKeys), errorMessageTemplate, fieldPrimaryKeys);
+        checkArgument(!isNull(root.get(FIELD_TABLE)), errorMessageTemplate, FIELD_TABLE);
+        checkArgument(!isNull(root.get(FIELD_DATABASE)), errorMessageTemplate, FIELD_DATABASE);
+        checkArgument(!isNull(root.get(FIELD_TYPE)), errorMessageTemplate, FIELD_TYPE);
+        checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
+        checkArgument(!isNull(root.get(primaryField())), errorMessageTemplate, primaryField());
     }
 
     @Override
-    protected void setPrimaryField() {
-        fieldPrimaryKeys = "primary_key_columns";
+    protected String primaryField() {
+        return "primary_key_columns";
     }
 
     @Override
-    protected void setDataField() {
-        fieldData = "data";
+    protected String dataField() {
+        return "data";
     }
 }
