@@ -150,6 +150,21 @@ public class CdcActionCommonUtils {
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
             Map<String, String> tableConfig,
+            Schema sourceSchema) {
+        return buildPaimonSchema(
+                specifiedPartitionKeys,
+                specifiedPrimaryKeys,
+                computedColumns,
+                tableConfig,
+                sourceSchema,
+                new CdcMetadataConverter[] {});
+    }
+
+    public static Schema buildPaimonSchema(
+            List<String> specifiedPartitionKeys,
+            List<String> specifiedPrimaryKeys,
+            List<ComputedColumn> computedColumns,
+            Map<String, String> tableConfig,
             Schema sourceSchema,
             CdcMetadataConverter[] metadataConverters) {
         Schema.Builder builder = Schema.newBuilder();

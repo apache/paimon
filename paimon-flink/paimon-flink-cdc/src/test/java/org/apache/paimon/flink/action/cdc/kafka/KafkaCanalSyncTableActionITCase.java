@@ -1028,4 +1028,48 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[2, 4, four, NULL, NULL, NULL, NULL]");
         waitForResult(expectedDelete, table, rowType, primaryKeys);
     }
+
+    @Test
+    @Timeout(120)
+    public void testSyncWithInitialEmptyTopic() throws Exception {
+        String topic = "initial_empty_topic";
+        createTestTopic(topic, 1, 1);
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.DATE(), DataTypes.INT().notNull(),
+                        },
+                        new String[] {"_id", "_date", "_year"}),
+                Collections.singletonList("_year"),
+                Arrays.asList("_id", "_year"),
+                Collections.emptyMap());
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withComputedColumnArgs("_year=year(_date)")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        List<String> lines = readLines("kafka/canal/table/initialemptytopic/canal-data-1.txt");
+        writeRecordsToKafka(topic, lines);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.DATE(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.VARCHAR(10)
+                        },
+                        new String[] {"_id", "_date", "_year", "v"});
+        waitForResult(
+                Collections.singletonList("+I[1, 19439, 2023, paimon]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Arrays.asList("_id", "_year"));
+    }
 }
