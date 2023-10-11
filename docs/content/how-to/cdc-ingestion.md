@@ -387,15 +387,15 @@ the table and can not be modified. Additionally, if you specified computed colum
 columns used for computed columns.
 
 Example 2:
-If you want to synchronize a table which has primary key 'id INT', and you want to compute a partition key '_year=year(age)',
+If you want to synchronize a table which has primary key 'id INT', and you want to compute a partition key 'part=date_format(create_time,yyyy-MM-dd)',
 you can create a such table first (the other columns can be omitted):
 ```sql
 CREATE TABLE test_db.test_table (
-    id INT,     -- primary key
-    year DATE,  -- the argument of computed column _year
-    _year DATE, -- partition key
-    PRIMARY KEY (id, _year) NOT ENFORCED
-) PARTITIONED BY (_year);
+    id INT,                 -- primary key
+    create_time TIMESTAMP,  -- the argument of computed column part
+    part STRING,            -- partition key
+    PRIMARY KEY (id, part) NOT ENFORCED
+) PARTITIONED BY (part);
 ```
 
 Then you can submit synchronization job:
@@ -407,7 +407,7 @@ Then you can submit synchronization job:
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --computed-column '_year=year(age)' \
+    --computed-column 'part=date_format(create_time,yyyy-MM-dd)' \
     ... (other conf)
 ```
 
