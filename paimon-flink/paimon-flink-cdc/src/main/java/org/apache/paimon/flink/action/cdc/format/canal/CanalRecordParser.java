@@ -147,13 +147,13 @@ public class CanalRecordParser extends RecordParser {
         checkArgument(!isNull(root.get(FIELD_DATABASE)), errorMessageTemplate, FIELD_DATABASE);
         checkArgument(!isNull(root.get(FIELD_TABLE)), errorMessageTemplate, FIELD_TABLE);
         checkArgument(!isNull(root.get(FIELD_TYPE)), errorMessageTemplate, FIELD_TYPE);
-        checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
         checkArgument(!isNull(root.get(FIELD_IS_DDL)), errorMessageTemplate, FIELD_IS_DDL);
 
         if (!extractBooleanFromRootJson(FIELD_IS_DDL)) {
             checkArgument(
                     !isNull(root.get(FIELD_MYSQL_TYPE)), errorMessageTemplate, FIELD_MYSQL_TYPE);
             checkArgument(!isNull(root.get(primaryField())), errorMessageTemplate, primaryField());
+            checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
         }
     }
 
