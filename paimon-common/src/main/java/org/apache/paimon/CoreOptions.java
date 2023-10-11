@@ -904,6 +904,12 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The bytes of types (CHAR, VARCHAR, BINARY, VARBINARY) devote to the zorder sort.");
 
+    public static final ConfigOption<Long> FILE_READER_ASYNC_THRESHOLD =
+            key("file-reader-async-threshold")
+                    .longType()
+                    .defaultValue(Long.MAX_VALUE)
+                    .withDescription("The threshold for read file async.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -990,6 +996,10 @@ public class CoreOptions implements Serializable {
 
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
+    }
+
+    public long fileReaderAsyncThreshold() {
+        return options.get(FILE_READER_ASYNC_THRESHOLD);
     }
 
     public int snapshotNumRetainMin() {

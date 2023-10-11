@@ -47,6 +47,7 @@ import org.apache.paimon.utils.Projection;
 import org.apache.orc.TypeDescription;
 
 import javax.annotation.Nullable;
+import javax.annotation.concurrent.ThreadSafe;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -57,6 +58,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.types.DataTypeChecks.getFieldTypes;
 
 /** Orc {@link FileFormat}. */
+@ThreadSafe
 public class OrcFileFormat extends FileFormat {
 
     public static final String IDENTIFIER = "orc";

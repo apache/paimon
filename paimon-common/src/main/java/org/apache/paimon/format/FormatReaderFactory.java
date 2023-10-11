@@ -30,4 +30,7 @@ import java.io.Serializable;
 public interface FormatReaderFactory extends Serializable {
 
     RecordReader<InternalRow> createReader(FileIO fileIO, Path file) throws IOException;
+
+    RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
+            throws IOException;
 }

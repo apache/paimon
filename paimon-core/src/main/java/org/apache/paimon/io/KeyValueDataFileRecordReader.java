@@ -49,10 +49,15 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             RowType keyType,
             RowType valueType,
             int level,
+            @Nullable Integer poolSize,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping)
             throws IOException {
-        this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
+        FileUtils.checkExists(fileIO, path);
+        this.reader =
+                poolSize == null
+                        ? readerFactory.createReader(fileIO, path)
+                        : readerFactory.createReader(fileIO, path, poolSize);
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
         this.indexMapping = indexMapping;

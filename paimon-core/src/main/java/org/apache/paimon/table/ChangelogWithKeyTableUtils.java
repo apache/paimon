@@ -83,6 +83,7 @@ public class ChangelogWithKeyTableUtils {
     }
 
     static class ChangelogWithKeyKeyValueFieldsExtractor implements KeyValueFieldsExtractor {
+
         private static final long serialVersionUID = 1L;
 
         static final ChangelogWithKeyKeyValueFieldsExtractor EXTRACTOR =

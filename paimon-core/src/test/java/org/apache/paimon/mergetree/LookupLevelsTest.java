@@ -204,7 +204,10 @@ public class LookupLevelsTest {
                 comparator,
                 keyType,
                 rowType,
-                file -> createReaderFactory().createRecordReader(0, file.fileName(), file.level()),
+                file ->
+                        createReaderFactory()
+                                .createRecordReader(
+                                        0, file.fileName(), file.fileSize(), file.level()),
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(new CacheManager(2048, MemorySize.ofMebiBytes(1)), 0.75),
                 Duration.ofHours(1),
@@ -263,7 +266,8 @@ public class LookupLevelsTest {
                             public List<DataField> valueFields(TableSchema schema) {
                                 return schema.fields();
                             }
-                        });
+                        },
+                        new CoreOptions(new HashMap<>()));
         return builder.build(BinaryRow.EMPTY_ROW, 0);
     }
 

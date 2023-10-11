@@ -108,6 +108,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
     }
 
+    @Override
+    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
+            throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
     private void setReadOptions(ParquetReadOptions.Builder builder) {
         builder.useSignedStringMinMax(
                 conf.getBoolean("parquet.strings.signed-min-max.enabled", false));

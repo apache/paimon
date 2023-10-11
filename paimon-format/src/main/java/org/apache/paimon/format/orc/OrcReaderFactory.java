@@ -94,7 +94,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
     @Override
     public OrcVectorizedReader createReader(FileIO fileIO, Path file) throws IOException {
-        Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(1);
+        return createReader(fileIO, file, 1);
+    }
+
+    @Override
+    public OrcVectorizedReader createReader(FileIO fileIO, Path file, int poolSize)
+            throws IOException {
+        Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(poolSize);
         RecordReader orcReader =
                 createRecordReader(
                         hadoopConfigWrapper.getHadoopConfig(),
@@ -135,7 +141,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         final Pool<OrcReaderBatch> pool = new Pool<>(numBatches);
 
         for (int i = 0; i < numBatches; i++) {
-            final VectorizedRowBatch orcBatch = createBatchWrapper(schema, batchSize);
+            final VectorizedRowBatch orcBatch = createBatchWrapper(schema, batchSize / numBatches);
             final OrcReaderBatch batch = createReaderBatch(orcBatch, pool.recycler());
             pool.add(batch);
         }

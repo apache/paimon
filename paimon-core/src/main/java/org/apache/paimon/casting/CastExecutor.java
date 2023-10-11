@@ -18,12 +18,15 @@
 
 package org.apache.paimon.casting;
 
+import javax.annotation.concurrent.ThreadSafe;
+
 /**
  * Interface to model a function that performs the casting of a value from one type to another.
  *
  * @param <IN> Input internal type
  * @param <OUT> Output internal type
  */
+@ThreadSafe
 public interface CastExecutor<IN, OUT> {
 
     /** Cast the input value. */

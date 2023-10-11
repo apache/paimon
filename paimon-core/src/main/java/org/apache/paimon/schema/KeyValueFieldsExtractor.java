@@ -20,11 +20,15 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.types.DataField;
 
+import javax.annotation.concurrent.ThreadSafe;
+
 import java.io.Serializable;
 import java.util.List;
 
 /** Extractor of schema for different tables. */
+@ThreadSafe
 public interface KeyValueFieldsExtractor extends Serializable {
+
     /**
      * Extract key fields from table schema.
      *

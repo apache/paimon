@@ -45,6 +45,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
+import javax.annotation.concurrent.ThreadSafe;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -66,6 +67,7 @@ import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Schema Manager to manage schema versions. */
+@ThreadSafe
 public class SchemaManager implements Serializable {
 
     private static final String SCHEMA_PREFIX = "schema-";

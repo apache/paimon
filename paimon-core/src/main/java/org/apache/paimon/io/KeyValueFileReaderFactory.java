@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -27,8 +28,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.AsyncRecordReader;
 import org.apache.paimon.utils.BulkFormatMapping;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Projection;
@@ -40,6 +41,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
 public class KeyValueFileReaderFactory {
@@ -51,8 +53,10 @@ public class KeyValueFileReaderFactory {
     private final RowType valueType;
 
     private final BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder;
-    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
     private final DataFilePathFactory pathFactory;
+    private final long asyncThreshold;
+
+    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
 
     private KeyValueFileReaderFactory(
             FileIO fileIO,
@@ -61,7 +65,8 @@ public class KeyValueFileReaderFactory {
             RowType keyType,
             RowType valueType,
             BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder,
-            DataFilePathFactory pathFactory) {
+            DataFilePathFactory pathFactory,
+            long asyncThreshold) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
@@ -69,21 +74,41 @@ public class KeyValueFileReaderFactory {
         this.valueType = valueType;
         this.bulkFormatMappingBuilder = bulkFormatMappingBuilder;
         this.pathFactory = pathFactory;
+        this.asyncThreshold = asyncThreshold;
         this.bulkFormatMappings = new HashMap<>();
     }
 
-    public RecordReader<KeyValue> createRecordReader(long schemaId, String fileName, int level)
+    public RecordReader<KeyValue> createRecordReader(
+            long schemaId, String fileName, long fileSize, int level) throws IOException {
+        if (fileSize >= asyncThreshold && fileName.endsWith("orc")) {
+            RecordReader<KeyValue> reader = createRecordReader(schemaId, fileName, level, false, 2);
+            return new AsyncRecordReader<>(reader);
+        }
+        return createRecordReader(schemaId, fileName, level, true, null);
+    }
+
+    private RecordReader<KeyValue> createRecordReader(
+            long schemaId,
+            String fileName,
+            int level,
+            boolean reuseFormat,
+            @Nullable Integer poolSize)
             throws IOException {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
+
+        Supplier<BulkFormatMapping> formatSupplier =
+                () ->
+                        bulkFormatMappingBuilder.build(
+                                formatIdentifier,
+                                schemaManager.schema(this.schemaId),
+                                schemaManager.schema(schemaId));
+
         BulkFormatMapping bulkFormatMapping =
-                bulkFormatMappings.computeIfAbsent(
-                        new FormatKey(schemaId, formatIdentifier),
-                        key -> {
-                            TableSchema tableSchema = schemaManager.schema(this.schemaId);
-                            TableSchema dataSchema = schemaManager.schema(key.schemaId);
-                            return bulkFormatMappingBuilder.build(
-                                    formatIdentifier, tableSchema, dataSchema);
-                        });
+                reuseFormat
+                        ? bulkFormatMappings.computeIfAbsent(
+                                new FormatKey(schemaId, formatIdentifier),
+                                key -> formatSupplier.get())
+                        : formatSupplier.get();
         return new KeyValueDataFileRecordReader(
                 fileIO,
                 bulkFormatMapping.getReaderFactory(),
@@ -91,6 +116,7 @@ public class KeyValueFileReaderFactory {
                 keyType,
                 valueType,
                 level,
+                poolSize,
                 bulkFormatMapping.getIndexMapping(),
                 bulkFormatMapping.getCastMapping());
     }
@@ -103,7 +129,8 @@ public class KeyValueFileReaderFactory {
             RowType valueType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
-            KeyValueFieldsExtractor extractor) {
+            KeyValueFieldsExtractor extractor,
+            CoreOptions options) {
         return new Builder(
                 fileIO,
                 schemaManager,
@@ -112,7 +139,8 @@ public class KeyValueFileReaderFactory {
                 valueType,
                 formatDiscover,
                 pathFactory,
-                extractor);
+                extractor,
+                options);
     }
 
     /** Builder for {@link KeyValueFileReaderFactory}. */
@@ -126,8 +154,9 @@ public class KeyValueFileReaderFactory {
         private final FileFormatDiscover formatDiscover;
         private final FileStorePathFactory pathFactory;
         private final KeyValueFieldsExtractor extractor;
-
         private final int[][] fullKeyProjection;
+        private final CoreOptions options;
+
         private int[][] keyProjection;
         private int[][] valueProjection;
         private RowType projectedKeyType;
@@ -141,7 +170,8 @@ public class KeyValueFileReaderFactory {
                 RowType valueType,
                 FileFormatDiscover formatDiscover,
                 FileStorePathFactory pathFactory,
-                KeyValueFieldsExtractor extractor) {
+                KeyValueFieldsExtractor extractor,
+                CoreOptions options) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.schemaId = schemaId;
@@ -152,6 +182,7 @@ public class KeyValueFileReaderFactory {
             this.extractor = extractor;
 
             this.fullKeyProjection = Projection.range(0, keyType.getFieldCount()).toNestedIndexes();
+            this.options = options;
             this.keyProjection = fullKeyProjection;
             this.valueProjection = Projection.range(0, valueType.getFieldCount()).toNestedIndexes();
             applyProjection();
@@ -166,7 +197,8 @@ public class KeyValueFileReaderFactory {
                     valueType,
                     formatDiscover,
                     pathFactory,
-                    extractor);
+                    extractor,
+                    options);
         }
 
         public Builder withKeyProjection(int[][] projection) {
@@ -205,7 +237,8 @@ public class KeyValueFileReaderFactory {
                     projectedValueType,
                     BulkFormatMapping.newBuilder(
                             formatDiscover, extractor, keyProjection, valueProjection, filters),
-                    pathFactory.createDataFilePathFactory(partition, bucket));
+                    pathFactory.createDataFilePathFactory(partition, bucket),
+                    options.fileReaderAsyncThreshold());
         }
 
         private void applyProjection() {

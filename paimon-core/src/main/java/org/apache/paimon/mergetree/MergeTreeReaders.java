@@ -86,7 +86,10 @@ public class MergeTreeReaders {
             readers.add(
                     () ->
                             readerFactory.createRecordReader(
-                                    file.schemaId(), file.fileName(), file.level()));
+                                    file.schemaId(),
+                                    file.fileName(),
+                                    file.fileSize(),
+                                    file.level()));
         }
         return ConcatRecordReader.create(readers);
     }
