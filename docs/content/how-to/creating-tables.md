@@ -456,6 +456,9 @@ CREATE TABLE MyTable (
 );
 
 CREATE TABLE MyTableLike LIKE MyTable;
+
+-- Create Paimon Table like other connector table
+CREATE TABLE MyTableLike WITH ('connector' = 'paimon') LIKE MyTable;
 ```
 
 {{< /tab >}}
