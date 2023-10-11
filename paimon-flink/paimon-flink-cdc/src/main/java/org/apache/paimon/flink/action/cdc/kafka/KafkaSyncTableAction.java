@@ -21,7 +21,6 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.schema.Schema;
 
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
@@ -46,14 +45,13 @@ public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
     }
 
     @Override
-    protected Schema buildSchema() {
-        String topic = mqConfig.get(KafkaConnectorOptions.TOPIC).get(0);
-        try (MessageQueueSchemaUtils.ConsumerWrapper consumer =
-                KafkaActionUtils.getKafkaEarliestConsumer(mqConfig, topic)) {
-            return MessageQueueSchemaUtils.getSchema(consumer, topic, getDataFormat(), typeMapping);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+    protected String topic() {
+        return mqConfig.get(KafkaConnectorOptions.TOPIC).get(0);
+    }
+
+    @Override
+    protected MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic) {
+        return KafkaActionUtils.getKafkaEarliestConsumer(mqConfig, topic);
     }
 
     @Override

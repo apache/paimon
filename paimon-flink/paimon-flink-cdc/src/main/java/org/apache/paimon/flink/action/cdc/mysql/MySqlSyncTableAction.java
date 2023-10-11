@@ -179,7 +179,7 @@ public class MySqlSyncTableAction extends ActionBase {
         MySqlTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
         Identifier identifier = new Identifier(database, table);
         List<ComputedColumn> computedColumns =
-                buildComputedColumns(computedColumnArgs, tableInfo.schema());
+                buildComputedColumns(computedColumnArgs, tableInfo.schema().fields());
 
         CdcMetadataConverter[] metadataConverters =
                 metadataColumn.stream()

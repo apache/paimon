@@ -355,7 +355,7 @@ To use this feature through `flink run`, run the following shell command.
 
 If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified Kafka topic's tables,it gets the earliest non-DDL data parsing schema from topic. If the Paimon table already exists, its schema will be compared against the schema of all specified Kafka topic's tables.
 
-Example
+Example 1:
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -377,6 +377,40 @@ Example
     --table-conf changelog-producer=input \
     --table-conf sink.parallelism=4
 ```
+
+If the kafka topic doesn't contain message when you start the synchronization job, you must manually create the table 
+before submitting the job. You can define the partition keys and primary keys only, and the left columns will be added 
+by the synchronization job.
+
+NOTE: In this case you shouldn't use --partition-keys or --primary-keys, because those keys are defined when creating 
+the table and can not be modified. Additionally, if you specified computed columns, you should also define all the argument 
+columns used for computed columns.
+
+Example 2:
+If you want to synchronize a table which has primary key 'id INT', and you want to compute a partition key '_year=year(age)',
+you can create a such table first (the other columns can be omitted):
+```sql
+CREATE TABLE test_db.test_table (
+    id INT,     -- primary key
+    year DATE,  -- the argument of computed column _year
+    _year DATE, -- partition key
+    PRIMARY KEY (id, _year) NOT ENFORCED
+) PARTITIONED BY (_year);
+```
+
+Then you can submit synchronization job:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    kafka-sync-table \
+    --warehouse hdfs:///path/to/warehouse \
+    --database test_db \
+    --table test_table \
+    --computed-column '_year=year(age)' \
+    ... (other conf)
+```
+
 ### Synchronizing Databases
 
 By using [KafkaSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the multi topic or one topic into one Paimon database.

@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
@@ -133,7 +132,7 @@ public class MongoDBSyncTableAction extends ActionBase {
         Schema mongodbSchema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, caseSensitive);
         catalog.createDatabase(database, true);
         List<ComputedColumn> computedColumns =
-                buildComputedColumns(computedColumnArgs, mongodbSchema);
+                buildComputedColumns(computedColumnArgs, mongodbSchema.fields());
 
         Identifier identifier = new Identifier(database, table);
         Schema fromMongodb =
@@ -142,8 +141,7 @@ public class MongoDBSyncTableAction extends ActionBase {
                         Collections.emptyList(),
                         computedColumns,
                         tableConfig,
-                        mongodbSchema,
-                        new CdcMetadataConverter[] {});
+                        mongodbSchema);
         // Check if table exists before trying to get or create it
         if (catalog.tableExists(identifier)) {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);

@@ -21,9 +21,9 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.schema.Schema;
 
 import org.apache.flink.api.connector.source.Source;
+import org.apache.pulsar.client.api.PulsarClientException;
 
 import java.util.Map;
 
@@ -45,12 +45,15 @@ public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
     }
 
     @Override
-    protected Schema buildSchema() {
-        String topic = mqConfig.get(PulsarActionUtils.TOPIC).split(",")[0].trim();
-        try (MessageQueueSchemaUtils.ConsumerWrapper consumer =
-                PulsarActionUtils.createPulsarConsumer(mqConfig, topic)) {
-            return MessageQueueSchemaUtils.getSchema(consumer, topic, getDataFormat(), typeMapping);
-        } catch (Exception e) {
+    protected String topic() {
+        return mqConfig.get(PulsarActionUtils.TOPIC).split(",")[0].trim();
+    }
+
+    @Override
+    protected MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic) {
+        try {
+            return PulsarActionUtils.createPulsarConsumer(mqConfig, topic);
+        } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
     }
