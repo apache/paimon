@@ -231,7 +231,7 @@ and disable all the other compaction by set `write-only`.
 ### Sort Compact
 
 The data in a per-partition out of order will lead a slow select, compaction may slow down the inserting. It is a good choice for you to set 
-write-only for inserting job, and after per-partition data done, trigger a partition `Sort Compact` action. 
+`write-only` for inserting job, and after per-partition data done, trigger a partition `Sort Compact` action. See [Sort Compact]({{< ref "concepts/file-operations#sort-compact" >}}).
 
 You can trigger action by shell script:
 ```shell
