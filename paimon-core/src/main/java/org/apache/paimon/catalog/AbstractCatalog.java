@@ -26,6 +26,8 @@ import org.apache.paimon.lineage.LineageMeta;
 import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
@@ -83,6 +85,149 @@ public abstract class AbstractCatalog implements Catalog {
                                         key.substring(TABLE_DEFAULT_OPTION_PREFIX.length()),
                                         options.get(key)));
     }
+
+    @Override
+    public boolean databaseExists(String databaseName) {
+        if (isSystemDatabase(databaseName)) {
+            return true;
+        }
+
+        return databaseExistsImpl(databaseName);
+    }
+
+    protected abstract boolean databaseExistsImpl(String databaseName);
+
+    @Override
+    public void createDatabase(String name, boolean ignoreIfExists)
+            throws DatabaseAlreadyExistException {
+        if (isSystemDatabase(name)) {
+            throw new ProcessSystemDatabaseException();
+        }
+        if (databaseExists(name)) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new DatabaseAlreadyExistException(name);
+        }
+
+        createDatabaseImpl(name);
+    }
+
+    protected abstract void createDatabaseImpl(String name);
+
+    @Override
+    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
+            throws DatabaseNotExistException, DatabaseNotEmptyException {
+        if (isSystemDatabase(name)) {
+            throw new ProcessSystemDatabaseException();
+        }
+        if (!databaseExists(name)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new DatabaseNotExistException(name);
+        }
+
+        if (!cascade && listTables(name).size() > 0) {
+            throw new DatabaseNotEmptyException(name);
+        }
+
+        dropDatabaseImpl(name);
+    }
+
+    protected abstract void dropDatabaseImpl(String name);
+
+    @Override
+    public List<String> listTables(String databaseName) throws DatabaseNotExistException {
+        if (isSystemDatabase(databaseName)) {
+            return GLOBAL_TABLES;
+        }
+        if (!databaseExists(databaseName)) {
+            throw new DatabaseNotExistException(databaseName);
+        }
+
+        return listTablesImpl(databaseName);
+    }
+
+    protected abstract List<String> listTablesImpl(String databaseName);
+
+    @Override
+    public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
+            throws TableNotExistException {
+        checkNotSystemTable(identifier, "dropTable");
+        if (!tableExists(identifier)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(identifier);
+        }
+
+        dropTableImpl(identifier);
+    }
+
+    protected abstract void dropTableImpl(Identifier identifier);
+
+    @Override
+    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
+            throws TableAlreadyExistException, DatabaseNotExistException {
+        checkNotSystemTable(identifier, "createTable");
+        if (!databaseExists(identifier.getDatabaseName())) {
+            throw new DatabaseNotExistException(identifier.getDatabaseName());
+        }
+
+        if (tableExists(identifier)) {
+            if (ignoreIfExists) {
+                return;
+            }
+            throw new TableAlreadyExistException(identifier);
+        }
+
+        copyTableDefaultOptions(schema.options());
+
+        createTableImpl(identifier, schema);
+    }
+
+    protected abstract void createTableImpl(Identifier identifier, Schema schema);
+
+    @Override
+    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
+            throws TableNotExistException, TableAlreadyExistException {
+        checkNotSystemTable(fromTable, "renameTable");
+        checkNotSystemTable(toTable, "renameTable");
+
+        if (!tableExists(fromTable)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(fromTable);
+        }
+
+        if (tableExists(toTable)) {
+            throw new TableAlreadyExistException(toTable);
+        }
+
+        renameTableImpl(fromTable, toTable);
+    }
+
+    protected abstract void renameTableImpl(Identifier fromTable, Identifier toTable);
+
+    @Override
+    public void alterTable(
+            Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
+        checkNotSystemTable(identifier, "alterTable");
+        if (!tableExists(identifier)) {
+            if (ignoreIfNotExists) {
+                return;
+            }
+            throw new TableNotExistException(identifier);
+        }
+
+        alterTableImpl(identifier, changes);
+    }
+
+    protected abstract void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
+            throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
     @Nullable
     private LineageMeta findAndCreateLineageMeta(Options options, ClassLoader classLoader) {
@@ -175,7 +320,7 @@ public abstract class AbstractCatalog implements Catalog {
         return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER);
     }
 
-    protected void checkNotSystemTable(Identifier identifier, String method) {
+    private void checkNotSystemTable(Identifier identifier, String method) {
         if (isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
@@ -213,7 +358,7 @@ public abstract class AbstractCatalog implements Catalog {
         return new Path(warehouse, database + DB_SUFFIX);
     }
 
-    protected boolean isSystemDatabase(String database) {
+    private boolean isSystemDatabase(String database) {
         return SYSTEM_DATABASE_NAME.equals(database);
     }
 }
