@@ -320,8 +320,12 @@ public abstract class AbstractCatalog implements Catalog {
         return identifier.getObjectName().contains(SYSTEM_TABLE_SPLITTER);
     }
 
+    protected boolean isSystemTable(Identifier identifier) {
+        return isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier);
+    }
+
     private void checkNotSystemTable(Identifier identifier, String method) {
-        if (isSystemDatabase(identifier.getDatabaseName()) || isSpecifiedSystemTable(identifier)) {
+        if (isSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
                             "Cannot '%s' for system table '%s', please use data table.",

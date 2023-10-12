@@ -220,6 +220,10 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(Identifier identifier) {
+        if (isSystemTable(identifier)) {
+            return super.tableExists(identifier);
+        }
+
         Table table;
         try {
             table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());

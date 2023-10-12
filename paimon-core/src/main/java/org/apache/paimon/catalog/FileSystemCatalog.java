@@ -92,6 +92,10 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(Identifier identifier) {
+        if (isSystemTable(identifier)) {
+            return super.tableExists(identifier);
+        }
+
         return tableExists(getDataTableLocation(identifier));
     }
 
