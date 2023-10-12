@@ -47,4 +47,7 @@ public interface TableScan {
     interface Plan {
         List<Split> splits();
     }
+
+    /** Close this scan, clean resources here. */
+    void close();
 }

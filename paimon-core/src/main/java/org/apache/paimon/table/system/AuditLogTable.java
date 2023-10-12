@@ -291,6 +291,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         public List<BinaryRow> listPartitions() {
             return batchScan.listPartitions();
         }
+
+        @Override
+        public void close() {
+            // nothing to close yet
+        }
     }
 
     private class AuditLogStreamScan implements InnerStreamTableScan {
@@ -347,6 +352,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {
             streamScan.notifyCheckpointComplete(nextSnapshot);
+        }
+
+        @Override
+        public void close() {
+            // nothing to close yet
         }
     }
 

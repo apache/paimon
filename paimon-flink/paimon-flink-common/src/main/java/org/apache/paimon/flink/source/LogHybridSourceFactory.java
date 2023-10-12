@@ -108,11 +108,12 @@ public class LogHybridSourceFactory
                 SplitEnumeratorContext<FileStoreSourceSplit> context,
                 PendingSplitsCheckpoint checkpoint) {
             Long snapshotId = null;
+            StreamTableScan scan = null;
             Collection<FileStoreSourceSplit> splits;
             if (checkpoint == null) {
                 FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
                 // get snapshot id and splits from scan
-                StreamTableScan scan = readBuilder.newStreamScan();
+                scan = readBuilder.newStreamScan();
                 splits = splitGenerator.createSplits(scan.plan());
                 Long nextSnapshotId = scan.checkpoint();
                 if (nextSnapshotId != null) {
@@ -132,7 +133,8 @@ public class LogHybridSourceFactory
                             context,
                             options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                             options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
-                            splits));
+                            splits),
+                    scan);
         }
     }
 }

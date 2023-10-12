@@ -116,7 +116,7 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void close() throws IOException {
-        // no resources to close
+        scan.close();
     }
 
     @Override

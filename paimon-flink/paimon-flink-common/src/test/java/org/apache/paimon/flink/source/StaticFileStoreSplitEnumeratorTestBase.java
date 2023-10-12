@@ -44,7 +44,7 @@ public abstract class StaticFileStoreSplitEnumeratorTestBase {
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             List<FileStoreSourceSplit> splits) {
         return new StaticFileStoreSplitEnumerator(
-                context, null, createSplitAssigner(context, 10, splitAssignMode(), splits));
+                context, null, createSplitAssigner(context, 10, splitAssignMode(), splits), null);
     }
 
     protected abstract FlinkConnectorOptions.SplitAssignMode splitAssignMode();

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -39,14 +40,17 @@ public class StaticFileStoreSplitEnumerator
     @Nullable private final Snapshot snapshot;
 
     private final SplitAssigner splitAssigner;
+    private final TableScan scan;
 
     public StaticFileStoreSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             @Nullable Snapshot snapshot,
-            SplitAssigner splitAssigner) {
+            SplitAssigner splitAssigner,
+            @Nullable TableScan scan) {
         this.context = context;
         this.snapshot = snapshot;
         this.splitAssigner = splitAssigner;
+        this.scan = scan;
     }
 
     @Override
@@ -88,7 +92,9 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public void close() {
-        // no resources to close
+        if (scan != null) {
+            scan.close();
+        }
     }
 
     @Nullable

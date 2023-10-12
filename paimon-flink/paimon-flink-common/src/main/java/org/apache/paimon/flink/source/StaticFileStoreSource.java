@@ -22,6 +22,7 @@ import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -62,16 +63,24 @@ public class StaticFileStoreSource extends FlinkSource {
     public SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> restoreEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
-        Collection<FileStoreSourceSplit> splits =
-                checkpoint == null ? getSplits() : checkpoint.splits();
+        TableScan scan = null;
+        Collection<FileStoreSourceSplit> splits;
+        if (checkpoint == null) {
+            scan = readBuilder.newScan();
+            splits = getSplits(scan);
+        } else {
+            splits = checkpoint.splits();
+        }
+        //        Collection<FileStoreSourceSplit> splits =
+        //                checkpoint == null ? getSplits() : checkpoint.splits();
         SplitAssigner splitAssigner =
                 createSplitAssigner(context, splitBatchSize, splitAssignMode, splits);
-        return new StaticFileStoreSplitEnumerator(context, null, splitAssigner);
+        return new StaticFileStoreSplitEnumerator(context, null, splitAssigner, scan);
     }
 
-    private List<FileStoreSourceSplit> getSplits() {
+    private List<FileStoreSourceSplit> getSplits(TableScan scan) {
         FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
-        return splitGenerator.createSplits(readBuilder.newScan().plan());
+        return splitGenerator.createSplits(scan.plan());
     }
 
     public static SplitAssigner createSplitAssigner(

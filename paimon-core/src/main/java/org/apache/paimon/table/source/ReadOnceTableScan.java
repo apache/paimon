@@ -43,4 +43,9 @@ public abstract class ReadOnceTableScan implements InnerTableScan {
     public List<BinaryRow> listPartitions() {
         throw new UnsupportedOperationException();
     }
+
+    @Override
+    public void close() {
+        // nothing to close
+    }
 }

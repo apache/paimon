@@ -135,6 +135,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
 
     @Override
     public void close() throws IOException {
+        super.close();
         closed = true;
         synchronized (lock) {
             lock.notifyAll();

@@ -187,6 +187,11 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
         }
     }
 
+    @Override
+    public void close() {
+        // do nothing yet
+    }
+
     public List<BinaryRow> listPartitions() {
         return snapshotReader.partitions();
     }

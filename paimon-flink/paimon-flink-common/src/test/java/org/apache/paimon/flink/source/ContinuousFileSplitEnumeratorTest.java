@@ -834,6 +834,11 @@ public class ContinuousFileSplitEnumeratorTest {
         @Override
         public void restore(Long state) {}
 
+        @Override
+        public void close() {
+            // nothing to close
+        }
+
         public void allowEnd(boolean allowEnd) {
             this.allowEnd = allowEnd;
         }
