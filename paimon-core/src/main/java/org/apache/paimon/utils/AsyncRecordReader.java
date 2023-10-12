@@ -40,12 +40,12 @@ public class AsyncRecordReader<T> implements RecordReader<T> {
 
     private boolean isEnd = false;
 
-    public AsyncRecordReader(RecordReader<T> reader) {
+    public AsyncRecordReader(IOExceptionSupplier<RecordReader<T>> supplier) {
         this.queue = new LinkedBlockingQueue<>();
         this.future =
                 ASYNC_EXECUTOR.submit(
                         () -> {
-                            try {
+                            try (RecordReader<T> reader = supplier.get()) {
                                 while (true) {
                                     RecordIterator<T> batch = reader.readBatch();
                                     if (batch == null) {
@@ -55,8 +55,6 @@ public class AsyncRecordReader<T> implements RecordReader<T> {
 
                                     queue.add(new Element(false, batch));
                                 }
-                            } finally {
-                                reader.close();
                             }
                         });
     }
