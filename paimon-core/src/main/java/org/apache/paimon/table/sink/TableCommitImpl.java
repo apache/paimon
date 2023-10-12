@@ -88,8 +88,8 @@ public class TableCommitImpl implements InnerTableCommit {
             @Nullable Duration consumerExpireTime,
             ConsumerManager consumerManager,
             ExpireExecutionMode expireExecutionMode,
-            String table) {
-        this.commitMetrics = new CommitMetrics(table);
+            String tableName) {
+        this.commitMetrics = new CommitMetrics(tableName);
         commit.withLock(lock).withMetrics(commitMetrics);
         if (expire != null) {
             expire.withLock(lock);

@@ -327,6 +327,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     properties);
         }
 
+        long started = System.nanoTime();
+        int generatedSnapshot = 0;
+        int attempts = 0;
         List<ManifestEntry> appendTableFiles = new ArrayList<>();
         List<ManifestEntry> appendChangelog = new ArrayList<>();
         List<ManifestEntry> compactTableFiles = new ArrayList<>();
@@ -356,65 +359,83 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.warn(warnMessage.toString());
         }
 
-        boolean skipOverwrite = false;
-        // partition filter is built from static or dynamic partition according to properties
-        Predicate partitionFilter = null;
-        if (dynamicPartitionOverwrite) {
-            if (appendTableFiles.isEmpty()) {
-                // in dynamic mode, if there is no changes to commit, no data will be deleted
-                skipOverwrite = true;
+        try {
+            boolean skipOverwrite = false;
+            // partition filter is built from static or dynamic partition according to properties
+            Predicate partitionFilter = null;
+            if (dynamicPartitionOverwrite) {
+                if (appendTableFiles.isEmpty()) {
+                    // in dynamic mode, if there is no changes to commit, no data will be deleted
+                    skipOverwrite = true;
+                } else {
+                    partitionFilter =
+                            appendTableFiles.stream()
+                                    .map(ManifestEntry::partition)
+                                    .distinct()
+                                    // partition filter is built from new data's partitions
+                                    .map(p -> PredicateBuilder.equalPartition(p, partitionType))
+                                    .reduce(PredicateBuilder::or)
+                                    .orElseThrow(
+                                            () ->
+                                                    new RuntimeException(
+                                                            "Failed to get dynamic partition filter. This is unexpected."));
+                }
             } else {
-                partitionFilter =
-                        appendTableFiles.stream()
-                                .map(ManifestEntry::partition)
-                                .distinct()
-                                // partition filter is built from new data's partitions
-                                .map(p -> PredicateBuilder.equalPartition(p, partitionType))
-                                .reduce(PredicateBuilder::or)
-                                .orElseThrow(
-                                        () ->
-                                                new RuntimeException(
-                                                        "Failed to get dynamic partition filter. This is unexpected."));
-            }
-        } else {
-            partitionFilter = PredicateBuilder.partition(partition, partitionType);
-            // sanity check, all changes must be done within the given partition
-            if (partitionFilter != null) {
-                for (ManifestEntry entry : appendTableFiles) {
-                    if (!partitionFilter.test(
-                            partitionObjectConverter.convert(entry.partition()))) {
-                        throw new IllegalArgumentException(
-                                "Trying to overwrite partition "
-                                        + partition
-                                        + ", but the changes in "
-                                        + pathFactory.getPartitionString(entry.partition())
-                                        + " does not belong to this partition");
+                partitionFilter = PredicateBuilder.partition(partition, partitionType);
+                // sanity check, all changes must be done within the given partition
+                if (partitionFilter != null) {
+                    for (ManifestEntry entry : appendTableFiles) {
+                        if (!partitionFilter.test(
+                                partitionObjectConverter.convert(entry.partition()))) {
+                            throw new IllegalArgumentException(
+                                    "Trying to overwrite partition "
+                                            + partition
+                                            + ", but the changes in "
+                                            + pathFactory.getPartitionString(entry.partition())
+                                            + " does not belong to this partition");
+                        }
                     }
                 }
             }
-        }
 
-        // overwrite new files
-        if (!skipOverwrite) {
-            tryOverwrite(
-                    partitionFilter,
-                    appendTableFiles,
-                    appendIndexFiles,
-                    committable.identifier(),
-                    committable.watermark(),
-                    committable.logOffsets());
-        }
+            // overwrite new files
+            if (!skipOverwrite) {
+                attempts +=
+                        tryOverwrite(
+                                partitionFilter,
+                                appendTableFiles,
+                                appendIndexFiles,
+                                committable.identifier(),
+                                committable.watermark(),
+                                committable.logOffsets());
+                generatedSnapshot += 1;
+            }
 
-        if (!compactTableFiles.isEmpty()) {
-            tryCommit(
-                    compactTableFiles,
-                    Collections.emptyList(),
-                    Collections.emptyList(),
-                    committable.identifier(),
-                    committable.watermark(),
-                    committable.logOffsets(),
-                    Snapshot.CommitKind.COMPACT,
-                    null);
+            if (!compactTableFiles.isEmpty()) {
+                attempts +=
+                        tryCommit(
+                                compactTableFiles,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                committable.identifier(),
+                                committable.watermark(),
+                                committable.logOffsets(),
+                                Snapshot.CommitKind.COMPACT,
+                                null);
+                generatedSnapshot += 1;
+            }
+        } finally {
+            long commitDuration = (System.nanoTime() - started) / 1_000_000;
+            if (this.commitMetrics != null) {
+                reportCommit(
+                        appendTableFiles,
+                        Collections.emptyList(),
+                        compactTableFiles,
+                        Collections.emptyList(),
+                        commitDuration,
+                        generatedSnapshot,
+                        attempts);
+            }
         }
     }
 
@@ -563,16 +584,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return cnt;
     }
 
-    private void tryOverwrite(
+    private int tryOverwrite(
             Predicate partitionFilter,
             List<ManifestEntry> changes,
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets) {
+        int cnt = 0;
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
+            cnt++;
             List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
             List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
             if (latestSnapshot != null) {
@@ -621,6 +644,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 break;
             }
         }
+        return cnt;
     }
 
     @VisibleForTesting

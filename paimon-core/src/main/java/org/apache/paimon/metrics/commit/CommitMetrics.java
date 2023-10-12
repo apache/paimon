@@ -31,8 +31,9 @@ public class CommitMetrics {
 
     private final AbstractMetricGroup genericMetricGroup;
 
-    public CommitMetrics(String table) {
-        this.genericMetricGroup = GenericMetricGroup.createGenericMetricGroup(table, GROUP_NAME);
+    public CommitMetrics(String tableName) {
+        this.genericMetricGroup =
+                GenericMetricGroup.createGenericMetricGroup(tableName, GROUP_NAME);
         registerGenericCommitMetrics();
     }
 
