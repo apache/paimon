@@ -484,7 +484,8 @@ public class ReadTable {
                 .withFilter(Lists.newArrayList(notNull, greaterOrEqual));
 
         // 2. Plan splits in 'Coordinator' (or named 'Driver')
-        List<Split> splits = readBuilder.newScan().plan().splits();
+        TableScan scan = readBuilder.newScan();
+        List<Split> splits = scan.plan().splits();
 
         // 3. Distribute these splits to different tasks
 
@@ -492,6 +493,9 @@ public class ReadTable {
         TableRead read = readBuilder.newRead();
         RecordReader<InternalRow> reader = read.createReader(splits);
         reader.forEachRemaining(System.out::println);
+        
+        // 5. Close scan
+        scan.close();
     }
 }
 ```
@@ -546,7 +550,7 @@ public class BatchWrite {
 
 ## Stream Read
 
-The difference of Stream Read is that StreamTableScan can continuously scan and generate splits.
+The difference of Stream Read is that StreamTableScan can continuously scan and generate splits. Note the scan should be closed if it's cancelled or finished.
 
 StreamTableScan provides the ability to checkpoint and restore, which can let you save the correct state
 during stream reading.
