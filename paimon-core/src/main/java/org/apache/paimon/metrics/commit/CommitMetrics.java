@@ -37,6 +37,7 @@ public class CommitMetrics {
         registerGenericCommitMetrics();
     }
 
+    @VisibleForTesting
     public AbstractMetricGroup getMetricGroup() {
         return genericMetricGroup;
     }
@@ -128,5 +129,9 @@ public class CommitMetrics {
     public void reportCommit(CommitStats commitStats) {
         latestCommit = commitStats;
         durationHistogram.update(commitStats.getDuration());
+    }
+
+    public void close() {
+        this.genericMetricGroup.close();
     }
 }

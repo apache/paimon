@@ -265,7 +265,7 @@ public class TableCommitImpl implements InnerTableCommit {
         }
         IOUtils.closeQuietly(lock);
         expireMainExecutor.shutdownNow();
-        commitMetrics.getMetricGroup().close();
+        commitMetrics.close();
     }
 
     @Override

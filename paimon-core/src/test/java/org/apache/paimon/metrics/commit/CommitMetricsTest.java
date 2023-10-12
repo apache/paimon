@@ -26,6 +26,7 @@ import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.Metrics;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -45,8 +46,12 @@ public class CommitMetricsTest {
 
     @BeforeEach
     public void beforeEach() {
-        Metrics.getInstance().getMetricGroups().clear();
         commitMetrics = getCommitMetrics();
+    }
+
+    @AfterEach
+    public void afterEach() {
+        commitMetrics.close();
     }
 
     /** Tests the registration of the commit metrics. */
