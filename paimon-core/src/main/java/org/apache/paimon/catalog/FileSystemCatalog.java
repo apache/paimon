@@ -65,58 +65,22 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean databaseExists(String databaseName) {
-        if (isSystemDatabase(databaseName)) {
-            return true;
-        }
+    protected boolean databaseExistsImpl(String databaseName) {
         return uncheck(() -> fileIO.exists(databasePath(databaseName)));
     }
 
     @Override
-    public void createDatabase(String name, boolean ignoreIfExists)
-            throws DatabaseAlreadyExistException {
-        if (isSystemDatabase(name)) {
-            throw new ProcessSystemDatabaseException();
-        }
-        if (databaseExists(name)) {
-            if (ignoreIfExists) {
-                return;
-            }
-            throw new DatabaseAlreadyExistException(name);
-        }
+    protected void createDatabaseImpl(String name) {
         uncheck(() -> fileIO.mkdirs(databasePath(name)));
     }
 
     @Override
-    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
-            throws DatabaseNotExistException, DatabaseNotEmptyException {
-        if (isSystemDatabase(name)) {
-            throw new ProcessSystemDatabaseException();
-        }
-        if (!databaseExists(name)) {
-            if (ignoreIfNotExists) {
-                return;
-            }
-
-            throw new DatabaseNotExistException(name);
-        }
-
-        if (!cascade && listTables(name).size() > 0) {
-            throw new DatabaseNotEmptyException(name);
-        }
-
+    protected void dropDatabaseImpl(String name) {
         uncheck(() -> fileIO.delete(databasePath(name), true));
     }
 
     @Override
-    public List<String> listTables(String databaseName) throws DatabaseNotExistException {
-        if (isSystemDatabase(databaseName)) {
-            return GLOBAL_TABLES;
-        }
-        if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(databaseName);
-        }
-
+    protected List<String> listTablesImpl(String databaseName) {
         List<String> tables = new ArrayList<>();
         for (FileStatus status : uncheck(() -> fileIO.listStatus(databasePath(databaseName)))) {
             if (status.isDir() && tableExists(status.getPath())) {
@@ -127,11 +91,12 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        Path path = getDataTableLocation(identifier);
-        return new SchemaManager(fileIO, path)
-                .latest()
-                .orElseThrow(() -> new TableNotExistException(identifier));
+    public boolean tableExists(Identifier identifier) {
+        if (isSystemTable(identifier)) {
+            return super.tableExists(identifier);
+        }
+
+        return tableExists(getDataTableLocation(identifier));
     }
 
     private boolean tableExists(Path tablePath) {
@@ -139,74 +104,35 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
-            throws TableNotExistException {
-        checkNotSystemTable(identifier, "dropTable");
+    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
         Path path = getDataTableLocation(identifier);
-        if (!tableExists(path)) {
-            if (ignoreIfNotExists) {
-                return;
-            }
+        return new SchemaManager(fileIO, path)
+                .latest()
+                .orElseThrow(() -> new TableNotExistException(identifier));
+    }
 
-            throw new TableNotExistException(identifier);
-        }
-
+    @Override
+    protected void dropTableImpl(Identifier identifier) {
+        Path path = getDataTableLocation(identifier);
         uncheck(() -> fileIO.delete(path, true));
     }
 
     @Override
-    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
-            throws TableAlreadyExistException, DatabaseNotExistException {
-        checkNotSystemTable(identifier, "createTable");
-        if (!databaseExists(identifier.getDatabaseName())) {
-            throw new DatabaseNotExistException(identifier.getDatabaseName());
-        }
-
+    public void createTableImpl(Identifier identifier, Schema schema) {
         Path path = getDataTableLocation(identifier);
-        if (tableExists(path)) {
-            if (ignoreIfExists) {
-                return;
-            }
-
-            throw new TableAlreadyExistException(identifier);
-        }
-
-        copyTableDefaultOptions(schema.options());
-
         uncheck(() -> new SchemaManager(fileIO, path).createTable(schema));
     }
 
     @Override
-    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, TableAlreadyExistException {
-        checkNotSystemTable(fromTable, "renameTable");
-        checkNotSystemTable(toTable, "renameTable");
+    public void renameTableImpl(Identifier fromTable, Identifier toTable) {
         Path fromPath = getDataTableLocation(fromTable);
-        if (!tableExists(fromPath)) {
-            if (ignoreIfNotExists) {
-                return;
-            }
-
-            throw new TableNotExistException(fromTable);
-        }
-
         Path toPath = getDataTableLocation(toTable);
-        if (tableExists(toPath)) {
-            throw new TableAlreadyExistException(toTable);
-        }
-
         uncheck(() -> fileIO.rename(fromPath, toPath));
     }
 
     @Override
-    public void alterTable(
-            Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
+    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        checkNotSystemTable(identifier, "alterTable");
-        if (!tableExists(getDataTableLocation(identifier))) {
-            throw new TableNotExistException(identifier);
-        }
-
         new SchemaManager(fileIO, getDataTableLocation(identifier)).commitChanges(changes);
     }
 

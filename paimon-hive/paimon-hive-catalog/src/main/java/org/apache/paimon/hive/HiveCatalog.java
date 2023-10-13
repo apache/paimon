@@ -42,14 +42,12 @@ import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.RetryingMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.SerDeInfo;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
@@ -171,10 +169,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public boolean databaseExists(String databaseName) {
-        if (isSystemDatabase(databaseName)) {
-            return true;
-        }
+    protected boolean databaseExistsImpl(String databaseName) {
         try {
             client.getDatabase(databaseName);
             return true;
@@ -187,93 +182,81 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createDatabase(String name, boolean ignoreIfExists)
-            throws DatabaseAlreadyExistException {
-        if (isSystemDatabase(name)) {
-            throw new ProcessSystemDatabaseException();
-        }
+    protected void createDatabaseImpl(String name) {
         try {
             client.createDatabase(convertToDatabase(name));
-
             locationHelper.createPathIfRequired(databasePath(name), fileIO);
-        } catch (AlreadyExistsException e) {
-            if (!ignoreIfExists) {
-                throw new DatabaseAlreadyExistException(name, e);
-            }
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
         }
     }
 
     @Override
-    public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
-            throws DatabaseNotExistException, DatabaseNotEmptyException {
-        if (isSystemDatabase(name)) {
-            throw new ProcessSystemDatabaseException();
-        }
+    protected void dropDatabaseImpl(String name) {
         try {
-            if (!cascade && client.getAllTables(name).size() > 0) {
-                throw new DatabaseNotEmptyException(name);
-            }
-
             locationHelper.dropPathIfRequired(databasePath(name), fileIO);
             client.dropDatabase(name, true, false, true);
-        } catch (NoSuchObjectException | UnknownDBException e) {
-            if (!ignoreIfNotExists) {
-                throw new DatabaseNotExistException(name, e);
-            }
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to drop database " + name, e);
         }
     }
 
     @Override
-    public List<String> listTables(String databaseName) throws DatabaseNotExistException {
-        if (isSystemDatabase(databaseName)) {
-            return GLOBAL_TABLES;
-        }
+    protected List<String> listTablesImpl(String databaseName) {
         try {
             return client.getAllTables(databaseName).stream()
                     .filter(
                             tableName -> {
                                 Identifier identifier = new Identifier(databaseName, tableName);
                                 // the environment here may not be able to access non-paimon
-                                // tables.
-                                // so we just check the schema file first
-                                return schemaFileExists(identifier)
-                                        && paimonTableExists(identifier);
+                                // tables, so we just check the schema file first
+                                return schemaFileExists(identifier) && tableExists(identifier);
                             })
                     .collect(Collectors.toList());
-        } catch (UnknownDBException e) {
-            throw new DatabaseNotExistException(databaseName, e);
         } catch (TException e) {
             throw new RuntimeException("Failed to list all tables in database " + databaseName, e);
         }
     }
 
     @Override
+    public boolean tableExists(Identifier identifier) {
+        if (isSystemTable(identifier)) {
+            return super.tableExists(identifier);
+        }
+
+        Table table;
+        try {
+            table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
+        } catch (NoSuchObjectException e) {
+            return false;
+        } catch (TException e) {
+            throw new RuntimeException(
+                    "Cannot determine if table " + identifier.getFullName() + " is a paimon table.",
+                    e);
+        }
+
+        return isPaimonTable(table) || LegacyHiveClasses.isPaimonTable(table);
+    }
+
+    private static boolean isPaimonTable(Table table) {
+        return INPUT_FORMAT_CLASS_NAME.equals(table.getSd().getInputFormat())
+                && OUTPUT_FORMAT_CLASS_NAME.equals(table.getSd().getOutputFormat());
+    }
+
+    @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        if (!paimonTableExists(identifier)) {
+        if (!tableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }
         Path tableLocation = getDataTableLocation(identifier);
         return new SchemaManager(fileIO, tableLocation)
                 .latest()
-                .orElseThrow(() -> new RuntimeException("There is no paimond in " + tableLocation));
+                .orElseThrow(
+                        () -> new RuntimeException("There is no paimon table in " + tableLocation));
     }
 
     @Override
-    public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
-            throws TableNotExistException {
-        checkNotSystemTable(identifier, "dropTable");
-        if (!paimonTableExists(identifier)) {
-            if (ignoreIfNotExists) {
-                return;
-            } else {
-                throw new TableNotExistException(identifier);
-            }
-        }
-
+    protected void dropTableImpl(Identifier identifier) {
         try {
             client.dropTable(
                     identifier.getDatabaseName(), identifier.getObjectName(), true, false, true);
@@ -294,27 +277,11 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
-            throws TableAlreadyExistException, DatabaseNotExistException {
-        checkNotSystemTable(identifier, "createTable");
-        String databaseName = identifier.getDatabaseName();
-        if (!databaseExists(databaseName)) {
-            throw new DatabaseNotExistException(databaseName);
-        }
-        if (paimonTableExists(identifier)) {
-            if (ignoreIfExists) {
-                return;
-            } else {
-                throw new TableAlreadyExistException(identifier);
-            }
-        }
-
+    protected void createTableImpl(Identifier identifier, Schema schema) {
         checkFieldNamesUpperCase(schema.rowType().getFieldNames());
+
         // first commit changes to underlying files
         // if changes on Hive fails there is no harm to perform the same changes to files again
-
-        copyTableDefaultOptions(schema.options());
-
         TableSchema tableSchema;
         try {
             tableSchema = schemaManager(identifier).createTable(schema);
@@ -325,6 +292,7 @@ public class HiveCatalog extends AbstractCatalog {
                             + " to underlying files.",
                     e);
         }
+
         Table table =
                 newHmsTable(
                         identifier,
@@ -351,22 +319,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void renameTable(Identifier fromTable, Identifier toTable, boolean ignoreIfNotExists)
-            throws TableNotExistException, TableAlreadyExistException {
-        checkNotSystemTable(fromTable, "renameTable");
-        checkNotSystemTable(toTable, "renameTable");
-        if (!paimonTableExists(fromTable)) {
-            if (ignoreIfNotExists) {
-                return;
-            } else {
-                throw new TableNotExistException(fromTable);
-            }
-        }
-
-        if (paimonTableExists(toTable)) {
-            throw new TableAlreadyExistException(toTable);
-        }
-
+    protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
         try {
             checkIdentifierUpperCase(toTable);
             String fromDB = fromTable.getDatabaseName();
@@ -401,18 +354,8 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void alterTable(
-            Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
+    protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        checkNotSystemTable(identifier, "alterTable");
-        if (!paimonTableExists(identifier)) {
-            if (ignoreIfNotExists) {
-                return;
-            } else {
-                throw new TableNotExistException(identifier);
-            }
-        }
-
         checkFieldNamesUpperCaseInSchemaChange(changes);
 
         final SchemaManager schemaManager = schemaManager(identifier);
@@ -577,26 +520,6 @@ public class HiveCatalog extends AbstractCatalog {
 
     private boolean schemaFileExists(Identifier identifier) {
         return new SchemaManager(fileIO, getDataTableLocation(identifier)).latest().isPresent();
-    }
-
-    private boolean paimonTableExists(Identifier identifier) {
-        Table table;
-        try {
-            table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
-        } catch (NoSuchObjectException e) {
-            return false;
-        } catch (TException e) {
-            throw new RuntimeException(
-                    "Cannot determine if table " + identifier.getFullName() + " is a paimon table.",
-                    e);
-        }
-
-        return isPaimonTable(table) || LegacyHiveClasses.isPaimonTable(table);
-    }
-
-    private static boolean isPaimonTable(Table table) {
-        return INPUT_FORMAT_CLASS_NAME.equals(table.getSd().getInputFormat())
-                && OUTPUT_FORMAT_CLASS_NAME.equals(table.getSd().getOutputFormat());
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
