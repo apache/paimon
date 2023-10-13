@@ -222,7 +222,7 @@ dataset.show()
 For now, Paimon does not support `UPDATE` syntax. But we can use `INSERT INTO` syntax instead for changelog tables.
 
 ```sql
-INSERT INTO my_table VALUES (1, 'Hi Again'), (3, 'Test');
+INSERT INTO my_table VALUES (1, 'Hi Again'), (2, 'Hello'), (3, 'Test');
 
 SELECT * FROM my_table;
 
