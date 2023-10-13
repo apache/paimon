@@ -26,6 +26,8 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.concurrent.ThreadSafe;
+
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -53,6 +55,7 @@ import static org.apache.paimon.fs.FileIOUtils.checkAccess;
  * @since 0.4.0
  */
 @Public
+@ThreadSafe
 public interface FileIO extends Serializable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);

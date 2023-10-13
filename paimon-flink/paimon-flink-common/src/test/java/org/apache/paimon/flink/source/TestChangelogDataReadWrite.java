@@ -134,7 +134,8 @@ public class TestChangelogDataReadWrite {
                         DeduplicateMergeFunction.factory(),
                         ignore -> avro,
                         pathFactory,
-                        EXTRACTOR);
+                        EXTRACTOR,
+                        new CoreOptions(new HashMap<>()));
         return new KeyValueTableRead(read) {
             @Override
             public KeyValueTableRead withFilter(Predicate predicate) {

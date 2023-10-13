@@ -36,6 +36,7 @@ import java.util.List;
 
 /** Class with index mapping and bulk format. */
 public class BulkFormatMapping {
+
     @Nullable private final int[] indexMapping;
     @Nullable private final CastFieldGetter[] castMapping;
     private final FormatReaderFactory bulkFormat;
@@ -75,6 +76,7 @@ public class BulkFormatMapping {
 
     /** Builder to build {@link BulkFormatMapping}. */
     public static class BulkFormatMappingBuilder {
+
         private final FileFormatDiscover formatDiscover;
         private final KeyValueFieldsExtractor extractor;
         private final int[][] keyProjection;
@@ -117,7 +119,7 @@ public class BulkFormatMapping {
             int[][] dataProjection =
                     KeyValue.project(dataKeyProjection, dataValueProjection, dataKeyFields.size());
 
-            /**
+            /*
              * We need to create index mapping on projection instead of key and value separately
              * here, for example
              *

@@ -55,6 +55,12 @@ public class AvroBulkFormat implements FormatReaderFactory {
         return new AvroReader(fileIO, file);
     }
 
+    @Override
+    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
+            throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
     private class AvroReader implements RecordReader<InternalRow> {
 
         private final FileIO fileIO;

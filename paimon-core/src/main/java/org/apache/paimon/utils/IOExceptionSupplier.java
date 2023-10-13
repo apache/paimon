@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,32 +16,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.schema;
+package org.apache.paimon.utils;
 
-import org.apache.paimon.types.DataField;
+import java.io.IOException;
+import java.util.function.Supplier;
 
-import javax.annotation.concurrent.ThreadSafe;
-
-import java.io.Serializable;
-import java.util.List;
-
-/** Extractor of schema for different tables. */
-@ThreadSafe
-public interface KeyValueFieldsExtractor extends Serializable {
-
-    /**
-     * Extract key fields from table schema.
-     *
-     * @param schema the table schema
-     * @return the key fields
-     */
-    List<DataField> keyFields(TableSchema schema);
+/**
+ * A {@link Supplier} throws {@link IOException}.
+ *
+ * @param <T> the type of results supplied by this supplier
+ */
+@FunctionalInterface
+public interface IOExceptionSupplier<T> {
 
     /**
-     * Extract value fields from table schema.
+     * Gets a result.
      *
-     * @param schema the table schema
-     * @return the value fields
+     * @return a result
      */
-    List<DataField> valueFields(TableSchema schema);
+    T get() throws IOException;
 }

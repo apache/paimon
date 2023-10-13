@@ -191,6 +191,7 @@ public class ChangelogValueCountFileStoreTable extends AbstractFileStoreTable {
      * {@link KeyValueFieldsExtractor} implementation for {@link ChangelogValueCountFileStoreTable}.
      */
     static class ValueCountTableKeyValueFieldsExtractor implements KeyValueFieldsExtractor {
+
         private static final long serialVersionUID = 1L;
 
         static final ValueCountTableKeyValueFieldsExtractor EXTRACTOR =

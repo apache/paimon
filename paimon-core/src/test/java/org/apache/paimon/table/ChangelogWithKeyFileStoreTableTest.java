@@ -66,6 +66,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -109,6 +110,43 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                     rowData.getRowKind().shortString()
                             + " "
                             + COMPATIBILITY_BATCH_ROW_TO_STRING.apply(rowData);
+
+    @Test
+    public void testAsyncReader() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.FILE_READER_ASYNC_THRESHOLD.key(), "1 b"));
+
+        Map<Integer, GenericRow> rows = new HashMap<>();
+        for (int i = 0; i < 20; i++) {
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+            BatchTableWrite write = writeBuilder.newWrite();
+            BatchTableCommit commit = writeBuilder.newCommit();
+            for (int j = 0; j < 1000; j++) {
+                GenericRow row = rowData(1, i * j, 100L * i * j);
+                rows.put(row.getInt(1), row);
+                write.write(row);
+            }
+            commit.commit(write.prepareCommit());
+            write.close();
+            commit.close();
+        }
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = readBuilder.newRead();
+
+        Function<InternalRow, String> toString =
+                r -> r.getInt(0) + "|" + r.getInt(1) + "|" + r.getLong(2);
+        String[] expected =
+                rows.values().stream()
+                        .sorted(Comparator.comparingInt(o -> o.getInt(1)))
+                        .map(toString)
+                        .toArray(String[]::new);
+        assertThat(getResult(read, splits, toString)).containsExactly(expected);
+    }
 
     @Test
     public void testBatchWriteBuilder() throws Exception {

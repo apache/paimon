@@ -116,7 +116,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 mfFactory,
                 FileFormatDiscover.of(options),
                 pathFactory(),
-                keyValueFieldsExtractor);
+                keyValueFieldsExtractor,
+                options);
     }
 
     @Override

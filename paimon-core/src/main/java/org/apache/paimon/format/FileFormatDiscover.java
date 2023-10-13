@@ -20,14 +20,17 @@ package org.apache.paimon.format;
 
 import org.apache.paimon.CoreOptions;
 
-import java.util.HashMap;
+import javax.annotation.concurrent.ThreadSafe;
+
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** A class to discover {@link FileFormat}. */
+@ThreadSafe
 public interface FileFormatDiscover {
 
     static FileFormatDiscover of(CoreOptions options) {
-        Map<String, FileFormat> formats = new HashMap<>();
+        Map<String, FileFormat> formats = new ConcurrentHashMap<>();
         return new FileFormatDiscover() {
 
             @Override

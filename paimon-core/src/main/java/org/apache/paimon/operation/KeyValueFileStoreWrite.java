@@ -115,7 +115,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         valueType,
                         FileFormatDiscover.of(options),
                         pathFactory,
-                        extractor);
+                        extractor,
+                        options);
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,
@@ -266,7 +267,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 valueType,
                 file ->
                         readerFactory.createRecordReader(
-                                file.schemaId(), file.fileName(), file.level()),
+                                file.schemaId(), file.fileName(), file.fileSize(), file.level()),
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,
@@ -287,7 +288,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 keyType,
                 file ->
                         readerFactory.createRecordReader(
-                                file.schemaId(), file.fileName(), file.level()),
+                                file.schemaId(), file.fileName(), file.fileSize(), file.level()),
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,

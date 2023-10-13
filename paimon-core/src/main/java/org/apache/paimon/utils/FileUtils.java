@@ -112,8 +112,7 @@ public class FileUtils {
                 .filter(status -> status.getPath().getName().startsWith(prefix));
     }
 
-    public static RecordReader<InternalRow> createFormatReader(
-            FileIO fileIO, FormatReaderFactory format, Path file) throws IOException {
+    public static void checkExists(FileIO fileIO, Path file) throws IOException {
         if (!fileIO.exists(file)) {
             throw new FileNotFoundException(
                     String.format(
@@ -124,7 +123,11 @@ public class FileUtils {
                                     + " (For example, increasing parallelism).",
                             file));
         }
+    }
 
+    public static RecordReader<InternalRow> createFormatReader(
+            FileIO fileIO, FormatReaderFactory format, Path file) throws IOException {
+        checkExists(fileIO, file);
         return format.createReader(fileIO, file);
     }
 }

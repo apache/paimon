@@ -168,7 +168,8 @@ public abstract class MergeTreeTestBase {
                                                 "v",
                                                 new org.apache.paimon.types.IntType(false)));
                             }
-                        });
+                        },
+                        new CoreOptions(new HashMap<>()));
         readerFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
         compactReaderFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
 
