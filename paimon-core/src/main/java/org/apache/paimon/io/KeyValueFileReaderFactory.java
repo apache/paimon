@@ -238,7 +238,7 @@ public class KeyValueFileReaderFactory {
                     BulkFormatMapping.newBuilder(
                             formatDiscover, extractor, keyProjection, valueProjection, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket),
-                    options.fileReaderAsyncThreshold());
+                    options.fileReaderAsyncThreshold().getBytes());
         }
 
         private void applyProjection() {

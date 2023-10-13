@@ -24,10 +24,12 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
 /** A {@link RecordReader} to use ASYNC_EXECUTOR to read records async. */
 public class AsyncRecordReader<T> implements RecordReader<T> {
@@ -37,26 +39,33 @@ public class AsyncRecordReader<T> implements RecordReader<T> {
 
     private final BlockingQueue<Element> queue;
     private final Future<Void> future;
+    private final ClassLoader classLoader;
 
     private boolean isEnd = false;
 
     public AsyncRecordReader(IOExceptionSupplier<RecordReader<T>> supplier) {
         this.queue = new LinkedBlockingQueue<>();
-        this.future =
-                ASYNC_EXECUTOR.submit(
-                        () -> {
-                            try (RecordReader<T> reader = supplier.get()) {
-                                while (true) {
-                                    RecordIterator<T> batch = reader.readBatch();
-                                    if (batch == null) {
-                                        queue.add(new Element(true, null));
-                                        return null;
-                                    }
+        this.future = ASYNC_EXECUTOR.submit(() -> asyncRead(supplier));
+        this.classLoader = Thread.currentThread().getContextClassLoader();
+    }
 
-                                    queue.add(new Element(false, batch));
-                                }
-                            }
-                        });
+    private Void asyncRead(IOExceptionSupplier<RecordReader<T>> supplier) throws IOException {
+        // set classloader, otherwise, its classloader belongs to its creator. It is possible that
+        // its creator's classloader has already exited, which will cause subsequent reads to report
+        // exceptions
+        Thread.currentThread().setContextClassLoader(classLoader);
+
+        try (RecordReader<T> reader = supplier.get()) {
+            while (true) {
+                RecordIterator<T> batch = reader.readBatch();
+                if (batch == null) {
+                    queue.add(new Element(true, null));
+                    return null;
+                }
+
+                queue.add(new Element(false, batch));
+            }
+        }
     }
 
     @Nullable
@@ -67,7 +76,12 @@ public class AsyncRecordReader<T> implements RecordReader<T> {
         }
 
         try {
-            Element element = queue.take();
+            Element element;
+            do {
+                element = queue.poll(2, TimeUnit.SECONDS);
+                checkException();
+            } while (element == null);
+
             if (element.isEnd) {
                 isEnd = true;
                 return null;
@@ -77,6 +91,16 @@ public class AsyncRecordReader<T> implements RecordReader<T> {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException(e);
+        }
+    }
+
+    private void checkException() throws IOException, InterruptedException {
+        if (future.isDone()) {
+            try {
+                future.get();
+            } catch (ExecutionException e) {
+                throw new IOException(e.getCause());
+            }
         }
     }
 
