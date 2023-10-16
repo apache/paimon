@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
-import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -33,7 +32,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
-import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 
 import javax.annotation.Nullable;
 
@@ -140,6 +138,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         .process(
                                 new CdcDynamicTableParsingProcessFunction<>(
                                         database, catalogLoader, parserFactory))
+                        .name("Side Output")
                         .setParallelism(input.getParallelism());
 
         // for newly-added tables, create a multiplexing operator that handles all their records
@@ -151,23 +150,18 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         SingleOutputStreamOperatorUtils.getSideOutput(
                         parsed,
                         CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
-                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader));
+                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
+                .name("Schema Evolution");
 
-        FlinkStreamPartitioner<CdcMultiplexRecord> partitioner =
-                new FlinkStreamPartitioner<>(
-                        new CdcMultiplexRecordChannelComputer(catalogLoader, dynamicOptions));
-        PartitionTransformation<CdcMultiplexRecord> partitioned =
-                new PartitionTransformation<>(
-                        newlyAddedTableStream.getTransformation(), partitioner);
-
-        if (parallelism != null) {
-            partitioned.setParallelism(parallelism);
-        }
+        DataStream<CdcMultiplexRecord> partitioned =
+                partition(
+                        newlyAddedTableStream,
+                        new CdcMultiplexRecordChannelComputer(catalogLoader, dynamicOptions),
+                        parallelism);
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(catalogLoader, committerCpu, committerMemory);
-        sink.sinkFrom(
-                new DataStream<>(input.getExecutionEnvironment(), partitioned), dynamicOptions);
+        sink.sinkFrom(partitioned, dynamicOptions);
     }
 
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {

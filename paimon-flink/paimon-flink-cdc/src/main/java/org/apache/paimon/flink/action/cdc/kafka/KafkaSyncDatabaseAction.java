@@ -173,7 +173,8 @@ public class KafkaSyncDatabaseAction extends ActionBase {
         new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
                 .withInput(
                         env.fromSource(source, WatermarkStrategy.noWatermarks(), "Kafka Source")
-                                .flatMap(recordParser))
+                                .flatMap(recordParser)
+                                .name("Parse"))
                 .withParserFactory(parserFactory)
                 .withCatalogLoader(catalogLoader())
                 .withDatabase(database)
