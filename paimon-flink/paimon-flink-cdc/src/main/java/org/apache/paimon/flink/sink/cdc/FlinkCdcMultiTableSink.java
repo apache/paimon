@@ -25,6 +25,7 @@ import org.apache.paimon.flink.sink.Committer;
 import org.apache.paimon.flink.sink.CommitterMetrics;
 import org.apache.paimon.flink.sink.CommitterOperator;
 import org.apache.paimon.flink.sink.FlinkSink;
+import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
 import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.flink.sink.MultiTableCommittableTypeInfo;
 import org.apache.paimon.flink.sink.RestoreAndFailCommittableStateManager;
@@ -116,15 +117,24 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                 createWriteOperator(sinkProvider, commitUser, dynamicOptions))
                         .setParallelism(input.getParallelism());
 
+        // shuffle committables by table
+        DataStream<MultiTableCommittable> partitioned =
+                FlinkStreamPartitioner.partition(
+                        written,
+                        new MultiTableCommittableChannelComputer(),
+                        input.getParallelism());
+
         SingleOutputStreamOperator<?> committed =
-                written.transform(
-                        GLOBAL_COMMITTER_NAME,
-                        typeInfo,
-                        new CommitterOperator<>(
-                                true,
-                                commitUser,
-                                createCommitterFactory(),
-                                createCommittableStateManager()));
+                partitioned
+                        .transform(
+                                GLOBAL_COMMITTER_NAME,
+                                typeInfo,
+                                new CommitterOperator<>(
+                                        true,
+                                        commitUser,
+                                        createCommitterFactory(),
+                                        createCommittableStateManager()))
+                        .setParallelism(input.getParallelism());
         configureGlobalCommitter(
                 committed,
                 commitCpuCores,

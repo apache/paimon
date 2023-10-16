@@ -206,9 +206,11 @@ public abstract class FlinkSink<T> implements Serializable {
         }
         SingleOutputStreamOperator<?> committed =
                 written.transform(
-                        GLOBAL_COMMITTER_NAME + " : " + table.name(),
-                        new CommittableTypeInfo(),
-                        committerOperator);
+                                GLOBAL_COMMITTER_NAME + " : " + table.name(),
+                                new CommittableTypeInfo(),
+                                committerOperator)
+                        .setParallelism(1)
+                        .setMaxParallelism(1);
         Options options = Options.fromMap(table.options());
         configureGlobalCommitter(
                 committed,
@@ -223,7 +225,6 @@ public abstract class FlinkSink<T> implements Serializable {
             double cpuCores,
             @Nullable MemorySize heapMemory,
             ReadableConfig conf) {
-        committed.setParallelism(1).setMaxParallelism(1);
         if (heapMemory == null) {
             return;
         }
