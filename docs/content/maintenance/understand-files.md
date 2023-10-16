@@ -298,32 +298,6 @@ Note that `manifest-4-0` contains 20 manifest entries (18 `DELETE` operations an
 2. For partition `20230501` to `20230502`, one `DELETE` operation and one `ADD` operation
    for the same data file.
 
-## Sort Compact
-
-If your table is configured with [dynamic bucket]({{< ref "concepts/primary-key-table#dynamic-bucket" >}}) 
-or [unaware bucket]({{< ref "concepts/append-only-table#append-for-scalable-table" >}}) , 
-you can trigger a compact with specified column sort to speed up queries. 
-
-```bash  
-<FLINK_HOME>/bin/flink run \
-    -D execution.runtime-mode=batch \
-    /path/to/paimon-flink-action-{{< version >}}.jar \
-    compact \
-    --warehouse <warehouse-path> \
-    --database <database-name> \ 
-    --table <table-name> \
-    --order-strategy <orderType> \
-    --order-by <col1,col2,...>
-    [--partition <partition-name>] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-dynamic-conf> [--table-conf <paimon-table-dynamic-conf>] ...]
-```
-There are two new configuration in `Sort Compact`
-{{< generated/sort-compact >}}
-
-The sort parallelism is the same as the sink parallelism, you can dynamically specify it by add conf `--table-conf sink.parallelism=<value>`. 
-Other config is the same as [Compact Table]({{< ref "concepts/file-operations#compact-table" >}}).
-
 
 ### Alter Table
 Execute the following statement to configure full-compaction:

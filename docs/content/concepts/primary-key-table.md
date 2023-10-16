@@ -66,7 +66,7 @@ Performance:
 
 #### Sort Compact For Normal Dynamic Bucket Mode
 
-`Normal Dynamic Bucket Mode` supports sort-compact to speed up queries. See [Sort Compact]({{< ref "concepts/file-operations#sort-compact" >}}).
+`Normal Dynamic Bucket Mode` supports sort-compact to speed up queries. See [Sort Compact]({{< ref "maintenance/dedicated-compaction#sort-compact" >}}).
 
 #### Cross Partitions Upsert Dynamic Bucket Mode
 
