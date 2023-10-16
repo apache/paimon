@@ -59,6 +59,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
 /** Column names, types and comments of a Hive table. */
 public class HiveSchema {
 
@@ -152,24 +154,32 @@ public class HiveSchema {
                     "Extract schema with exists DDL and exists paimon table, table location:[{}].",
                     location);
 
+            TableSchema paimonSchema = tableSchema.get();
+            String tagToPartField =
+                    paimonSchema.options().get(CoreOptions.METASTORE_TAG_TO_PARTITION.key());
+
             boolean isPartitionedTable =
                     partitionTypeInfos.size() > 0
                             // for some Hive compatible system
                             || properties.containsKey("TABLE_TOTAL_PARTITIONS");
-            checkFieldsMatched(columnNames, typeInfos, tableSchema.get(), isPartitionedTable);
-            checkPartitionMatched(partitionKeys, partitionTypeInfos, tableSchema.get());
+            checkFieldsMatched(columnNames, typeInfos, paimonSchema, isPartitionedTable);
+            checkPartitionMatched(partitionKeys, partitionTypeInfos, paimonSchema, tagToPartField);
 
             // Use paimon table data types and column comments when the paimon table exists.
             // Using paimon data types first because hive's TypeInfoFactory.timestampTypeInfo
             // doesn't contain precision and thus may cause casting problems
             Map<String, DataField> paimonFields =
-                    tableSchema.get().fields().stream()
+                    paimonSchema.fields().stream()
                             .collect(
                                     Collectors.toMap(
                                             dataField -> dataField.name().toLowerCase(),
                                             Function.identity()));
             for (int i = 0; i < columnNames.size(); i++) {
                 String columnName = columnNames.get(i).toLowerCase();
+                if (Objects.equals(columnName, tagToPartField)) {
+                    // ignore tagToPartField, it should just be a string type
+                    continue;
+                }
                 dataTypes.set(i, paimonFields.get(columnName).type());
                 comments.set(i, paimonFields.get(columnName).description());
             }
@@ -267,9 +277,16 @@ public class HiveSchema {
     private static void checkPartitionMatched(
             List<String> hivePartitionKeys,
             List<TypeInfo> hivePartitionTypeInfos,
-            TableSchema tableSchema) {
+            TableSchema tableSchema,
+            @Nullable String tagToPartField) {
         if (hivePartitionKeys.isEmpty()) {
             // only partitioned Hive table needs to consider this part
+            return;
+        }
+        if (tagToPartField != null) {
+            // fast check path for tagToPartField
+            checkArgument(tableSchema.partitionKeys().isEmpty());
+            checkArgument(hivePartitionKeys.equals(Collections.singletonList(tagToPartField)));
             return;
         }
 

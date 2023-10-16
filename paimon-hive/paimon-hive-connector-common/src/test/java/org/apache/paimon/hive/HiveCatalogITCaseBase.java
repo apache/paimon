@@ -21,11 +21,13 @@ package org.apache.paimon.hive;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.DataCatalogTable;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.s3.MinioTestContainer;
+import org.apache.paimon.table.Table;
 
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
@@ -35,6 +37,7 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
@@ -907,6 +910,54 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
         assertThat(hiveShell.executeQuery("SELECT * FROM t ORDER BY k"))
                 .containsExactlyInAnyOrder("1\t10", "2\t20");
+    }
+
+    @Test
+    public void testAddPartitionsForTag() throws Exception {
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE TABLE t (",
+                        "    k INT,",
+                        "    v BIGINT,",
+                        "    PRIMARY KEY (k) NOT ENFORCED",
+                        ") WITH (",
+                        "    'bucket' = '2',",
+                        "    'metastore.tag-to-partition' = 'dt'",
+                        ")"));
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
+
+        // TODO modify to CALL after Flink 1.18
+        Table table =
+                ((DataCatalogTable)
+                                tEnv.getCatalog(tEnv.getCurrentCatalog())
+                                        .get()
+                                        .getTable(new ObjectPath(tEnv.getCurrentDatabase(), "t")))
+                        .table();
+        table.createTag("2023-10-16", 1);
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-16");
+
+        assertThat(hiveShell.executeQuery("SELECT k, v FROM t WHERE dt='2023-10-16'"))
+                .containsExactlyInAnyOrder("1\t10", "2\t20");
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM t WHERE dt='2023-10-16'"))
+                .containsExactlyInAnyOrder("1\t10\t2023-10-16", "2\t20\t2023-10-16");
+
+        // another tag
+
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30), (4, 40)").await();
+        table.createTag("2023-10-17", 2);
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM t"))
+                .containsExactlyInAnyOrder(
+                        "1\t10\t2023-10-16",
+                        "2\t20\t2023-10-16",
+                        "1\t10\t2023-10-17",
+                        "2\t20\t2023-10-17",
+                        "3\t30\t2023-10-17",
+                        "4\t40\t2023-10-17");
     }
 
     protected List<Row> collect(String sql) throws Exception {

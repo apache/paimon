@@ -193,7 +193,8 @@ public class PaimonRecordReaderTest {
                         new PaimonInputSplit(tempDir.toString(), dataSplit),
                         originalColumns,
                         originalColumns,
-                        selectedColumns);
+                        selectedColumns,
+                        null);
             }
         }
         throw new IllegalArgumentException(

@@ -1,10 +1,9 @@
 ---
-title: Project
-icon: <i class="fa fa-sitemap title maindish" aria-hidden="true"></i>
+title: Migration
+icon: <i class="fa fa-briefcase title maindish" aria-hidden="true"></i>
 bold: true
 bookCollapseSection: true
-sectionBreak: true
-weight: 9
+weight: 8
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

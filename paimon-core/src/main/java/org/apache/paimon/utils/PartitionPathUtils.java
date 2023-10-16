@@ -25,9 +25,13 @@ import java.util.BitSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Utils for file system. */
 public class PartitionPathUtils {
+
+    private static final Pattern PARTITION_NAME_PATTERN = Pattern.compile("([^/]+)=([^/]+)");
 
     private static final BitSet CHAR_TO_ESCAPE = new BitSet(128);
 
@@ -150,5 +154,57 @@ public class PartitionPathUtils {
             sb.append('0');
         }
         sb.append(Integer.toHexString(c).toUpperCase());
+    }
+
+    public static String unescapePathName(String path) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < path.length(); i++) {
+            char c = path.charAt(i);
+            if (c == '%' && i + 2 < path.length()) {
+                int code = -1;
+                try {
+                    code = Integer.parseInt(path.substring(i + 1, i + 3), 16);
+                } catch (Exception ignored) {
+                }
+                if (code >= 0) {
+                    sb.append((char) code);
+                    i += 2;
+                    continue;
+                }
+            }
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Make partition spec from path.
+     *
+     * @param currPath partition file path.
+     * @return Sequential partition specs.
+     */
+    public static LinkedHashMap<String, String> extractPartitionSpecFromPath(Path currPath) {
+        LinkedHashMap<String, String> fullPartSpec = new LinkedHashMap<>();
+        List<String[]> kvs = new ArrayList<>();
+        do {
+            String component = currPath.getName();
+            Matcher m = PARTITION_NAME_PATTERN.matcher(component);
+            if (m.matches()) {
+                String k = unescapePathName(m.group(1));
+                String v = unescapePathName(m.group(2));
+                String[] kv = new String[2];
+                kv[0] = k;
+                kv[1] = v;
+                kvs.add(kv);
+            }
+            currPath = currPath.getParent();
+        } while (currPath != null && !currPath.getName().isEmpty());
+
+        // reverse the list since we checked the part from leaf dir to table's base dir
+        for (int i = kvs.size(); i > 0; i--) {
+            fullPartSpec.put(kvs.get(i - 1)[0], kvs.get(i - 1)[1]);
+        }
+
+        return fullPartSpec;
     }
 }
