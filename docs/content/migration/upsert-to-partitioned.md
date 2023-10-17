@@ -37,7 +37,7 @@ of calculations. So we created a Tag mechanism to output these views.
 However, the traditional use of Hive data warehouses is more accustomed to using partitions to specify the query's Tag,
 and is more accustomed to using Hive computing engines.
 
-So, we introduce `'metastore.tag-to-partition'` and `'metastore.tag-to-partition-preview'` to mapping a non-partitioned
+So, we introduce `'metastore.tag-to-partition'` and `'metastore.tag-to-partition.preview'` to mapping a non-partitioned
 primary key table to the partition table in Hive metastore, and mapping the partition field to the name of the Tag to be
 fully compatible with Hive.
 
@@ -129,7 +129,7 @@ CREATE TABLE mydb.T (
     'metastore.tag-to-partition' = 'dt',
     -- preview tag creation mode process-time
     -- paimon will create partitions early based on process-time
-    'metastore.tag-to-partition-preview' = 'process-time'
+    'metastore.tag-to-partition.preview' = 'process-time'
 );
 
 INSERT INTO t VALUES (1, '10', '100'), (2, '20', '200');

@@ -836,7 +836,7 @@ public class CoreOptions implements Serializable {
                                     + "use partitioning field to read specific partitions (specific tags).");
 
     public static final ConfigOption<TagCreationMode> METASTORE_TAG_TO_PARTITION_PREVIEW =
-            key("metastore.tag-to-partition-preview")
+            key("metastore.tag-to-partition.preview")
                     .enumType(TagCreationMode.class)
                     .defaultValue(TagCreationMode.NONE)
                     .withDescription(

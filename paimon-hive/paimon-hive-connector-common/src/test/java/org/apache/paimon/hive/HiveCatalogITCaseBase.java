@@ -972,7 +972,7 @@ public abstract class HiveCatalogITCaseBase {
                         ") WITH (",
                         "    'bucket' = '2',",
                         "    'metastore.tag-to-partition' = 'dt',",
-                        "    'metastore.tag-to-partition-preview' = 'process-time'",
+                        "    'metastore.tag-to-partition.preview' = 'process-time'",
                         ")"));
 
         tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();

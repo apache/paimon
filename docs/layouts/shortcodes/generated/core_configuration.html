@@ -312,7 +312,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Whether to create this table as a partitioned table for mapping non-partitioned table tags in metastore. This allows the Hive engine to view this table in a partitioned table view and use partitioning field to read specific partitions (specific tags).</td>
         </tr>
         <tr>
-            <td><h5>metastore.tag-to-partition-preview</h5></td>
+            <td><h5>metastore.tag-to-partition.preview</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
             <td>Whether to preview tag of generated snapshots in metastore. This allows the Hive engine to query specific tag before creation.<br /><br />Possible values:<ul><li>"none": No automatically created tags.</li><li>"process-time": Based on the time of the machine, create TAG once the processing time passes period time plus delay.</li><li>"watermark": Based on the watermark of the input, create TAG once the watermark passes period time plus delay.</li></ul></td>
