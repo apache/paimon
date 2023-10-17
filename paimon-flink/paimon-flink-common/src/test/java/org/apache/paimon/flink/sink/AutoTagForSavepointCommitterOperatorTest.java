@@ -81,6 +81,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
 
         // notify checkpoint success and tag for savepoint-2
         testHarness.notifyOfCompletedCheckpoint(checkpointId);
+        testHarness.close();
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(3);
         assertThat(table.tagManager().tagCount()).isEqualTo(1);
 
@@ -116,6 +117,7 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                         .getJobManagerOwnedState();
         assertThat(table.snapshotManager().latestSnapshot()).isNull();
         assertThat(table.tagManager().tagCount()).isEqualTo(0);
+        testHarness.close();
 
         testHarness = createRecoverableTestHarness(table);
         try {
@@ -131,6 +133,8 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
                                     + "By restarting the job we hope that "
                                     + "writers can start writing based on these new commits.");
         }
+        testHarness.close();
+
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.id()).isEqualTo(checkpointId);
@@ -170,6 +174,8 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
 
         // abort savepoint 1
         testHarness.getOneInputOperator().notifyCheckpointAborted(1);
+        testHarness.close();
+
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(2);
         assertThat(table.tagManager().tagCount()).isEqualTo(0);
     }

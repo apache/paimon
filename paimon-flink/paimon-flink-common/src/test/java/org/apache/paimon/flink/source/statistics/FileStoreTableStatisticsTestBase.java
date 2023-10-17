@@ -151,6 +151,7 @@ public abstract class FileStoreTableStatisticsTestBase {
         commit.commit(2, write.prepareCommit(true, 2));
 
         write.close();
+        commit.close();
 
         return table;
     }

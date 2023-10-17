@@ -133,6 +133,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowData(3, 33, 303L));
         commit.commit(2, write.prepareCommit(true, 2));
         write.close();
+        commit.close();
 
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         int[] partitions =
@@ -162,6 +163,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(2, write.prepareCommit(true, 2));
 
         write.close();
+        commit.close();
 
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         int[] partitions =
@@ -204,6 +206,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(scan.plan().splits().size()).isEqualTo(3);
 
         write.close();
+        commit.close();
     }
 
     @Test
@@ -279,6 +282,8 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
             dataPerBucket.clear();
         }
         commit.commit(0, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
 
         int partition = random.nextInt(numOfPartition);
         List<Integer> availableBucket = new ArrayList<>(dataset.get(partition).keySet());
@@ -319,6 +324,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 expected.add(i);
             }
             write.close();
+            commit.close();
 
             ReadBuilder readBuilder = table.newReadBuilder();
             List<Split> splits = readBuilder.newScan().plan().splits();
@@ -341,6 +347,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                 expected.add(i);
             }
             write.close();
+            commit.close();
 
             ReadBuilder readBuilder = table.newReadBuilder();
             List<Split> splits = readBuilder.newScan().plan().splits();
@@ -374,6 +381,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         commit.commit(2, write.prepareCommit(true, 2));
 
         write.close();
+        commit.close();
     }
 
     @Override

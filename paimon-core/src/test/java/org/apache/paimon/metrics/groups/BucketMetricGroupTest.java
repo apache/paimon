@@ -39,5 +39,6 @@ public class BucketMetricGroupTest {
         assertThat(group.getAllTags().get("partition")).isEqualTo("dt=1");
         assertThat(group.getMetricIdentifier("myMetric", ".")).isEqualTo("commit.myMetric");
         assertThat(group.getGroupName()).isEqualTo("commit");
+        group.close();
     }
 }

@@ -47,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
     @Test
-    public void testTag() {
+    public void testTag() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -81,6 +81,8 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         Options expireSetting = new Options();
         expireSetting.set(SNAPSHOT_NUM_RETAINED_MIN, 1);
         expireSetting.set(SNAPSHOT_NUM_RETAINED_MAX, 1);
+        commit.close();
+
         commit = table.copy(expireSetting.toMap()).newCommit(commitUser).ignoreEmptyCommit(false);
 
         // trigger snapshot expiration
@@ -91,10 +93,11 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         commit.commit(new ManifestCommittable(9, utcMills("2023-07-18T16:00:00")));
         assertThat(tagManager.tags().values())
                 .containsOnly("2023-07-18 13", "2023-07-18 14", "2023-07-18 15");
+        commit.close();
     }
 
     @Test
-    public void testTagDelay() {
+    public void testTagDelay() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -114,10 +117,11 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         // test create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T13:00:10")));
         assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11", "2023-07-18 12");
+        commit.close();
     }
 
     @Test
-    public void testTagSinkWatermark() {
+    public void testTagSinkWatermark() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
@@ -133,10 +137,11 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         // test second create
         commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T13:00:10")));
         assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11", "2023-07-18 12");
+        commit.close();
     }
 
     @Test
-    public void testTagTwoHour() {
+    public void testTagTwoHour() throws Exception {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.TWO_HOURS);
@@ -155,6 +160,7 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         // test second create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T14:00:09")));
         assertThat(tagManager.tags().values()).containsOnly("2023-07-18 10", "2023-07-18 12");
+        commit.close();
     }
 
     @Test
@@ -180,6 +186,7 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-20T12:00:01")));
         assertThat(tagManager.tags().values())
                 .containsOnly("2023-07-17", "2023-07-18", "2023-07-19");
+        commit.close();
     }
 
     private long utcMills(String timestamp) {

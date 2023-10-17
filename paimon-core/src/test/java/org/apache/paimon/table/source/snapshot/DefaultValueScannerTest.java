@@ -75,6 +75,8 @@ public class DefaultValueScannerTest extends ScannerTestBase {
             List<String> result = getResult(read, plan.splits());
             assertThat(result).hasSameElementsAs(Arrays.asList("+I 2|11|200", "+I 2|12|100"));
         }
+        write.close();
+        commit.close();
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {

@@ -301,6 +301,8 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                     rowData(2, 1520, 15, BinaryString.fromString("20221209")),
                     rowData(1, 1510, 16, BinaryString.fromString("20221208")),
                     rowData(1, 1511, 15, BinaryString.fromString("20221209")));
+            write.close();
+            commit.close();
         }
         actual.clear();
         for (int i = 0; i < 8; i++) {
@@ -340,6 +342,8 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                         0,
                         rowData(2, 1520, 15, BinaryString.fromString("20221209")),
                         rowData(1, 1510, 16, BinaryString.fromString("20221208")));
+                write.close();
+                commit.close();
             }
         }
         actual.clear();
@@ -466,6 +470,8 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                         0,
                         rowData(2, 1520, 15, BinaryString.fromString("20221209")),
                         rowData(1, 1510, 16, BinaryString.fromString("20221208")));
+                write.close();
+                commit.close();
             }
         }
         actual.clear();

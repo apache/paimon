@@ -184,6 +184,8 @@ public abstract class SparkReadTestBase {
         }
         long commitIdentifier = COMMIT_IDENTIFIER.getAndIncrement();
         commit.commit(commitIdentifier, writer.prepareCommit(true, commitIdentifier));
+        writer.close();
+        commit.close();
     }
 
     protected static void writeTable(String tableName, String... values) {

@@ -27,6 +27,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -47,6 +48,11 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     public void beforeEach() throws Exception {
         fileHandler = table.store().newIndexFileHandler();
         commit = table.newStreamWriteBuilder().withCommitUser(commitUser).newCommit();
+    }
+
+    @AfterEach
+    public void afterEach() throws Exception {
+        commit.close();
     }
 
     private HashBucketAssigner createAssigner(int numAssigners, int assignId) {

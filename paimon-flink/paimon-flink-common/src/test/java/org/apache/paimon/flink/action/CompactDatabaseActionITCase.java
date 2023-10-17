@@ -125,6 +125,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
                 assertThat(snapshot.id()).isEqualTo(2);
                 assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+                write.close();
+                commit.close();
             }
         }
 
@@ -198,6 +200,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 StreamTableScan scan = table.newReadBuilder().newStreamScan();
                 TableScan.Plan plan = scan.plan();
                 assertThat(plan.splits()).isEmpty();
+                write.close();
+                commit.close();
             }
         }
 
@@ -275,6 +279,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     Duration.ofSeconds(100),
                     String.format(
                             "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
+            write.close();
+            commit.close();
         }
 
         // In combined mode, check whether newly created table can be detected
@@ -310,6 +316,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                             snapshotManager.snapshot(snapshotManager.latestSnapshotId());
                     assertThat(snapshot.id()).isEqualTo(1);
                     assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+                    write.close();
+                    commit.close();
                 }
             }
 
@@ -364,6 +372,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         Duration.ofSeconds(100),
                         String.format(
                                 "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
+                write.close();
+                commit.close();
             }
         }
     }
@@ -457,6 +467,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
                 assertThat(snapshot.id()).isEqualTo(2);
                 assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+                write.close();
+                commit.close();
             }
         }
 
@@ -566,6 +578,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
             assertThat(snapshot.id()).isEqualTo(2);
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+            write.close();
+            commit.close();
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
@@ -592,6 +606,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
             // second compaction, snapshot will be 5
             checkFileAndRowSize(table, 5L, 30_000L, 1, 9);
+            write.close();
+            commit.close();
         }
     }
 
@@ -633,6 +649,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             Snapshot snapshot = snapshotManager.snapshot(snapshotManager.latestSnapshotId());
             assertThat(snapshot.id()).isEqualTo(2);
             assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
+            write.close();
+            commit.close();
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {

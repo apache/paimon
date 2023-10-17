@@ -81,6 +81,9 @@ public class PaimonRecordReaderTest {
         write.write(GenericRow.ofKind(RowKind.DELETE, 2L, BinaryString.fromString("Hello")));
         commit.commit(0, write.prepareCommit(true, 0));
 
+        write.close();
+        commit.close();
+
         PaimonRecordReader reader = read(table, BinaryRow.EMPTY_ROW, 0);
         RowDataContainer container = reader.createValue();
         Set<String> actual = new HashSet<>();
@@ -119,6 +122,9 @@ public class PaimonRecordReaderTest {
         write.write(GenericRow.of(2, 20L, BinaryString.fromString("Hello")));
         write.write(GenericRow.of(1, 10L, BinaryString.fromString("Hi")));
         commit.commit(0, write.prepareCommit(true, 0));
+
+        write.close();
+        commit.close();
 
         PaimonRecordReader reader = read(table, BinaryRow.EMPTY_ROW, 0, Arrays.asList("c", "a"));
         RowDataContainer container = reader.createValue();
