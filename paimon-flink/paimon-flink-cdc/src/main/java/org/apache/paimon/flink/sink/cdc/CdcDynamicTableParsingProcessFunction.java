@@ -100,7 +100,10 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                             try {
                                 catalog.createTable(identifier, schema, true);
                             } catch (Exception e) {
-                                LOG.error("create newly added paimon table error.", e);
+                                LOG.error(
+                                        "Cannot create newly added Paimon table {}",
+                                        identifier.getFullName(),
+                                        e);
                             }
                         });
 

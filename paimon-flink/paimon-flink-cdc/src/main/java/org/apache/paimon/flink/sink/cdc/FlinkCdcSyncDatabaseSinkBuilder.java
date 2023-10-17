@@ -138,6 +138,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         .process(
                                 new CdcDynamicTableParsingProcessFunction<>(
                                         database, catalogLoader, parserFactory))
+                        .name("Side Output")
                         .setParallelism(input.getParallelism());
 
         // for newly-added tables, create a multiplexing operator that handles all their records
@@ -149,7 +150,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         SingleOutputStreamOperatorUtils.getSideOutput(
                         parsed,
                         CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
-                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader));
+                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
+                .name("Schema Evolution");
 
         DataStream<CdcMultiplexRecord> partitioned =
                 partition(
