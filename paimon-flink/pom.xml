@@ -33,6 +33,10 @@ under the License.
 
     <packaging>pom</packaging>
 
+    <properties>
+        <flink.version>1.18-SNAPSHOT</flink.version>
+    </properties>
+
     <modules>
         <module>paimon-flink-common</module>
         <module>paimon-flink-1.14</module>
