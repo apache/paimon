@@ -167,7 +167,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
         newIdx = DECIMAL_TYPES.indexOf(newType.getTypeRoot());
         if (oldIdx >= 0 && newIdx >= 0) {
             return DataTypeChecks.getPrecision(newType) <= DataTypeChecks.getPrecision(oldType)
-                    && DataTypeChecks.getScale(newType) <= DataTypeChecks.getScale(oldType)
+                            && DataTypeChecks.getScale(newType) <= DataTypeChecks.getScale(oldType)
                     ? ConvertAction.IGNORE
                     : ConvertAction.CONVERT;
         }
