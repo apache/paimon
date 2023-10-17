@@ -30,7 +30,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.PrimaryKeyFileStoreTable;
+import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
+import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableUtils;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -42,7 +43,6 @@ import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.sink.abilities.SupportsDeletePushDown;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelDelete;
 import org.apache.flink.table.connector.sink.abilities.SupportsRowLevelUpdate;
-import org.apache.flink.table.connector.sink.abilities.SupportsTruncate;
 import org.apache.flink.table.expressions.ResolvedExpression;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.apache.flink.table.types.logical.RowType;
@@ -64,10 +64,7 @@ import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
 
 /** Table sink to create sink. */
 public class FlinkTableSink extends FlinkTableSinkBase
-        implements SupportsRowLevelUpdate,
-                SupportsRowLevelDelete,
-                SupportsDeletePushDown,
-                SupportsTruncate {
+        implements SupportsRowLevelUpdate, SupportsRowLevelDelete, SupportsDeletePushDown {
 
     @Nullable protected Predicate deletePredicate;
 
@@ -93,11 +90,11 @@ public class FlinkTableSink extends FlinkTableSinkBase
     public RowLevelUpdateInfo applyRowLevelUpdate(
             List<Column> updatedColumns, @Nullable RowLevelModificationScanContext context) {
         // Since only UPDATE_AFTER type messages can be received at present,
-        // AppendOnlyFileStoreTable cannot correctly handle old data, so they are marked as
-        // unsupported. Similarly, it is not allowed to update the primary key column when updating
-        // the column of PrimaryKeyFileStoreTable, because the old data cannot be handled
-        // correctly.
-        if (table instanceof PrimaryKeyFileStoreTable) {
+        // AppendOnlyFileStoreTable and ChangelogValueCountFileStoreTable without primary keys
+        // cannot correctly handle old data, so they are marked as unsupported. Similarly, it is not
+        // allowed to update the primary key column when updating the column of
+        // ChangelogWithKeyFileStoreTable, because the old data cannot be handled correctly.
+        if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
             updatedColumns.forEach(
@@ -130,7 +127,8 @@ public class FlinkTableSink extends FlinkTableSinkBase
                             MERGE_ENGINE.key(),
                             MergeEngine.DEDUPLICATE,
                             MergeEngine.PARTIAL_UPDATE));
-        } else if (table instanceof AppendOnlyFileStoreTable) {
+        } else if (table instanceof AppendOnlyFileStoreTable
+                || table instanceof ChangelogValueCountFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(
                             "%s can not support update, because there is no primary key.",
@@ -188,7 +186,7 @@ public class FlinkTableSink extends FlinkTableSinkBase
     }
 
     private void validateDeletable() {
-        if (table instanceof PrimaryKeyFileStoreTable) {
+        if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
                 return;
@@ -197,6 +195,9 @@ public class FlinkTableSink extends FlinkTableSinkBase
                     String.format(
                             "merge engine '%s' can not support delete, currently only %s can support delete.",
                             options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
+        } else if (table instanceof ChangelogValueCountFileStoreTable) {
+            // ChangelogValueCountFileStoreTable is OK to be deleted
+            return;
         } else if (table instanceof AppendOnlyFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(
@@ -238,21 +239,5 @@ public class FlinkTableSink extends FlinkTableSinkBase
         return deletePredicate
                 .visit(new AllPrimaryKeyEqualVisitor(table.primaryKeys()))
                 .containsAll(table.primaryKeys());
-    }
-
-    @Override
-    public void executeTruncation() {
-        // At present, Flink does not support truncating tables with conditions, such as partitions.
-        // We judge the deletePredicate here mainly for the purpose that after Flink supports
-        // truncating tables based on conditions in the future, we can locate the cause of the
-        // exception based on this information and support it.
-        if (deletePredicate != null) {
-            throw new UnsupportedOperationException("Truncate table doesn't support predication");
-        }
-
-        FileStoreCommit commit =
-                ((AbstractFileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
-        long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
-        commit.purgeTable(identifier);
     }
 }
