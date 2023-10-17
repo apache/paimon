@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.function.Predicate;
 
@@ -75,5 +77,9 @@ public abstract class PrimaryKeyTableTestBase {
 
     protected Options tableOptions() {
         return new Options();
+    }
+
+    protected static long utcMills(String timestamp) {
+        return Timestamp.fromLocalDateTime(LocalDateTime.parse(timestamp)).getMillisecond();
     }
 }

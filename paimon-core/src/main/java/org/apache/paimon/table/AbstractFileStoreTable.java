@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
@@ -54,6 +55,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -271,12 +273,25 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private List<CommitCallback> createCommitCallbacks() {
         List<CommitCallback> callbacks = new ArrayList<>(loadCommitCallbacks());
-        if (coreOptions().partitionedTableInMetastore()
-                && catalogEnvironment.metastoreClientFactory() != null
+        CoreOptions options = coreOptions();
+        MetastoreClient.Factory metastoreClientFactory =
+                catalogEnvironment.metastoreClientFactory();
+        if (options.partitionedTableInMetastore()
+                && metastoreClientFactory != null
                 && tableSchema.partitionKeys().size() > 0) {
-            callbacks.add(
-                    new AddPartitionCommitCallback(
-                            catalogEnvironment.metastoreClientFactory().create()));
+            callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
+        }
+        TagPreview tagPreview = TagPreview.create(options);
+        if (options.tagToPartitionField() != null
+                && tagPreview != null
+                && metastoreClientFactory != null
+                && tableSchema.partitionKeys().isEmpty()) {
+            TagPreviewCommitCallback callback =
+                    new TagPreviewCommitCallback(
+                            new AddPartitionTagCallback(
+                                    metastoreClientFactory.create(), options.tagToPartitionField()),
+                            tagPreview);
+            callbacks.add(callback);
         }
         return callbacks;
     }

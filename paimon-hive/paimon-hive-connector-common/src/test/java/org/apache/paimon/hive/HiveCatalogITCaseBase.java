@@ -960,6 +960,40 @@ public abstract class HiveCatalogITCaseBase {
                         "4\t40\t2023-10-17");
     }
 
+    @Test
+    public void testAddPartitionsForTagPreview() throws Exception {
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE TABLE t (",
+                        "    k INT,",
+                        "    v BIGINT,",
+                        "    PRIMARY KEY (k) NOT ENFORCED",
+                        ") WITH (",
+                        "    'bucket' = '2',",
+                        "    'metastore.tag-to-partition' = 'dt',",
+                        "    'metastore.tag-to-partition-preview' = 'process-time'",
+                        ")"));
+
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
+
+        List<String> result = hiveShell.executeQuery("SHOW PARTITIONS t");
+        assertThat(result).hasSize(1);
+        String tag = result.get(0).split("=")[1];
+
+        assertThat(hiveShell.executeQuery(String.format("SELECT k, v FROM t WHERE dt='%s'", tag)))
+                .containsExactlyInAnyOrder("1\t10", "2\t20");
+
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30), (4, 40)").await();
+        if (hiveShell.executeQuery("SHOW PARTITIONS t").size() == 1) {
+            // no new partition
+            assertThat(
+                            hiveShell.executeQuery(
+                                    String.format("SELECT k, v FROM t WHERE dt='%s'", tag)))
+                    .containsExactlyInAnyOrder("1\t10", "2\t20", "3\t30", "4\t40");
+        }
+    }
+
     protected List<Row> collect(String sql) throws Exception {
         List<Row> result = new ArrayList<>();
         try (CloseableIterator<Row> it = tEnv.executeSql(sql).collect()) {

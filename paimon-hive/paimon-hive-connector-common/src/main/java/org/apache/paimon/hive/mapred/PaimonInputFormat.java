@@ -26,6 +26,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.PartitionPathUtils;
 
@@ -48,6 +49,7 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -77,6 +79,7 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
         String locations = jobConf.get(FileInputFormat.INPUT_DIR);
 
         @Nullable String tagToPartField = table.coreOptions().tagToPartitionField();
+        @Nullable TagPreview tagPreview = TagPreview.create(table.coreOptions());
 
         List<PaimonInputSplit> splits = new ArrayList<>();
         // locations may contain multiple partitions
@@ -85,12 +88,12 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
             if (tagToPartField != null) {
                 // the location should be pruned by partition predicate
                 // we can extract tag name from location, and use time travel to scan
-                scan =
-                        table.copy(
-                                        singletonMap(
-                                                SCAN_TAG_NAME.key(),
-                                                extractTagName(location, tagToPartField)))
-                                .newScan();
+                String tag = extractTagName(location, tagToPartField);
+                Map<String, String> dynamicOptions =
+                        tagPreview == null
+                                ? singletonMap(SCAN_TAG_NAME.key(), tag)
+                                : tagPreview.timeTravel(table, tag);
+                scan = table.copy(dynamicOptions).newScan();
                 if (predicates.size() > 0) {
                     scan.withFilter(PredicateBuilder.and(predicates));
                 }

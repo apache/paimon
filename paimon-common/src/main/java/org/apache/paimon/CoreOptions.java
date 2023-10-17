@@ -835,6 +835,14 @@ public class CoreOptions implements Serializable {
                                     + "This allows the Hive engine to view this table in a partitioned table view and "
                                     + "use partitioning field to read specific partitions (specific tags).");
 
+    public static final ConfigOption<TagCreationMode> METASTORE_TAG_TO_PARTITION_PREVIEW =
+            key("metastore.tag-to-partition-preview")
+                    .enumType(TagCreationMode.class)
+                    .defaultValue(TagCreationMode.NONE)
+                    .withDescription(
+                            "Whether to preview tag of generated snapshots in metastore. "
+                                    + "This allows the Hive engine to query specific tag before creation.");
+
     public static final ConfigOption<TagCreationMode> TAG_AUTOMATIC_CREATION =
             key("tag.automatic-creation")
                     .enumType(TagCreationMode.class)
@@ -1315,6 +1323,10 @@ public class CoreOptions implements Serializable {
     @Nullable
     public String tagToPartitionField() {
         return options.get(METASTORE_TAG_TO_PARTITION);
+    }
+
+    public TagCreationMode tagToPartitionPreview() {
+        return options.get(METASTORE_TAG_TO_PARTITION_PREVIEW);
     }
 
     public TagCreationMode tagCreationMode() {
