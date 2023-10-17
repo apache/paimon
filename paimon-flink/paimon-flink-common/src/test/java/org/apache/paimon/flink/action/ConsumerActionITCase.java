@@ -87,7 +87,8 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                     .run();
         } else {
             callProcedure(
-                    String.format("CALL reset_consumer('%s.%s', 'myid', 1)", database, tableName));
+                    String.format(
+                            "CALL sys.reset_consumer('%s.%s', 'myid', 1)", database, tableName));
         }
         Optional<Consumer> consumer2 = consumerManager.consumer("myid");
         assertThat(consumer2).isPresent();
@@ -99,7 +100,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
                     .run();
         } else {
             callProcedure(
-                    String.format("CALL reset_consumer('%s.%s', 'myid')", database, tableName));
+                    String.format("CALL sys.reset_consumer('%s.%s', 'myid')", database, tableName));
         }
         Optional<Consumer> consumer3 = consumerManager.consumer("myid");
         assertThat(consumer3).isNotPresent();

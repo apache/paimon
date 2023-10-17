@@ -42,7 +42,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * Merge Into procedure. Usage:
  *
  * <pre><code>
- *  CALL merge_into(
+ *  CALL sys.merge_into(
  *      'targetTableId',
  *      'targetAlias',
  *      'sourceSqls', -- separate with ';'

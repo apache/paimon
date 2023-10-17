@@ -71,7 +71,7 @@ public class TagActionITCase extends ActionITCaseBase {
                     .run();
         } else {
             callProcedure(
-                    String.format("CALL create_tag('%s.%s', 'tag2', 2)", database, tableName));
+                    String.format("CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
         }
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
@@ -84,7 +84,8 @@ public class TagActionITCase extends ActionITCaseBase {
             new DeleteTagAction(warehouse, database, tableName, Collections.emptyMap(), "tag2")
                     .run();
         } else {
-            callProcedure(String.format("CALL delete_tag('%s.%s', 'tag2')", database, tableName));
+            callProcedure(
+                    String.format("CALL sys.delete_tag('%s.%s', 'tag2')", database, tableName));
         }
         assertThat(tagManager.tagExists("tag2")).isFalse();
     }

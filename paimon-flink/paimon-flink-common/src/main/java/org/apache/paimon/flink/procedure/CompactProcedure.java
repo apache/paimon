@@ -37,13 +37,13 @@ import java.util.Map;
  *  -- NOTE: use '' as placeholder for optional arguments
  *
  *  -- compact a table (tableId should be 'database_name.table_name')
- *  CALL compact('tableId')
+ *  CALL sys.compact('tableId')
  *
  *  -- compact specific partitions ('pt1=A,pt2=a;pt1=B,pt2=b', ...)
- *  CALL compact('tableId', 'pt1=A,pt2=a;pt1=B,pt2=b')
+ *  CALL sys.compact('tableId', 'pt1=A,pt2=a;pt1=B,pt2=b')
  *
  *  -- compact a table with sorting
- *  CALL compact('tableId', 'partitions', 'ORDER/ZORDER', 'col1,col2', 'sink.parallelism=6')
+ *  CALL sys.compact('tableId', 'partitions', 'ORDER/ZORDER', 'col1,col2', 'sink.parallelism=6')
  *
  * </code></pre>
  */

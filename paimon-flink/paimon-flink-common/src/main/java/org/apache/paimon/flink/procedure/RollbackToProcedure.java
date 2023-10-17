@@ -29,10 +29,10 @@ import org.apache.flink.table.procedure.ProcedureContext;
  *
  * <pre><code>
  *  -- rollback to a snapshot
- *  CALL rollback_to('tableId', snapshotId)
+ *  CALL sys.rollback_to('tableId', snapshotId)
  *
  *  -- rollback to a tag
- *  CALL rollback_to('tableId', 'tagName')
+ *  CALL sys.rollback_to('tableId', 'tagName')
  * </code></pre>
  */
 public class RollbackToProcedure extends ProcedureBase {

@@ -69,7 +69,7 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         if (ThreadLocalRandom.current().nextBoolean()) {
             new RollbackToAction(warehouse, database, tableName, "2", Collections.emptyMap()).run();
         } else {
-            callProcedure(String.format("CALL rollback_to('%s.%s', 2)", database, tableName));
+            callProcedure(String.format("CALL sys.rollback_to('%s.%s', 2)", database, tableName));
         }
 
         testBatchRead(
@@ -97,10 +97,13 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         table.createTag("tag2", 2);
         table.createTag("tag3", 3);
 
-        RollbackToAction action =
-                new RollbackToAction(
-                        warehouse, database, tableName, "tag2", Collections.emptyMap());
-        action.run();
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            new RollbackToAction(warehouse, database, tableName, "tag2", Collections.emptyMap())
+                    .run();
+        } else {
+            callProcedure(
+                    String.format("CALL sys.rollback_to('%s.%s', 'tag2')", database, tableName));
+        }
 
         testBatchRead(
                 "SELECT * FROM `" + tableName + "`",

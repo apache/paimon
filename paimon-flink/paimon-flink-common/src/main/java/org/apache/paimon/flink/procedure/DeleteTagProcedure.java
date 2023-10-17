@@ -28,7 +28,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  * Delete tag procedure. Usage:
  *
  * <pre><code>
- *  CALL delete_tag('tableId', 'tagName')
+ *  CALL sys.delete_tag('tableId', 'tagName')
  * </code></pre>
  */
 public class DeleteTagProcedure extends ProcedureBase {

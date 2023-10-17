@@ -135,7 +135,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     .build(env);
             env.execute();
         } else {
-            callProcedure(String.format("CALL compact_database('', '%s')", mode), false, true);
+            callProcedure(String.format("CALL sys.compact_database('', '%s')", mode), false, true);
         }
 
         for (FileStoreTable table : tables) {
@@ -218,10 +218,10 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             env.executeAsync();
         } else {
             if (mode.equals("divided")) {
-                callProcedure("CALL compact_database()", true, false);
+                callProcedure("CALL sys.compact_database()", true, false);
             } else {
                 callProcedure(
-                        "CALL compact_database('', 'combined', '', '', 'continuous.discovery-interval=1s')",
+                        "CALL sys.compact_database('', 'combined', '', '', 'continuous.discovery-interval=1s')",
                         true,
                         false);
             }
@@ -478,14 +478,14 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             if (mode.equals("divided")) {
                 callProcedure(
                         String.format(
-                                "CALL compact_database('', 'divided', '%s', '%s')",
+                                "CALL sys.compact_database('', 'divided', '%s', '%s')",
                                 nonNull(includingPattern), nonNull(excludesPattern)),
                         false,
                         true);
             } else {
                 callProcedure(
                         String.format(
-                                "CALL compact_database('', 'combined', '%s', '%s', 'continuous.discovery-interval=1s')",
+                                "CALL sys.compact_database('', 'combined', '%s', '%s', 'continuous.discovery-interval=1s')",
                                 nonNull(includingPattern), nonNull(excludesPattern)),
                         false,
                         true);
@@ -573,7 +573,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             new CompactDatabaseAction(warehouse, new HashMap<>()).build(env);
             env.executeAsync();
         } else {
-            callProcedure("CALL compact_database()");
+            callProcedure("CALL sys.compact_database()");
         }
 
         for (FileStoreTable table : tables) {
@@ -640,7 +640,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             new CompactDatabaseAction(warehouse, new HashMap<>()).build(env);
             env.execute();
         } else {
-            callProcedure("CALL compact_database()", false, true);
+            callProcedure("CALL sys.compact_database()", false, true);
         }
 
         for (FileStoreTable table : tables) {

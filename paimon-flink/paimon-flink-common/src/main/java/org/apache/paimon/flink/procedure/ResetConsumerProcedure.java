@@ -31,10 +31,10 @@ import org.apache.flink.table.procedure.ProcedureContext;
  *
  * <pre><code>
  *  -- reset the new next snapshot id in the consumer
- *  CALL reset_consumer('tableId', 'consumerId', nextSnapshotId)
+ *  CALL sys.reset_consumer('tableId', 'consumerId', nextSnapshotId)
  *
  *  -- delete consumer
- *  CALL reset_consumer('tableId', 'consumerId')
+ *  CALL sys.reset_consumer('tableId', 'consumerId')
  * </code></pre>
  */
 public class ResetConsumerProcedure extends ProcedureBase {

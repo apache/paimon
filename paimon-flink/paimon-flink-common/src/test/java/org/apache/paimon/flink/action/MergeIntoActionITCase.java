@@ -126,7 +126,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         NOT_MATCHED_BY_SOURCE_DELETE);
         String procedureStatement =
                 String.format(
-                        "CALL merge_into('%s.T', '', '', 'default.S', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
+                        "CALL sys.merge_into('%s.T', '', '', 'default.S', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
                         database,
                         mergeActions,
                         "'T.v <> S.v AND S.v IS NOT NULL', "
@@ -200,7 +200,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL merge_into('%s.T', 'TT', '', 'S', 'TT.k = S.k AND TT.dt = S.dt', '%s', %s)",
+                        "CALL sys.merge_into('%s.T', 'TT', '', 'S', 'TT.k = S.k AND TT.dt = S.dt', '%s', %s)",
                         inDefault ? database : "test_db", MATCHED_DELETE, "'S.v IS NULL'");
 
         validateActionRunResult(
@@ -242,7 +242,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL merge_into('default.T', '', '', '%s', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
+                        "CALL sys.merge_into('default.T', '', '', '%s', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
                         sourceTableName, MATCHED_DELETE, "'S.v IS NULL'");
 
         if (!inDefault) {
@@ -306,7 +306,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL merge_into('%s.T', '', '%s', '%s', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
+                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
                         database,
                         useCatalog
                                 ? String.format(
@@ -346,7 +346,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '%s', %s)",
+                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '%s', %s)",
                         database,
                         "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
                         qualified ? "default.SS" : "SS",
@@ -390,7 +390,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '%s', %s)",
+                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '%s', %s)",
                         database,
                         "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
                         qualified ? "default.SS" : "SS",
