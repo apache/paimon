@@ -111,7 +111,7 @@ public interface TagPeriodHandler {
     /** Hourly {@link TagPeriodHandler}. */
     class HourlyTagPeriodHandler extends BaseTagPeriodHandler {
 
-        final Duration ONE_PERIOD = Duration.ofHours(1);
+        static final Duration ONE_PERIOD = Duration.ofHours(1);
 
         @Override
         protected Duration onePeriod() {
@@ -127,7 +127,7 @@ public interface TagPeriodHandler {
     /** Daily {@link TagPeriodHandler}. */
     class DailyTagPeriodHandler extends BaseTagPeriodHandler {
 
-        final Duration ONE_PERIOD = Duration.ofDays(1);
+        static final Duration ONE_PERIOD = Duration.ofDays(1);
 
         @Override
         protected Duration onePeriod() {
@@ -148,7 +148,7 @@ public interface TagPeriodHandler {
     /** Two Hours {@link TagPeriodHandler}. */
     class TwoHoursTagPeriodHandler extends BaseTagPeriodHandler {
 
-        final Duration ONE_PERIOD = Duration.ofHours(2);
+        static final Duration ONE_PERIOD = Duration.ofHours(2);
 
         @Override
         protected Duration onePeriod() {
