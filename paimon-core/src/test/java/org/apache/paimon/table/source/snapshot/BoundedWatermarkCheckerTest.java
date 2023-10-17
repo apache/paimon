@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class BoundedWatermarkCheckerTest extends ScannerTestBase {
 
     @Test
-    public void testBounded() {
+    public void testBounded() throws Exception {
         SnapshotManager snapshotManager = table.snapshotManager();
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
         BoundedChecker checker = BoundedChecker.watermark(2000L);
@@ -47,5 +47,6 @@ public class BoundedWatermarkCheckerTest extends ScannerTestBase {
         commit.commit(new ManifestCommittable(0, 2001L));
         snapshot = snapshotManager.latestSnapshot();
         assertThat(checker.shouldEndInput(snapshot)).isTrue();
+        commit.close();
     }
 }

@@ -180,6 +180,7 @@ public class HiveWriteITCase {
         commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
         commitIdentifier++;
         write.close();
+        commit.close();
 
         String tableName = "test_table_" + (UUID.randomUUID().toString().substring(0, 4));
         hiveShell.execute(
@@ -642,6 +643,7 @@ public class HiveWriteITCase {
         }
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
 
         hiveShell.execute(
                 String.join(

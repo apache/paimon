@@ -181,6 +181,7 @@ public abstract class SchemaEvolutionTableTestBase {
         write.write(rowData("S006", 2, 16, "S16", 116L, "S116"));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
         R result = firstChecker.apply(tableSchemas);
 
         /**
@@ -219,6 +220,7 @@ public abstract class SchemaEvolutionTableTestBase {
         write.write(rowData(1, 22, 122L, 1122, "S012", "S22"));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
 
         secondChecker.accept(result, tableSchemas);
     }
@@ -306,6 +308,8 @@ public abstract class SchemaEvolutionTableTestBase {
                         toBytes("310")));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
+
         R result = firstChecker.apply(tableSchemas);
 
         /**
@@ -400,6 +404,7 @@ public abstract class SchemaEvolutionTableTestBase {
                         toBytes("610")));
         commit.commit(1, write.prepareCommit(true, 1));
         write.close();
+        commit.close();
 
         secondChecker.accept(result, tableSchemas);
     }

@@ -153,7 +153,9 @@ public abstract class TableTestBase {
     }
 
     protected void commitDefault(List<CommitMessage> messages) throws Exception {
-        getTableDefault().newBatchWriteBuilder().newCommit().commit(messages);
+        BatchTableCommit commit = getTableDefault().newBatchWriteBuilder().newCommit();
+        commit.commit(messages);
+        commit.close();
     }
 
     protected List<CommitMessage> writeDataDefault(int size, int times) throws Exception {

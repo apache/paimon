@@ -159,6 +159,7 @@ class StoreMultiCommitterTest {
         // checkpoint is completed but not notified, so no snapshot is committed
         OperatorSubtaskState snapshot = testHarness.snapshot(0, timestamp++);
         assertThat(table.snapshotManager().latestSnapshotId()).isNull();
+        testHarness.close();
 
         testHarness = createRecoverableTestHarness();
         try {
@@ -175,6 +176,7 @@ class StoreMultiCommitterTest {
                                     + "writers can start writing based on these new commits.");
         }
         assertResultsForFirstTable(table, "1, 10", "2, 20");
+        testHarness.close();
 
         // snapshot is successfully committed, no failure is needed
         testHarness = createRecoverableTestHarness();
@@ -200,6 +202,7 @@ class StoreMultiCommitterTest {
         // checkpoint is completed but not notified, so no snapshot is committed
         snapshot = testHarness.snapshot(1, timestamp++);
         assertThat(table.snapshotManager().latestSnapshotId()).isNull();
+        testHarness.close();
 
         testHarness = createRecoverableTestHarness();
         try {
@@ -216,12 +219,14 @@ class StoreMultiCommitterTest {
                                     + "writers can start writing based on these new commits.");
         }
         assertResultsForSecondTable(table, "3, 30.0, s3", "4, 40.0, s4");
+        testHarness.close();
 
         // snapshot is successfully committed, no failure is needed
         testHarness = createRecoverableTestHarness();
         testHarness.initializeState(snapshot);
         testHarness.open();
         assertResultsForSecondTable(table, "3, 30.0, s3", "4, 40.0, s4");
+        testHarness.close();
     }
 
     @Test
@@ -300,6 +305,7 @@ class StoreMultiCommitterTest {
         assertThat(snapshotManager1.latestSnapshotId()).isEqualTo(20);
         // should create 10 snapshots for second table
         assertThat(snapshotManager2.latestSnapshotId()).isEqualTo(10);
+        testHarness.close();
     }
 
     // ------------------------------------------------------------------------
@@ -445,6 +451,7 @@ class StoreMultiCommitterTest {
         testHarness.processWatermark(new Watermark(2048));
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
+        testHarness.close();
         assertThat(table1.snapshotManager().latestSnapshot().watermark()).isEqualTo(2048L);
         assertThat(table1.snapshotManager().latestSnapshot().watermark()).isEqualTo(2048L);
     }

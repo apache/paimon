@@ -326,6 +326,7 @@ public abstract class FileStoreTableTestBase {
         write.write(rowData(2, 20, 200L));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
 
         write = table.newWrite(commitUser).withIgnorePreviousFiles(true);
         commit = table.newCommit(commitUser);
@@ -334,6 +335,7 @@ public abstract class FileStoreTableTestBase {
         overwritePartition.put("pt", "2");
         commit.withOverwrite(overwritePartition).commit(1, write.prepareCommit(true, 1));
         write.close();
+        commit.close();
 
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead();
@@ -362,8 +364,10 @@ public abstract class FileStoreTableTestBase {
         write.write(rowData(1, 5, 6L));
         write.write(rowData(1, 7, 8L));
         write.write(rowData(1, 9, 10L));
-        table.newCommit(commitUser).commit(0, write.prepareCommit(true, 0));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
 
         List<Split> splits =
                 toSplits(
@@ -381,12 +385,14 @@ public abstract class FileStoreTableTestBase {
         StreamTableWrite write = table.newWrite(commitUser);
         write.write(rowData(1, 2, 3L));
         List<CommitMessage> messages = write.prepareCommit(true, 0);
-        table.newCommit(commitUser).abort(messages);
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.abort(messages);
 
         FileStatus[] files =
                 LocalFileIO.create().listStatus(new Path(tablePath + "/pt=1/bucket-0"));
         assertThat(files).isEmpty();
         write.close();
+        commit.close();
     }
 
     @Test
@@ -413,6 +419,7 @@ public abstract class FileStoreTableTestBase {
         commit.commit(2, write.prepareCommit(true, 2));
 
         write.close();
+        commit.close();
 
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
@@ -471,6 +478,7 @@ public abstract class FileStoreTableTestBase {
         }
 
         write.close();
+        commit.close();
     }
 
     @Test
@@ -504,6 +512,7 @@ public abstract class FileStoreTableTestBase {
                             "%s|%s|%s|binary|varbinary|mapKey:mapVal|multiset", i, i + 1, i + 1));
         }
         commit.commit(cnt, write.prepareCommit(false, cnt));
+        commit.close();
 
         // check result
         List<String> result =
@@ -532,6 +541,7 @@ public abstract class FileStoreTableTestBase {
             commit.commit(i, write.prepareCommit(true, i));
         }
         write.close();
+        commit.close();
 
         List<DataFileMeta> files =
                 table.newSnapshotReader().read().dataSplits().stream()
@@ -571,6 +581,8 @@ public abstract class FileStoreTableTestBase {
         write.write(new JoinedRow(rowData(1, 30, 300L), GenericRow.of(3000)));
         write.write(new JoinedRow(rowData(1, 40, 400L), GenericRow.of(4000)));
         commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
 
         List<Split> splits = table.newScan().plan().splits();
         TableRead read = table.newRead();
@@ -644,6 +656,8 @@ public abstract class FileStoreTableTestBase {
         result = getResult(read, scan.plan().splits(), STREAMING_ROW_TO_STRING);
         assertThat(result)
                 .containsExactlyInAnyOrder("+1|40|400|binary|varbinary|mapKey:mapVal|multiset");
+        write.close();
+        commit.close();
 
         // expire consumer and then test snapshot expiration
         Thread.sleep(1000);
@@ -666,6 +680,7 @@ public abstract class FileStoreTableTestBase {
                                 OutOfRangeException.class, "The snapshot with id 5 has expired."));
 
         write.close();
+        commit.close();
     }
 
     // All tags are after the rollback snapshot
@@ -848,6 +863,7 @@ public abstract class FileStoreTableTestBase {
             commit.commit(i, write.prepareCommit(false, i));
         }
         write.close();
+        commit.close();
 
         return table;
     }

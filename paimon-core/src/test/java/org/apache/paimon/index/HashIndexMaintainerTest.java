@@ -122,6 +122,7 @@ public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
                 .containsExactlyInAnyOrder(-771300025, 1340390384, 1465514398);
 
         write.close();
+        commit.close();
     }
 
     @Test
@@ -137,5 +138,6 @@ public class HashIndexMaintainerTest extends PrimaryKeyTableTestBase {
         assertThat(readIndex(commitMessages)).isEmpty();
 
         write.close();
+        commit.close();
     }
 }

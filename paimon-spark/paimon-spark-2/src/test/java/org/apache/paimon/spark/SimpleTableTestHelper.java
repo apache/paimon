@@ -75,4 +75,9 @@ public class SimpleTableTestHelper {
         commit.commit(commitIdentifier, writer.prepareCommit(true, commitIdentifier));
         commitIdentifier++;
     }
+
+    public void close() throws Exception {
+        writer.close();
+        commit.close();
+    }
 }

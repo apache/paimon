@@ -114,5 +114,6 @@ public class SparkGenericCatalogTest {
         }
         commit.commit(writer.prepareCommit());
         writer.close();
+        commit.close();
     }
 }

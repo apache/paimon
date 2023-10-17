@@ -221,6 +221,9 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         // commit bucket 2 only
         write.write(createRow(2, 2, 5, 5));
         commit.commit(5, write.prepareCommit(true, 5));
+
+        write.close();
+        commit.close();
     }
 
     private void checkIndexFiles(long snapshotId) {

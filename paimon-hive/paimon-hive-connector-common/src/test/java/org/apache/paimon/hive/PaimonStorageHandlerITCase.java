@@ -544,6 +544,7 @@ public class PaimonStorageHandlerITCase {
         commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
         commitIdentifier++;
         write.close();
+        commit.close();
     }
 
     @Test
@@ -578,6 +579,7 @@ public class PaimonStorageHandlerITCase {
         }
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
 
         createExternalTable();
         List<Object[]> actual =
@@ -686,7 +688,7 @@ public class PaimonStorageHandlerITCase {
         write.write(GenericRow.of(6));
         commit.commit(3, write.prepareCommit(true, 3));
         write.close();
-
+        commit.close();
         hiveShell.execute(
                 String.join(
                         "\n",
@@ -773,6 +775,7 @@ public class PaimonStorageHandlerITCase {
                                 LocalDateTime.of(2022, 6, 18, 8, 30, 0, 100_000_000))));
         commit.commit(2, write.prepareCommit(true, 2));
         write.close();
+        commit.close();
 
         createExternalTable();
         assertThat(
@@ -827,6 +830,7 @@ public class PaimonStorageHandlerITCase {
         commit.commit(4, write.prepareCommit(true, 3));
 
         write.close();
+        commit.close();
 
         createExternalTable();
 
@@ -917,6 +921,7 @@ public class PaimonStorageHandlerITCase {
                         new GenericMap(varcharMap)));
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
 
         createExternalTable();
 

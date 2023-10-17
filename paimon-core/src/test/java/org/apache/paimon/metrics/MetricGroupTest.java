@@ -65,8 +65,8 @@ public class MetricGroupTest {
     public void testAddAndRemoveMetricGroups() {
         AbstractMetricGroup metricGroup =
                 GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
-        assertThat(Metrics.getInstance().getMetricGroups()).containsExactly(metricGroup);
+        assertThat(Metrics.getInstance().getMetricGroups()).contains(metricGroup);
         metricGroup.close();
-        assertThat(Metrics.getInstance().getMetricGroups()).isEmpty();
+        assertThat(Metrics.getInstance().getMetricGroups()).doesNotContain(metricGroup);
     }
 }

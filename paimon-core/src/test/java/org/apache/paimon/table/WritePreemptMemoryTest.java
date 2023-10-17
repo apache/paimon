@@ -75,6 +75,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         }
         commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
 
         // read
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());

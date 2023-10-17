@@ -32,6 +32,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
@@ -183,12 +184,14 @@ public class PartitionExpireTest {
         options.put(PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "5 s");
         options.put(PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
         table = table.copy(options);
+        commit.close();
         commit = table.newCommit(commitUser);
         commit.commit(successCommits - 2, commitMessages.get(successCommits - 2));
         notCommitted.remove((long) (successCommits - 2));
         Thread.sleep(5000);
         commit.commit(successCommits - 1, commitMessages.get(successCommits - 1));
         notCommitted.remove((long) (successCommits - 1));
+        commit.close();
 
         // check whether partition expire is triggered
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
@@ -217,8 +220,10 @@ public class PartitionExpireTest {
         StreamTableWrite write =
                 table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true")).newWrite("");
         write.write(GenericRow.of(BinaryString.fromString(f0), BinaryString.fromString(f1)));
-        table.newCommit("").commit(0, write.prepareCommit(true, 0));
+        TableCommitImpl commit = table.newCommit("");
+        commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
     }
 
     private PartitionExpire newExpire() {

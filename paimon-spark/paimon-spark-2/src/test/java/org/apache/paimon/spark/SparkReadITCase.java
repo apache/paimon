@@ -70,6 +70,7 @@ public class SparkReadITCase {
         testHelper1.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
         testHelper1.write(GenericRow.ofKind(RowKind.DELETE, 3, 4L, BinaryString.fromString("2")));
         testHelper1.commit();
+        testHelper1.close();
 
         tablePath2 = new Path(warehousePath, "default.db/t2");
         SimpleTableTestHelper testHelper2 = createTestHelper(tablePath2);
@@ -79,6 +80,7 @@ public class SparkReadITCase {
         testHelper2.write(GenericRow.of(5, 6L, BinaryString.fromString("3")));
         testHelper2.write(GenericRow.of(7, 8L, BinaryString.fromString("4")));
         testHelper2.commit();
+        testHelper2.close();
     }
 
     private static SimpleTableTestHelper createTestHelper(Path tablePath) throws Exception {

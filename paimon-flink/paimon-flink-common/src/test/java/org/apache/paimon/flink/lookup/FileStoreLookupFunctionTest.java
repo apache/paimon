@@ -32,6 +32,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -136,8 +137,10 @@ public class FileStoreLookupFunctionTest {
         fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
     }
 
-    private void commit(List<CommitMessage> messages) {
-        fileStoreTable.newCommit(commitUser).commit(messages);
+    private void commit(List<CommitMessage> messages) throws Exception {
+        TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
+        commit.commit(messages);
+        commit.close();
     }
 
     private List<CommitMessage> writeCommit(int number) throws Exception {

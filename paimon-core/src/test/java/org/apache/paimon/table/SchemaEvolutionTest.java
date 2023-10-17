@@ -33,6 +33,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.StreamTableWrite;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -216,8 +217,10 @@ public class SchemaEvolutionTest {
         StreamTableWrite write = table.newWrite(commitUser);
         write.write(GenericRow.of(1, 1L));
         write.write(GenericRow.of(2, 2L));
-        table.newCommit(commitUser).commit(0, write.prepareCommit(true, 0));
+        TableCommitImpl commit = table.newCommit(commitUser);
+        commit.commit(0, write.prepareCommit(true, 0));
         write.close();
+        commit.close();
 
         schemaManager.commitChanges(
                 Collections.singletonList(SchemaChange.addColumn("f3", DataTypes.BIGINT())));
@@ -226,8 +229,10 @@ public class SchemaEvolutionTest {
         write = table.newWrite(commitUser);
         write.write(GenericRow.of(3, 3L, 3L));
         write.write(GenericRow.of(4, 4L, 4L));
-        table.newCommit(commitUser).commit(1, write.prepareCommit(true, 1));
+        commit = table.newCommit(commitUser);
+        commit.commit(1, write.prepareCommit(true, 1));
         write.close();
+        commit.close();
 
         // read all
         List<String> rows = readRecords(table, null);

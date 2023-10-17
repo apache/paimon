@@ -254,6 +254,9 @@ public class StreamTableScanTest extends ScannerTestBase {
         StreamTableScan scan = table.newReadBuilder().newStreamScan();
         TableScan.Plan plan = scan.plan();
         assertThat(plan.splits()).isEmpty();
+
+        write.close();
+        commit.close();
     }
 
     @Test

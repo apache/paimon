@@ -170,6 +170,7 @@ public class HiveWriteITCase {
                                 "CREATE EXTERNAL TABLE " + tableName + " ",
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + path + "'")));
+        commit.close();
         return tableName;
     }
 

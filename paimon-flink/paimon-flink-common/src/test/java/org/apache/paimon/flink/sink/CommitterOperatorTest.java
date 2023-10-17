@@ -91,6 +91,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         // checkpoint is completed but not notified, so no snapshot is committed
         OperatorSubtaskState snapshot = testHarness.snapshot(0, timestamp++);
         assertThat(table.snapshotManager().latestSnapshotId()).isNull();
+        testHarness.close();
 
         testHarness = createRecoverableTestHarness(table);
         try {
@@ -107,12 +108,14 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                     + "writers can start writing based on these new commits.");
         }
         assertResults(table, "1, 10", "2, 20");
+        testHarness.close();
 
         // snapshot is successfully committed, no failure is needed
         testHarness = createRecoverableTestHarness(table);
         testHarness.initializeState(snapshot);
         testHarness.open();
         assertResults(table, "1, 10", "2, 20");
+        testHarness.close();
     }
 
     @Test
@@ -145,6 +148,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
         // should create 10 snapshots
         assertThat(snapshotManager.latestSnapshotId()).isEqualTo(cpId);
+        testHarness.close();
     }
 
     // ------------------------------------------------------------------------
@@ -227,6 +231,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
             OperatorSubtaskState snapshot =
                     writeAndSnapshot(table, commitUser, timestamp, ++checkpoint, testHarness);
             operatorSubtaskStates.add(snapshot);
+            testHarness.close();
         }
 
         // 2. Clearing redundant union list state
@@ -239,6 +244,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.initializeState(operatorSubtaskState);
         OperatorSubtaskState snapshot =
                 writeAndSnapshot(table, initialCommitUser, timestamp, ++checkpoint, testHarness);
+        testHarness.close();
 
         // 3. Check whether success
         List<String> actual = new ArrayList<>();
@@ -260,6 +266,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness1 =
                 createTestHarness(operator);
         testHarness1.initializeState(snapshot);
+        testHarness1.close();
 
         Assertions.assertThat(actual.size()).isEqualTo(1);
 
@@ -316,6 +323,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.processWatermark(new Watermark(Long.MAX_VALUE));
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
+        testHarness.close();
         assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
     }
 
