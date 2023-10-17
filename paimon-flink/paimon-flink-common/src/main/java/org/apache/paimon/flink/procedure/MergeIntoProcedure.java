@@ -23,18 +23,14 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MergeIntoAction;
 import org.apache.paimon.flink.action.MergeIntoActionFactory;
 
+import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_DELETE;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_UPSERT;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_BY_SOURCE_DELETE;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_BY_SOURCE_UPSERT;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_INSERT;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -42,29 +38,62 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * Merge Into procedure. Usage:
  *
  * <pre><code>
+ *  -- NOTE: use '' as placeholder for optional arguments
+ *
+ *  -- when matched then upsert
  *  CALL sys.merge_into(
  *      'targetTableId',
  *      'targetAlias',
  *      'sourceSqls', -- separate with ';'
  *      'sourceTable',
  *      'mergeCondition',
- *      'mergeActions',
- *      // arguments for merge actions
- *      ...
- *      )
+ *      'matchedUpsertCondition',
+ *      'matchedUpsertSetting'
+ *  )
  *
- *  -- merge actions and corresponding arguments
- *  matched-upsert: condition, set
- *  not-matched-by-source-upsert: condition, set
- *  matched-delete: condition
- *  not-matched-by-source-delete: condition
- *  not-matched-insert: condition, insertValues
+ *  -- when matched then upsert + when not matched then insert
+ *  CALL sys.merge_into(
+ *      'targetTableId'
+ *      'targetAlias',
+ *      'sourceSqls',
+ *      'sourceTable',
+ *      'mergeCondition',
+ *      'matchedUpsertCondition',
+ *      'matchedUpsertSetting',
+ *      'notMatchedInsertCondition',
+ *      'notMatchedInsertValues'
+ *  )
  *
- *  -- NOTE: the arguments should be in the order of merge actions
- *  -- and use '' as placeholder for optional arguments
+ *  -- above + when matched then delete
+ *  -- IMPORTANT: Use 'TRUE' if you want to delete data without filter condition.
+ *  -- If matchedDeleteCondition='', it will ignore matched-delete action!
+ *  CALL sys.merge_into(
+ *      'targetTableId',
+ *      'targetAlias',
+ *      'sourceSqls',
+ *      'sourceTable',
+ *      'mergeCondition',
+ *      'matchedUpsertCondition',
+ *      'matchedUpsertSetting',
+ *      'notMatchedInsertCondition',
+ *      'notMatchedInsertValues',
+ *      'matchedDeleteCondition'
+ *  )
+ *
+ *  -- when matched then delete (short form)
+ *  CALL sys.merge_into(
+ *      'targetTableId'
+ *      'targetAlias',
+ *      'sourceSqls',
+ *      'sourceTable',
+ *      'mergeCondition',
+ *      'matchedDeleteCondition'
+ *  )
  * </code></pre>
  *
- * <p>This procedure will be forced to use batch environments
+ * <p>This procedure will be forced to use batch environments. Compared to {@link MergeIntoAction},
+ * this procedure doesn't provide arguments to control not-matched-by-source behavior because they
+ * are not commonly used and will make the methods too complex to use.
  */
 public class MergeIntoProcedure extends ProcedureBase {
 
@@ -77,9 +106,81 @@ public class MergeIntoProcedure extends ProcedureBase {
             String sourceSqls,
             String sourceTable,
             String mergeCondition,
-            String mergeActions,
-            String... mergeActionArguments)
-            throws Exception {
+            String matchedUpsertCondition,
+            String matchedUpsertSetting) {
+        return call(
+                procedureContext,
+                targetTableId,
+                targetAlias,
+                sourceSqls,
+                sourceTable,
+                mergeCondition,
+                matchedUpsertCondition,
+                matchedUpsertSetting,
+                "",
+                "",
+                "");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String targetTableId,
+            String targetAlias,
+            String sourceSqls,
+            String sourceTable,
+            String mergeCondition,
+            String matchedUpsertCondition,
+            String matchedUpsertSetting,
+            String notMatchedInsertCondition,
+            String notMatchedInsertValues) {
+        return call(
+                procedureContext,
+                targetTableId,
+                targetAlias,
+                sourceSqls,
+                sourceTable,
+                mergeCondition,
+                matchedUpsertCondition,
+                matchedUpsertSetting,
+                notMatchedInsertCondition,
+                notMatchedInsertValues,
+                "");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String targetTableId,
+            String targetAlias,
+            String sourceSqls,
+            String sourceTable,
+            String mergeCondition,
+            String matchedDeleteCondition) {
+        return call(
+                procedureContext,
+                targetTableId,
+                targetAlias,
+                sourceSqls,
+                sourceTable,
+                mergeCondition,
+                "",
+                "",
+                "",
+                "",
+                matchedDeleteCondition);
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext,
+            String targetTableId,
+            String targetAlias,
+            String sourceSqls,
+            String sourceTable,
+            String mergeCondition,
+            String matchedUpsertCondition,
+            String matchedUpsertSetting,
+            String notMatchedInsertCondition,
+            String notMatchedInsertValues,
+            String matchedDeleteCondition) {
         String warehouse = ((AbstractCatalog) catalog).warehouse();
         Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
         Identifier identifier = Identifier.fromString(targetTableId);
@@ -101,88 +202,32 @@ public class MergeIntoProcedure extends ProcedureBase {
         checkArgument(!mergeCondition.isEmpty(), "Must specify merge condition.");
         action.withMergeCondition(mergeCondition);
 
-        checkArgument(!mergeActions.isEmpty(), "Must specify at least one merge action.");
-        List<String> actions =
-                Arrays.stream(mergeActions.split(","))
-                        .map(String::trim)
-                        .collect(Collectors.toList());
-        validateActions(actions, mergeActionArguments.length);
+        if (!matchedUpsertCondition.isEmpty() || !matchedUpsertSetting.isEmpty()) {
+            String condition = nullable(matchedUpsertCondition);
+            String setting = nullable(matchedUpsertSetting);
+            checkNotNull(setting, "matched-upsert must set the 'matchedUpsertSetting' argument");
+            action.withMatchedUpsert(condition, setting);
+        }
 
-        int index = 0;
-        String condition, setting;
-        for (String mergeAction : actions) {
-            switch (mergeAction) {
-                case MATCHED_UPSERT:
-                case NOT_MATCHED_BY_SOURCE_UPSERT:
-                case NOT_MATCHED_INSERT:
-                    condition = nullable(mergeActionArguments[index++]);
-                    setting = nullable(mergeActionArguments[index++]);
-                    checkNotNull(setting, "%s must set the second argument", mergeAction);
-                    setMergeAction(action, mergeAction, condition, setting);
-                    break;
-                case MATCHED_DELETE:
-                case NOT_MATCHED_BY_SOURCE_DELETE:
-                    condition = nullable(mergeActionArguments[index++]);
-                    setMergeAction(action, mergeAction, condition);
-                    break;
-                default:
-                    throw new UnsupportedOperationException("Unknown merge action: " + action);
-            }
+        if (!notMatchedInsertCondition.isEmpty() || !notMatchedInsertValues.isEmpty()) {
+            String condition = nullable(notMatchedInsertCondition);
+            String values = nullable(notMatchedInsertValues);
+            checkNotNull(
+                    values, "not-matched-insert must set the 'notMatchedInsertValues' argument");
+            action.withNotMatchedInsert(condition, values);
+        }
+
+        if (!matchedDeleteCondition.isEmpty()) {
+            action.withMatchedDelete(matchedDeleteCondition);
         }
 
         MergeIntoActionFactory.validate(action);
 
-        // TODO set dml-sync argument to action
-        action.run();
+        DataStream<RowData> dataStream = action.buildDataStream();
+        TableResult tableResult = action.batchSink(dataStream);
+        JobClient jobClient = tableResult.getJobClient().get();
 
-        return new String[] {"Success"};
-    }
-
-    private void validateActions(List<String> mergeActions, int argumentLength) {
-        int expectedArguments = 0;
-        for (String action : mergeActions) {
-            switch (action) {
-                case MATCHED_UPSERT:
-                case NOT_MATCHED_BY_SOURCE_UPSERT:
-                case NOT_MATCHED_INSERT:
-                    expectedArguments += 2;
-                    break;
-                case MATCHED_DELETE:
-                case NOT_MATCHED_BY_SOURCE_DELETE:
-                    expectedArguments += 1;
-                    break;
-                default:
-                    throw new UnsupportedOperationException("Unknown merge action: " + action);
-            }
-        }
-
-        checkArgument(
-                expectedArguments == argumentLength,
-                "Expected %s action arguments but given '%s'",
-                expectedArguments,
-                argumentLength);
-    }
-
-    private void setMergeAction(MergeIntoAction action, String mergeAction, String... arguments) {
-        switch (mergeAction) {
-            case MATCHED_UPSERT:
-                action.withMatchedUpsert(arguments[0], arguments[1]);
-                return;
-            case NOT_MATCHED_BY_SOURCE_UPSERT:
-                action.withNotMatchedBySourceUpsert(arguments[0], arguments[1]);
-                return;
-            case NOT_MATCHED_INSERT:
-                action.withNotMatchedInsert(arguments[0], arguments[1]);
-                return;
-            case MATCHED_DELETE:
-                action.withMatchedDelete(arguments[0]);
-                return;
-            case NOT_MATCHED_BY_SOURCE_DELETE:
-                action.withNotMatchedBySourceDelete(arguments[0]);
-                return;
-            default:
-                throw new UnsupportedOperationException("Unknown merge action: " + mergeAction);
-        }
+        return execute(procedureContext, jobClient);
     }
 
     @Override

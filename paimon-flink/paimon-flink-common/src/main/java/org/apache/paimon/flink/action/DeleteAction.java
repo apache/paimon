@@ -83,6 +83,6 @@ public class DeleteAction extends TableActionBase {
                                     return rowData;
                                 });
 
-        batchSink(dataStream);
+        batchSink(dataStream).await();
     }
 }

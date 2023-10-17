@@ -40,11 +40,6 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_DELETE;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_UPSERT;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_BY_SOURCE_DELETE;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_BY_SOURCE_UPSERT;
-import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_INSERT;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildDdl;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
@@ -116,31 +111,8 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         "dt < '02-28'", "v = v || '_nmu', last_action = 'not_matched_upsert'")
                 .withNotMatchedBySourceDelete("dt >= '02-28'");
 
-        String mergeActions =
-                String.format(
-                        "%s,%s,%s,%s,%s",
-                        MATCHED_UPSERT,
-                        MATCHED_DELETE,
-                        NOT_MATCHED_INSERT,
-                        NOT_MATCHED_BY_SOURCE_UPSERT,
-                        NOT_MATCHED_BY_SOURCE_DELETE);
-        String procedureStatement =
-                String.format(
-                        "CALL sys.merge_into('%s.T', '', '', 'default.S', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
-                        database,
-                        mergeActions,
-                        "'T.v <> S.v AND S.v IS NOT NULL', "
-                                + "'v = S.v, last_action = ''matched_upsert''', "
-                                + "'S.v IS NULL', "
-                                + "'', "
-                                + "'S.k, S.v, ''insert'', S.dt', "
-                                + "'dt < ''02-28''', "
-                                + "'v = v || ''_nmu'', last_action = ''not_matched_upsert''', "
-                                + "'dt >= ''02-28'''");
-
         validateActionRunResult(
                 action,
-                procedureStatement,
                 expected,
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
@@ -200,15 +172,15 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL sys.merge_into('%s.T', 'TT', '', 'S', 'TT.k = S.k AND TT.dt = S.dt', '%s', %s)",
-                        inDefault ? database : "test_db", MATCHED_DELETE, "'S.v IS NULL'");
+                        "CALL sys.merge_into('%s.T', 'TT', '', 'S', 'TT.k = S.k AND TT.dt = S.dt', 'S.v IS NULL')",
+                        inDefault ? database : "test_db");
 
-        validateActionRunResult(
-                action,
-                procedureStatement,
+        List<Row> streamingExpected =
                 Arrays.asList(
                         changelogRow("-D", 4, "v_4", "creation", "02-27"),
-                        changelogRow("-D", 8, "v_8", "creation", "02-28")),
+                        changelogRow("-D", 8, "v_8", "creation", "02-28"));
+
+        List<Row> batchExpected =
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
                         changelogRow("+I", 2, "v_2", "creation", "02-27"),
@@ -217,7 +189,13 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 6, "v_6", "creation", "02-28"),
                         changelogRow("+I", 7, "v_7", "creation", "02-28"),
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
-                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
+                        changelogRow("+I", 10, "v_10", "creation", "02-28"));
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            validateActionRunResult(action, streamingExpected, batchExpected);
+        } else {
+            validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
+        }
     }
 
     @ParameterizedTest(name = "in-default = {0}")
@@ -242,20 +220,20 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL sys.merge_into('default.T', '', '', '%s', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
-                        sourceTableName, MATCHED_DELETE, "'S.v IS NULL'");
+                        "CALL sys.merge_into('default.T', '', '', '%s', 'T.k = S.k AND T.dt = S.dt', 'S.v IS NULL')",
+                        sourceTableName);
 
         if (!inDefault) {
             sEnv.executeSql("USE `default`");
             bEnv.executeSql("USE `default`");
         }
 
-        validateActionRunResult(
-                action,
-                procedureStatement,
+        List<Row> streamingExpected =
                 Arrays.asList(
                         changelogRow("-D", 4, "v_4", "creation", "02-27"),
-                        changelogRow("-D", 8, "v_8", "creation", "02-28")),
+                        changelogRow("-D", 8, "v_8", "creation", "02-28"));
+
+        List<Row> batchExpected =
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
                         changelogRow("+I", 2, "v_2", "creation", "02-27"),
@@ -264,7 +242,13 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 6, "v_6", "creation", "02-28"),
                         changelogRow("+I", 7, "v_7", "creation", "02-28"),
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
-                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
+                        changelogRow("+I", 10, "v_10", "creation", "02-28"));
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            validateActionRunResult(action, streamingExpected, batchExpected);
+        } else {
+            validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
+        }
     }
 
     @ParameterizedTest(name = "useCatalog = {0}")
@@ -306,23 +290,21 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = S.k AND T.dt = S.dt', '%s', %s)",
+                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = S.k AND T.dt = S.dt', 'S.v IS NULL')",
                         database,
                         useCatalog
                                 ? String.format(
                                         "%s;%s;%s",
                                         escapeCatalog, "USE CATALOG test_cat", escapeDdl)
                                 : String.format("%s;%s", escapeCatalog, escapeDdl),
-                        useCatalog ? "S" : "test_cat.default.S",
-                        MATCHED_DELETE,
-                        "'S.v IS NULL'");
+                        useCatalog ? "S" : "test_cat.default.S");
 
-        validateActionRunResult(
-                action,
-                procedureStatement,
+        List<Row> streamingExpected =
                 Arrays.asList(
                         changelogRow("-D", 4, "v_4", "creation", "02-27"),
-                        changelogRow("-D", 8, "v_8", "creation", "02-28")),
+                        changelogRow("-D", 8, "v_8", "creation", "02-28"));
+
+        List<Row> batchExpected =
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
                         changelogRow("+I", 2, "v_2", "creation", "02-27"),
@@ -331,7 +313,13 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 6, "v_6", "creation", "02-28"),
                         changelogRow("+I", 7, "v_7", "creation", "02-28"),
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
-                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
+                        changelogRow("+I", 10, "v_10", "creation", "02-28"));
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            validateActionRunResult(action, streamingExpected, batchExpected);
+        } else {
+            validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
+        }
     }
 
     @ParameterizedTest(name = "source-qualified = {0}")
@@ -346,16 +334,12 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '%s', %s)",
+                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '', '*')",
                         database,
                         "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
-                        qualified ? "default.SS" : "SS",
-                        MATCHED_UPSERT,
-                        "'', '*'");
+                        qualified ? "default.SS" : "SS");
 
-        validateActionRunResult(
-                action,
-                procedureStatement,
+        List<Row> streamingExpected =
                 Arrays.asList(
                         changelogRow("-U", 1, "v_1", "creation", "02-27"),
                         changelogRow("+U", 1, "v_1", "unknown", "02-27"),
@@ -364,7 +348,9 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("-U", 7, "v_7", "creation", "02-28"),
                         changelogRow("+U", 7, "Seven", "unknown", "02-28"),
                         changelogRow("-U", 8, "v_8", "creation", "02-28"),
-                        changelogRow("+U", 8, null, "unknown", "02-28")),
+                        changelogRow("+U", 8, null, "unknown", "02-28"));
+
+        List<Row> batchExpected =
                 Arrays.asList(
                         changelogRow("+U", 1, "v_1", "unknown", "02-27"),
                         changelogRow("+I", 2, "v_2", "creation", "02-27"),
@@ -375,7 +361,13 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+U", 7, "Seven", "unknown", "02-28"),
                         changelogRow("+U", 8, null, "unknown", "02-28"),
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
-                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
+                        changelogRow("+I", 10, "v_10", "creation", "02-28"));
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            validateActionRunResult(action, streamingExpected, batchExpected);
+        } else {
+            validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
+        }
     }
 
     @ParameterizedTest(name = "source-qualified = {0}")
@@ -390,19 +382,17 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
 
         String procedureStatement =
                 String.format(
-                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '%s', %s)",
+                        "CALL sys.merge_into('%s.T', '', '%s', '%s', 'T.k = SS.k AND T.dt = SS.dt', '', '', 'SS.k < 12', '*', '')",
                         database,
                         "CREATE TEMPORARY VIEW SS AS SELECT k, v, ''unknown'', dt FROM S",
-                        qualified ? "default.SS" : "SS",
-                        NOT_MATCHED_INSERT,
-                        "'SS.k < 12', '*'");
+                        qualified ? "default.SS" : "SS");
 
-        validateActionRunResult(
-                action,
-                procedureStatement,
+        List<Row> streamingExpected =
                 Arrays.asList(
                         changelogRow("+I", 8, "v_8", "unknown", "02-29"),
-                        changelogRow("+I", 11, "v_11", "unknown", "02-29")),
+                        changelogRow("+I", 11, "v_11", "unknown", "02-29"));
+
+        List<Row> batchExpected =
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
                         changelogRow("+I", 2, "v_2", "creation", "02-27"),
@@ -415,7 +405,36 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 9, "v_9", "creation", "02-28"),
                         changelogRow("+I", 10, "v_10", "creation", "02-28"),
                         changelogRow("+I", 8, "v_8", "unknown", "02-29"),
-                        changelogRow("+I", 11, "v_11", "unknown", "02-29")));
+                        changelogRow("+I", 11, "v_11", "unknown", "02-29"));
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            validateActionRunResult(action, streamingExpected, batchExpected);
+        } else {
+            validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
+        }
+    }
+
+    @Test
+    public void testProcedureWithDeleteConditionTrue() throws Exception {
+        String procedureStatement =
+                String.format(
+                        "CALL sys.merge_into('%s.T', '', '', 'S', 'T.k = S.k AND T.dt = S.dt', 'TRUE')",
+                        database);
+
+        validateProcedureResult(
+                procedureStatement,
+                Arrays.asList(
+                        changelogRow("-D", 1, "v_1", "creation", "02-27"),
+                        changelogRow("-D", 4, "v_4", "creation", "02-27"),
+                        changelogRow("-D", 7, "v_7", "creation", "02-28"),
+                        changelogRow("-D", 8, "v_8", "creation", "02-28")),
+                Arrays.asList(
+                        changelogRow("+I", 2, "v_2", "creation", "02-27"),
+                        changelogRow("+I", 3, "v_3", "creation", "02-27"),
+                        changelogRow("+I", 5, "v_5", "creation", "02-28"),
+                        changelogRow("+I", 6, "v_6", "creation", "02-28"),
+                        changelogRow("+I", 9, "v_9", "creation", "02-28"),
+                        changelogRow("+I", 10, "v_10", "creation", "02-28")));
     }
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -493,23 +512,29 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     }
 
     private void validateActionRunResult(
-            MergeIntoAction action,
-            String procedureStatement,
-            List<Row> streamingExpected,
-            List<Row> batchExpected)
+            MergeIntoAction action, List<Row> streamingExpected, List<Row> batchExpected)
             throws Exception {
         BlockingIterator<Row, Row> iterator =
                 testStreamingRead(buildSimpleQuery("T"), initialRecords);
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            action.run();
-        } else {
-            callProcedure(procedureStatement);
-        }
+        action.run();
         // test streaming read
         validateStreamingReadResult(iterator, streamingExpected);
         iterator.close();
         // test batch read
         testBatchRead(buildSimpleQuery("T"), batchExpected);
+    }
+
+    private void validateProcedureResult(
+            String procedureStatement, List<Row> streamingExpected, List<Row> batchExpected)
+            throws Exception {
+        BlockingIterator<Row, Row> iterator =
+                testStreamingRead(buildSimpleQuery("T"), initialRecords);
+        callProcedure(procedureStatement, true, true);
+        // test batch read first to ensure TABLE_DML_SYNC works
+        testBatchRead(buildSimpleQuery("T"), batchExpected);
+        // test streaming read
+        validateStreamingReadResult(iterator, streamingExpected);
+        iterator.close();
     }
 
     private void prepareTargetTable(CoreOptions.ChangelogProducer producer) throws Exception {

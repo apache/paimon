@@ -26,7 +26,6 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
 
 /** Utility methods for {@link TableEnvironment} and its subclasses. */
 public class TableEnvironmentUtils {
@@ -35,7 +34,7 @@ public class TableEnvironmentUtils {
      * Invoke {@code TableEnvironmentImpl#executeInternal(List<Transformation<?>>, List<String>)}
      * from a {@link StreamTableEnvironment} instance through reflecting.
      */
-    public static void executeInternal(
+    public static TableResult executeInternal(
             StreamTableEnvironment tEnv,
             List<Transformation<?>> transformations,
             List<String> sinkIdentifierNames) {
@@ -45,10 +44,7 @@ public class TableEnvironmentUtils {
                     clazz.getDeclaredMethod("executeInternal", List.class, List.class);
             executeInternal.setAccessible(true);
 
-            TableResult tableResult =
-                    (TableResult)
-                            executeInternal.invoke(tEnv, transformations, sinkIdentifierNames);
-            tableResult.await();
+            return (TableResult) executeInternal.invoke(tEnv, transformations, sinkIdentifierNames);
         } catch (NoSuchMethodException e) {
             throw new RuntimeException(
                     "Failed to get 'TableEnvironmentImpl#executeInternal(List, List)' method "
@@ -59,8 +55,6 @@ public class TableEnvironmentUtils {
                     "Failed to invoke 'TableEnvironmentImpl#executeInternal(List, List)' method "
                             + "from given StreamTableEnvironment instance by Java reflection. This is unexpected.",
                     e);
-        } catch (ExecutionException | InterruptedException e) {
-            throw new RuntimeException("Failed to wait for insert job to finish.", e);
         }
     }
 }

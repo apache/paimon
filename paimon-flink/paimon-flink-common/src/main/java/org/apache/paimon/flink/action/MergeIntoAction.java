@@ -219,6 +219,11 @@ public class MergeIntoAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
+        DataStream<RowData> dataStream = buildDataStream();
+        batchSink(dataStream).await();
+    }
+
+    public DataStream<RowData> buildDataStream() {
         // handle aliases
         handleTargetAlias();
 
@@ -237,9 +242,8 @@ public class MergeIntoAction extends TableActionBase {
                         .map(Optional::get)
                         .collect(Collectors.toList());
 
-        // sink to target table
         DataStream<RowData> firstDs = dataStreams.get(0);
-        batchSink(firstDs.union(dataStreams.stream().skip(1).toArray(DataStream[]::new)));
+        return firstDs.union(dataStreams.stream().skip(1).toArray(DataStream[]::new));
     }
 
     private void handleTargetAlias() {

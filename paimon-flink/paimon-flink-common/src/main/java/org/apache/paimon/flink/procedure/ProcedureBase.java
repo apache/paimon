@@ -73,8 +73,18 @@ public abstract class ProcedureBase implements Procedure, Factory {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultJobName);
         JobClient jobClient = env.executeAsync(name);
+        return execute(jobClient, conf.get(TABLE_DML_SYNC));
+    }
+
+    protected String[] execute(ProcedureContext procedureContext, JobClient jobClient) {
+        StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
+        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        return execute(jobClient, conf.get(TABLE_DML_SYNC));
+    }
+
+    private String[] execute(JobClient jobClient, boolean dmlSync) {
         String jobId = jobClient.getJobID().toString();
-        if (conf.get(TABLE_DML_SYNC)) {
+        if (dmlSync) {
             try {
                 jobClient.getJobExecutionResult().get();
             } catch (Exception e) {
