@@ -53,7 +53,6 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          mvn -T 1C -B clean install -DskipTests
           mvn -T 1C -B test -pl paimon-e2e-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m
