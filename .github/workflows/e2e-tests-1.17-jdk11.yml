@@ -44,7 +44,9 @@ jobs:
         with:
           java-version: ${{ env.JDK_VERSION }}
           distribution: 'adopt'
-      - name: Build and Test Flink 1.17
+      - name: Build Flink 1.17
+        run: mvn -T 1C -B clean install -DskipTests
+      - name: Test Flink 1.17
         timeout-minutes: 60
         run: |
           # run tests with random timezone to find out timezone related bugs
