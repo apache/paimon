@@ -231,25 +231,7 @@ and disable all the other compaction by set `write-only`.
 ### Sort Compact
 
 The data in a per-partition out of order will lead a slow select, compaction may slow down the inserting. It is a good choice for you to set 
-write-only for inserting job, and after per-partition data done, trigger a partition `Sort Compact` action. 
-
-You can trigger action by shell script:
-```shell
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-{{< version >}}.jar \
-    compact \
-    --warehouse hdfs:///path/to/warehouse \
-    --database test_db \
-    --table <tableName> \
-    --table-conf <key>=<value> \
-    --order-strategy <orderType> \
-    --order-by <col1,col2,...>
-```
-
-{{< generated/sort-compact >}}
-
-The sort parallelism is the same as the sink parallelism, you can dynamically specify it by add conf --table-conf sink.parallelism=<value>.
-Other config is the same as [Compact Table]({{< ref "maintenance/dedicated-compaction" >}})
+`write-only` for inserting job, and after per-partition data done, trigger a partition `Sort Compact` action. See [Sort Compact]({{< ref "maintenance/dedicated-compaction#sort-compact" >}}).
 
 ### Streaming Source
 
