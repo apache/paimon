@@ -487,6 +487,41 @@ DELETE FROM MyTable WHERE currency = 'UNKNOWN';
 
 {{< /tabs >}}
 
+
+## Deleting orphan files
+
+This action provides a way to delete data files and metadata files which are not referenced by any snapshot.
+
+Run the following command to submit a 'delete-orphan' job for the table.
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    delete-orphan \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    --location <location> \
+    --max-concurrent-deletes <max-concurrent-deletes> \
+    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--older-than <timestamp>]
+    
+    
+-- Examples:
+
+./flink run \
+    /path/to/paimon-flink-action-0.6-SNAPSHOT.jar \
+    delete-orphan \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table t1 \
+    --location /path/table1/part=1/ \
+    --max-concurrent-deletes 2 \
+    --older-than 1698762567711 
+    
+```
+
+
 ## Merging into table
 
 Paimon supports "MERGE INTO" via submitting the 'merge-into' job through `flink run`.
