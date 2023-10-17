@@ -66,7 +66,8 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         } else {
             callProcedure(
                     String.format(
-                            "CALL drop_partition('%s.%s', 'partKey0 = 0')", database, tableName));
+                            "CALL sys.drop_partition('%s.%s', 'partKey0 = 0')",
+                            database, tableName));
         }
 
         SnapshotManager snapshotManager = getFileStoreTable(tableName).snapshotManager();
@@ -124,7 +125,7 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         } else {
             callProcedure(
                     String.format(
-                            "CALL drop_partition('%s.%s', 'partKey0=0,partKey1=1', 'partKey0=1,partKey1=0')",
+                            "CALL sys.drop_partition('%s.%s', 'partKey0=0,partKey1=1', 'partKey0=1,partKey1=0')",
                             database, tableName));
         }
 

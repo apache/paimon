@@ -34,7 +34,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * Drop partition procedure. Usage:
  *
  * <pre><code>
- *  CALL drop_partition('tableId', 'partition1', 'partition2', ...)
+ *  CALL sys.drop_partition('tableId', 'partition1', 'partition2', ...)
  * </code></pre>
  */
 public class DropPartitionProcedure extends ProcedureBase {

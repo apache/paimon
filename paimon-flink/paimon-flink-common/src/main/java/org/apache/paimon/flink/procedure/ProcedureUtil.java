@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
 
+import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.procedures.Procedure;
 
 import java.util.Collections;
@@ -39,13 +40,16 @@ public class ProcedureUtil {
                         ProcedureBase.class.getClassLoader(), ProcedureBase.class));
     }
 
-    public static Optional<Procedure> getProcedure(Catalog catalog, String procedureName) {
+    public static Optional<Procedure> getProcedure(Catalog catalog, ObjectPath procedurePath) {
+        if (!Catalog.SYSTEM_DATABASE_NAME.equals(procedurePath.getDatabaseName())) {
+            return Optional.empty();
+        }
         try {
             ProcedureBase procedure =
                     FactoryUtil.discoverFactory(
                                     ProcedureBase.class.getClassLoader(),
                                     ProcedureBase.class,
-                                    procedureName)
+                                    procedurePath.getObjectName())
                             .withCatalog(catalog);
             return Optional.of(procedure);
         } catch (FactoryException e) {
