@@ -166,19 +166,18 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         List<Row> results = spark.table("testRenameColumn").select("a", "c").collectAsList();
         assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
 
-        // Rename "a" to "aa"
-        spark.sql("ALTER TABLE testRenameColumn RENAME COLUMN a to aa");
+        // Rename "b" to "bb"
+        spark.sql("ALTER TABLE testRenameColumn RENAME COLUMN b to bb");
         List<Row> afterRename = spark.sql("SHOW CREATE TABLE testRenameColumn").collectAsList();
         assertThat(afterRename.toString())
-                .contains(showCreateString("testRenameColumn", "aa INT", "b BIGINT", "c STRING"));
+                .contains(showCreateString("testRenameColumn", "a INT", "bb BIGINT", "c STRING"));
         Dataset<Row> table = spark.table("testRenameColumn");
-        results = table.select("aa", "c").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
-        assertThatThrownBy(() -> table.select("a", "c"))
+        results = table.select("bb", "c").collectAsList();
+        assertThat(results.toString()).isEqualTo("[[2,1], [6,3]]");
+        assertThatThrownBy(() -> table.select("b", "c"))
                 .isInstanceOf(AnalysisException.class)
                 .hasMessageContaining(
-                        "A column or function parameter with name `a` cannot be resolved. Did you mean one of the following? "
-                                + "[`paimon`.`default`.`testRenameColumn`.`b`, `paimon`.`default`.`testRenameColumn`.`c`, `paimon`.`default`.`testRenameColumn`.`aa`]");
+                        "A column or function parameter with name `b` cannot be resolved. Did you mean one of the following?");
     }
 
     @Test
@@ -209,14 +208,14 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropSingleColumn").collectAsList();
         assertThat(beforeDrop.toString()).contains(defaultShowCreateString("testDropSingleColumn"));
 
-        spark.sql("ALTER TABLE testDropSingleColumn DROP COLUMN a");
+        spark.sql("ALTER TABLE testDropSingleColumn DROP COLUMN b");
 
         List<Row> afterDrop = spark.sql("SHOW CREATE TABLE testDropSingleColumn").collectAsList();
         assertThat(afterDrop.toString())
-                .contains(showCreateString("testDropSingleColumn", "b BIGINT", "c STRING"));
+                .contains(showCreateString("testDropSingleColumn", "a INT", "c STRING"));
 
         List<Row> results = spark.table("testDropSingleColumn").collectAsList();
-        assertThat(results.toString()).isEqualTo("[[2,1], [6,3]]");
+        assertThat(results.toString()).isEqualTo("[[1,1], [5,3]]");
     }
 
     @Test
@@ -226,10 +225,10 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
         List<Row> beforeDrop = spark.sql("SHOW CREATE TABLE testDropColumns").collectAsList();
         assertThat(beforeDrop.toString()).contains(defaultShowCreateString("testDropColumns"));
 
-        spark.sql("ALTER TABLE testDropColumns DROP COLUMNS a, b");
+        spark.sql("ALTER TABLE testDropColumns DROP COLUMNS b,c");
 
         List<Row> afterDrop = spark.sql("SHOW CREATE TABLE testDropColumns").collectAsList();
-        assertThat(afterDrop.toString()).contains(showCreateString("testDropColumns", "c STRING"));
+        assertThat(afterDrop.toString()).contains(showCreateString("testDropColumns", "a INT"));
     }
 
     @Test

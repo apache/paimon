@@ -53,7 +53,7 @@ public class SimpleTableTestHelper {
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
-                                Collections.emptyList(),
+                                Collections.singletonList(rowType.getFields().get(0).name()),
                                 options,
                                 ""));
         Options conf = Options.fromMap(options);
