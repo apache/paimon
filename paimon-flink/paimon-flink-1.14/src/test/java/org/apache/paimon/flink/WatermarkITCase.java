@@ -49,7 +49,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
                                         "'scan.watermark.idle-timeout'='1s'",
                                         "'scan.watermark.alignment.group'='group'",
                                         "'scan.watermark.alignment.update-interval'='2s'",
-                                        "'scan.watermark.alignment.max-drift'='1s',"))
+                                        "'scan.watermark.alignment.max-drift'='1s'"))
                 .hasMessageContaining(
                         "Flink 1.14 does not support watermark alignment, please check your Flink version");
     }
@@ -58,7 +58,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE T (f0 INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts) WITH ("
                         + String.join(",", options)
-                        + " 'write-mode'='append-only')");
+                        + ")");
 
         BlockingIterator<Row, Row> select =
                 BlockingIterator.of(

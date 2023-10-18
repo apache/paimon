@@ -17,7 +17,6 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.WriteMode.CHANGE_LOG
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
@@ -32,23 +31,22 @@ class TableValuedFunctionsTest extends PaimonSparkTestBase {
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
   }
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
-          test(s"incremental query: write-mode: $writeMode, bucket: $bucket") {
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+          test(s"incremental query: hasPk: $hasPk, bucket: $bucket") {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a,b',"
             } else {
               ""
             }
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b INT, c STRING)
-                 |USING paimon
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |PARTITIONED BY (a)
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b INT, c STRING)
+                         |USING paimon
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |PARTITIONED BY (a)
+                         |""".stripMargin)
 
             spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
             spark.sql("INSERT INTO T VALUES (1, 3, '3'), (2, 4, '4')")

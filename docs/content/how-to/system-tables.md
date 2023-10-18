@@ -270,11 +270,8 @@ SELECT * FROM sys.all_table_options;
 +---------------+--------------------------------+--------------------------------+------------------+
 |         my_db |                    Orders_orc  |                         bucket |               -1 |
 |         my_db |                        Orders2 |                         bucket |               -1 |
-|         my_db |                        Orders2 |                     write-mode |      append-only |
 |         my_db |                        Orders2 |               sink.parallelism |                7 |
-|         my_db |                   StockAnalyze |                     write-mode |       change-log |
 |         my_db2|                      OrdersSum |                         bucket |                1 |
-|         my_db2|                      OrdersSum |                     write-mode |       change-log |
 +---------------+--------------------------------+--------------------------------+------------------+
 7 rows in set
 */

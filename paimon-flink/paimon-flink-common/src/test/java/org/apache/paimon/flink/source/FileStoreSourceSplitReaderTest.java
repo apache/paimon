@@ -87,22 +87,12 @@ public class FileStoreSourceSplitReaderTest {
 
     @Test
     public void testPrimaryKey() throws Exception {
-        innerTestOnce(false, 0);
-    }
-
-    @Test
-    public void testValueCount() throws Exception {
-        innerTestOnce(true, 0);
+        innerTestOnce(0);
     }
 
     @Test
     public void testPrimaryKeySkip() throws Exception {
-        innerTestOnce(false, 4);
-    }
-
-    @Test
-    public void testValueCountSkip() throws Exception {
-        innerTestOnce(true, 7);
+        innerTestOnce(4);
     }
 
     private FileStoreSourceSplitReader createReader(TableRead tableRead, @Nullable Long limit) {
@@ -110,12 +100,9 @@ public class FileStoreSourceSplitReaderTest {
                 tableRead, limit == null ? null : new RecordLimiter(limit), null);
     }
 
-    private void innerTestOnce(boolean valueCountMode, int skip) throws Exception {
+    private void innerTestOnce(int skip) throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader =
-                createReader(
-                        valueCountMode ? rw.createReadWithValueCount() : rw.createReadWithKey(),
-                        null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
 
         List<Tuple2<Long, Long>> input = kvs();
         List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
@@ -124,25 +111,10 @@ public class FileStoreSourceSplitReaderTest {
 
         RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
 
-        List<Tuple2<RowKind, Long>> expected;
-        if (valueCountMode) {
-            expected =
-                    Arrays.asList(
-                            new Tuple2<>(RowKind.INSERT, 1L),
-                            new Tuple2<>(RowKind.INSERT, 2L),
-                            new Tuple2<>(RowKind.INSERT, 2L),
-                            new Tuple2<>(RowKind.INSERT, 3L),
-                            new Tuple2<>(RowKind.INSERT, 3L),
-                            new Tuple2<>(RowKind.DELETE, 4L),
-                            new Tuple2<>(RowKind.INSERT, 5L),
-                            new Tuple2<>(RowKind.DELETE, 6L),
-                            new Tuple2<>(RowKind.DELETE, 6L));
-        } else {
-            expected =
-                    input.stream()
-                            .map(t -> new Tuple2<>(RowKind.INSERT, t.f1))
-                            .collect(Collectors.toList());
-        }
+        List<Tuple2<RowKind, Long>> expected =
+                input.stream()
+                        .map(t -> new Tuple2<>(RowKind.INSERT, t.f1))
+                        .collect(Collectors.toList());
 
         List<Tuple2<RowKind, Long>> result = readRecords(records, "id1", skip);
         assertThat(result).isEqualTo(expected.subList(skip, expected.size()));

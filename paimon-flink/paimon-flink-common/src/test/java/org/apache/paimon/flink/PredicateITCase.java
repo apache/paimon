@@ -44,8 +44,7 @@ public class PredicateITCase extends CatalogITCaseBase {
 
     @Test
     public void testAppendFilterBucket() throws Exception {
-        sql(
-                "CREATE TABLE T (a INT, b INT) WITH ('bucket' = '5', 'bucket-key'='a', 'write-mode'='append-only')");
+        sql("CREATE TABLE T (a INT, b INT) WITH ('bucket' = '5', 'bucket-key'='a')");
         writeRecords();
         innerTestSingleField();
         innerTestAllFields();
@@ -53,7 +52,7 @@ public class PredicateITCase extends CatalogITCaseBase {
 
     @Test
     public void testAppendNoBucketKey() throws Exception {
-        sql("CREATE TABLE T (a INT, b INT) WITH ('write-mode'='append-only', 'bucket' = '5')");
+        sql("CREATE TABLE T (a INT, b INT) WITH ('bucket' = '5')");
         writeRecords();
         innerTestSingleField();
         innerTestAllFields();

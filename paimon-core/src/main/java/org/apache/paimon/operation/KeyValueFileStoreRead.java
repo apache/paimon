@@ -71,7 +71,6 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final Comparator<InternalRow> keyComparator;
     private final MergeFunctionFactory<KeyValue> mfFactory;
-    private final boolean valueCountMode;
     private final MergeSorter mergeSorter;
 
     @Nullable private int[][] keyProjectedFields;
@@ -111,7 +110,6 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                         options);
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
-        this.valueCountMode = tableSchema.trimmedPrimaryKeys().isEmpty();
         this.mergeSorter =
                 new MergeSorter(
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
@@ -175,7 +173,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         // For sections with only one run, as each key only appears once, it is OK to push down
         // value filters.
         filtersForNonOverlappedSection = allFilters;
-        filtersForOverlappedSection = valueCountMode ? allFilters : pkFilters;
+        filtersForOverlappedSection = pkFilters;
         return this;
     }
 

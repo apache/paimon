@@ -20,7 +20,6 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -47,7 +46,7 @@ import org.apache.paimon.utils.Preconditions;
 import java.io.IOException;
 import java.util.function.BiConsumer;
 
-/** {@link FileStoreTable} for {@link WriteMode#APPEND_ONLY} write mode. */
+/** {@link FileStoreTable} for append table. */
 public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;

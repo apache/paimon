@@ -394,20 +394,18 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testConflictOption() {
         assertThatThrownBy(
-                        () ->
-                                sql(
-                                        "CREATE TABLE T (a INT) WITH ('write-mode' = 'append-only', 'changelog-producer' = 'input')"))
+                        () -> sql("CREATE TABLE T (a INT) WITH ('changelog-producer' = 'input')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Can not set the write-mode to append-only and changelog-producer at the same time.");
+                .hasMessageContaining(
+                        "Can not set changelog-producer on table without primary keys");
 
-        sql("CREATE TABLE T (a INT) WITH ('write-mode' = 'append-only')");
+        sql("CREATE TABLE T (a INT)");
         assertThatThrownBy(() -> sql("ALTER TABLE T SET ('changelog-producer'='input')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Can not set the write-mode to append-only and changelog-producer at the same time.");
+                .hasMessageContaining(
+                        "Can not set changelog-producer on table without primary keys");
     }
 
     @Test
@@ -452,23 +450,6 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testChangelogProducerOnAppendOnlyTable() {
-        assertThatThrownBy(
-                        () -> sql("CREATE TABLE T (a INT) WITH ('changelog-producer' = 'input')"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
-
-        sql("CREATE TABLE T (a INT)");
-        assertThatThrownBy(() -> sql("ALTER TABLE T SET ('changelog-producer'='input')"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
-    }
-
-    @Test
     public void testFileFormatPerLevel() {
         sql(
                 "CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) "
@@ -489,21 +470,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testFilesTable() throws Exception {
         sql(
-                "CREATE TABLE T_VALUE_COUNT (a INT, p INT, b BIGINT, c STRING) "
-                        + "PARTITIONED BY (p) "
-                        + "WITH ('write-mode'='change-log')"); // change log with value count table
-        assertFilesTable("T_VALUE_COUNT");
-
-        sql(
                 "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
-                        + "PARTITIONED BY (p) "
-                        + "WITH ('write-mode'='change-log')"); // change log with key table
+                        + "PARTITIONED BY (p) ");
         assertFilesTable("T_WITH_KEY");
 
         sql(
                 "CREATE TABLE T_APPEND_ONLY (a INT, p INT, b BIGINT, c STRING) "
-                        + "PARTITIONED BY (p) "
-                        + "WITH ('write-mode'='append-only')"); // append only table
+                        + "PARTITIONED BY (p)");
         assertFilesTable("T_APPEND_ONLY");
     }
 
@@ -676,21 +649,13 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     @Test
     public void testPartitionsTable() throws Exception {
         sql(
-                "CREATE TABLE T_VALUE_COUNT (a INT, p INT, b BIGINT, c STRING) "
-                        + "PARTITIONED BY (p) "
-                        + "WITH ('write-mode'='change-log')"); // change log with value count table
-        assertFilesTable("T_VALUE_COUNT");
-
-        sql(
                 "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
-                        + "PARTITIONED BY (p) "
-                        + "WITH ('write-mode'='change-log')"); // change log with key table
+                        + "PARTITIONED BY (p)");
         assertFilesTable("T_WITH_KEY");
 
         sql(
                 "CREATE TABLE T_APPEND_ONLY (a INT, p INT, b BIGINT, c STRING) "
-                        + "PARTITIONED BY (p) "
-                        + "WITH ('write-mode'='append-only')"); // append only table
+                        + "PARTITIONED BY (p)");
         assertPartitionsTable("T_APPEND_ONLY");
     }
 

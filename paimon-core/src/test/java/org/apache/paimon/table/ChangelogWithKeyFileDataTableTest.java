@@ -18,8 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -44,7 +42,6 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
     @BeforeEach
     public void before() throws Exception {
         super.before();
-        tableConfig.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
     }
 
     @Test

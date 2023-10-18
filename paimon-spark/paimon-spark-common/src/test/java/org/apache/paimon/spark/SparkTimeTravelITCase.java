@@ -35,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT case for Spark 3.3+ time travel syntax (VERSION AS OF, TIMESTAMP AS OF). */
 public class SparkTimeTravelITCase extends SparkReadTestBase {
+
     @Test
     public void testTravelToVersion() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");

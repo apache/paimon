@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -33,9 +32,6 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -52,7 +48,6 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 /** IT cases for {@link DeleteAction}. */
 public class DeleteActionITCase extends ActionITCaseBase {
@@ -66,11 +61,16 @@ public class DeleteActionITCase extends ActionITCaseBase {
         init(warehouse);
     }
 
-    @ParameterizedTest(name = "hasPk-{0}")
-    @MethodSource("data")
-    public void testDeleteAction(boolean hasPk, List<Row> initialRecords, List<Row> expected)
-            throws Exception {
-        prepareTable(hasPk);
+    @Test
+    public void testDeleteAction() throws Exception {
+        List<Row> initialRecords =
+                Arrays.asList(
+                        changelogRow("+I", 1L, "World"),
+                        changelogRow("+I", 2L, "Store"),
+                        changelogRow("+I", 3L, "Developer"));
+        List<Row> expected = Collections.singletonList(changelogRow("-D", 1L, "World"));
+
+        prepareTable();
 
         DeleteAction action =
                 new DeleteAction(warehouse, database, tableName, "k = 1", Collections.emptyMap());
@@ -149,15 +149,11 @@ public class DeleteActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 3, "To", "C"), changelogRow("+I", 4, "Test", "$")));
     }
 
-    private void prepareTable(boolean hasPk) throws Exception {
+    private void prepareTable() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         FileStoreTable table =
                 createFileStoreTable(
-                        ROW_TYPE,
-                        Collections.emptyList(),
-                        hasPk ? Collections.singletonList("k") : Collections.emptyList(),
-                        options);
+                        ROW_TYPE, Collections.emptyList(), Collections.singletonList("k"), options);
         SnapshotManager snapshotManager = table.snapshotManager();
         StreamWriteBuilder streamWriteBuilder =
                 table.newStreamWriteBuilder().withCommitUser(commitUser);
@@ -178,30 +174,5 @@ public class DeleteActionITCase extends ActionITCaseBase {
 
         assertThat(snapshot.id()).isEqualTo(1);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.APPEND);
-    }
-
-    private static List<Arguments> data() {
-        return Arrays.asList(
-                arguments(
-                        true,
-                        Arrays.asList(
-                                changelogRow("+I", 1L, "World"),
-                                changelogRow("+I", 2L, "Store"),
-                                changelogRow("+I", 3L, "Developer")),
-                        Collections.singletonList(changelogRow("-D", 1L, "World"))),
-                arguments(
-                        false,
-                        Arrays.asList(
-                                changelogRow("+I", 1L, "Hi"),
-                                changelogRow("+I", 1L, "Hello"),
-                                changelogRow("+I", 1L, "World"),
-                                changelogRow("+I", 2L, "Flink"),
-                                changelogRow("+I", 2L, "Table"),
-                                changelogRow("+I", 2L, "Store"),
-                                changelogRow("+I", 3L, "Developer")),
-                        Arrays.asList(
-                                changelogRow("-D", 1L, "Hi"),
-                                changelogRow("-D", 1L, "Hello"),
-                                changelogRow("-D", 1L, "World"))));
     }
 }

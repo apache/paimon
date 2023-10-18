@@ -39,7 +39,6 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.createTemporar
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.insertIntoFromTable;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
-import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingReadWithReadFirst;
 
 /** Paimon IT case when the table has computed column and watermark spec. */
@@ -177,117 +176,6 @@ public class ComputedColumnAndWatermarkTableITCase extends KafkaTableTestBase {
                         "CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))",
                         "WHERE currency = 'US Dollar'"),
                 Collections.singletonList(changelogRow("+I", 16)));
-    }
-
-    @Test
-    public void testStreamingSelectComputedColumn() throws Exception {
-        // test 1
-        List<Row> initialRecords =
-                Arrays.asList(
-                        changelogRow("+I", "US Dollar", 102L),
-                        changelogRow("+I", "Euro", 114L),
-                        changelogRow("+I", "Yen", 1L),
-                        changelogRow("-U", "Euro", 114L),
-                        changelogRow("+U", "Euro", 116L),
-                        changelogRow("-D", "Euro", 116L),
-                        changelogRow("+I", "Euro", 119L),
-                        changelogRow("-U", "Euro", 119L),
-                        changelogRow("+U", "Euro", 119L),
-                        changelogRow("-D", "Yen", 1L),
-                        changelogRow("+I", null, 100L),
-                        changelogRow("+I", "HK Dollar", null));
-
-        String temporaryTable =
-                createTemporaryTable(
-                        Arrays.asList("currency STRING", "rate BIGINT"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        initialRecords,
-                        null,
-                        false,
-                        "I,UA,UB,D");
-
-        String table =
-                createTableWithKafkaLog(
-                        Arrays.asList(
-                                "currency STRING",
-                                "rate BIGINT",
-                                "capital_currency AS UPPER(currency)",
-                                "ptime AS PROCTIME()"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        false);
-
-        insertIntoFromTable(temporaryTable, table);
-
-        testStreamingRead(
-                        buildQuery(
-                                table,
-                                "capital_currency, CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))",
-                                "WHERE currency IS NULL"),
-                        Collections.singletonList(changelogRow("+I", null, 16)))
-                .close();
-
-        // test 2
-        initialRecords =
-                Arrays.asList(
-                        // to_currency is USD
-                        changelogRow("+I", "US Dollar", "US Dollar", null, "2022-01-01"),
-                        changelogRow("+I", "Euro", "US Dollar", null, "2022-01-01"),
-                        changelogRow("+I", "HK Dollar", "US Dollar", 0.13d, "2022-01-01"),
-                        changelogRow("+I", "Yen", "US Dollar", 0.0082d, "2022-01-01"),
-                        changelogRow("-D", "Yen", "US Dollar", 0.0082d, "2022-01-01"),
-                        changelogRow("+I", "Singapore Dollar", "US Dollar", 0.74d, "2022-01-01"),
-                        changelogRow("+I", "Yen", "US Dollar", 0.0081d, "2022-01-01"),
-                        changelogRow("+U", "Euro", "US Dollar", 1.11d, "2022-01-01"),
-                        changelogRow("+U", "US Dollar", "US Dollar", 1.0d, "2022-01-01"),
-                        // to_currency is Euro
-                        changelogRow("+I", "US Dollar", "Euro", 0.9d, "2022-01-02"),
-                        changelogRow("+I", "Singapore Dollar", "Euro", 0.67d, "2022-01-02"),
-                        changelogRow("-D", "Singapore Dollar", "Euro", 0.67d, "2022-01-02"),
-                        // to_currency is Yen
-                        changelogRow("+I", "Yen", "Yen", 1.0d, "2022-01-02"),
-                        changelogRow("+I", "Chinese Yuan", "Yen", 19.25d, "2022-01-02"),
-                        changelogRow("+I", "Singapore Dollar", "Yen", 90.32d, "2022-01-02"),
-                        changelogRow("+U", "Singapore Dollar", "Yen", 122.46d, "2022-01-02"));
-
-        temporaryTable =
-                createTemporaryTable(
-                        Arrays.asList(
-                                "from_currency STRING",
-                                "to_currency STRING",
-                                "rate_by_to_currency DOUBLE",
-                                "dt STRING"),
-                        Arrays.asList("from_currency", "to_currency", "dt"),
-                        Collections.singletonList("dt"),
-                        initialRecords,
-                        "dt:2022-01-01;dt:2022-01-02",
-                        false,
-                        "I,UA,D");
-
-        table =
-                createTableWithKafkaLog(
-                        Arrays.asList(
-                                "from_currency STRING",
-                                "to_currency STRING",
-                                "rate_by_to_currency DOUBLE",
-                                "dt STRING",
-                                "corrected_rate_by_to_currency AS COALESCE(rate_by_to_currency, 1)",
-                                "ptime AS PROCTIME()"),
-                        Arrays.asList("from_currency", "to_currency", "dt"),
-                        Collections.singletonList("dt"),
-                        true);
-
-        testStreamingReadWithReadFirst(
-                        temporaryTable,
-                        table,
-                        buildQueryWithTableOptions(
-                                table,
-                                "corrected_rate_by_to_currency, CHAR_LENGTH(DATE_FORMAT(ptime, 'yyyy-MM-dd HH:mm'))",
-                                "WHERE rate_by_to_currency IS NULL",
-                                SCAN_LATEST),
-                        Collections.singletonList(changelogRow("+I", 1d, 16)))
-                .close();
     }
 
     @Test

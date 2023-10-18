@@ -172,7 +172,7 @@ public class SparkWriteITCase {
     public void testReadWriteUnawareBucketTable() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (a) TBLPROPERTIES"
-                        + " ('write-mode'='append-only', 'bucket'='-1')");
+                        + " ('bucket'='-1')");
 
         spark.sql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
         spark.sql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");

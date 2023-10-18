@@ -19,7 +19,6 @@
 package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -91,7 +90,6 @@ public class TableCommitTest {
 
         Options conf = new Options();
         conf.set(CoreOptions.PATH, path);
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         conf.set(CoreOptions.COMMIT_CALLBACKS, TestCommitCallback.class.getName());
         conf.set(
                 CoreOptions.COMMIT_CALLBACK_PARAM

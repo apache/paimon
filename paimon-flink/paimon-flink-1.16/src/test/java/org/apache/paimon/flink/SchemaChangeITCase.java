@@ -59,18 +59,6 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'bucket-key' is not supported yet.");
 
-        // write-mode is immutable
-        assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('write-mode' = 'append-only')"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'write-mode' is not supported yet.");
-
-        sql("CREATE TABLE T3 (a STRING, b STRING, c STRING) WITH ('write-mode' = 'append-only')");
-        assertThatThrownBy(() -> sql("ALTER TABLE T3 RESET ('write-mode')"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Change 'write-mode' is not supported yet.");
-
         // merge-engine is immutable
         sql(
                 "CREATE TABLE T4 (a STRING, b STRING, c STRING) WITH ('merge-engine' = 'partial-update')");

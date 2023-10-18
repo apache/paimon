@@ -34,7 +34,7 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
           // define a change-log table and test `forEachBatch` api
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'write-mode'='change-log', 'bucket'='3')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().getPath
 

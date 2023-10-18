@@ -17,7 +17,6 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.WriteMode.CHANGE_LOG
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
@@ -25,22 +24,21 @@ import org.apache.spark.sql.types._
 
 class InsertOverwriteTest extends PaimonSparkTestBase {
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
-          test(s"insert overwrite non-partitioned table: write-mode: $writeMode, bucket: $bucket") {
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+          test(s"insert overwrite non-partitioned table: hasPk: $hasPk, bucket: $bucket") {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a,b',"
             } else {
               ""
             }
 
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b INT, c STRING)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b INT, c STRING)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |""".stripMargin)
 
             spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
             checkAnswer(
@@ -55,24 +53,22 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       }
   }
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
-          test(
-            s"insert overwrite single-partitioned table: write-mode: $writeMode, bucket: $bucket") {
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+          test(s"insert overwrite single-partitioned table: hasPk: $hasPk, bucket: $bucket") {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a,b',"
             } else {
               ""
             }
 
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b INT, c STRING)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |PARTITIONED BY (a)
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b INT, c STRING)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |PARTITIONED BY (a)
+                         |""".stripMargin)
 
             spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
             checkAnswer(
@@ -95,24 +91,22 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       }
   }
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
-          test(
-            s"insert overwrite mutil-partitioned table: write-mode: $writeMode, bucket: $bucket") {
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+          test(s"insert overwrite mutil-partitioned table: hasPk: $hasPk, bucket: $bucket") {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a,pt1,pt2',"
             } else {
               ""
             }
 
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |PARTITIONED BY (pt1, pt2)
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |PARTITIONED BY (pt1, pt2)
+                         |""".stripMargin)
 
             spark.sql(
               "INSERT INTO T values (1, 'a', 'ptv1', 11), (2, 'b', 'ptv1', 11), (3, 'c', 'ptv1', 22), (4, 'd', 'ptv2', 22)")
@@ -216,24 +210,23 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       }
   }
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
           test(
-            s"dynamic insert overwrite single-partitioned table: write-mode: $writeMode, bucket: $bucket") {
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+            s"dynamic insert overwrite single-partitioned table: hasPk: $hasPk, bucket: $bucket") {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a,b',"
             } else {
               ""
             }
 
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b INT, c STRING)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |PARTITIONED BY (a)
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b INT, c STRING)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |PARTITIONED BY (a)
+                         |""".stripMargin)
 
             spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
             checkAnswer(
@@ -257,24 +250,23 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       }
   }
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
           test(
-            s"dynamic insert overwrite mutil-partitioned table: write-mode: $writeMode, bucket: $bucket") {
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+            s"dynamic insert overwrite mutil-partitioned table: hasPk: $hasPk, bucket: $bucket") {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a,pt1,pt2',"
             } else {
               ""
             }
 
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |PARTITIONED BY (pt1, pt2)
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |PARTITIONED BY (pt1, pt2)
+                         |""".stripMargin)
 
             spark.sql(
               "INSERT INTO T values (1, 'a', 'ptv1', 11), (2, 'b', 'ptv1', 11), (3, 'c', 'ptv1', 22), (4, 'd', 'ptv2', 22)")

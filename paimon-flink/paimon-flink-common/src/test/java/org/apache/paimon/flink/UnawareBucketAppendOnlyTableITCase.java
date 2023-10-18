@@ -231,8 +231,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testTimestampLzType() {
-        sql(
-                "CREATE TABLE t_table (id INT, data TIMESTAMP_LTZ(3)) WITH ('write-mode'='append-only')");
+        sql("CREATE TABLE t_table (id INT, data TIMESTAMP_LTZ(3))");
         batchSql("INSERT INTO t_table VALUES (1, TIMESTAMP '2023-02-03 20:20:20')");
         assertThat(batchSql("SELECT * FROM t_table"))
                 .containsExactly(
@@ -303,9 +302,9 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only', 'bucket' = '-1')",
-                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('write-mode'='append-only', 'bucket' = '-1')",
-                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('write-mode'='append-only', 'bucket' = '-1')");
+                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('bucket' = '-1')",
+                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '-1')",
+                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '-1')");
     }
 
     @Override

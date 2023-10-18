@@ -27,7 +27,6 @@ import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -79,9 +78,6 @@ public abstract class FlinkTableSinkBase
         if (table instanceof AppendOnlyFileStoreTable) {
             // Don't check this, for example, only inserts are available from the database, but the
             // plan phase contains all changelogs
-            return requestedMode;
-        } else if (table instanceof ChangelogValueCountFileStoreTable) {
-            // no primary key, sink all changelogs
             return requestedMode;
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());

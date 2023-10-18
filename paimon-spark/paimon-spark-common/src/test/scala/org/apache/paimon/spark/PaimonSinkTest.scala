@@ -35,7 +35,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
           // define a change-log table and test `forEachBatch` api
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'write-mode'='change-log', 'bucket'='3')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().getPath
 
@@ -79,7 +79,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
           // define a change-log table and sink into it in append mode
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'write-mode'='change-log', 'bucket'='3')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().getPath
 
@@ -120,7 +120,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
           // define an append-only table and sink into it in complete mode
           spark.sql(s"""
                        |CREATE TABLE T (city String, population Long)
-                       |TBLPROPERTIES ('write-mode'='append-only', 'bucket'='3')
+                       |TBLPROPERTIES ('bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().getPath
 
@@ -164,7 +164,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
           // define a change-log table and sink into it in update mode
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'write-mode'='change-log', 'bucket'='3')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().getPath
 
@@ -188,7 +188,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
         // define an append-only table and sink into it with aggregation and watermark in append mode
         spark.sql(s"""
                      |CREATE TABLE T (start Timestamp, stockId INT, avg_price DOUBLE)
-                     |TBLPROPERTIES ('write-mode'='append-only', 'bucket'='3')
+                     |TBLPROPERTIES ('bucket'='3')
                      |""".stripMargin)
         val location = loadTable("T").location().getPath
 
@@ -239,7 +239,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
           // define a change-log table and sink into it with schema evolution in append mode
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'write-mode'='change-log', 'bucket'='3')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().getPath
 

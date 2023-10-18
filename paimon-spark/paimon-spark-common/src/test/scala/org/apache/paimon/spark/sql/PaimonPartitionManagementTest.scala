@@ -17,19 +17,18 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.WriteMode.CHANGE_LOG
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{AnalysisException, Row}
 
 class PaimonPartitionManagementTest extends PaimonSparkTestBase {
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
-          test(s"Partition for non-partitioned table: write-mode: $writeMode, bucket: $bucket") {
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+          test(s"Partition for non-partitioned table: hasPk: $hasPk, bucket: $bucket") {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a,b',"
             } else {
               ""
@@ -37,7 +36,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
             spark.sql(
               s"""
                  |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt VARCHAR(8),hh VARCHAR(4))
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
+                 |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
                  |""".stripMargin)
             spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1132')")
             spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1133')")
@@ -73,12 +72,12 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
       }
   }
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
-          test(s"Partition for partitioned table: write-mode: $writeMode, bucket: $bucket") {
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+          test(s"Partition for partitioned table: hasPk: $hasPk, bucket: $bucket") {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a,b,dt,hh',"
             } else {
               ""
@@ -87,7 +86,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
               s"""
                  |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt VARCHAR(8),hh VARCHAR(4))
                  |PARTITIONED BY (dt, hh)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
+                 |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
                  |""".stripMargin)
 
             spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1132')")

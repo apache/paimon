@@ -246,13 +246,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 mb"))
                     .withDescription("Amount of data to spill records to disk in spilled sort.");
 
-    @Immutable
-    public static final ConfigOption<WriteMode> WRITE_MODE =
-            key("write-mode")
-                    .enumType(WriteMode.class)
-                    .defaultValue(WriteMode.AUTO)
-                    .withDescription("Specify the write mode for table.");
-
     public static final ConfigOption<Boolean> WRITE_ONLY =
             key("write-only")
                     .booleanType()
@@ -1230,10 +1223,6 @@ public class CoreOptions implements Serializable {
             return Collections.emptyList();
         }
         return Arrays.asList(padding.split(","));
-    }
-
-    public WriteMode writeMode() {
-        return options.get(WRITE_MODE);
     }
 
     public boolean writeOnly() {

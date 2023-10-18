@@ -111,40 +111,6 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
         }
     }
 
-    /** Tests for {@link SortMergeReader} with {@link ValueCountMergeFunction}. */
-    public static class WithValueCountMergeFunctionTest extends SortMergeReaderTestBase {
-
-        @Override
-        protected boolean addOnly() {
-            return true;
-        }
-
-        @Override
-        protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return MergeFunctionTestUtils.getExpectedForValueCount(input);
-        }
-
-        @Override
-        protected MergeFunction<KeyValue> createMergeFunction() {
-            return new ValueCountMergeFunction();
-        }
-
-        @ParameterizedTest
-        @EnumSource(SortEngine.class)
-        public void testCancelingRecords(SortEngine sortEngine) throws IOException {
-            runTest(
-                    parseData(
-                            "1, 1, +, 100 | 3, 5, +, -300 | 5, 300, +, 300",
-                            "",
-                            "1, 4, +, -200 | 3, 3, +, 300",
-                            "5, 100, +, -200 | 7, 123, +, -500",
-                            "7, 321, +, 200",
-                            "7, 456, +, 300"),
-                    sortEngine);
-            runTest(parseData("1, 2, +, 100", "1, 1, +, -100"), sortEngine);
-        }
-    }
-
     /** Test for {@link SortMergeReader} with {@link FirstRowMergeFunction}. */
     public static class WithFirstRowMergeFunctionTest extends SortMergeReaderTestBase {
 

@@ -17,14 +17,11 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.WriteMode
-import org.apache.paimon.WriteMode._
-
 trait WithTableOptions {
 
   // 3: fixed bucket, -1: dynamic bucket
   protected val bucketModes: Seq[Int] = Seq(3, -1)
 
-  protected val writeModes: Seq[WriteMode] = Seq(CHANGE_LOG, APPEND_ONLY)
+  protected val withPk: Seq[Boolean] = Seq(true, false)
 
 }

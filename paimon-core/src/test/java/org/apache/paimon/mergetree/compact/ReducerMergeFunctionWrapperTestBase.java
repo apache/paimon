@@ -19,11 +19,9 @@
 package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.types.RowKind;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -34,7 +32,6 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link ReducerMergeFunctionWrapper}. */
 public abstract class ReducerMergeFunctionWrapperTestBase {
@@ -86,45 +83,6 @@ public abstract class ReducerMergeFunctionWrapperTestBase {
         @Override
         protected KeyValue getExpected(List<KeyValue> kvs) {
             return kvs.get(kvs.size() - 1);
-        }
-    }
-
-    /** Tests for {@link ReducerMergeFunctionWrapper} with {@link ValueCountMergeFunction}. */
-    public static class WithValueRecordMergeFunctionTest
-            extends ReducerMergeFunctionWrapperTestBase {
-
-        @Override
-        protected MergeFunction<KeyValue> createMergeFunction() {
-            return new ValueCountMergeFunction();
-        }
-
-        @Override
-        protected KeyValue getExpected(List<KeyValue> kvs) {
-            if (kvs.size() == 1) {
-                return kvs.get(0);
-            } else {
-                long total = kvs.stream().mapToLong(kv -> kv.value().getLong(0)).sum();
-                if (total == 0) {
-                    return null;
-                } else {
-                    KeyValue result = kvs.get(kvs.size() - 1);
-                    return new KeyValue()
-                            .replace(
-                                    result.key(),
-                                    result.sequenceNumber(),
-                                    RowKind.INSERT,
-                                    GenericRow.of(total));
-                }
-            }
-        }
-
-        @Test
-        public void testIllegalInput() {
-            wrapper.add(new KeyValue().replace(null, RowKind.INSERT, row(1)));
-            assertThatThrownBy(
-                            () -> wrapper.add(new KeyValue().replace(null, RowKind.DELETE, row(1))))
-                    .hasMessageContaining(
-                            "In value count mode, only insert records come. This is a bug. Please file an issue.");
         }
     }
 }

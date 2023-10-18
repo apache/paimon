@@ -19,7 +19,6 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -49,13 +48,12 @@ public class SimpleTableTestHelper {
         Map<String, String> options = new HashMap<>();
         // orc is shaded, can not find shaded classes in ide
         options.put(CoreOptions.FILE_FORMAT.key(), CoreOptions.FileFormatType.AVRO.toString());
-        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         new SchemaManager(LocalFileIO.create(), path)
                 .createTable(
                         new Schema(
                                 rowType.getFields(),
                                 Collections.emptyList(),
-                                Collections.emptyList(),
+                                Collections.singletonList(rowType.getFields().get(0).name()),
                                 options,
                                 ""));
         Options conf = Options.fromMap(options);

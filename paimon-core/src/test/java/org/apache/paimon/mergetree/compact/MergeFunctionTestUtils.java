@@ -20,7 +20,6 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.ReusingTestData;
 
 import java.util.ArrayList;
@@ -32,29 +31,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test utils for {@link MergeFunction}s. */
 public class MergeFunctionTestUtils {
-
-    public static List<ReusingTestData> getExpectedForValueCount(List<ReusingTestData> input) {
-        input = new ArrayList<>(input);
-        Collections.sort(input);
-
-        List<ReusingTestData> expected = new ArrayList<>();
-        long c = 0;
-        for (int i = 0; i < input.size(); i++) {
-            ReusingTestData data = input.get(i);
-            Preconditions.checkArgument(
-                    data.valueKind == RowKind.INSERT,
-                    "Only ADD value kind is supported for value count merge function.");
-            c += data.value;
-            if (i + 1 >= input.size() || data.key != input.get(i + 1).key) {
-                if (c != 0) {
-                    expected.add(
-                            new ReusingTestData(data.key, data.sequenceNumber, RowKind.INSERT, c));
-                }
-                c = 0;
-            }
-        }
-        return expected;
-    }
 
     public static List<ReusingTestData> getExpectedForDeduplicate(List<ReusingTestData> input) {
         input = new ArrayList<>(input);

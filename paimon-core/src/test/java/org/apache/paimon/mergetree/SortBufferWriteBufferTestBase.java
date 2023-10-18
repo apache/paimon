@@ -29,7 +29,6 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionTestUtils;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
-import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
@@ -155,38 +154,6 @@ public abstract class SortBufferWriteBufferTestBase {
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
             return DeduplicateMergeFunction.factory().create();
-        }
-    }
-
-    /** Test for {@link SortBufferWriteBuffer} with {@link ValueCountMergeFunction}. */
-    public static class WithValueCountMergeFunctionTest extends SortBufferWriteBufferTestBase {
-
-        @Override
-        protected boolean addOnly() {
-            return true;
-        }
-
-        @Override
-        protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
-            return MergeFunctionTestUtils.getExpectedForValueCount(input);
-        }
-
-        @Override
-        protected MergeFunction<KeyValue> createMergeFunction() {
-            return ValueCountMergeFunction.factory().create();
-        }
-
-        @Test
-        public void testCancelingRecords() throws IOException {
-            runTest(
-                    ReusingTestData.parse(
-                            "1, 1, +, 100 | 3, 5, +, -300 | 5, 300, +, 300 | "
-                                    + "1, 4, +, -200 | 3, 3, +, 300 | "
-                                    + "5, 100, +, -200 | 7, 123, +, -500 | "
-                                    + "7, 321, +, 200 | "
-                                    + "7, 456, +, 300"));
-            table.clear();
-            runTest(ReusingTestData.parse("1, 2, +, 100 | 1, 1, +, -100"));
         }
     }
 

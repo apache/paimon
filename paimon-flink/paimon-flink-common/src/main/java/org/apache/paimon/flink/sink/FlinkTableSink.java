@@ -30,7 +30,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableUtils;
@@ -90,10 +89,10 @@ public class FlinkTableSink extends FlinkTableSinkBase
     public RowLevelUpdateInfo applyRowLevelUpdate(
             List<Column> updatedColumns, @Nullable RowLevelModificationScanContext context) {
         // Since only UPDATE_AFTER type messages can be received at present,
-        // AppendOnlyFileStoreTable and ChangelogValueCountFileStoreTable without primary keys
-        // cannot correctly handle old data, so they are marked as unsupported. Similarly, it is not
-        // allowed to update the primary key column when updating the column of
-        // ChangelogWithKeyFileStoreTable, because the old data cannot be handled correctly.
+        // AppendOnlyFileStoreTable cannot correctly handle old data, so they are marked as
+        // unsupported. Similarly, it is not allowed to update the primary key column when updating
+        // the column of ChangelogWithKeyFileStoreTable, because the old data cannot be handled
+        // correctly.
         if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
@@ -127,8 +126,7 @@ public class FlinkTableSink extends FlinkTableSinkBase
                             MERGE_ENGINE.key(),
                             MergeEngine.DEDUPLICATE,
                             MergeEngine.PARTIAL_UPDATE));
-        } else if (table instanceof AppendOnlyFileStoreTable
-                || table instanceof ChangelogValueCountFileStoreTable) {
+        } else if (table instanceof AppendOnlyFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(
                             "%s can not support update, because there is no primary key.",
@@ -195,9 +193,6 @@ public class FlinkTableSink extends FlinkTableSinkBase
                     String.format(
                             "merge engine '%s' can not support delete, currently only %s can support delete.",
                             options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
-        } else if (table instanceof ChangelogValueCountFileStoreTable) {
-            // ChangelogValueCountFileStoreTable is OK to be deleted
-            return;
         } else if (table instanceof AppendOnlyFileStoreTable) {
             throw new UnsupportedOperationException(
                     String.format(

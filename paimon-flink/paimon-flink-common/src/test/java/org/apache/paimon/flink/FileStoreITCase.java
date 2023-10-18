@@ -19,7 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.flink.sink.FileStoreSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
@@ -78,7 +77,6 @@ import java.util.stream.Stream;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toDataType;
 import static org.apache.paimon.utils.FailingFileIO.retryArtificialException;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -362,13 +360,16 @@ public class FileStoreITCase extends AbstractTestBase {
                 Row.ofKind(RowKind.INSERT, 1, "p1", 1),
                 Row.ofKind(RowKind.INSERT, 2, "p2", 2));
 
-        sinkAndValidate(
-                table,
-                Arrays.asList(
-                        srcRow(RowKind.DELETE, 1, "p1", 1), srcRow(RowKind.INSERT, 3, "p3", 3)),
-                iterator,
-                Row.ofKind(RowKind.DELETE, 1, "p1", 1),
-                Row.ofKind(RowKind.INSERT, 3, "p3", 3));
+        if (table.primaryKeys().size() > 0) {
+            // only primary key table can accept delete
+            sinkAndValidate(
+                    table,
+                    Arrays.asList(
+                            srcRow(RowKind.DELETE, 1, "p1", 1), srcRow(RowKind.INSERT, 3, "p3", 3)),
+                    iterator,
+                    Row.ofKind(RowKind.DELETE, 1, "p1", 1),
+                    Row.ofKind(RowKind.INSERT, 3, "p3", 3));
+        }
     }
 
     private void sinkAndValidate(
@@ -444,7 +445,6 @@ public class FileStoreITCase extends AbstractTestBase {
             options.set(PATH, FailingFileIO.getFailingPath(failingName, temporaryPath));
         }
         options.set(FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        options.set(WRITE_MODE, WriteMode.CHANGE_LOG);
         return options;
     }
 

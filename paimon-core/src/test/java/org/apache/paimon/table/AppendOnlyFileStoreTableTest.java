@@ -19,7 +19,6 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -381,7 +380,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         configure.accept(conf);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
@@ -399,7 +397,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
@@ -416,7 +413,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
             throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         conf.set(CoreOptions.BUCKET, -1);
         configure.accept(conf);
         TableSchema tableSchema =
