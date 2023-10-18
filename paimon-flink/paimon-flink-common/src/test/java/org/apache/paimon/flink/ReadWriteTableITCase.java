@@ -19,7 +19,6 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
@@ -31,7 +30,6 @@ import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 
-import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.apache.flink.api.dag.Transformation;
@@ -79,7 +77,6 @@ import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
-import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildPaimonTable;
 import static org.apache.paimon.flink.FlinkConnectorOptions.INFER_SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
@@ -506,93 +503,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testStreamingReadWriteWithPartitionedRecordsWithoutPk() throws Exception {
-        // file store bounded read with merge
-        List<Row> initialRecords =
-                Arrays.asList(
-                        // dt = 2022-01-01
-                        changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                        changelogRow("+I", "Euro", 116L, "2022-01-01"),
-                        changelogRow("-D", "Euro", 116L, "2022-01-01"),
-                        changelogRow("+I", "Yen", 1L, "2022-01-01"),
-                        changelogRow("-D", "Yen", 1L, "2022-01-01"),
-                        // dt = 2022-01-02
-                        changelogRow("+I", "Euro", 114L, "2022-01-02"),
-                        changelogRow("-U", "Euro", 114L, "2022-01-02"),
-                        changelogRow("+U", "Euro", 119L, "2022-01-02"),
-                        changelogRow("-D", "Euro", 119L, "2022-01-02"),
-                        changelogRow("+I", "Euro", 115L, "2022-01-02"));
-
-        String temporaryTable =
-                createTemporaryTable(
-                        Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
-                        Collections.emptyList(),
-                        Collections.singletonList("dt"),
-                        initialRecords,
-                        "dt:2022-01-01;dt:2022-01-02",
-                        false,
-                        "I,UA,UB,D");
-
-        String table =
-                createTable(
-                        Arrays.asList("currency STRING", "rate BIGINT", "dt STRING"),
-                        Collections.emptyList(),
-                        Collections.singletonList("dt"),
-                        ImmutableMap.of(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
-
-        insertIntoFromTable(temporaryTable, table);
-
-        checkFileStorePath(table, Arrays.asList("dt=2022-01-01", "dt=2022-01-02"));
-
-        testStreamingRead(
-                        buildSimpleQuery(table),
-                        Arrays.asList(
-                                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                                changelogRow("+I", "Euro", 115L, "2022-01-02")))
-                .close();
-
-        // test partition filter
-        testStreamingRead(
-                        buildQuery(table, "*", "WHERE dt IS NOT NULL"),
-                        Arrays.asList(
-                                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                                changelogRow("+I", "Euro", 115L, "2022-01-02")))
-                .close();
-
-        testStreamingRead(buildQuery(table, "*", "WHERE dt IS NULL"), Collections.emptyList())
-                .close();
-
-        // test field filter
-        testStreamingRead(
-                        buildQuery(table, "*", "WHERE currency = 'US Dollar' OR rate = 115"),
-                        Arrays.asList(
-                                changelogRow("+I", "US Dollar", 102L, "2022-01-01"),
-                                changelogRow("+I", "Euro", 115L, "2022-01-02")))
-                .close();
-
-        // test partition and field filter
-        testStreamingRead(
-                        buildQuery(
-                                table,
-                                "*",
-                                "WHERE (dt = '2022-01-02' AND currency = 'US Dollar') OR (dt = '2022-01-01' AND rate = 115)"),
-                        Collections.emptyList())
-                .close();
-
-        // test projection
-        testStreamingRead(
-                        buildQuery(table, "rate", ""),
-                        Arrays.asList(changelogRow("+I", 102L), changelogRow("+I", 115L)))
-                .close();
-
-        // test projection and filter
-        testStreamingRead(
-                        buildQuery(table, "rate", "WHERE dt <> '2022-01-01'"),
-                        Collections.singletonList(changelogRow("+I", 115L)))
-                .close();
-    }
-
-    @Test
     void testStreamingReadWriteWithNonPartitionedRecordsWithPk() throws Exception {
         // file store bounded read with merge
         List<Row> initialRecords =
@@ -647,79 +557,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         testStreamingRead(
                         buildQuery(table, "currency", "WHERE rate = 102"),
                         Collections.singletonList(changelogRow("+I", "US Dollar")))
-                .close();
-    }
-
-    @Test
-    public void testStreamingReadWriteWithNonPartitionedRecordsWithoutPk() throws Exception {
-        // default full scan mode, will merge
-        List<Row> initialRecords =
-                Arrays.asList(
-                        changelogRow("+I", "US Dollar", 102L),
-                        changelogRow("+I", "Euro", 114L),
-                        changelogRow("+I", "Yen", 1L),
-                        changelogRow("-U", "Euro", 114L),
-                        changelogRow("+U", "Euro", 116L),
-                        changelogRow("-D", "Euro", 116L),
-                        changelogRow("+I", "Euro", 119L),
-                        changelogRow("-U", "Euro", 119L),
-                        changelogRow("+U", "Euro", 119L),
-                        changelogRow("-D", "Yen", 1L),
-                        changelogRow("+I", null, 100L),
-                        changelogRow("+I", "HK Dollar", null));
-
-        String temporaryTable =
-                createTemporaryTable(
-                        Arrays.asList("currency STRING", "rate BIGINT"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        initialRecords,
-                        null,
-                        false,
-                        "I,UA,UB,D");
-
-        String table =
-                createTable(
-                        Arrays.asList("currency STRING", "rate BIGINT"),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        ImmutableMap.of(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString()));
-
-        insertIntoFromTable(temporaryTable, table);
-
-        checkFileStorePath(table, Collections.emptyList());
-
-        testStreamingRead(
-                        buildSimpleQuery(table),
-                        Arrays.asList(
-                                changelogRow("+I", "US Dollar", 102L),
-                                changelogRow("+I", "Euro", 119L),
-                                changelogRow("+I", null, 100L),
-                                changelogRow("+I", "HK Dollar", null)))
-                .close();
-
-        // test field filter
-        testStreamingRead(
-                        buildQuery(table, "*", "WHERE currency IS NOT NULL"),
-                        Arrays.asList(
-                                changelogRow("+I", "US Dollar", 102L),
-                                changelogRow("+I", "Euro", 119L),
-                                changelogRow("+I", "HK Dollar", null)))
-                .close();
-
-        testStreamingRead(
-                        buildQuery(table, "*", "WHERE rate IS NOT NULL"),
-                        Arrays.asList(
-                                changelogRow("+I", "US Dollar", 102L),
-                                changelogRow("+I", "Euro", 119L),
-                                changelogRow("+I", null, 100L)))
-                .close();
-
-        // test projection and filter
-        testStreamingRead(
-                        buildQuery(
-                                table, "rate", "WHERE currency IS NOT NULL AND rate IS NOT NULL"),
-                        Arrays.asList(changelogRow("+I", 102L), changelogRow("+I", 119L)))
                 .close();
     }
 
@@ -1483,7 +1320,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         supportUpdateEngines.add(CoreOptions.MergeEngine.PARTIAL_UPDATE);
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
             options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
@@ -1542,7 +1378,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     @Test
     public void testDefaultValueWithoutPrimaryKey() throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.AUTO.name());
         options.put(
                 CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
 
@@ -1578,7 +1413,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     public void testDefaultValueWithPrimaryKey(CoreOptions.MergeEngine mergeEngine)
             throws Exception {
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.AUTO.name());
         options.put(
                 CoreOptions.FIELDS_PREFIX + ".rate." + CoreOptions.DEFAULT_VALUE_SUFFIX, "1000");
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
@@ -1610,13 +1444,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         testBatchRead(querySql, expectedRecords);
     }
 
-    @ParameterizedTest
-    @EnumSource(WriteMode.class)
-    public void testUpdateWithoutPrimaryKey(WriteMode writeMode) throws Exception {
+    @Test
+    public void testUpdateWithoutPrimaryKey() throws Exception {
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), writeMode.toString());
-        options.put(MERGE_ENGINE.key(), MERGE_ENGINE.defaultValue().toString());
         String table =
                 createTable(
                         Arrays.asList(
@@ -1663,7 +1494,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
             options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
@@ -1704,13 +1534,10 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         }
     }
 
-    @ParameterizedTest
-    @EnumSource(WriteMode.class)
-    public void testDeleteWithoutPrimaryKey(WriteMode writeMode) throws Exception {
+    @Test
+    public void testDeleteWithoutPrimaryKey() throws Exception {
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), writeMode.toString());
-        options.put(MERGE_ENGINE.key(), MERGE_ENGINE.defaultValue().toString());
         String table =
                 createTable(
                         Arrays.asList(
@@ -1737,14 +1564,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 Arrays.asList(
                         changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
                         changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"));
-        if (writeMode == WriteMode.CHANGE_LOG) {
-            bEnv.executeSql(deleteStatement).await();
-            String querySql = String.format("SELECT * FROM %s", table);
-            testBatchRead(querySql, expectedRecords);
-        } else {
-            assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
-        }
+
+        assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
+                .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
     }
 
     @ParameterizedTest
@@ -1756,7 +1578,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
             options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());
@@ -1837,7 +1658,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
-        options.put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
         if (mergeEngine == FIRST_ROW) {
             options.put(CHANGELOG_PRODUCER.key(), LOOKUP.toString());

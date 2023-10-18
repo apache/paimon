@@ -23,13 +23,14 @@ import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
-import org.apache.paimon.mergetree.compact.ValueCountMergeFunction;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -48,6 +49,8 @@ import org.apache.paimon.types.VarCharType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -59,6 +62,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link KeyValueFileStoreRead}. */
@@ -129,7 +133,7 @@ public class KeyValueFileStoreReadTest {
                                                 new org.apache.paimon.types.BigIntType()));
                             }
                         },
-                        ValueCountMergeFunction.factory());
+                        TestValueCountMergeFunction.factory());
         List<KeyValue> readData =
                 writeThenRead(
                         data,
@@ -263,7 +267,7 @@ public class KeyValueFileStoreReadTest {
             throws Exception {
         Path path = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
-        boolean valueCountMode = mfFactory.create() instanceof ValueCountMergeFunction;
+        boolean valueCountMode = mfFactory.create() instanceof TestValueCountMergeFunction;
         schemaManager.createTable(
                 new Schema(
                         (valueCountMode ? keyType : valueType).getFields(),
@@ -287,5 +291,65 @@ public class KeyValueFileStoreReadTest {
                         extractor,
                         mfFactory)
                 .build();
+    }
+
+    private static class TestValueCountMergeFunction implements MergeFunction<KeyValue> {
+
+        private KeyValue latestKv;
+        private long total;
+        private KeyValue reused;
+
+        protected TestValueCountMergeFunction() {}
+
+        @Override
+        public void reset() {
+            latestKv = null;
+            total = 0;
+        }
+
+        @Override
+        public void add(KeyValue kv) {
+            checkArgument(
+                    kv.valueKind() == RowKind.INSERT,
+                    "In value count mode, only insert records come. This is a bug. Please file an issue.");
+            latestKv = kv;
+            total += count(kv.value());
+        }
+
+        @Override
+        @Nullable
+        public KeyValue getResult() {
+            if (total == 0) {
+                return null;
+            }
+
+            if (reused == null) {
+                reused = new KeyValue();
+            }
+            return reused.replace(
+                    latestKv.key(),
+                    latestKv.sequenceNumber(),
+                    RowKind.INSERT,
+                    GenericRow.of(total));
+        }
+
+        private long count(InternalRow value) {
+            checkArgument(!value.isNullAt(0), "Value count should not be null.");
+            return value.getLong(0);
+        }
+
+        public static MergeFunctionFactory<KeyValue> factory() {
+            return new Factory();
+        }
+
+        private static class Factory implements MergeFunctionFactory<KeyValue> {
+
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
+                return new TestValueCountMergeFunction();
+            }
+        }
     }
 }

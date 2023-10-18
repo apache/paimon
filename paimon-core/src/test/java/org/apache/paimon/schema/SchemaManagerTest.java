@@ -19,7 +19,6 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -248,7 +247,6 @@ public class SchemaManagerTest {
     public void testChangelogTableWithFullCompaction() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("key", "value");
-        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
         options.put(
                 CoreOptions.CHANGELOG_PRODUCER.key(),
                 CoreOptions.ChangelogProducer.FULL_COMPACTION.toString());
@@ -256,8 +254,8 @@ public class SchemaManagerTest {
         final Schema schemaWithoutPrimaryKeys =
                 new Schema(
                         rowType.getFields(),
-                        Collections.EMPTY_LIST,
-                        Collections.EMPTY_LIST,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
                         options,
                         "");
         assertThatThrownBy(() -> manager.createTable(schemaWithoutPrimaryKeys))
@@ -267,25 +265,6 @@ public class SchemaManagerTest {
         final Schema schemaWithPrimaryKeys =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
         retryArtificialException(() -> manager.createTable(schemaWithPrimaryKeys));
-    }
-
-    @Test
-    public void testAppendOnlyTableWithPrimaryKey() {
-        RowType newType = RowType.of(new IntType(), new BigIntType());
-        Map<String, String> options = new HashMap<>();
-        options.put(CoreOptions.WRITE_MODE.key(), WriteMode.APPEND_ONLY.toString());
-        Schema schema =
-                new Schema(
-                        newType.getFields(),
-                        partitionKeys,
-                        primaryKeys,
-                        options,
-                        "append-only table with primary key");
-        assertThatThrownBy(() -> retryArtificialException(() -> manager.createTable(schema)))
-                .isInstanceOf(RuntimeException.class)
-                .hasMessage(
-                        "Cannot define any primary key in an append-only table. "
-                                + "Set 'write-mode'='change-log' if still want to keep the primary key definition.");
     }
 
     @Test

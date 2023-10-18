@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -53,7 +52,7 @@ import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/** {@link FileStoreTable} for {@link WriteMode#CHANGE_LOG} write mode with primary keys. */
+/** {@link FileStoreTable} for primary key table. */
 public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;

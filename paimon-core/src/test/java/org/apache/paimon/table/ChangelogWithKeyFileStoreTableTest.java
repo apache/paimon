@@ -21,7 +21,6 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -1096,7 +1095,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
@@ -1114,7 +1112,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
             throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         configure.accept(conf);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

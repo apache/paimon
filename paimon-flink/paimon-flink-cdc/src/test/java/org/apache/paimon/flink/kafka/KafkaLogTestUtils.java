@@ -20,7 +20,6 @@ package org.apache.paimon.flink.kafka;
 
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -60,7 +59,6 @@ import java.util.stream.IntStream;
 import static org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
-import static org.apache.paimon.CoreOptions.WRITE_MODE;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
@@ -231,7 +229,6 @@ public class KafkaLogTestUtils {
                                 put(BOOTSTRAP_SERVERS.key(), getBootstrapServers());
                                 put(TOPIC.key(), topic);
                                 put(DYNAMIC_PARTITION_OVERWRITE.key(), "false");
-                                put(WRITE_MODE.key(), WriteMode.CHANGE_LOG.toString());
                             }
                         });
 

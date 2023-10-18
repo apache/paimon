@@ -17,7 +17,6 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.paimon.WriteMode
 import org.apache.paimon.spark.sources.PaimonSourceOffset
 
 import org.apache.spark.sql.Row
@@ -34,7 +33,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         val query = spark.readStream
           .format("paimon")
@@ -72,7 +71,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDirs {
       (checkpointDir1, checkpointDir2) =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         // set scan.snapshot-id = 3, this query can read the latest changes.
         val query1 = spark.readStream
@@ -130,7 +129,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
         // timestamp that is before this table is created and data is written.
         val ts1 = System.currentTimeMillis()
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
         // timestamp that is after this table is created and data is written.
         val ts2 = System.currentTimeMillis()
 
@@ -184,7 +183,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDirs {
       (checkpointDir1, checkpointDir2) =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         val query1 = spark.readStream
           .format("paimon")
@@ -240,7 +239,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDirs {
       (checkpointDir1, checkpointDir2) =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         val query1 = spark.readStream
           .format("paimon")
@@ -298,7 +297,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         val query = spark.readStream
           .format("paimon")
@@ -334,7 +333,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, snapshotToDataSplitNum) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         val query = spark.readStream
           .format("paimon")
@@ -372,7 +371,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, snapshotToDataSplitNum) =
-          prepareTableAndGetLocation(3, WriteMode.APPEND_ONLY)
+          prepareTableAndGetLocation(3, false)
         val totalDataSplitNum = snapshotToDataSplitNum.values.sum
 
         val query = spark.readStream
@@ -425,7 +424,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         val query = spark.readStream
           .format("paimon")
@@ -457,7 +456,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDirs {
       (checkpointDir1, checkpointDir2) =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         assertThrows[StreamingQueryException] {
           spark.readStream
@@ -524,7 +523,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(0, WriteMode.APPEND_ONLY)
+          prepareTableAndGetLocation(0, false)
 
         val query = spark.readStream
           .format("paimon")
@@ -577,7 +576,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         val query = spark.readStream
           .format("paimon")
@@ -610,7 +609,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, snapshotData, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         assertThrows[IllegalArgumentException] {
           spark.readStream
@@ -633,7 +632,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, _, _, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG)
+          prepareTableAndGetLocation(3, true)
 
         val query = spark.readStream
           .format("paimon")
@@ -657,10 +656,10 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     withTempDir {
       checkpointDir =>
         val TableSnapshotState(_, location, _, latestChanges, _) =
-          prepareTableAndGetLocation(3, WriteMode.CHANGE_LOG, tableName = "T1")
+          prepareTableAndGetLocation(3, true, tableName = "T1")
 
         val TableSnapshotState(_, targetLocation, _, _, _) =
-          prepareTableAndGetLocation(0, WriteMode.APPEND_ONLY, tableName = "T2")
+          prepareTableAndGetLocation(0, false, tableName = "T2")
 
         val df = spark.readStream
           .format("paimon")
@@ -717,21 +716,20 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
   /** Create a paimon table, insert some data, return the location of this table. */
   private def prepareTableAndGetLocation(
       snapshotNum: Int,
-      writeMode: WriteMode,
+      hasPk: Boolean,
       tableName: String = "T"): TableSnapshotState = {
 
     spark.sql(s"DROP TABLE IF EXISTS $tableName")
 
-    val primaryKeysProp = if (writeMode == WriteMode.CHANGE_LOG) {
+    val primaryKeysProp = if (hasPk) {
       "'primary-key'='a',"
     } else {
       ""
     }
-    spark.sql(
-      s"""
-         |CREATE TABLE $tableName (a INT, b STRING)
-         |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='2', 'file.format'='parquet')
-         |""".stripMargin)
+    spark.sql(s"""
+                 |CREATE TABLE $tableName (a INT, b STRING)
+                 |TBLPROPERTIES ($primaryKeysProp 'bucket'='2', 'file.format'='parquet')
+                 |""".stripMargin)
     val table = loadTable(tableName)
     val location = table.location().getPath
 
@@ -740,10 +738,10 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     var latestChanges = Array.empty[(Int, String)]
 
     def updateData(row: (Int, String)): Unit = {
-      writeMode match {
-        case WriteMode.CHANGE_LOG =>
+      hasPk match {
+        case true =>
           mergedData += (row._1 -> row._2)
-        case WriteMode.APPEND_ONLY =>
+        case false =>
           unmergedData += row
         case _ =>
           throw new IllegalArgumentException("Please provide write mode explicitly.")
@@ -753,10 +751,10 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
     def currentTableSnapshotState: (Array[Row], Array[Row]) = {
       def toRow(data: (Int, String)) = Row(data._1, data._2)
 
-      writeMode match {
-        case WriteMode.CHANGE_LOG =>
+      hasPk match {
+        case true =>
           (mergedData.toArray[(Int, String)].map(toRow), latestChanges.map(toRow))
-        case WriteMode.APPEND_ONLY =>
+        case false =>
           (unmergedData.sorted.toArray.map(toRow), latestChanges.map(toRow))
         case _ =>
           throw new IllegalArgumentException("Please provide write mode explicitly.")

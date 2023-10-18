@@ -18,8 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataFileMeta;
@@ -45,7 +43,6 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
     @BeforeEach
     public void before() throws Exception {
         super.before();
-        tableConfig.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
     }
 
     @Override

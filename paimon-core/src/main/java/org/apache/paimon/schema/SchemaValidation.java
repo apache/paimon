@@ -20,7 +20,6 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
@@ -40,7 +39,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -54,8 +52,6 @@ import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
-import static org.apache.paimon.CoreOptions.WRITE_MODE;
-import static org.apache.paimon.WriteMode.APPEND_ONLY;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -84,17 +80,7 @@ public class SchemaValidation {
         validateStartupMode(options);
 
         ChangelogProducer changelogProducer = options.changelogProducer();
-        if (options.writeMode() == WriteMode.APPEND_ONLY
-                && changelogProducer != ChangelogProducer.NONE) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "Can not set the %s to %s and %s at the same time.",
-                            WRITE_MODE.key(), APPEND_ONLY, CHANGELOG_PRODUCER.key()));
-        }
-
-        if (options.writeMode() == WriteMode.AUTO
-                && schema.primaryKeys().isEmpty()
-                && changelogProducer != ChangelogProducer.NONE) {
+        if (schema.primaryKeys().isEmpty() && changelogProducer != ChangelogProducer.NONE) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Can not set %s on table without primary keys, please define primary keys.",
@@ -109,23 +95,6 @@ public class SchemaValidation {
                 SNAPSHOT_NUM_RETAINED_MIN.key()
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
-
-        // Only changelog tables with primary keys support full compaction or lookup
-        // changelog producer
-        if (options.writeMode() == WriteMode.CHANGE_LOG) {
-            switch (changelogProducer) {
-                case FULL_COMPACTION:
-                case LOOKUP:
-                    if (schema.primaryKeys().isEmpty()) {
-                        throw new UnsupportedOperationException(
-                                "Changelog table with "
-                                        + changelogProducer
-                                        + " must have primary keys");
-                    }
-                    break;
-                default:
-            }
-        }
 
         // Get the format type here which will try to convert string value to {@Code
         // FileFormatType}. If the string value is illegal, an exception will be thrown.
@@ -149,13 +118,6 @@ public class SchemaValidation {
                                             "Field name[%s] in schema cannot start with [%s]",
                                             f, KEY_FIELD_PREFIX));
                         });
-
-        // Cannot define any primary key in an append-only table.
-        if (!schema.primaryKeys().isEmpty() && Objects.equals(APPEND_ONLY, options.writeMode())) {
-            throw new RuntimeException(
-                    "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if "
-                            + "still want to keep the primary key definition.");
-        }
 
         if (options.bucket() == -1 && options.toMap().get(BUCKET_KEY.key()) != null) {
             throw new RuntimeException(

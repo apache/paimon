@@ -17,7 +17,6 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.WriteMode._
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
@@ -26,26 +25,25 @@ import java.sql.Date
 
 class DataFrameWriteTest extends PaimonSparkTestBase {
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
-          test(s"Write data into Paimon directly: write-mode: $writeMode, bucket: $bucket") {
+          test(s"Write data into Paimon directly: has-pk: $hasPk, bucket: $bucket") {
 
             val _spark = spark
             import _spark.implicits._
 
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a',"
             } else {
               ""
             }
 
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b STRING)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |""".stripMargin)
 
             val paimonTable = loadTable("T")
             val location = paimonTable.location().getPath
@@ -58,7 +56,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
 
             val df2 = Seq((1, "a2"), (3, "c")).toDF("a", "b")
             df2.write.format("paimon").mode("append").save(location)
-            val expected = if (writeMode == CHANGE_LOG) {
+            val expected = if (hasPk) {
               Row(1, "a2") :: Row(2, "b") :: Row(3, "c") :: Nil
             } else {
               Row(1, "a") :: Row(1, "a2") :: Row(2, "b") :: Row(3, "c") :: Nil
@@ -74,25 +72,24 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
       }
   }
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
-          test(s"Schema evolution: write data into Paimon: $writeMode, bucket: $bucket") {
+          test(s"Schema evolution: write data into Paimon: $hasPk, bucket: $bucket") {
             val _spark = spark
             import _spark.implicits._
 
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a',"
             } else {
               ""
             }
 
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b STRING)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |""".stripMargin)
 
             val paimonTable = loadTable("T")
             val location = paimonTable.location().getPath
@@ -111,7 +108,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
               .mode("append")
               .option("write.merge-schema", "true")
               .save(location)
-            val expected2 = if (writeMode == CHANGE_LOG) {
+            val expected2 = if (hasPk) {
               Row(1, "a2", 123L, Map("k" -> 11.1)) ::
                 Row(2, "b", null, null) :: Row(3, "c", 345L, Map("k" -> 33.3)) :: Nil
             } else {
@@ -132,7 +129,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
               .mode("append")
               .option("write.merge-schema", "true")
               .save(location)
-            val expected3 = if (writeMode == CHANGE_LOG) {
+            val expected3 = if (hasPk) {
               Row(1L, "a2", BigDecimal.decimal(123), Map("k" -> 11.1)) :: Row(
                 2L,
                 "b2",
@@ -163,26 +160,25 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
       }
   }
 
-  writeModes.foreach {
-    writeMode =>
+  withPk.foreach {
+    hasPk =>
       bucketModes.foreach {
         bucket =>
           test(
-            s"Schema evolution: write data into Paimon with allowExplicitCast = true: $writeMode, bucket: $bucket") {
+            s"Schema evolution: write data into Paimon with allowExplicitCast = true: $hasPk, bucket: $bucket") {
             val _spark = spark
             import _spark.implicits._
 
-            val primaryKeysProp = if (writeMode == CHANGE_LOG) {
+            val primaryKeysProp = if (hasPk) {
               "'primary-key'='a',"
             } else {
               ""
             }
 
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a INT, b STRING)
-                 |TBLPROPERTIES ($primaryKeysProp 'write-mode'='${writeMode.toString}', 'bucket'='$bucket')
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a INT, b STRING)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |""".stripMargin)
 
             val paimonTable = loadTable("T")
             val location = paimonTable.location().getPath
@@ -202,7 +198,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
               .mode("append")
               .option("write.merge-schema", "true")
               .save(location)
-            val expected2 = if (writeMode == CHANGE_LOG) {
+            val expected2 = if (hasPk) {
               Row(1, "2023-08-01", 12.3d, ts) ::
                 Row(2, "2023-08-02", null, null) :: Row(3, "2023-08-03", 34.5d, ts) :: Nil
             } else {
@@ -237,7 +233,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
               .option("write.merge-schema", "true")
               .option("write.merge-schema.explicit-cast", "true")
               .save(location)
-            val expected3 = if (writeMode == CHANGE_LOG) {
+            val expected3 = if (hasPk) {
               Row(1L, Date.valueOf("2023-08-01"), 12, ts.toString) :: Row(
                 2L,
                 date,

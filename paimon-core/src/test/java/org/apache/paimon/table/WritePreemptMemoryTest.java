@@ -19,7 +19,6 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -91,7 +90,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     protected FileStoreTable createFileStoreTable(Consumer<Options> configure) throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         // Run with minimal memory to ensure a more intense preempt
         // Currently a writer needs at least one page
         int pages = 10;
@@ -114,7 +112,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         // Run with minimal memory to ensure a more intense preempt
         // Currently a writer needs at least one page
         int pages = 10;

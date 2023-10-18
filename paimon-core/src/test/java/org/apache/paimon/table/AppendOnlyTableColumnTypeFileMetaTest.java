@@ -18,8 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -35,7 +33,6 @@ public class AppendOnlyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
     @BeforeEach
     public void before() throws Exception {
         super.before();
-        tableConfig.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
     }
 
     @Override

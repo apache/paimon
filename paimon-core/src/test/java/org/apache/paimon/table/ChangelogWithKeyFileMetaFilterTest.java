@@ -18,8 +18,6 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -41,7 +39,6 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @BeforeEach
     public void before() throws Exception {
         super.before();
-        tableConfig.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
     }
 
     @Test

@@ -32,7 +32,6 @@ import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.ChangelogValueCountFileStoreTable;
 import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
@@ -141,8 +140,6 @@ public class DataTableSource extends FlinkTableSource {
 
         if (table instanceof AppendOnlyFileStoreTable) {
             return ChangelogMode.insertOnly();
-        } else if (table instanceof ChangelogValueCountFileStoreTable) {
-            return ChangelogMode.all();
         } else if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
 

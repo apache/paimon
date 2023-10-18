@@ -19,7 +19,6 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -370,7 +369,6 @@ public class PaimonStorageHandlerITCase {
 
         Options conf = getBasicConf();
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         RowType rowType =
                 RowType.of(
                         new DataType[] {
@@ -458,7 +456,6 @@ public class PaimonStorageHandlerITCase {
 
         Options conf = getBasicConf();
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.CHANGE_LOG);
         RowType rowType =
                 RowType.of(
                         new DataType[] {

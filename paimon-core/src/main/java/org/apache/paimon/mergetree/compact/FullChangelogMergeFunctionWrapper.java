@@ -56,10 +56,6 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
             int maxLevel,
             RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
-        Preconditions.checkArgument(
-                !(mergeFunction instanceof ValueCountMergeFunction),
-                "Value count merge function does not need to produce changelog from full compaction. "
-                        + "Please set changelog producer to 'input'.");
         this.mergeFunction = mergeFunction;
         this.maxLevel = maxLevel;
         this.valueEqualiser = valueEqualiser;

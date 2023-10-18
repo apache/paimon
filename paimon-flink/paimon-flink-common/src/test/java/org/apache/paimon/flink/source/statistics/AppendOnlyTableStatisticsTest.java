@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.source.statistics;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
@@ -34,7 +33,6 @@ public class AppendOnlyTableStatisticsTest extends FileStoreTableStatisticsTestB
     protected FileStoreTable createStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.WRITE_MODE, WriteMode.APPEND_ONLY);
         conf.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath)

@@ -19,7 +19,6 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.WriteMode;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -94,31 +93,12 @@ public class FileStoreTableFactory {
             TableSchema tableSchema,
             Options dynamicOptions,
             CatalogEnvironment catalogEnvironment) {
-        FileStoreTable table;
-        Options coreOptions = Options.fromMap(tableSchema.options());
-        WriteMode writeMode = coreOptions.get(CoreOptions.WRITE_MODE);
-        if (writeMode == WriteMode.AUTO) {
-            writeMode =
-                    tableSchema.primaryKeys().isEmpty()
-                            ? WriteMode.APPEND_ONLY
-                            : WriteMode.CHANGE_LOG;
-            coreOptions.set(CoreOptions.WRITE_MODE, writeMode);
-        }
-        if (writeMode == WriteMode.APPEND_ONLY) {
-            table =
-                    new AppendOnlyFileStoreTable(
-                            fileIO, tablePath, tableSchema, catalogEnvironment);
-        } else {
-            if (tableSchema.primaryKeys().isEmpty()) {
-                table =
-                        new ChangelogValueCountFileStoreTable(
+        FileStoreTable table =
+                tableSchema.primaryKeys().isEmpty()
+                        ? new AppendOnlyFileStoreTable(
+                                fileIO, tablePath, tableSchema, catalogEnvironment)
+                        : new ChangelogWithKeyFileStoreTable(
                                 fileIO, tablePath, tableSchema, catalogEnvironment);
-            } else {
-                table =
-                        new ChangelogWithKeyFileStoreTable(
-                                fileIO, tablePath, tableSchema, catalogEnvironment);
-            }
-        }
         return table.copy(dynamicOptions.toMap());
     }
 }
