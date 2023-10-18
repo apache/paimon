@@ -89,10 +89,10 @@ public class FlinkTableSink extends FlinkTableSinkBase
     public RowLevelUpdateInfo applyRowLevelUpdate(
             List<Column> updatedColumns, @Nullable RowLevelModificationScanContext context) {
         // Since only UPDATE_AFTER type messages can be received at present,
-        // AppendOnlyFileStoreTable and ChangelogValueCountFileStoreTable without primary keys
-        // cannot correctly handle old data, so they are marked as unsupported. Similarly, it is not
-        // allowed to update the primary key column when updating the column of
-        // ChangelogWithKeyFileStoreTable, because the old data cannot be handled correctly.
+        // AppendOnlyFileStoreTable cannot correctly handle old data, so they are marked as
+        // unsupported. Similarly, it is not allowed to update the primary key column when updating
+        // the column of ChangelogWithKeyFileStoreTable, because the old data cannot be handled
+        // correctly.
         if (table instanceof ChangelogWithKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
