@@ -19,10 +19,11 @@
 package org.apache.paimon.flink.sink.index;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
-import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.Table;
@@ -30,14 +31,13 @@ import org.apache.paimon.table.source.AbstractInnerTableScan;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -80,21 +80,24 @@ public class IndexBootstrap implements Serializable {
                         .newReadBuilder()
                         .withProjection(projection);
 
-        String minPartition =
-                CoreOptions.fromMap(table.options()).crossPartitionUpsertBootstrapMinPartition();
-        if (minPartition != null) {
-            int partIndex = fieldNames.indexOf(table.partitionKeys().get(0));
-            Object minPart = TypeUtils.castFromString(minPartition, rowType.getTypeAt(partIndex));
-            PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
-            readBuilder =
-                    readBuilder.withFilter(predicateBuilder.greaterOrEqual(partIndex, minPart));
+        AbstractInnerTableScan tableScan = (AbstractInnerTableScan) readBuilder.newScan();
+        List<Split> splits =
+                tableScan
+                        .withBucketFilter(bucket -> bucket % numAssigners == assignId)
+                        .plan()
+                        .splits();
+
+        Duration indexTtl = CoreOptions.fromMap(table.options()).crossPartitionUpsertIndexTtl();
+        if (indexTtl != null) {
+            long indexTtlMillis = indexTtl.toMillis();
+            long currentTime = System.currentTimeMillis();
+            splits =
+                    splits.stream()
+                            .filter(split -> filterSplit(split, indexTtlMillis, currentTime))
+                            .collect(Collectors.toList());
         }
 
-        AbstractInnerTableScan tableScan = (AbstractInnerTableScan) readBuilder.newScan();
-        TableScan.Plan plan =
-                tableScan.withBucketFilter(bucket -> bucket % numAssigners == assignId).plan();
-
-        for (Split split : plan.splits()) {
+        for (Split split : splits) {
             try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(split)) {
                 int bucket = ((DataSplit) split).bucket();
                 GenericRow bucketRow = GenericRow.of(bucket);
@@ -103,6 +106,18 @@ public class IndexBootstrap implements Serializable {
                         .forEachRemaining(collector);
             }
         }
+    }
+
+    @VisibleForTesting
+    static boolean filterSplit(Split split, long indexTtl, long currentTime) {
+        List<DataFileMeta> files = ((DataSplit) split).dataFiles();
+        for (DataFileMeta file : files) {
+            long fileTime = file.creationTimeEpochMillis();
+            if (currentTime <= fileTime + indexTtl) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static RowType bootstrapType(TableSchema schema) {

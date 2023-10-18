@@ -22,21 +22,28 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.DynamicBucketRow;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
-import static org.apache.paimon.CoreOptions.CROSS_PARTITION_UPSERT_BOOTSTRAP_MIN_PARTITION;
+import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
+import static org.apache.paimon.flink.sink.index.IndexBootstrap.filterSplit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link IndexBootstrap}. */
@@ -90,24 +97,42 @@ public class IndexBootstrapTest extends TableTestBase {
                 .containsExactlyInAnyOrder(
                         GenericRow.of(2, 1, 3), GenericRow.of(4, 2, 5), GenericRow.of(6, 3, 7));
         result.clear();
+    }
 
-        // test bootstrap min partition
-        indexBootstrap =
-                new IndexBootstrap(
-                        table.copy(
-                                Collections.singletonMap(
-                                        CROSS_PARTITION_UPSERT_BOOTSTRAP_MIN_PARTITION.key(),
-                                        "2")));
+    @Test
+    public void testFilterSplit() {
+        assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 50, 230)).isTrue();
+        assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 50, 300)).isFalse();
+        assertThat(filterSplit(newSplit(newFile(100), newFile(200)), 200, 230)).isTrue();
+    }
 
-        indexBootstrap.bootstrap(2, 0, consumer);
-        assertThat(result)
-                .containsExactlyInAnyOrder(GenericRow.of(7, 3, 8), GenericRow.of(5, 2, 6));
-        result.clear();
+    private DataSplit newSplit(DataFileMeta... files) {
+        return DataSplit.builder()
+                .withSnapshot(1)
+                .withPartition(EMPTY_ROW)
+                .withBucket(0)
+                .withDataFiles(Arrays.asList(files))
+                .build();
+    }
 
-        indexBootstrap.bootstrap(2, 1, consumer);
-        assertThat(result)
-                .containsExactlyInAnyOrder(GenericRow.of(4, 2, 5), GenericRow.of(6, 3, 7));
-        result.clear();
+    private static DataFileMeta newFile(long timeMillis) {
+        return new DataFileMeta(
+                "",
+                1,
+                1,
+                DataFileMeta.EMPTY_MIN_KEY,
+                DataFileMeta.EMPTY_MAX_KEY,
+                DataFileMeta.EMPTY_KEY_STATS,
+                null,
+                0,
+                1,
+                0L,
+                DataFileMeta.DUMMY_LEVEL,
+                Collections.emptyList(),
+                Timestamp.fromLocalDateTime(
+                        Instant.ofEpochMilli(timeMillis)
+                                .atZone(ZoneId.systemDefault())
+                                .toLocalDateTime()));
     }
 
     private DynamicBucketRow row(int pt, int col, int pk, int bucket) {
