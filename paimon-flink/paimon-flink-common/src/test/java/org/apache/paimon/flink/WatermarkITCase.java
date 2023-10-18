@@ -48,7 +48,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
                 "'scan.watermark.idle-timeout'='1s'",
                 "'scan.watermark.alignment.group'='group'",
                 "'scan.watermark.alignment.update-interval'='2s'",
-                "'scan.watermark.alignment.max-drift'='1s',");
+                "'scan.watermark.alignment.max-drift'='1s'");
     }
 
     private void innerTestWatermark(String... options) throws Exception {

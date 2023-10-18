@@ -360,13 +360,16 @@ public class FileStoreITCase extends AbstractTestBase {
                 Row.ofKind(RowKind.INSERT, 1, "p1", 1),
                 Row.ofKind(RowKind.INSERT, 2, "p2", 2));
 
-        sinkAndValidate(
-                table,
-                Arrays.asList(
-                        srcRow(RowKind.DELETE, 1, "p1", 1), srcRow(RowKind.INSERT, 3, "p3", 3)),
-                iterator,
-                Row.ofKind(RowKind.DELETE, 1, "p1", 1),
-                Row.ofKind(RowKind.INSERT, 3, "p3", 3));
+        if (table.primaryKeys().size() > 0) {
+            // only primary key table can accept delete
+            sinkAndValidate(
+                    table,
+                    Arrays.asList(
+                            srcRow(RowKind.DELETE, 1, "p1", 1), srcRow(RowKind.INSERT, 3, "p3", 3)),
+                    iterator,
+                    Row.ofKind(RowKind.DELETE, 1, "p1", 1),
+                    Row.ofKind(RowKind.INSERT, 3, "p3", 3));
+        }
     }
 
     private void sinkAndValidate(
