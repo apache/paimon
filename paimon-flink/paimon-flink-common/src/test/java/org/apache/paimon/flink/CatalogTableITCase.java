@@ -29,6 +29,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -407,6 +408,47 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
                         "Can not set the write-mode to append-only and changelog-producer at the same time.");
+    }
+
+    @Test
+    public void testShowPartitions() {
+        sql(
+                "CREATE TABLE NoPartitionTable (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ")");
+        assertThatThrownBy(() -> sql("SHOW PARTITIONS NoPartitionTable"))
+                .getRootCause()
+                .isInstanceOf(TableNotPartitionedException.class)
+                .hasMessage("Table default.NoPartitionTable in catalog PAIMON is not partitioned.");
+
+        sql(
+                "CREATE TABLE PartitionTable (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh)");
+        sql("INSERT INTO PartitionTable select 1,1,'a','2020-01-01','10'");
+        sql("INSERT INTO PartitionTable select 2,2,'b','2020-01-02','11'");
+        sql("INSERT INTO PartitionTable select 3,3,'c','2020-01-03','11'");
+        List<Row> result = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[dt=2020-01-01/hh=10], +I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11]]");
+
+        result = sql("SHOW PARTITIONS PartitionTable partition (hh='11')");
+        assertThat(result.toString())
+                .isEqualTo("[+I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11]]");
+
+        result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
+        assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-02/hh=11]]");
     }
 
     @Test
