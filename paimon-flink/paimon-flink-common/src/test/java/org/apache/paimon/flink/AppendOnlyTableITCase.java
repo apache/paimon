@@ -38,19 +38,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class AppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
-    public void testCreateTableWithPrimaryKey() {
-        assertThatThrownBy(
-                        () ->
-                                batchSql(
-                                        "CREATE TABLE pk_table (id INT PRIMARY KEY NOT ENFORCED, data STRING) "
-                                                + "WITH ('write-mode'='append-only')"))
-                .hasRootCauseInstanceOf(RuntimeException.class)
-                .hasRootCauseMessage(
-                        "Cannot define any primary key in an append-only table. Set 'write-mode'='change-log' if still "
-                                + "want to keep the primary key definition.");
-    }
-
-    @Test
     public void testCreateUnawareBucketTableWithBucketKey() {
         assertThatThrownBy(
                         () ->
@@ -231,8 +218,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testTimestampLzType() {
-        sql(
-                "CREATE TABLE t_table (id INT, data TIMESTAMP_LTZ(3)) WITH ('write-mode'='append-only')");
+        sql("CREATE TABLE t_table (id INT, data TIMESTAMP_LTZ(3))");
         batchSql("INSERT INTO t_table VALUES (1, TIMESTAMP '2023-02-03 20:20:20')");
         assertThat(batchSql("SELECT * FROM t_table"))
                 .containsExactly(
@@ -246,9 +232,9 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING) WITH ('write-mode'='append-only')",
-                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('write-mode'='append-only')",
-                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('write-mode'='append-only')");
+                "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING)",
+                "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt)",
+                "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>)");
     }
 
     private void testRejectChanges(RowKind kind) {

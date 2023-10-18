@@ -22,7 +22,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
@@ -294,34 +293,10 @@ public class SparkReadITCase extends SparkReadTestBase {
         assertThatThrownBy(
                         () ->
                                 spark.sql(
-                                        "CREATE TABLE T (a INT) TBLPROPERTIES ('write-mode' = 'append-only', 'changelog-producer' = 'input')"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Can not set the write-mode to append-only and changelog-producer at the same time.");
-
-        spark.sql("CREATE TABLE T (a INT) TBLPROPERTIES ('write-mode' = 'append-only')");
-
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                        "ALTER TABLE T SET TBLPROPERTIES('changelog-producer' 'input')"))
-                .getRootCause()
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Can not set the write-mode to append-only and changelog-producer at the same time.");
-    }
-
-    @Test
-    public void testChangelogProducerOnAppendOnlyTable() {
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
                                         "CREATE TABLE T (a INT) TBLPROPERTIES ('changelog-producer' = 'input')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
+                .hasMessage("Can not set changelog-producer on table without primary keys");
 
         spark.sql("CREATE TABLE T (a INT)");
 
@@ -331,8 +306,7 @@ public class SparkReadITCase extends SparkReadTestBase {
                                         "ALTER TABLE T SET TBLPROPERTIES('changelog-producer' 'input')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage(
-                        "Can not set changelog-producer on table without primary keys, please define primary keys.");
+                .hasMessage("Can not set changelog-producer on table without primary keys");
     }
 
     @Test
@@ -440,16 +414,15 @@ public class SparkReadITCase extends SparkReadTestBase {
 
     @Test
     public void testCreateAndDropTable() {
-        innerTest("MyTable1", true, true, false);
-        innerTest("MyTable2", true, false, false);
-        innerTest("MyTable3", false, false, false);
-        innerTest("MyTable4", false, false, true);
-        innerTest("MyTable5", false, true, false);
-        innerTest("MyTable6", false, true, true);
+        innerTest("MyTable1", true, true);
+        innerTest("MyTable2", true, false);
+        innerTest("MyTable3", false, false);
+        innerTest("MyTable4", false, false);
+        innerTest("MyTable5", false, true);
+        innerTest("MyTable6", false, true);
     }
 
-    private void innerTest(
-            String tableName, boolean hasPk, boolean partitioned, boolean appendOnly) {
+    private void innerTest(String tableName, boolean hasPk, boolean partitioned) {
         String ddlTemplate =
                 "CREATE TABLE default.%s (\n"
                         + "order_id BIGINT NOT NULL comment 'order_id',\n"
@@ -482,9 +455,6 @@ public class SparkReadITCase extends SparkReadTestBase {
         String partitionStr = "";
         if (hasPk) {
             tableProperties.put("primary-key", partitioned ? "order_id,dt,hh" : "order_id");
-        }
-        if (appendOnly) {
-            tableProperties.put("write-mode", "append-only");
         }
         if (partitioned) {
             partitionStr = "PARTITIONED BY (dt, hh)";
@@ -523,16 +493,6 @@ public class SparkReadITCase extends SparkReadTestBase {
                                                 tableName)))
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessageContaining("Alter primary key is not supported");
-        assertThatThrownBy(
-                        () ->
-                                spark.sql(
-                                        String.format(
-                                                "ALTER TABLE %s SET TBLPROPERTIES('write-mode' = 'append-only')",
-                                                tableName)))
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                UnsupportedOperationException.class,
-                                "Change 'write-mode' is not supported yet"));
 
         Path tablePath = new Path(warehousePath, String.format("default.db/%s", tableName));
         TableSchema schema = FileStoreTableFactory.create(LocalFileIO.create(), tablePath).schema();
@@ -555,12 +515,6 @@ public class SparkReadITCase extends SparkReadTestBase {
             assertThat(schema.partitionKeys()).containsExactly("dt", "hh");
         } else {
             assertThat(schema.partitionKeys()).isEmpty();
-        }
-
-        if (appendOnly) {
-            assertThat(schema.options()).containsEntry("write-mode", "append-only");
-        } else {
-            assertThat(schema.options()).doesNotContainEntry("write-mode", "append-only");
         }
 
         assertThat(schema.comment()).isEqualTo("table comment");

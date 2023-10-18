@@ -34,7 +34,6 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
                      |CREATE TABLE $tableName (a INT, b STRING)
                      |TBLPROPERTIES (
                      |  'primary-key'='a',
-                     |  'write-mode'='change-log',
                      |  'bucket'='2',
                      |  'changelog-producer' = 'lookup')
                      |""".stripMargin)
@@ -86,7 +85,6 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
                      |CREATE TABLE $tableName (a INT, b STRING)
                      |TBLPROPERTIES (
                      |  'primary-key'='a',
-                     |  'write-mode'='change-log',
                      |  'bucket'='2',
                      |  'changelog-producer' = 'lookup')
                      |""".stripMargin)
@@ -143,7 +141,6 @@ class PaimonCDCSourceTest extends PaimonSparkTestBase with StreamTest {
                      |CREATE TABLE $tableName (a INT, b STRING)
                      |TBLPROPERTIES (
                      |  'primary-key'='a',
-                     |  'write-mode'='change-log',
                      |  'bucket'='2',
                      |  'changelog-producer' = 'lookup')
                      |""".stripMargin)

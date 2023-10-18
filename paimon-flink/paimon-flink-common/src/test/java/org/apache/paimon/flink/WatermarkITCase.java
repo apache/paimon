@@ -55,7 +55,7 @@ public class WatermarkITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE T (f0 INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts) WITH ("
                         + String.join(",", options)
-                        + " 'write-mode'='append-only')");
+                        + ")");
 
         BlockingIterator<Row, Row> select =
                 BlockingIterator.of(

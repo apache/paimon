@@ -27,17 +27,13 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.table.api.StatementSet;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.testutils.junit.extensions.parameterized.ParameterizedTestExtension;
-import org.apache.flink.testutils.junit.extensions.parameterized.Parameters;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.Timeout;
-import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -47,30 +43,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** SQL ITCase for continuous file store. */
-@ExtendWith(ParameterizedTestExtension.class)
 public class ContinuousFileStoreITCase extends CatalogITCaseBase {
-
-    private final boolean changelogFile;
-
-    public ContinuousFileStoreITCase(boolean changelogFile) {
-        this.changelogFile = changelogFile;
-    }
-
-    @Parameters(name = "changelogFile-{0}")
-    public static Collection<Boolean> parameters() {
-        return Arrays.asList(true);
-    }
 
     @Override
     protected List<String> ddl() {
-        String options =
-                changelogFile
-                        ? " WITH('write-mode'='change-log','changelog-producer'='input')"
-                        : "";
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)" + options,
-                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
-                        + options);
+                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)",
+                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED) WITH('changelog-producer'='input')");
     }
 
     @TestTemplate

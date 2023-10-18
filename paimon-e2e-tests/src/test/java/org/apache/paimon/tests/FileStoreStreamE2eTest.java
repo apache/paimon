@@ -73,9 +73,9 @@ public class FileStoreStreamE2eTest extends E2eTestBase {
                 "CREATE TABLE IF NOT EXISTS ts_table (\n"
                         + "    a VARCHAR,\n"
                         + "    b INT,\n"
-                        + "    rn BIGINT\n"
+                        + "    rn BIGINT,\n"
+                        + "    PRIMARY KEY (a, b, rn) NOT ENFORCED,\n"
                         + ") WITH (\n"
-                        + "    'write-mode'='change-log',\n"
                         + "    'bucket' = '3'\n"
                         + ");";
 

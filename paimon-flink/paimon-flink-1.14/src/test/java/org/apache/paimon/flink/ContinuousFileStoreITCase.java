@@ -56,10 +56,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     @Override
     protected List<String> ddl() {
-        String options =
-                changelogFile
-                        ? " WITH('write-mode'='change-log','changelog-producer'='input')"
-                        : "";
+        String options = changelogFile ? " WITH('changelog-producer'='input')" : "";
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)" + options,
                 "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"

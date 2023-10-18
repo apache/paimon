@@ -349,7 +349,6 @@ CREATE TABLE MyTable (
 	c INT,
 	PRIMARY KEY (a) NOT ENFORCED
 ) WITH ( 
-	'write-mode' = 'change-log',
 	'merge-engine' = 'deduplicate' 
 );
 
@@ -400,7 +399,7 @@ For more information of 'delete', see
 {{< tab "Flink 1.17+" >}}
 {{< hint info >}}
 Important table properties setting:
-1. Only tables whose `write-mode` is set to `change-log` supports this feature.
+1. Only primary key tables support this feature.
 2. If the table has primary keys, [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) to support this feature.
    {{< /hint >}}
 
@@ -421,7 +420,6 @@ CREATE TABLE MyTable (
     dt String,
     PRIMARY KEY (id, dt) NOT ENFORCED
 ) PARTITIONED BY (dt) WITH ( 
-    'write-mode' = 'change-log',
     'merge-engine' = 'deduplicate' 
 );
 
