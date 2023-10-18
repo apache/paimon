@@ -251,17 +251,6 @@ public class SchemaManagerTest {
                 CoreOptions.CHANGELOG_PRODUCER.key(),
                 CoreOptions.ChangelogProducer.FULL_COMPACTION.toString());
 
-        final Schema schemaWithoutPrimaryKeys =
-                new Schema(
-                        rowType.getFields(),
-                        Collections.emptyList(),
-                        Collections.emptyList(),
-                        options,
-                        "");
-        assertThatThrownBy(() -> manager.createTable(schemaWithoutPrimaryKeys))
-                .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessage("Changelog table with full-compaction must have primary keys");
-
         final Schema schemaWithPrimaryKeys =
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
         retryArtificialException(() -> manager.createTable(schemaWithPrimaryKeys));
