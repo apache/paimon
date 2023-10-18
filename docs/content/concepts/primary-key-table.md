@@ -85,13 +85,9 @@ existing keys in the table when starting stream write job. Different merge engin
 Performance: For tables with a large amount of data, there will be a significant loss in performance. Moreover,
 initialization takes a long time.
 
-If your upsert does not rely on too old data, you can consider configuring index TTL and bootstrap-min-partition to
-reduce Index and initialization time:
-- `'cross-partition-upsert.index-ttl'`: The TTL in rocksdb index, this can avoid maintaining too many indexes and lead
-  to worse and worse performance.
-- `'cross-partition-upsert.bootstrap-min-partition'`: The min partition bootstrap of rocksdb index, bootstrap will only
-  read the partitions above it, and the smaller partitions will not be read into the index. This can reduce job startup
-  time and excessive initialization of index.
+If your upsert does not rely on too old data, you can consider configuring index TTL to reduce Index and initialization time:
+- `'cross-partition-upsert.index-ttl'`: The TTL in rocksdb index and initialization, this can avoid maintaining too many
+  indexes and lead to worse and worse performance.
 
 But please note that this may also cause data duplication.
 
