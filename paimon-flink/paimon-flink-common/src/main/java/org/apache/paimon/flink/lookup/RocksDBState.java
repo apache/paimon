@@ -77,7 +77,11 @@ public abstract class RocksDBState<K, V, CacheV> {
                         .build();
     }
 
-    protected byte[] serializeKey(K key) throws IOException {
+    public ColumnFamilyHandle columnFamily() {
+        return columnFamily;
+    }
+
+    public byte[] serializeKey(K key) throws IOException {
         keyOutView.clear();
         keySerializer.serialize(key, keyOutView);
         return keyOutView.getCopyOfBuffer();

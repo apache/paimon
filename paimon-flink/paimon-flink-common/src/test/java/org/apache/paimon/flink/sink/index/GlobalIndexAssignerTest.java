@@ -23,6 +23,7 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.TableTestBase;
@@ -85,33 +86,43 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         innerTestBucketAssign(true);
     }
 
+    private IOManager ioManager() {
+        return IOManager.create(new File(tempPath.toFile(), "io").getPath());
+    }
+
     private void innerTestBucketAssign(boolean enableTtl) throws Exception {
         GlobalIndexAssigner<InternalRow> assigner =
                 createAssigner(MergeEngine.DEDUPLICATE, enableTtl);
         List<Integer> output = new ArrayList<>();
-        assigner.open(new File(warehouse.getPath()), 2, 0, (row, bucket) -> output.add(bucket));
+        assigner.open(
+                ioManager(),
+                new File(warehouse.getPath()),
+                2,
+                0,
+                (row, bucket) -> output.add(bucket));
+        assigner.endBoostrap();
 
         // assign
-        assigner.process(GenericRow.of(1, 1, 1));
-        assigner.process(GenericRow.of(1, 2, 2));
-        assigner.process(GenericRow.of(1, 3, 3));
+        assigner.processInput(GenericRow.of(1, 1, 1));
+        assigner.processInput(GenericRow.of(1, 2, 2));
+        assigner.processInput(GenericRow.of(1, 3, 3));
         assertThat(output).containsExactly(0, 0, 0);
         output.clear();
 
         // full
-        assigner.process(GenericRow.of(1, 4, 4));
+        assigner.processInput(GenericRow.of(1, 4, 4));
         assertThat(output).containsExactly(2);
         output.clear();
 
         // another partition
-        assigner.process(GenericRow.of(2, 5, 5));
+        assigner.processInput(GenericRow.of(2, 5, 5));
         assertThat(output).containsExactly(0);
         output.clear();
 
         // read assigned
-        assigner.process(GenericRow.of(1, 4, 4));
-        assigner.process(GenericRow.of(1, 2, 2));
-        assigner.process(GenericRow.of(1, 3, 3));
+        assigner.processInput(GenericRow.of(1, 4, 4));
+        assigner.processInput(GenericRow.of(1, 2, 2));
+        assigner.processInput(GenericRow.of(1, 3, 3));
         assertThat(output).containsExactly(2, 0, 0);
         output.clear();
 
@@ -123,14 +134,16 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         GlobalIndexAssigner<InternalRow> assigner = createAssigner(MergeEngine.DEDUPLICATE);
         List<Tuple2<InternalRow, Integer>> output = new ArrayList<>();
         assigner.open(
+                ioManager(),
                 new File(warehouse.getPath()),
                 2,
                 0,
                 (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
+        assigner.endBoostrap();
 
         // change partition
-        assigner.process(GenericRow.of(1, 1, 1));
-        assigner.process(GenericRow.of(2, 1, 2));
+        assigner.processInput(GenericRow.of(1, 1, 1));
+        assigner.processInput(GenericRow.of(2, 1, 2));
         assertThat(output)
                 .containsExactly(
                         new Tuple2<>(GenericRow.of(1, 1, 1), 0),
@@ -139,14 +152,14 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         output.clear();
 
         // test partition 1 deleted
-        assigner.process(GenericRow.of(1, 2, 2));
-        assigner.process(GenericRow.of(1, 3, 3));
-        assigner.process(GenericRow.of(1, 4, 4));
+        assigner.processInput(GenericRow.of(1, 2, 2));
+        assigner.processInput(GenericRow.of(1, 3, 3));
+        assigner.processInput(GenericRow.of(1, 4, 4));
         assertThat(output.stream().map(t -> t.f1)).containsExactly(0, 0, 0);
         output.clear();
 
         // move from full bucket
-        assigner.process(GenericRow.of(2, 4, 4));
+        assigner.processInput(GenericRow.of(2, 4, 4));
         assertThat(output)
                 .containsExactly(
                         new Tuple2<>(GenericRow.ofKind(RowKind.DELETE, 1, 4, 4), 0),
@@ -154,7 +167,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         output.clear();
 
         // test partition 1 deleted
-        assigner.process(GenericRow.of(1, 5, 5));
+        assigner.processInput(GenericRow.of(1, 5, 5));
         assertThat(output.stream().map(t -> t.f1)).containsExactly(0);
         output.clear();
 
@@ -170,14 +183,16 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         GlobalIndexAssigner<InternalRow> assigner = createAssigner(mergeEngine);
         List<Tuple2<InternalRow, Integer>> output = new ArrayList<>();
         assigner.open(
+                ioManager(),
                 new File(warehouse.getPath()),
                 2,
                 0,
                 (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
+        assigner.endBoostrap();
 
         // change partition
-        assigner.process(GenericRow.of(1, 1, 1));
-        assigner.process(GenericRow.of(2, 1, 2));
+        assigner.processInput(GenericRow.of(1, 1, 1));
+        assigner.processInput(GenericRow.of(2, 1, 2));
         assertThat(output)
                 .containsExactly(
                         new Tuple2<>(GenericRow.of(1, 1, 1), 0),
@@ -185,9 +200,9 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         output.clear();
 
         // test partition 2 no effect
-        assigner.process(GenericRow.of(2, 2, 2));
-        assigner.process(GenericRow.of(2, 3, 3));
-        assigner.process(GenericRow.of(2, 4, 4));
+        assigner.processInput(GenericRow.of(2, 2, 2));
+        assigner.processInput(GenericRow.of(2, 3, 3));
+        assigner.processInput(GenericRow.of(2, 4, 4));
         assertThat(output.stream().map(t -> t.f1)).containsExactly(0, 0, 0);
         output.clear();
         assigner.close();
@@ -198,21 +213,23 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         GlobalIndexAssigner<InternalRow> assigner = createAssigner(MergeEngine.FIRST_ROW);
         List<Tuple2<InternalRow, Integer>> output = new ArrayList<>();
         assigner.open(
+                ioManager(),
                 new File(warehouse.getPath()),
                 2,
                 0,
                 (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
+        assigner.endBoostrap();
 
         // change partition
-        assigner.process(GenericRow.of(1, 1, 1));
-        assigner.process(GenericRow.of(2, 1, 2));
+        assigner.processInput(GenericRow.of(1, 1, 1));
+        assigner.processInput(GenericRow.of(2, 1, 2));
         assertThat(output).containsExactly(new Tuple2<>(GenericRow.of(1, 1, 1), 0));
         output.clear();
 
         // test partition 2 no effect
-        assigner.process(GenericRow.of(2, 2, 2));
-        assigner.process(GenericRow.of(2, 3, 3));
-        assigner.process(GenericRow.of(2, 4, 4));
+        assigner.processInput(GenericRow.of(2, 2, 2));
+        assigner.processInput(GenericRow.of(2, 3, 3));
+        assigner.processInput(GenericRow.of(2, 4, 4));
         assertThat(output.stream().map(t -> t.f1)).containsExactly(0, 0, 0);
         output.clear();
         assigner.close();
