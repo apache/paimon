@@ -90,6 +90,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
         sql(
                 "create table large_t (pt int, k int, v int, primary key (k) not enforced) partitioned by (pt) with ("
                         + "'bucket'='-1', "
+                        + "'rocksdb.compaction.level.target-file-size-base'='2 kb', "
                         + "'dynamic-bucket.target-row-num'='10000')");
         sql(
                 "create temporary table src (pt int, k int, v int) with ("
