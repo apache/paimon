@@ -880,6 +880,13 @@ public class CoreOptions implements Serializable {
                                     + "this can avoid maintaining too many indexes and lead to worse and worse performance, "
                                     + "but please note that this may also cause data duplication.");
 
+    public static final ConfigOption<Integer> CROSS_PARTITION_UPSERT_BOOTSTRAP_PARALLELISM =
+            key("cross-partition-upsert.bootstrap-parallelism")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "The parallelism for bootstrap in a single task for cross partition upsert.");
+
     public static final ConfigOption<Integer> ZORDER_VAR_LENGTH_CONTRIBUTION =
             key("zorder.var-length-contribution")
                     .intType()
@@ -1325,6 +1332,10 @@ public class CoreOptions implements Serializable {
 
     public Duration crossPartitionUpsertIndexTtl() {
         return options.get(CROSS_PARTITION_UPSERT_INDEX_TTL);
+    }
+
+    public int crossPartitionUpsertBootstrapParallelism() {
+        return options.get(CROSS_PARTITION_UPSERT_BOOTSTRAP_PARALLELISM);
     }
 
     public int varTypeSize() {

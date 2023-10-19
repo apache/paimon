@@ -87,6 +87,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testLargeRecords() {
+        setParallelism(1);
         sql(
                 "create table large_t (pt int, k int, v int, primary key (k) not enforced) partitioned by (pt) with ("
                         + "'bucket'='-1', "

@@ -18,23 +18,38 @@
 
 package org.apache.paimon.memory;
 
-import org.apache.paimon.annotation.Public;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Queue;
 
-import javax.annotation.Nullable;
+/** A {@link MemorySegmentPool} for allocated segments. */
+public class ArraySegmentPool implements MemorySegmentPool {
 
-/**
- * Interface describing entities that can provide memory segments.
- *
- * @since 0.4.0
- */
-@Public
-public interface MemorySegmentSource {
+    private final Queue<MemorySegment> segments;
+    private final int pageSize;
 
-    /**
-     * Gets the next memory segment. If no more segments are available, it returns null.
-     *
-     * @return The next memory segment, or null, if none is available.
-     */
-    @Nullable
-    MemorySegment nextSegment();
+    public ArraySegmentPool(List<MemorySegment> segments) {
+        this.segments = new LinkedList<>(segments);
+        this.pageSize = segments.get(0).size();
+    }
+
+    @Override
+    public int pageSize() {
+        return pageSize;
+    }
+
+    @Override
+    public void returnAll(List<MemorySegment> memory) {
+        segments.addAll(memory);
+    }
+
+    @Override
+    public int freePages() {
+        return segments.size();
+    }
+
+    @Override
+    public MemorySegment nextSegment() {
+        return segments.poll();
+    }
 }
