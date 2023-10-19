@@ -325,9 +325,11 @@ public abstract class AbstractFlinkTableFactory
         conf.keySet()
                 .forEach(
                         (key) -> {
-                            Matcher matcher = pattern.matcher(key);
-                            if (matcher.find()) {
-                                optionsFromTableConfig.put(matcher.group(5), conf.get(key));
+                            if (key.startsWith(FlinkConnectorOptions.TABLE_DYNAMIC_OPTION_PREFIX)) {
+                                Matcher matcher = pattern.matcher(key);
+                                if (matcher.find()) {
+                                    optionsFromTableConfig.put(matcher.group(5), conf.get(key));
+                                }
                             }
                         });
 
