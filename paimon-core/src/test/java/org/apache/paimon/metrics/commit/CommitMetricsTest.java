@@ -25,7 +25,6 @@ import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.Metrics;
-import org.apache.paimon.utils.ExceptionUtils;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,19 +58,12 @@ public class CommitMetricsTest {
     @Test
     public void testGenericMetricsRegistration() {
         MetricGroup genericMetricGroup = commitMetrics.getMetricGroup();
-        AssertionError error = null;
-        try {
-            assertThat(Metrics.getInstance().getMetricGroups().size()).isEqualTo(1);
-        } catch (AssertionError e) {
-            error =
-                    ExceptionUtils.firstOrSuppressed(
-                            e,
-                            new AssertionError(
-                                    "Please close the created TableCommit objects in case of metrics resource leak."));
-        }
-        if (error != null) {
-            throw error;
-        }
+        assertThat(Metrics.getInstance().getMetricGroups().size())
+                .withFailMessage(
+                        String.format(
+                                "Please close the created metric groups %s in case of metrics resource leak.",
+                                Metrics.groupsInfo()))
+                .isEqualTo(1);
         assertThat(genericMetricGroup.getGroupName()).isEqualTo(CommitMetrics.GROUP_NAME);
         Map<String, Metric> registeredMetrics = genericMetricGroup.getMetrics();
         assertThat(registeredMetrics.keySet())

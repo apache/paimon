@@ -190,4 +190,14 @@ public abstract class AbstractMetricGroup implements MetricGroup {
     public final boolean isClosed() {
         return closed;
     }
+
+    @Override
+    public String toString() {
+        return "MetricGroup{"
+                + "groupName="
+                + getGroupName()
+                + ", metrics="
+                + String.join(",", metrics.keySet())
+                + '}';
+    }
 }
