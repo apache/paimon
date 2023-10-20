@@ -16,18 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.metrics.commit;
+package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.metrics.Gauge;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.Metric;
-import org.apache.paimon.metrics.MetricGroup;
-import org.apache.paimon.metrics.Metrics;
+import org.apache.paimon.metrics.MetricRegistryImpl;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -40,58 +37,14 @@ import static org.assertj.core.api.Assertions.offset;
 
 /** Tests for {@link CommitMetrics}. */
 public class CommitMetricsTest {
+
     private static final String TABLE_NAME = "myTable";
 
-    private CommitMetrics commitMetrics;
-
-    @BeforeEach
-    public void beforeEach() {
-        commitMetrics = getCommitMetrics();
-    }
-
-    @AfterEach
-    public void afterEach() {
-        commitMetrics.close();
-    }
-
-    /** Tests the registration of the commit metrics. */
-    @Test
-    public void testGenericMetricsRegistration() {
-        MetricGroup genericMetricGroup = commitMetrics.getMetricGroup();
-        assertThat(Metrics.getInstance().getMetricGroups().size())
-                .withFailMessage(
-                        String.format(
-                                "Please close the created metric groups %s in case of metrics resource leak.",
-                                Metrics.groupsInfo()))
-                .isEqualTo(1);
-        assertThat(genericMetricGroup.getGroupName()).isEqualTo(CommitMetrics.GROUP_NAME);
-        Map<String, Metric> registeredMetrics = genericMetricGroup.getMetrics();
-        assertThat(registeredMetrics.keySet())
-                .containsExactlyInAnyOrder(
-                        CommitMetrics.LAST_COMMIT_DURATION,
-                        CommitMetrics.LAST_COMMIT_ATTEMPTS,
-                        CommitMetrics.LAST_GENERATED_SNAPSHOTS,
-                        CommitMetrics.LAST_PARTITIONS_WRITTEN,
-                        CommitMetrics.LAST_BUCKETS_WRITTEN,
-                        CommitMetrics.COMMIT_DURATION,
-                        CommitMetrics.LAST_TABLE_FILES_ADDED,
-                        CommitMetrics.LAST_TABLE_FILES_DELETED,
-                        CommitMetrics.LAST_TABLE_FILES_APPENDED,
-                        CommitMetrics.LAST_TABLE_FILES_COMMIT_COMPACTED,
-                        CommitMetrics.LAST_CHANGELOG_FILES_APPENDED,
-                        CommitMetrics.LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
-                        CommitMetrics.LAST_DELTA_RECORDS_APPENDED,
-                        CommitMetrics.LAST_CHANGELOG_RECORDS_APPENDED,
-                        CommitMetrics.LAST_DELTA_RECORDS_COMMIT_COMPACTED,
-                        CommitMetrics.LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED);
-
-        reportOnce(commitMetrics);
-        assertThat(Metrics.getInstance().getMetricGroups().size()).isEqualTo(1);
-    }
-
     /** Tests that the metrics are updated properly. */
+    @SuppressWarnings("unchecked")
     @Test
     public void testMetricsAreUpdated() {
+        CommitMetrics commitMetrics = getCommitMetrics();
         Map<String, Metric> registeredGenericMetrics = commitMetrics.getMetricGroup().getMetrics();
 
         // Check initial values
@@ -281,6 +234,6 @@ public class CommitMetricsTest {
     }
 
     private CommitMetrics getCommitMetrics() {
-        return new CommitMetrics(TABLE_NAME);
+        return new CommitMetrics(new MetricRegistryImpl(), TABLE_NAME);
     }
 }

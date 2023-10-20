@@ -18,6 +18,8 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.metrics.AbstractMetricRegistry;
+
 import javax.annotation.Nullable;
 
 import java.util.Map;
@@ -41,4 +43,6 @@ public interface InnerTableCommit extends StreamTableCommit, BatchTableCommit {
      * generated regardless of the configuration (No one trigger commit interface).
      */
     InnerTableCommit ignoreEmptyCommit(boolean ignoreEmptyCommit);
+
+    InnerTableCommit withMetricRegistry(AbstractMetricRegistry registry);
 }

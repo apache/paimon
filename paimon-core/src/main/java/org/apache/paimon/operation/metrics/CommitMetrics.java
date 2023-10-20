@@ -16,35 +16,32 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.metrics.commit;
+package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.metrics.AbstractMetricGroup;
-import org.apache.paimon.metrics.DescriptiveStatisticsHistogram;
+import org.apache.paimon.metrics.AbstractMetricRegistry;
 import org.apache.paimon.metrics.Histogram;
-import org.apache.paimon.metrics.groups.GenericMetricGroup;
+import org.apache.paimon.metrics.MetricGroup;
 
 /** Metrics to measure a commit. */
 public class CommitMetrics {
+
     private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
-    protected static final String GROUP_NAME = "commit";
+    private static final String GROUP_NAME = "commit";
 
-    private final AbstractMetricGroup genericMetricGroup;
+    private final MetricGroup metricGroup;
 
-    public CommitMetrics(String tableName) {
-        this.genericMetricGroup =
-                GenericMetricGroup.createGenericMetricGroup(tableName, GROUP_NAME);
+    public CommitMetrics(AbstractMetricRegistry registry, String tableName) {
+        this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
         registerGenericCommitMetrics();
     }
 
     @VisibleForTesting
-    public AbstractMetricGroup getMetricGroup() {
-        return genericMetricGroup;
+    public MetricGroup getMetricGroup() {
+        return metricGroup;
     }
 
-    private final Histogram durationHistogram =
-            new DescriptiveStatisticsHistogram(HISTOGRAM_WINDOW_SIZE);
-
+    private Histogram durationHistogram;
     private CommitStats latestCommit;
 
     @VisibleForTesting static final String LAST_COMMIT_DURATION = "lastCommitDuration";
@@ -80,48 +77,48 @@ public class CommitMetrics {
     @VisibleForTesting static final String LAST_BUCKETS_WRITTEN = "lastBucketsWritten";
 
     private void registerGenericCommitMetrics() {
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_COMMIT_DURATION, () -> latestCommit == null ? 0L : latestCommit.getDuration());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_COMMIT_ATTEMPTS, () -> latestCommit == null ? 0L : latestCommit.getAttempts());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_GENERATED_SNAPSHOTS,
                 () -> latestCommit == null ? 0L : latestCommit.getGeneratedSnapshots());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_PARTITIONS_WRITTEN,
                 () -> latestCommit == null ? 0L : latestCommit.getNumPartitionsWritten());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_BUCKETS_WRITTEN,
                 () -> latestCommit == null ? 0L : latestCommit.getNumBucketsWritten());
-        genericMetricGroup.histogram(COMMIT_DURATION, durationHistogram);
-        genericMetricGroup.gauge(
+        durationHistogram = metricGroup.histogram(COMMIT_DURATION, HISTOGRAM_WINDOW_SIZE);
+        metricGroup.gauge(
                 LAST_TABLE_FILES_ADDED,
                 () -> latestCommit == null ? 0L : latestCommit.getTableFilesAdded());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_TABLE_FILES_DELETED,
                 () -> latestCommit == null ? 0L : latestCommit.getTableFilesDeleted());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_TABLE_FILES_APPENDED,
                 () -> latestCommit == null ? 0L : latestCommit.getTableFilesAppended());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_TABLE_FILES_COMMIT_COMPACTED,
                 () -> latestCommit == null ? 0L : latestCommit.getTableFilesCompacted());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_CHANGELOG_FILES_APPENDED,
                 () -> latestCommit == null ? 0L : latestCommit.getChangelogFilesAppended());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_CHANGELOG_FILES_COMMIT_COMPACTED,
                 () -> latestCommit == null ? 0L : latestCommit.getChangelogFilesCompacted());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_DELTA_RECORDS_APPENDED,
                 () -> latestCommit == null ? 0L : latestCommit.getDeltaRecordsAppended());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_CHANGELOG_RECORDS_APPENDED,
                 () -> latestCommit == null ? 0L : latestCommit.getChangelogRecordsAppended());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_DELTA_RECORDS_COMMIT_COMPACTED,
                 () -> latestCommit == null ? 0L : latestCommit.getDeltaRecordsCompacted());
-        genericMetricGroup.gauge(
+        metricGroup.gauge(
                 LAST_CHANGELOG_RECORDS_COMMIT_COMPACTED,
                 () -> latestCommit == null ? 0L : latestCommit.getChangelogRecordsCompacted());
     }
@@ -129,9 +126,5 @@ public class CommitMetrics {
     public void reportCommit(CommitStats commitStats) {
         latestCommit = commitStats;
         durationHistogram.update(commitStats.getDuration());
-    }
-
-    public void close() {
-        this.genericMetricGroup.close();
     }
 }

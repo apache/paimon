@@ -21,11 +21,12 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.metrics.commit.CommitMetrics;
+import org.apache.paimon.metrics.AbstractMetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.PartitionExpire;
+import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.IOUtils;
@@ -70,13 +71,13 @@ public class TableCommitImpl implements InnerTableCommit {
     @Nullable private final Duration consumerExpireTime;
     private final ConsumerManager consumerManager;
 
+    private final ExecutorService expireMainExecutor;
+    private final AtomicReference<Throwable> expireError;
+
+    private final String tableName;
+
     @Nullable private Map<String, String> overwritePartition = null;
-
     private boolean batchCommitted = false;
-
-    private ExecutorService expireMainExecutor;
-    private AtomicReference<Throwable> expireError;
-    private final CommitMetrics commitMetrics;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -89,8 +90,7 @@ public class TableCommitImpl implements InnerTableCommit {
             ConsumerManager consumerManager,
             ExpireExecutionMode expireExecutionMode,
             String tableName) {
-        this.commitMetrics = new CommitMetrics(tableName);
-        commit.withLock(lock).withMetrics(commitMetrics);
+        commit.withLock(lock);
         if (expire != null) {
             expire.withLock(lock);
         }
@@ -115,6 +115,8 @@ public class TableCommitImpl implements InnerTableCommit {
                                 new ExecutorThreadFactory(
                                         Thread.currentThread().getName() + "expire-main-thread"));
         this.expireError = new AtomicReference<>(null);
+
+        this.tableName = tableName;
     }
 
     @Override
@@ -126,6 +128,12 @@ public class TableCommitImpl implements InnerTableCommit {
     @Override
     public TableCommitImpl ignoreEmptyCommit(boolean ignoreEmptyCommit) {
         commit.ignoreEmptyCommit(ignoreEmptyCommit);
+        return this;
+    }
+
+    @Override
+    public InnerTableCommit withMetricRegistry(AbstractMetricRegistry registry) {
+        commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;
     }
 
@@ -265,7 +273,6 @@ public class TableCommitImpl implements InnerTableCommit {
         }
         IOUtils.closeQuietly(lock);
         expireMainExecutor.shutdownNow();
-        commitMetrics.close();
     }
 
     @Override
