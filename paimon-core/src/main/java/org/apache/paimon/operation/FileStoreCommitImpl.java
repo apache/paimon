@@ -34,6 +34,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.metrics.commit.CommitMetrics;
+import org.apache.paimon.metrics.commit.CommitStats;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -112,6 +114,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
 
+    private CommitMetrics commitMetrics;
+
     public FileStoreCommitImpl(
             FileIO fileIO,
             SchemaManager schemaManager,
@@ -149,6 +153,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
         this.lock = null;
         this.ignoreEmptyCommit = true;
+        this.commitMetrics = null;
     }
 
     @Override
@@ -192,6 +197,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.debug("Ready to commit\n" + committable.toString());
         }
 
+        long started = System.nanoTime();
+        int generatedSnapshot = 0;
+        int attempts = 0;
         Snapshot latestSnapshot = null;
         Long safeLatestSnapshotId = null;
         List<ManifestEntry> baseEntries = new ArrayList<>();
@@ -208,63 +216,102 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 compactTableFiles,
                 compactChangelog,
                 appendIndexFiles);
+        try {
+            if (!ignoreEmptyCommit
+                    || !appendTableFiles.isEmpty()
+                    || !appendChangelog.isEmpty()
+                    || !appendIndexFiles.isEmpty()) {
+                // Optimization for common path.
+                // Step 1:
+                // Read manifest entries from changed partitions here and check for conflicts.
+                // If there are no other jobs committing at the same time,
+                // we can skip conflict checking in tryCommit method.
+                // This optimization is mainly used to decrease the number of times we read from
+                // files.
+                latestSnapshot = snapshotManager.latestSnapshot();
+                if (latestSnapshot != null) {
+                    // it is possible that some partitions only have compact changes,
+                    // so we need to contain all changes
+                    baseEntries.addAll(
+                            readAllEntriesFromChangedPartitions(
+                                    latestSnapshot, appendTableFiles, compactTableFiles));
+                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
+                    safeLatestSnapshotId = latestSnapshot.id();
+                }
 
-        if (!ignoreEmptyCommit
-                || !appendTableFiles.isEmpty()
-                || !appendChangelog.isEmpty()
-                || !appendIndexFiles.isEmpty()) {
-            // Optimization for common path.
-            // Step 1:
-            // Read manifest entries from changed partitions here and check for conflicts.
-            // If there are no other jobs committing at the same time,
-            // we can skip conflict checking in tryCommit method.
-            // This optimization is mainly used to decrease the number of times we read from files.
-            latestSnapshot = snapshotManager.latestSnapshot();
-            if (latestSnapshot != null) {
-                // it is possible that some partitions only have compact changes,
-                // so we need to contain all changes
-                baseEntries.addAll(
-                        readAllEntriesFromChangedPartitions(
-                                latestSnapshot, appendTableFiles, compactTableFiles));
-                noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, appendTableFiles);
-                safeLatestSnapshotId = latestSnapshot.id();
+                attempts +=
+                        tryCommit(
+                                appendTableFiles,
+                                appendChangelog,
+                                appendIndexFiles,
+                                committable.identifier(),
+                                committable.watermark(),
+                                committable.logOffsets(),
+                                Snapshot.CommitKind.APPEND,
+                                safeLatestSnapshotId);
+                generatedSnapshot += 1;
             }
 
-            tryCommit(
-                    appendTableFiles,
-                    appendChangelog,
-                    appendIndexFiles,
-                    committable.identifier(),
-                    committable.watermark(),
-                    committable.logOffsets(),
-                    Snapshot.CommitKind.APPEND,
-                    safeLatestSnapshotId);
-        }
+            if (!compactTableFiles.isEmpty() || !compactChangelog.isEmpty()) {
+                // Optimization for common path.
+                // Step 2:
+                // Add appendChanges to the manifest entries read above and check for conflicts.
+                // If there are no other jobs committing at the same time,
+                // we can skip conflict checking in tryCommit method.
+                // This optimization is mainly used to decrease the number of times we read from
+                // files.
+                if (safeLatestSnapshotId != null) {
+                    baseEntries.addAll(appendTableFiles);
+                    noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
+                    // assume this compact commit follows just after the append commit created above
+                    safeLatestSnapshotId += 1;
+                }
 
-        if (!compactTableFiles.isEmpty() || !compactChangelog.isEmpty()) {
-            // Optimization for common path.
-            // Step 2:
-            // Add appendChanges to the manifest entries read above and check for conflicts.
-            // If there are no other jobs committing at the same time,
-            // we can skip conflict checking in tryCommit method.
-            // This optimization is mainly used to decrease the number of times we read from files.
-            if (safeLatestSnapshotId != null) {
-                baseEntries.addAll(appendTableFiles);
-                noConflictsOrFail(latestSnapshot.commitUser(), baseEntries, compactTableFiles);
-                // assume this compact commit follows just after the append commit created above
-                safeLatestSnapshotId += 1;
+                attempts +=
+                        tryCommit(
+                                compactTableFiles,
+                                compactChangelog,
+                                Collections.emptyList(),
+                                committable.identifier(),
+                                committable.watermark(),
+                                committable.logOffsets(),
+                                Snapshot.CommitKind.COMPACT,
+                                safeLatestSnapshotId);
+                generatedSnapshot += 1;
             }
-
-            tryCommit(
-                    compactTableFiles,
-                    compactChangelog,
-                    Collections.emptyList(),
-                    committable.identifier(),
-                    committable.watermark(),
-                    committable.logOffsets(),
-                    Snapshot.CommitKind.COMPACT,
-                    safeLatestSnapshotId);
+        } finally {
+            long commitDuration = (System.nanoTime() - started) / 1_000_000;
+            if (this.commitMetrics != null) {
+                reportCommit(
+                        appendTableFiles,
+                        appendChangelog,
+                        compactTableFiles,
+                        compactChangelog,
+                        commitDuration,
+                        generatedSnapshot,
+                        attempts);
+            }
         }
+    }
+
+    private void reportCommit(
+            List<ManifestEntry> appendTableFiles,
+            List<ManifestEntry> appendChangelogFiles,
+            List<ManifestEntry> compactTableFiles,
+            List<ManifestEntry> compactChangelogFiles,
+            long commitDuration,
+            int generatedSnapshots,
+            int attempts) {
+        CommitStats commitStats =
+                new CommitStats(
+                        appendTableFiles,
+                        appendChangelogFiles,
+                        compactTableFiles,
+                        compactChangelogFiles,
+                        commitDuration,
+                        generatedSnapshots,
+                        attempts);
+        commitMetrics.reportCommit(commitStats);
     }
 
     @Override
@@ -280,6 +327,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     properties);
         }
 
+        long started = System.nanoTime();
+        int generatedSnapshot = 0;
+        int attempts = 0;
         List<ManifestEntry> appendTableFiles = new ArrayList<>();
         List<ManifestEntry> appendChangelog = new ArrayList<>();
         List<ManifestEntry> compactTableFiles = new ArrayList<>();
@@ -309,65 +359,83 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             LOG.warn(warnMessage.toString());
         }
 
-        boolean skipOverwrite = false;
-        // partition filter is built from static or dynamic partition according to properties
-        Predicate partitionFilter = null;
-        if (dynamicPartitionOverwrite) {
-            if (appendTableFiles.isEmpty()) {
-                // in dynamic mode, if there is no changes to commit, no data will be deleted
-                skipOverwrite = true;
+        try {
+            boolean skipOverwrite = false;
+            // partition filter is built from static or dynamic partition according to properties
+            Predicate partitionFilter = null;
+            if (dynamicPartitionOverwrite) {
+                if (appendTableFiles.isEmpty()) {
+                    // in dynamic mode, if there is no changes to commit, no data will be deleted
+                    skipOverwrite = true;
+                } else {
+                    partitionFilter =
+                            appendTableFiles.stream()
+                                    .map(ManifestEntry::partition)
+                                    .distinct()
+                                    // partition filter is built from new data's partitions
+                                    .map(p -> PredicateBuilder.equalPartition(p, partitionType))
+                                    .reduce(PredicateBuilder::or)
+                                    .orElseThrow(
+                                            () ->
+                                                    new RuntimeException(
+                                                            "Failed to get dynamic partition filter. This is unexpected."));
+                }
             } else {
-                partitionFilter =
-                        appendTableFiles.stream()
-                                .map(ManifestEntry::partition)
-                                .distinct()
-                                // partition filter is built from new data's partitions
-                                .map(p -> PredicateBuilder.equalPartition(p, partitionType))
-                                .reduce(PredicateBuilder::or)
-                                .orElseThrow(
-                                        () ->
-                                                new RuntimeException(
-                                                        "Failed to get dynamic partition filter. This is unexpected."));
-            }
-        } else {
-            partitionFilter = PredicateBuilder.partition(partition, partitionType);
-            // sanity check, all changes must be done within the given partition
-            if (partitionFilter != null) {
-                for (ManifestEntry entry : appendTableFiles) {
-                    if (!partitionFilter.test(
-                            partitionObjectConverter.convert(entry.partition()))) {
-                        throw new IllegalArgumentException(
-                                "Trying to overwrite partition "
-                                        + partition
-                                        + ", but the changes in "
-                                        + pathFactory.getPartitionString(entry.partition())
-                                        + " does not belong to this partition");
+                partitionFilter = PredicateBuilder.partition(partition, partitionType);
+                // sanity check, all changes must be done within the given partition
+                if (partitionFilter != null) {
+                    for (ManifestEntry entry : appendTableFiles) {
+                        if (!partitionFilter.test(
+                                partitionObjectConverter.convert(entry.partition()))) {
+                            throw new IllegalArgumentException(
+                                    "Trying to overwrite partition "
+                                            + partition
+                                            + ", but the changes in "
+                                            + pathFactory.getPartitionString(entry.partition())
+                                            + " does not belong to this partition");
+                        }
                     }
                 }
             }
-        }
 
-        // overwrite new files
-        if (!skipOverwrite) {
-            tryOverwrite(
-                    partitionFilter,
-                    appendTableFiles,
-                    appendIndexFiles,
-                    committable.identifier(),
-                    committable.watermark(),
-                    committable.logOffsets());
-        }
+            // overwrite new files
+            if (!skipOverwrite) {
+                attempts +=
+                        tryOverwrite(
+                                partitionFilter,
+                                appendTableFiles,
+                                appendIndexFiles,
+                                committable.identifier(),
+                                committable.watermark(),
+                                committable.logOffsets());
+                generatedSnapshot += 1;
+            }
 
-        if (!compactTableFiles.isEmpty()) {
-            tryCommit(
-                    compactTableFiles,
-                    Collections.emptyList(),
-                    Collections.emptyList(),
-                    committable.identifier(),
-                    committable.watermark(),
-                    committable.logOffsets(),
-                    Snapshot.CommitKind.COMPACT,
-                    null);
+            if (!compactTableFiles.isEmpty()) {
+                attempts +=
+                        tryCommit(
+                                compactTableFiles,
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                committable.identifier(),
+                                committable.watermark(),
+                                committable.logOffsets(),
+                                Snapshot.CommitKind.COMPACT,
+                                null);
+                generatedSnapshot += 1;
+            }
+        } finally {
+            long commitDuration = (System.nanoTime() - started) / 1_000_000;
+            if (this.commitMetrics != null) {
+                reportCommit(
+                        appendTableFiles,
+                        Collections.emptyList(),
+                        compactTableFiles,
+                        Collections.emptyList(),
+                        commitDuration,
+                        generatedSnapshot,
+                        attempts);
+            }
         }
     }
 
@@ -430,6 +498,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
+    @Override
+    public FileStoreCommit withMetrics(CommitMetrics metrics) {
+        this.commitMetrics = metrics;
+        return this;
+    }
+
     private void collectChanges(
             List<CommitMessage> commitMessages,
             List<ManifestEntry> appendTableFiles,
@@ -481,7 +555,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 kind, commitMessage.partition(), commitMessage.bucket(), numBucket, file);
     }
 
-    private void tryCommit(
+    private int tryCommit(
             List<ManifestEntry> tableFiles,
             List<ManifestEntry> changelogFiles,
             List<IndexManifestEntry> indexFiles,
@@ -490,8 +564,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             Long safeLatestSnapshotId) {
+        int cnt = 0;
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            cnt++;
             if (tryCommitOnce(
                     tableFiles,
                     changelogFiles,
@@ -505,18 +581,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 break;
             }
         }
+        return cnt;
     }
 
-    private void tryOverwrite(
+    private int tryOverwrite(
             Predicate partitionFilter,
             List<ManifestEntry> changes,
             List<IndexManifestEntry> indexFiles,
             long identifier,
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets) {
+        int cnt = 0;
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot();
 
+            cnt++;
             List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
             List<IndexManifestEntry> indexChangesWithOverwrite = new ArrayList<>();
             if (latestSnapshot != null) {
@@ -565,6 +644,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 break;
             }
         }
+        return cnt;
     }
 
     @VisibleForTesting

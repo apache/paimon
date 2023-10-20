@@ -34,9 +34,9 @@ public class GenericMetricGroup extends AbstractMetricGroup {
     }
 
     public static GenericMetricGroup createGenericMetricGroup(
-            final String table, final String groupName) {
+            final String tableName, final String groupName) {
         Map<String, String> tags = new HashMap<>();
-        tags.put("table", table);
+        tags.put("table", tableName);
         return new GenericMetricGroup(tags, groupName);
     }
 
