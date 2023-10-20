@@ -71,21 +71,23 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
         super.initializeState(context);
-        org.apache.flink.runtime.io.disk.iomanager.IOManager ioManager =
+        org.apache.flink.runtime.io.disk.iomanager.IOManager flinkIoManager =
                 getContainingTask().getEnvironment().getIOManager();
-        File[] tmpDirs = ioManager.getSpillingDirectories();
+        File[] tmpDirs = flinkIoManager.getSpillingDirectories();
         File tmpDir = tmpDirs[ThreadLocalRandom.current().nextInt(tmpDirs.length)];
+        IOManager ioManager = IOManager.create(flinkIoManager.getSpillingDirectoriesPaths());
         assigner.open(
+                ioManager,
                 tmpDir,
                 getRuntimeContext().getNumberOfParallelSubtasks(),
                 getRuntimeContext().getIndexOfThisSubtask(),
                 this::collect);
         Options options = Options.fromMap(table.options());
-        long bufferSize = options.get(CoreOptions.WRITE_BUFFER_SIZE).getBytes();
+        long bufferSize = options.get(CoreOptions.WRITE_BUFFER_SIZE).getBytes() / 2;
         long pageSize = options.get(CoreOptions.PAGE_SIZE).getBytes();
         bootstrapBuffer =
                 RowBuffer.getBuffer(
-                        IOManager.create(ioManager.getSpillingDirectoriesPaths()),
+                        ioManager,
                         new HeapMemorySegmentPool(bufferSize, (int) pageSize),
                         new InternalRowSerializer(table.rowType()),
                         true);
@@ -106,7 +108,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
                     // is always true
                     bootstrapBuffer.put(toRow.apply(value));
                 } else {
-                    assigner.process(value);
+                    assigner.processInput(value);
                 }
                 break;
         }
@@ -124,10 +126,11 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
 
     private void endBootstrap() throws Exception {
         if (bootstrapBuffer != null) {
+            assigner.endBoostrap();
             bootstrapBuffer.complete();
             try (RowBuffer.RowBufferIterator iterator = bootstrapBuffer.newIterator()) {
                 while (iterator.advanceNext()) {
-                    assigner.process(fromRow.apply(iterator.getRow()));
+                    assigner.processInput(fromRow.apply(iterator.getRow()));
                 }
             }
             bootstrapBuffer.reset();

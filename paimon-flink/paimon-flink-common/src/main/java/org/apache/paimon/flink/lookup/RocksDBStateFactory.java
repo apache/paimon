@@ -21,30 +21,40 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.flink.RocksDBOptions;
 
+import org.apache.flink.table.runtime.util.KeyValueIterator;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.DBOptions;
+import org.rocksdb.EnvOptions;
+import org.rocksdb.IngestExternalFileOptions;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
+import org.rocksdb.SstFileWriter;
 import org.rocksdb.TtlDB;
 
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Factory to create state. */
 public class RocksDBStateFactory implements Closeable {
 
     public static final String MERGE_OPERATOR_NAME = "stringappendtest";
 
-    private RocksDB db;
-
+    private final Options options;
+    private final String path;
     private final ColumnFamilyOptions columnFamilyOptions;
+
+    private RocksDB db;
+    private int sstIndex = 0;
 
     public RocksDBStateFactory(
             String path, org.apache.paimon.options.Options conf, @Nullable Duration ttlSecs)
@@ -56,11 +66,12 @@ public class RocksDBStateFactory implements Closeable {
                                 .setStatsDumpPeriodSec(0)
                                 .setCreateIfMissing(true),
                         conf);
+        this.path = path;
         this.columnFamilyOptions =
                 RocksDBOptions.createColumnOptions(new ColumnFamilyOptions(), conf)
                         .setMergeOperatorName(MERGE_OPERATOR_NAME);
 
-        Options options = new Options(dbOptions, columnFamilyOptions);
+        this.options = new Options(dbOptions, columnFamilyOptions);
         try {
             this.db =
                     ttlSecs == null
@@ -68,6 +79,42 @@ public class RocksDBStateFactory implements Closeable {
                             : TtlDB.open(options, path, (int) ttlSecs.getSeconds(), false);
         } catch (RocksDBException e) {
             throw new IOException("Error while opening RocksDB instance.", e);
+        }
+    }
+
+    public void bulkLoad(ColumnFamilyHandle columnFamily, KeyValueIterator<byte[], byte[]> iterator)
+            throws RocksDBException, IOException {
+        long targetFileSize = options.targetFileSizeBase();
+
+        List<String> files = new ArrayList<>();
+        SstFileWriter writer = null;
+        long recordNum = 0;
+        while (iterator.advanceNext()) {
+            byte[] key = iterator.getKey();
+            byte[] value = iterator.getValue();
+
+            if (writer == null) {
+                writer = new SstFileWriter(new EnvOptions(), options);
+                String path = new File(this.path, "sst-" + (sstIndex++)).getPath();
+                writer.open(path);
+                files.add(path);
+            }
+
+            writer.put(key, value);
+            recordNum++;
+            if (recordNum % 1000 == 0 && writer.fileSize() >= targetFileSize) {
+                writer.finish();
+                writer = null;
+                recordNum = 0;
+            }
+        }
+
+        if (writer != null) {
+            writer.finish();
+        }
+
+        if (files.size() > 0) {
+            db.ingestExternalFile(columnFamily, files, new IngestExternalFileOptions());
         }
     }
 

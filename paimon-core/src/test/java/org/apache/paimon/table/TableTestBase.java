@@ -71,7 +71,7 @@ public abstract class TableTestBase {
     protected Path warehouse;
     protected Catalog catalog;
     protected String database;
-    @TempDir java.nio.file.Path tempPath;
+    @TempDir public java.nio.file.Path tempPath;
 
     @BeforeEach
     public void beforeEach() throws Catalog.DatabaseAlreadyExistException {

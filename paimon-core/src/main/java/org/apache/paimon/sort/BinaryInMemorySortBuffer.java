@@ -244,7 +244,9 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
 
     @Override
     public final MutableObjectIterator<BinaryRow> sortedIterator() {
-        new QuickSort().sort(this);
+        if (numRecords > 0) {
+            new QuickSort().sort(this);
+        }
         return iterator();
     }
 }
