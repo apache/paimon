@@ -24,6 +24,7 @@ import org.apache.paimon.utils.MathUtils;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -39,6 +40,10 @@ public class SimpleCollectingOutputView extends AbstractPagedOutputView {
     private final int segmentSizeBits;
 
     private int segmentNum;
+
+    public SimpleCollectingOutputView(MemorySegmentSource memSource, int segmentSize) {
+        this(new ArrayList<>(), memSource, segmentSize);
+    }
 
     public SimpleCollectingOutputView(
             List<MemorySegment> fullSegmentTarget, MemorySegmentSource memSource, int segmentSize) {

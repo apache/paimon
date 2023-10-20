@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -54,6 +55,10 @@ public class RowDataToObjectArrayConverter implements Serializable {
 
     public int getArity() {
         return fieldGetters.length;
+    }
+
+    public GenericRow toGenericRow(InternalRow rowData) {
+        return GenericRow.of(convert(rowData));
     }
 
     public Object[] convert(InternalRow rowData) {
