@@ -44,6 +44,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
@@ -122,6 +123,13 @@ public class SchemaValidation {
         if (options.bucket() == -1 && options.toMap().get(BUCKET_KEY.key()) != null) {
             throw new RuntimeException(
                     "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
+        }
+
+        if (options.bucket() == -1
+                && schema.primaryKeys().isEmpty()
+                && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
+            throw new RuntimeException(
+                    "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
         }
 
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
