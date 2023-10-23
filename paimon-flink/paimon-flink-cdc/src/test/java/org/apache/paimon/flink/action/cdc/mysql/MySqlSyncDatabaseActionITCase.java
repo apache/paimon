@@ -858,7 +858,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .includingTables("t.+")
                         .withMode(COMBINED.configString())
                         .build();
-        action.build();
+        action.withStreamExecutionEnvironment(env).build();
 
         if (Objects.nonNull(savepointPath)) {
             StreamGraph streamGraph = env.getStreamGraph();
