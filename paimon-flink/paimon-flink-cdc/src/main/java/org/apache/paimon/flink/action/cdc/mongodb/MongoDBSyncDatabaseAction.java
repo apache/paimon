@@ -34,7 +34,6 @@ import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import javax.annotation.Nullable;
 
@@ -117,7 +116,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     }
 
     @Override
-    public void build(StreamExecutionEnvironment env) throws Exception {
+    public void build() throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {
@@ -191,8 +190,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        build(env);
+        build();
         env.execute(String.format("MongoDB-Paimon Database Sync: %s", database));
     }
 }

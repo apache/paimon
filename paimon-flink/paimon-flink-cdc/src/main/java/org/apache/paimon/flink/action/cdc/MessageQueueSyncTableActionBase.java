@@ -35,7 +35,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -149,7 +148,7 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
     protected abstract String sourceName();
 
     @Override
-    public void build(StreamExecutionEnvironment env) throws Exception {
+    public void build() throws Exception {
         Source<String, ?, ?> source = buildSource();
 
         catalog.createDatabase(database, true);
@@ -273,8 +272,7 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        build(env);
+        build();
         env.execute(jobName());
     }
 }

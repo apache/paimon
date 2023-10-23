@@ -31,7 +31,6 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.data.RowData;
 import org.slf4j.Logger;
@@ -65,12 +64,12 @@ public class SortCompactAction extends CompactAction {
 
     @Override
     public void run() throws Exception {
-        build(env);
+        build();
         execute(env, "Sort Compact Job");
     }
 
     @Override
-    public void build(StreamExecutionEnvironment env) {
+    public void build() {
         // only support batch sort yet
         if (env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                 != RuntimeExecutionMode.BATCH) {

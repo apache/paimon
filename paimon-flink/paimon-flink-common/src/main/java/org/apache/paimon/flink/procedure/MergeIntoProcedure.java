@@ -221,6 +221,7 @@ public class MergeIntoProcedure extends ProcedureBase {
             action.withMatchedDelete(matchedDeleteCondition);
         }
 
+        action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
         MergeIntoActionFactory.validate(action);
 
         DataStream<RowData> dataStream = action.buildDataStream();

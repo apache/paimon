@@ -20,7 +20,7 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.factories.Factory;
-import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.utils.StringUtils;
 
@@ -65,10 +65,11 @@ public abstract class ProcedureBase implements Procedure, Factory {
     }
 
     protected String[] execute(
-            ProcedureContext procedureContext, Action action, String defaultJobName)
+            ProcedureContext procedureContext, ActionBase action, String defaultJobName)
             throws Exception {
         StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
-        action.build(env);
+        action.withStreamExecutionEnvironment(env);
+        action.build();
 
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultJobName);
