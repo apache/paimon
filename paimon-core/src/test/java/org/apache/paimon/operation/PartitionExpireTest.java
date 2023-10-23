@@ -36,6 +36,7 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -93,6 +94,29 @@ public class PartitionExpireTest {
                                                 "")))
                 .hasMessageContaining(
                         "Can not set 'partition.expiration-time' for non-partitioned table");
+    }
+
+    @Test
+    public void testIllegalPartition() throws Exception {
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE, VarCharType.STRING_TYPE).getFields(),
+                        Collections.singletonList("f0"),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+        table = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        write("20230101", "11");
+        write("abcd", "12");
+        write("20230101", "12");
+        write("20230103", "31");
+        write("20230103", "32");
+        write("20230105", "51");
+        PartitionExpire expire = newExpire();
+        expire.setLastCheck(date(1));
+        Assertions.assertDoesNotThrow(() -> expire.expire(date(8), Long.MAX_VALUE));
+        assertThat(read()).containsExactlyInAnyOrder("abcd:12");
     }
 
     @Test

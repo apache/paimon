@@ -92,7 +92,11 @@ public class PartitionExpire {
         List<Map<String, String>> expired = new ArrayList<>();
         for (BinaryRow partition : partitions) {
             Object[] array = toObjectArrayConverter.convert(partition);
+
             LocalDateTime partTime = timeExtractor.extract(partitionKeys, Arrays.asList(array));
+            if (partTime == null) {
+                continue;
+            }
             if (expireDateTime.isAfter(partTime)) {
                 expired.add(toPartitionString(array));
             }
