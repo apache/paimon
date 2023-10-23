@@ -18,12 +18,16 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.TableCommit;
 import org.apache.paimon.table.sink.TableCommitImpl;
+
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 
 import javax.annotation.Nullable;
 
@@ -38,11 +42,22 @@ import java.util.Map;
 public class StoreCommitter implements Committer<Committable, ManifestCommittable> {
 
     private final TableCommitImpl commit;
-    @Nullable private final CommitterMetrics metrics;
+    @Nullable private final CommitterMetrics committerMetrics;
 
-    public StoreCommitter(TableCommit commit, @Nullable CommitterMetrics metrics) {
+    public StoreCommitter(TableCommit commit, @Nullable OperatorMetricGroup metricGroup) {
         this.commit = (TableCommitImpl) commit;
-        this.metrics = metrics;
+
+        if (metricGroup != null) {
+            this.commit.withMetricRegistry(new FlinkMetricRegistry(metricGroup));
+            this.committerMetrics = new CommitterMetrics(metricGroup.getIOMetricGroup());
+        } else {
+            this.committerMetrics = null;
+        }
+    }
+
+    @VisibleForTesting
+    public CommitterMetrics getCommitterMetrics() {
+        return committerMetrics;
     }
 
     @Override
@@ -92,7 +107,7 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     private void calcNumBytesAndRecordsOut(List<ManifestCommittable> committables) {
-        if (metrics == null) {
+        if (committerMetrics == null) {
             return;
         }
 
@@ -111,8 +126,8 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
                 recordsOut += dataFileRowCountInc;
             }
         }
-        metrics.increaseNumBytesOut(bytesOut);
-        metrics.increaseNumRecordsOut(recordsOut);
+        committerMetrics.increaseNumBytesOut(bytesOut);
+        committerMetrics.increaseNumRecordsOut(recordsOut);
     }
 
     private static long calcTotalFileSize(List<DataFileMeta> files) {

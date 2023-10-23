@@ -37,6 +37,7 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -343,10 +344,10 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         }
 
         StreamTableCommit commit = table.newCommit(initialCommitUser);
-        CommitterMetrics metrics =
-                new CommitterMetrics(UnregisteredMetricsGroup.createOperatorIOMetricGroup());
-        StoreCommitter committer = new StoreCommitter(commit, metrics);
+        OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
+        StoreCommitter committer = new StoreCommitter(commit, metricGroup);
         committer.commit(Collections.singletonList(manifestCommittable));
+        CommitterMetrics metrics = committer.getCommitterMetrics();
         assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(275);
         assertThat(metrics.getNumRecordsOutCounter().getCount()).isEqualTo(2);
         committer.close();
@@ -401,7 +402,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 (user, metricGroup) ->
                         new StoreCommitter(
                                 table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                new CommitterMetrics(metricGroup)),
+                                metricGroup),
                 committableStateManager);
     }
 
@@ -416,7 +417,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 (user, metricGroup) ->
                         new StoreCommitter(
                                 table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                new CommitterMetrics(metricGroup)),
+                                metricGroup),
                 committableStateManager) {
             @Override
             public void initializeState(StateInitializationContext context) throws Exception {

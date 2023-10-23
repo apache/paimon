@@ -19,7 +19,7 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.metrics.groups.OperatorIOMetricGroup;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -54,6 +54,6 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
     interface Factory<CommitT, GlobalCommitT> extends Serializable {
 
         Committer<CommitT, GlobalCommitT> create(
-                String commitUser, OperatorIOMetricGroup metricGroup);
+                String commitUser, OperatorMetricGroup metricGroup);
     }
 }

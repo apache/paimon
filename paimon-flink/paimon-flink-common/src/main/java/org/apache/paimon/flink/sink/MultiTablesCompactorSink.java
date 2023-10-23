@@ -179,8 +179,7 @@ public class MultiTablesCompactorSink implements Serializable {
     protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>
             createCommitterFactory() {
         return (user, metricGroup) ->
-                new StoreMultiCommitter(
-                        catalogLoader, user, new CommitterMetrics(metricGroup), true);
+                new StoreMultiCommitter(catalogLoader, user, metricGroup, true);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {

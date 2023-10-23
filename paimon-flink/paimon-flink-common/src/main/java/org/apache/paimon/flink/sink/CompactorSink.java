@@ -42,8 +42,7 @@ public class CompactorSink extends FlinkSink<RowData> {
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory(
             boolean streamingCheckpointEnabled) {
-        return (user, metricGroup) ->
-                new StoreCommitter(table.newCommit(user), new CommitterMetrics(metricGroup));
+        return (user, metricGroup) -> new StoreCommitter(table.newCommit(user), metricGroup);
     }
 
     @Override
