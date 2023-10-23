@@ -59,12 +59,13 @@ public abstract class ActionBase implements Action {
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
 
-        // use the default env if user doesn't pass env
+        // use the default env if user doesn't pass one
         initFlinkEnv(StreamExecutionEnvironment.getExecutionEnvironment());
     }
 
-    public void withStreamExecutionEnvironment(StreamExecutionEnvironment env) {
+    public ActionBase withStreamExecutionEnvironment(StreamExecutionEnvironment env) {
         initFlinkEnv(env);
+        return this;
     }
 
     private void initFlinkEnv(StreamExecutionEnvironment env) {

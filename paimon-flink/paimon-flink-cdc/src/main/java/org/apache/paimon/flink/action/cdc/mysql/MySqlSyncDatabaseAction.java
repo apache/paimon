@@ -41,7 +41,6 @@ import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -188,7 +187,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     }
 
     @Override
-    public void build(StreamExecutionEnvironment env) throws Exception {
+    public void build() throws Exception {
         checkArgument(
                 !mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
                 MySqlSourceOptions.TABLE_NAME.key()
@@ -406,8 +405,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        build(env);
+        build();
         execute(env, String.format("MySQL-Paimon Database Sync: %s", database));
     }
 }

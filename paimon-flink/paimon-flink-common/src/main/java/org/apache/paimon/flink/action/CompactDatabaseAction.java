@@ -116,15 +116,15 @@ public class CompactDatabaseAction extends ActionBase {
     }
 
     @Override
-    public void build(StreamExecutionEnvironment env) {
+    public void build() {
         if (databaseCompactMode == MultiTablesSinkMode.DIVIDED) {
-            buildForDividedMode(env);
+            buildForDividedMode();
         } else {
-            buildForCombinedMode(env);
+            buildForCombinedMode();
         }
     }
 
-    private void buildForDividedMode(StreamExecutionEnvironment env) {
+    private void buildForDividedMode() {
         try {
             List<String> databases = catalog.listDatabases();
             for (String databaseName : databases) {
@@ -188,7 +188,7 @@ public class CompactDatabaseAction extends ActionBase {
         }
     }
 
-    private void buildForCombinedMode(StreamExecutionEnvironment env) {
+    private void buildForCombinedMode() {
 
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         boolean isStreaming =
@@ -240,8 +240,7 @@ public class CompactDatabaseAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        build(env);
+        build();
         execute(env, "Compact database job");
     }
 }

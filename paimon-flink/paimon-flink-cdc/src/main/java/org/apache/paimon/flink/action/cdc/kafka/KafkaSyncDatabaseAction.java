@@ -35,7 +35,6 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordSchemaBuilder;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import javax.annotation.Nullable;
 
@@ -141,7 +140,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
     }
 
     @Override
-    public void build(StreamExecutionEnvironment env) throws Exception {
+    public void build() throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
 
         if (!caseSensitive) {
@@ -212,8 +211,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
 
     @Override
     public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        build(env);
+        build();
         env.execute(String.format("KAFKA-Paimon Database Sync: %s", database));
     }
 }

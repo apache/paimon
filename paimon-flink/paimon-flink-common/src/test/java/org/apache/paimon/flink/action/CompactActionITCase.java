@@ -290,7 +290,8 @@ public class CompactActionITCase extends CompactActionITCaseBase {
 
         new CompactAction(warehouse, database, tableName)
                 .withPartitions(getSpecifiedPartitions())
-                .build(env);
+                .withStreamExecutionEnvironment(env)
+                .build();
         if (isStreaming) {
             env.executeAsync();
         } else {

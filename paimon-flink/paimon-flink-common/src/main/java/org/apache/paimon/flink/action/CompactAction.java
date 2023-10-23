@@ -75,7 +75,7 @@ public class CompactAction extends TableActionBase {
     }
 
     @Override
-    public void build(StreamExecutionEnvironment env) {
+    public void build() {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
@@ -120,8 +120,7 @@ public class CompactAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        build(env);
+        build();
         execute(env, "Compact job");
     }
 

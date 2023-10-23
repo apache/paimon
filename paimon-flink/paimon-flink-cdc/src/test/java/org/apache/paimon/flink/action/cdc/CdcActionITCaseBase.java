@@ -185,8 +185,8 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         return Arrays.asList(argKey, nullable.toString());
     }
 
-    public <T extends ActionBase> JobClient runActionWithDefaultEnv(T action) throws Exception {
-        action.build(env);
+    public JobClient runActionWithDefaultEnv(ActionBase action) throws Exception {
+        action.withStreamExecutionEnvironment(env).build();
         JobClient client = env.executeAsync();
         waitJobRunning(client);
         return client;

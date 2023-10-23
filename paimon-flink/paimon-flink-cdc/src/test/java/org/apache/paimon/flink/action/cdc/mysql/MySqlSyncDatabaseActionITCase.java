@@ -858,7 +858,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .includingTables("t.+")
                         .withMode(COMBINED.configString())
                         .build();
-        action.build(env);
+        action.build();
 
         if (Objects.nonNull(savepointPath)) {
             StreamGraph streamGraph = env.getStreamGraph();
@@ -1167,7 +1167,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                         .ignoreIncompatible(true)
                         .withMode(COMBINED.configString())
                         .build();
-        action.build(env);
+        action.build();
 
         assertThat(action.monitoredTables())
                 .containsOnly(

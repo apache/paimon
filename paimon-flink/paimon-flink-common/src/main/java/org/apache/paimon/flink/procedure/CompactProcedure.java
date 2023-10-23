@@ -111,7 +111,6 @@ public class CompactProcedure extends ProcedureBase {
             throw new IllegalArgumentException(
                     "You must specify 'order strategy' and 'order by columns' both.");
         }
-        action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
 
         if (!(StringUtils.isBlank(partitions) || "ALL".equals(partitions))) {
             action.withPartitions(getPartitions(partitions.split(";")));

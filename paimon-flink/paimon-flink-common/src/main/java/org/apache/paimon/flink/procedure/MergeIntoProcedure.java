@@ -190,7 +190,6 @@ public class MergeIntoProcedure extends ProcedureBase {
                         identifier.getDatabaseName(),
                         identifier.getObjectName(),
                         catalogOptions);
-        action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
         action.withTargetAlias(nullable(targetAlias));
 
         if (!sourceSqls.isEmpty()) {
@@ -222,6 +221,7 @@ public class MergeIntoProcedure extends ProcedureBase {
             action.withMatchedDelete(matchedDeleteCondition);
         }
 
+        action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
         MergeIntoActionFactory.validate(action);
 
         DataStream<RowData> dataStream = action.buildDataStream();

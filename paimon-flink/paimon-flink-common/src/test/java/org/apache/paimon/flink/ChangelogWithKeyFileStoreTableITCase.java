@@ -164,7 +164,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
         StreamExecutionEnvironment env = createStreamExecutionEnvironment(2000);
         env.setParallelism(1);
         env.setRestartStrategy(RestartStrategies.noRestart());
-        new CompactAction(path, "default", "T").build(env);
+        new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
         JobClient client = env.executeAsync();
 
         // write records for a while
@@ -408,7 +408,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
             StreamExecutionEnvironment env =
                     createStreamExecutionEnvironment(random.nextInt(1900) + 100);
             env.setParallelism(2);
-            new CompactAction(path, "default", "T").build(env);
+            new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
             env.executeAsync();
         }
 
@@ -442,7 +442,7 @@ public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
             StreamExecutionEnvironment env =
                     createStreamExecutionEnvironment(random.nextInt(1900) + 100);
             env.setParallelism(2);
-            new CompactAction(path, "default", "T").build(env);
+            new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
             env.executeAsync();
         }
 

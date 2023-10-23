@@ -107,7 +107,6 @@ public class CompactDatabaseProcedure extends ProcedureBase {
                         .includingTables(nullable(includingTables))
                         .excludingTables(nullable(excludingTables))
                         .withDatabaseCompactMode(nullable(mode));
-        action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
         if (!StringUtils.isBlank(tableOptions)) {
             action.withTableOptions(parseCommaSeparatedKeyValues(tableOptions));
         }
