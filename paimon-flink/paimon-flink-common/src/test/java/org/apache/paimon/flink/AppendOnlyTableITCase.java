@@ -50,6 +50,18 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testCreateUnawareBucketTableWithFullCompaction() {
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "CREATE TABLE pk_table (id INT, data STRING) "
+                                                + "WITH ('bucket' = '-1','full-compaction.delta-commits'='10')"))
+                .hasRootCauseInstanceOf(RuntimeException.class)
+                .hasRootCauseMessage(
+                        "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
+    }
+
+    @Test
     public void testReadEmpty() {
         assertThat(batchSql("SELECT * FROM append_table")).isEmpty();
     }
