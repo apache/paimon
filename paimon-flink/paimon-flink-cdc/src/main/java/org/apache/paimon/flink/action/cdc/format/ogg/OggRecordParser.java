@@ -29,7 +29,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * The {@code OggRecordParser} class extends the abstract {@link RecordParser} and is responsible
@@ -67,10 +68,10 @@ public class OggRecordParser extends RecordParser {
         switch (operation) {
             case OP_UPDATE:
                 processRecord(root.get(FIELD_BEFORE), RowKind.DELETE, records);
-                processRecord(root.get(fieldData), RowKind.INSERT, records);
+                processRecord(root.get(dataField()), RowKind.INSERT, records);
                 break;
             case OP_INSERT:
-                processRecord(root.get(fieldData), RowKind.INSERT, records);
+                processRecord(root.get(dataField()), RowKind.INSERT, records);
                 break;
             case OP_DELETE:
                 processRecord(root.get(FIELD_BEFORE), RowKind.DELETE, records);
@@ -86,22 +87,22 @@ public class OggRecordParser extends RecordParser {
         String errorMessageTemplate =
                 "Didn't find '%s' node in json. Please make sure your topic's format is correct.";
 
-        checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
-        checkNotNull(root.get(FIELD_TYPE), errorMessageTemplate, FIELD_TYPE);
-        checkNotNull(root.get(fieldPrimaryKeys), errorMessageTemplate, fieldPrimaryKeys);
+        checkArgument(!isNull(root.get(FIELD_TABLE)), errorMessageTemplate, FIELD_TABLE);
+        checkArgument(!isNull(root.get(FIELD_TYPE)), errorMessageTemplate, FIELD_TYPE);
+        checkArgument(!isNull(root.get(primaryField())), errorMessageTemplate, primaryField());
 
         String fieldType = root.get(FIELD_TYPE).asText();
 
         switch (fieldType) {
             case OP_UPDATE:
-                checkNotNull(root.get(fieldData), errorMessageTemplate, fieldData);
-                checkNotNull(root.get(FIELD_BEFORE), errorMessageTemplate, FIELD_BEFORE);
+                checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
+                checkArgument(!isNull(root.get(FIELD_BEFORE)), errorMessageTemplate, FIELD_BEFORE);
                 break;
             case OP_INSERT:
-                checkNotNull(root.get(fieldData), errorMessageTemplate, fieldData);
+                checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
                 break;
             case OP_DELETE:
-                checkNotNull(root.get(FIELD_BEFORE), errorMessageTemplate, FIELD_BEFORE);
+                checkArgument(!isNull(root.get(FIELD_BEFORE)), errorMessageTemplate, FIELD_BEFORE);
                 break;
         }
     }
@@ -119,13 +120,13 @@ public class OggRecordParser extends RecordParser {
     }
 
     @Override
-    protected void setPrimaryField() {
-        fieldPrimaryKeys = "primary_keys";
+    protected String primaryField() {
+        return "primary_keys";
     }
 
     @Override
-    protected void setDataField() {
-        fieldData = "after";
+    protected String dataField() {
+        return "after";
     }
 
     private void extractDatabaseAndTableNames() {

@@ -219,5 +219,9 @@ public class JsonSerdeUtil {
         return OBJECT_MAPPER_INSTANCE.valueToTree(value);
     }
 
+    public static boolean isNull(JsonNode jsonNode) {
+        return jsonNode == null || jsonNode.isNull();
+    }
+
     private JsonSerdeUtil() {}
 }

@@ -31,6 +31,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeRefe
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
+import org.apache.commons.lang3.BooleanUtils;
+
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,7 +43,8 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
+import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * The {@code CanalRecordParser} class is responsible for parsing records from the Canal-JSON
@@ -68,7 +71,7 @@ public class CanalRecordParser extends RecordParser {
     private static final String OP_ROW = "ROW";
 
     @Override
-    protected boolean isDDL() {
+    protected Boolean isDDL() {
         return extractBooleanFromRootJson(FIELD_IS_DDL);
     }
 
@@ -93,11 +96,11 @@ public class CanalRecordParser extends RecordParser {
 
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
-        if (extractBooleanFromRootJson(FIELD_IS_DDL)) {
+        if (BooleanUtils.isTrue(this.isDDL())) {
             return Collections.emptyList();
         }
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
-        ArrayNode arrayData = JsonSerdeUtil.getNodeAs(root, fieldData, ArrayNode.class);
+        ArrayNode arrayData = JsonSerdeUtil.getNodeAs(root, dataField(), ArrayNode.class);
         String type = extractStringFromRootJson(FIELD_TYPE);
         for (JsonNode data : arrayData) {
             switch (type) {
@@ -141,26 +144,27 @@ public class CanalRecordParser extends RecordParser {
                 "Didn't find '%s' node in json. Only supports canal-json format,"
                         + "please make sure your topic's format is correct.";
 
-        checkNotNull(root.get(FIELD_DATABASE), errorMessageTemplate, FIELD_DATABASE);
-        checkNotNull(root.get(FIELD_TABLE), errorMessageTemplate, FIELD_TABLE);
-        checkNotNull(root.get(FIELD_TYPE), errorMessageTemplate, FIELD_TYPE);
-        checkNotNull(root.get(fieldData), errorMessageTemplate, fieldData);
-        checkNotNull(root.get(FIELD_IS_DDL), errorMessageTemplate, FIELD_IS_DDL);
+        checkArgument(!isNull(root.get(FIELD_DATABASE)), errorMessageTemplate, FIELD_DATABASE);
+        checkArgument(!isNull(root.get(FIELD_TABLE)), errorMessageTemplate, FIELD_TABLE);
+        checkArgument(!isNull(root.get(FIELD_TYPE)), errorMessageTemplate, FIELD_TYPE);
+        checkArgument(!isNull(root.get(FIELD_IS_DDL)), errorMessageTemplate, FIELD_IS_DDL);
 
         if (!extractBooleanFromRootJson(FIELD_IS_DDL)) {
-            checkNotNull(root.get(FIELD_MYSQL_TYPE), errorMessageTemplate, FIELD_MYSQL_TYPE);
-            checkNotNull(root.get(fieldPrimaryKeys), errorMessageTemplate, fieldPrimaryKeys);
+            checkArgument(
+                    !isNull(root.get(FIELD_MYSQL_TYPE)), errorMessageTemplate, FIELD_MYSQL_TYPE);
+            checkArgument(!isNull(root.get(primaryField())), errorMessageTemplate, primaryField());
+            checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
         }
     }
 
     @Override
-    protected void setPrimaryField() {
-        fieldPrimaryKeys = "pkNames";
+    protected String primaryField() {
+        return "pkNames";
     }
 
     @Override
-    protected void setDataField() {
-        fieldData = "data";
+    protected String dataField() {
+        return "data";
     }
 
     @Override

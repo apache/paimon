@@ -36,6 +36,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
+import org.apache.commons.lang3.BooleanUtils;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.util.Collector;
 
@@ -57,6 +58,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDupl
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
+import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
  * Provides a base implementation for parsing messages of various formats into {@link
@@ -74,8 +76,6 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     protected final boolean caseSensitive;
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
-    protected String fieldPrimaryKeys;
-    protected static String fieldData;
     protected List<String> primaryKeys;
     protected LinkedHashMap<String, String> fieldTypes;
     protected JsonNode root;
@@ -92,13 +92,11 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     @Nullable
     public Schema buildSchema(String record) {
         this.parseRootJson(record);
-        if (this.isDDL()) {
+        if (BooleanUtils.isTrue(this.isDDL())) {
             return null;
         }
 
         tableName = extractStringFromRootJson(FIELD_TABLE);
-        this.setPrimaryField();
-        this.setDataField();
         this.validateFormat();
         this.extractPrimaryKeys();
         this.extractFieldTypesFromDatabaseSchema();
@@ -123,28 +121,28 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
 
     protected abstract void validateFormat();
 
-    protected abstract void setPrimaryField();
+    protected abstract String primaryField();
 
-    protected abstract void setDataField();
+    protected abstract String dataField();
 
-    protected boolean isDDL() {
+    protected Boolean isDDL() {
         return false;
     }
 
     protected String extractStringFromRootJson(String key) {
         JsonNode node = root.get(key);
-        return node == null ? null : node.asText();
+        return isNull(node) ? null : node.asText();
     }
 
     protected Boolean extractBooleanFromRootJson(String key) {
         JsonNode node = root.get(key);
-        return node == null ? null : node.asBoolean();
+        return isNull(node) ? null : node.asBoolean();
     }
 
     protected LinkedHashMap<String, DataType> setPaimonFieldType() {
         LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
-        JsonNode record = root.get(fieldData);
-        if (record == null) {
+        JsonNode record = root.get(dataField());
+        if (isNull(record)) {
             return fieldTypes;
         }
         Map<String, Object> linkedHashMap =
@@ -159,9 +157,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     @Override
     public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) throws Exception {
         root = OBJECT_MAPPER.readValue(value, JsonNode.class);
-        this.setPrimaryField();
-        this.setDataField();
-        validateFormat();
+        this.validateFormat();
 
         databaseName = extractStringFromRootJson(FIELD_DATABASE);
         tableName = extractStringFromRootJson(FIELD_TABLE);
@@ -202,7 +198,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     }
 
     protected void extractPrimaryKeys() {
-        ArrayNode pkNames = JsonSerdeUtil.getNodeAs(root, fieldPrimaryKeys, ArrayNode.class);
+        ArrayNode pkNames = JsonSerdeUtil.getNodeAs(root, primaryField(), ArrayNode.class);
         primaryKeys =
                 StreamSupport.stream(pkNames.spliterator(), false)
                         .map(pk -> applyCaseSensitiveFieldName(pk.asText()))
