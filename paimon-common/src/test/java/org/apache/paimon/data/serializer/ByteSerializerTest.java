@@ -20,7 +20,7 @@ package org.apache.paimon.data.serializer;
 
 import java.util.Random;
 
-/** Test for {@link ShortSerializer}. */
+/** Test for {@link ByteSerializer}. */
 public class ByteSerializerTest extends SerializerTestBase<Byte> {
 
     @Override

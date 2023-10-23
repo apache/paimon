@@ -25,7 +25,7 @@ import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link IntSerializer}. */
+/** Test for {@link NullableSerializer}. */
 public class NullableSerializerTest extends SerializerTestBase<Integer> {
 
     @Override
