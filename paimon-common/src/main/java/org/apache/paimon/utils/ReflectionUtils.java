@@ -47,4 +47,21 @@ public class ReflectionUtils {
             throws InvocationTargetException, IllegalAccessException {
         return (T) method.invoke(null, args);
     }
+
+    public static Method getMethod(Class<?> clz, String methodName, int argSize)
+            throws NoSuchMethodException {
+        Method method = null;
+        Method[] methods = clz.getMethods();
+        for (Method m : methods) {
+            if (methodName.equals(m.getName()) && m.getParameterTypes().length == argSize) {
+                method = m;
+                break;
+            }
+        }
+
+        if (method == null) {
+            throw new NoSuchMethodException(methodName);
+        }
+        return method;
+    }
 }

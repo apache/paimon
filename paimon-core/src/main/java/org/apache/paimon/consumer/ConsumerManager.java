@@ -21,6 +21,7 @@ package org.apache.paimon.consumer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
+import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import java.io.IOException;
@@ -59,6 +60,22 @@ public class ConsumerManager implements Serializable {
     }
 
     public void resetConsumer(String consumerId, Consumer consumer) {
+        Path path = consumerPath(consumerId);
+        if (fileIO instanceof HadoopFileIO) {
+            // For HDFS, try to use rename with overwrite
+            try {
+                boolean success =
+                        ((HadoopFileIO) fileIO)
+                                .tryAtomicOverwriteViaRename(path, consumer.toJson());
+                if (success) {
+                    return;
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        // For Non-HDFS, just use write overwrite
         try (PositionOutputStream out = fileIO.newOutputStream(consumerPath(consumerId), true)) {
             OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
             writer.write(consumer.toJson());

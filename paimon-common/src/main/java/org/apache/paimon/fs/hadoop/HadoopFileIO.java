@@ -26,12 +26,20 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
+import org.apache.paimon.utils.ReflectionUtils;
 
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Options;
 
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.UncheckedIOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** Hadoop {@link FileIO}. */
 public class HadoopFileIO implements FileIO {
@@ -288,6 +296,89 @@ public class HadoopFileIO implements FileIO {
         @Override
         public long getModificationTime() {
             return status.getModificationTime();
+        }
+    }
+
+    // ============================== extra methods ===================================
+
+    private transient volatile AtomicReference<Method> renameMethodRef;
+
+    public boolean tryAtomicOverwriteViaRename(Path dst, String content) throws IOException {
+        org.apache.hadoop.fs.Path hadoopDst = path(dst);
+        FileSystem fs = getFileSystem(hadoopDst);
+
+        if (renameMethodRef == null) {
+            synchronized (this) {
+                if (renameMethodRef == null) {
+                    Method method;
+                    // Implementation in FileSystem is incorrect, not atomic, Object Storage like S3
+                    // and OSS not override it
+                    // DistributedFileSystem and ViewFileSystem override the rename method to public
+                    // and implement correct renaming
+                    try {
+                        method = ReflectionUtils.getMethod(fs.getClass(), "rename", 3);
+                    } catch (NoSuchMethodException e) {
+                        method = null;
+                    }
+                    renameMethodRef = new AtomicReference<>(method);
+                }
+            }
+        }
+
+        Method renameMethod = renameMethodRef.get();
+        if (renameMethod == null) {
+            return false;
+        }
+
+        boolean renameDone = false;
+
+        // write tempPath
+        Path tempPath = dst.createTempPath();
+        org.apache.hadoop.fs.Path hadoopTemp = path(tempPath);
+        try {
+            try (PositionOutputStream out = newOutputStream(tempPath, false)) {
+                OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+                writer.write(content);
+                writer.flush();
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+
+            renameMethod.invoke(
+                    fs, hadoopTemp, hadoopDst, new Options.Rename[] {Options.Rename.OVERWRITE});
+            renameDone = true;
+            // TODO: this is a workaround of HADOOP-16255 - remove this when HADOOP-16255 is
+            // resolved
+            tryRemoveCrcFile(hadoopTemp);
+            return true;
+        } catch (InvocationTargetException | IllegalAccessException e) {
+            throw new IOException(e);
+        } finally {
+            if (!renameDone) {
+                deleteQuietly(tempPath);
+            }
+        }
+    }
+
+    /** @throws IOException if a fatal exception occurs. Will try to ignore most exceptions. */
+    @SuppressWarnings("CatchMayIgnoreException")
+    private void tryRemoveCrcFile(org.apache.hadoop.fs.Path path) throws IOException {
+        try {
+            final org.apache.hadoop.fs.Path checksumFile =
+                    new org.apache.hadoop.fs.Path(
+                            path.getParent(), String.format(".%s.crc", path.getName()));
+
+            if (fs.exists(checksumFile)) {
+                // checksum file exists, deleting it
+                fs.delete(checksumFile, true); // recursive=true
+            }
+        } catch (Throwable t) {
+            if (t instanceof VirtualMachineError
+                    || t instanceof ThreadDeath
+                    || t instanceof LinkageError) {
+                throw t;
+            }
+            // else, ignore - we are removing crc file as "best-effort"
         }
     }
 }

@@ -227,7 +227,7 @@ public abstract class FileIOBehaviorTestBase {
     //  Utilities
     // ------------------------------------------------------------------------
 
-    private static String randomName() {
+    protected static String randomName() {
         return StringUtils.getRandomString(RND, 16, 16, 'a', 'z');
     }
 
