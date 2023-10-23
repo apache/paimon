@@ -23,23 +23,28 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
@@ -105,6 +110,16 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         createDatabaseImpl(name);
+    }
+
+    @Override
+    public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
+        FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
+        commit.dropPartitions(
+                Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
 
     protected abstract void createDatabaseImpl(String name);

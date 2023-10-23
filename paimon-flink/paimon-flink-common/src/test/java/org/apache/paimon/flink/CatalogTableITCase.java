@@ -32,6 +32,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
@@ -452,6 +453,50 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
         assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-02/hh=11]]");
+    }
+
+    @Test
+    public void testDropPartition() {
+        sql(
+                "CREATE TABLE PartitionTable (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh)");
+        sql("INSERT INTO PartitionTable select 1,1,'a','2020-01-01','10'");
+        sql("INSERT INTO PartitionTable select 2,2,'b','2020-01-02','11'");
+        sql("INSERT INTO PartitionTable select 3,3,'c','2020-01-03','11'");
+        sql("INSERT INTO PartitionTable select 4,4,'d','2020-01-04','14'");
+        sql("INSERT INTO PartitionTable select 5,5,'e','2020-01-05','15'");
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "ALTER TABLE PartitionTable DROP PARTITION (`dt` = '2020-10-10')"))
+                .getRootCause()
+                .isInstanceOf(PartitionNotExistException.class)
+                .hasMessage(
+                        "Partition CatalogPartitionSpec{{dt=2020-10-10}} of table default.PartitionTable in catalog PAIMON does not exist.");
+
+        List<Row> result = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[dt=2020-01-01/hh=10], +I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11], +I[dt=2020-01-04/hh=14], +I[dt=2020-01-05/hh=15]]");
+
+        // drop a partition
+        sql("ALTER TABLE PartitionTable DROP PARTITION (`dt` = '2020-01-01', `hh` = '10')");
+        result = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11], +I[dt=2020-01-04/hh=14], +I[dt=2020-01-05/hh=15]]");
+
+        // drop two partitions
+        sql("ALTER TABLE PartitionTable DROP PARTITION (dt ='2020-01-04'), PARTITION (hh='11')");
+        result = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-05/hh=15]]");
     }
 
     @Test

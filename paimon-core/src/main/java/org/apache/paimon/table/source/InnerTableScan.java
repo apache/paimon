@@ -20,8 +20,14 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.predicate.Predicate;
 
+import java.util.Map;
+
 /** Inner {@link TableScan} contains filter push down. */
 public interface InnerTableScan extends TableScan {
 
     InnerTableScan withFilter(Predicate predicate);
+
+    default InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+        return this;
+    }
 }
