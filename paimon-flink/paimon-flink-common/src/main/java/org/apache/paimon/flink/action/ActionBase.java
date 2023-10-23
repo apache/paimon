@@ -48,8 +48,9 @@ public abstract class ActionBase implements Action {
     protected final Catalog catalog;
     protected final FlinkCatalog flinkCatalog;
     protected final String catalogName = "paimon-" + UUID.randomUUID();
-    protected final StreamExecutionEnvironment env;
-    protected final StreamTableEnvironment batchTEnv;
+
+    protected StreamExecutionEnvironment env;
+    protected StreamTableEnvironment batchTEnv;
 
     public ActionBase(String warehouse, Map<String, String> catalogConfig) {
         catalogOptions = Options.fromMap(catalogConfig);
@@ -57,10 +58,20 @@ public abstract class ActionBase implements Action {
 
         catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
-        env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+        // use the default env if user doesn't pass env
+        initFlinkEnv(StreamExecutionEnvironment.getExecutionEnvironment());
+    }
+
+    public void withStreamExecutionEnvironment(StreamExecutionEnvironment env) {
+        initFlinkEnv(env);
+    }
+
+    private void initFlinkEnv(StreamExecutionEnvironment env) {
+        this.env = env;
         // we enable object reuse, we copy the un-reusable object ourselves.
-        env.getConfig().enableObjectReuse();
-        batchTEnv = StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
+        this.env.getConfig().enableObjectReuse();
+        batchTEnv = StreamTableEnvironment.create(this.env, EnvironmentSettings.inBatchMode());
 
         // register flink catalog to table environment
         batchTEnv.registerCatalog(flinkCatalog.getName(), flinkCatalog);

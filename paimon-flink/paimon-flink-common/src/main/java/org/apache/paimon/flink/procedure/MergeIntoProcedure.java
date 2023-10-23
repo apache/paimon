@@ -190,6 +190,7 @@ public class MergeIntoProcedure extends ProcedureBase {
                         identifier.getDatabaseName(),
                         identifier.getObjectName(),
                         catalogOptions);
+        action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
         action.withTargetAlias(nullable(targetAlias));
 
         if (!sourceSqls.isEmpty()) {
