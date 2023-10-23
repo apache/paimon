@@ -20,7 +20,7 @@ package org.apache.paimon.data.serializer;
 
 import java.util.Random;
 
-/** Test for {@link IntSerializer}. */
+/** Test for {@link LongSerializer}. */
 public class LongSerializerTest extends SerializerTestBase<Long> {
 
     @Override
