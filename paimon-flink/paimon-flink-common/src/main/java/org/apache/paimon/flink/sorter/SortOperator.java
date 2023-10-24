@@ -27,7 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
-import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
@@ -50,7 +50,9 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final int pageSize;
     private final int arity;
     private final int spillSortMaxNumFiles;
+
     private transient BinaryExternalSortBuffer buffer;
+    private transient IOManager ioManager;
 
     public SortOperator(
             RowType keyType,
@@ -87,17 +89,19 @@ public class SortOperator extends TableStreamOperator<InternalRow>
                 BinaryInMemorySortBuffer.createBuffer(
                         normalizedKeyComputer, serializer, keyComparator, memoryPool);
 
+        this.ioManager =
+                IOManager.create(
+                        getContainingTask()
+                                .getEnvironment()
+                                .getIOManager()
+                                .getSpillingDirectoriesPaths());
         buffer =
                 new BinaryExternalSortBuffer(
                         new BinaryRowSerializer(serializer.getArity()),
                         keyComparator,
                         memoryPool.pageSize(),
                         inMemorySortBuffer,
-                        new IOManagerImpl(
-                                getContainingTask()
-                                        .getEnvironment()
-                                        .getIOManager()
-                                        .getSpillingDirectoriesPaths()),
+                        ioManager,
                         spillSortMaxNumFiles);
     }
 
@@ -115,7 +119,12 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     @Override
     public void close() throws Exception {
         super.close();
-        buffer.clear();
+        if (buffer != null) {
+            buffer.clear();
+        }
+        if (ioManager != null) {
+            ioManager.close();
+        }
     }
 
     @Override

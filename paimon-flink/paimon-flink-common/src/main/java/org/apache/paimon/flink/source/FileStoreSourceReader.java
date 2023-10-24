@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.TableRead;
 
@@ -38,9 +39,12 @@ public class FileStoreSourceReader
         extends SingleThreadMultiplexSourceReaderBase<
                 RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
+    @Nullable private final IOManager ioManager;
+
     public FileStoreSourceReader(
             SourceReaderContext readerContext,
             TableRead tableRead,
+            @Nullable IOManager ioManager,
             @Nullable Long limit,
             @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
         // limiter is created in SourceReader, it can be shared in all split readers
@@ -51,11 +55,13 @@ public class FileStoreSourceReader
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);
+        this.ioManager = ioManager;
     }
 
     public FileStoreSourceReader(
             SourceReaderContext readerContext,
             TableRead tableRead,
+            @Nullable IOManager ioManager,
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<RecordIterator<RowData>>>
                     elementsQueue,
@@ -68,6 +74,7 @@ public class FileStoreSourceReader
                 FlinkRecordsWithSplitIds::emitRecord,
                 readerContext.getConfiguration(),
                 readerContext);
+        this.ioManager = ioManager;
     }
 
     @Override
@@ -97,5 +104,13 @@ public class FileStoreSourceReader
     protected FileStoreSourceSplit toSplitType(
             String splitId, FileStoreSourceSplitState splitState) {
         return splitState.toSourceSplit();
+    }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (ioManager != null) {
+            ioManager.close();
+        }
     }
 }

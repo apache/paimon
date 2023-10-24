@@ -40,7 +40,6 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.concurrent.ThreadLocalRandom;
 
 /** A {@link OneInputStreamOperator} for {@link GlobalIndexAssigner}. */
@@ -55,6 +54,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
     private final SerializableFunction<T, InternalRow> toRow;
     private final SerializableFunction<InternalRow, T> fromRow;
 
+    private transient IOManager ioManager;
     private transient RowBuffer bootstrapBuffer;
 
     public GlobalIndexAssignerOperator(
@@ -75,7 +75,7 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
                 getContainingTask().getEnvironment().getIOManager();
         File[] tmpDirs = flinkIoManager.getSpillingDirectories();
         File tmpDir = tmpDirs[ThreadLocalRandom.current().nextInt(tmpDirs.length)];
-        IOManager ioManager = IOManager.create(flinkIoManager.getSpillingDirectoriesPaths());
+        ioManager = IOManager.create(flinkIoManager.getSpillingDirectoriesPaths());
         assigner.open(
                 ioManager,
                 tmpDir,
@@ -143,8 +143,11 @@ public class GlobalIndexAssignerOperator<T> extends AbstractStreamOperator<Tuple
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() throws Exception {
         this.assigner.close();
+        if (ioManager != null) {
+            ioManager.close();
+        }
     }
 
     public static GlobalIndexAssignerOperator<InternalRow> forRowData(Table table) {

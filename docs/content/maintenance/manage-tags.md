@@ -87,6 +87,8 @@ SELECT * FROM T VERSION AS OF '2023-07-26';
 SELECT * FROM paimon_incremental_query('T', '2023-07-25', '2023-07-26');
 ```
 
+See [Query Tables]({{< ref "how-to/querying-tables" >}}) to see more query for engines.
+
 ## Create Tags
 
 You can create a tag with given name (cannot be number) and snapshot ID.
