@@ -64,8 +64,6 @@ Performance:
    entries in a partition takes up **1 GB** more memory, partitions that are no longer active do not take up memory.
 2. For tables with low update rates, this mode is recommended to significantly improve performance.
 
-#### Sort Compact For Normal Dynamic Bucket Mode
-
 `Normal Dynamic Bucket Mode` supports sort-compact to speed up queries. See [Sort Compact]({{< ref "maintenance/dedicated-compaction#sort-compact" >}}).
 
 #### Cross Partitions Upsert Dynamic Bucket Mode
