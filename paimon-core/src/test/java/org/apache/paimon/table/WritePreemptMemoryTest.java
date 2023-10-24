@@ -44,7 +44,7 @@ import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link ChangelogWithKeyFileStoreTable}. */
+/** Tests for {@link PrimaryKeyFileStoreTable}. */
 public class WritePreemptMemoryTest extends FileStoreTableTestBase {
 
     @Test
@@ -57,7 +57,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
         testWritePreemptMemory(true);
     }
 
-    @Override // this has been tested in ChangelogWithKeyFileStoreTableTest
+    @Override // this has been tested in PrimaryKeyFileStoreTableTest
     @Test
     public void testReadFilter() {}
 
@@ -106,7 +106,7 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
+        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
     }
 
     @Override
@@ -127,6 +127,6 @@ public class WritePreemptMemoryTest extends FileStoreTableTestBase {
                                 Arrays.asList("pk", "pt0", "pt1"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
+        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, schema);
     }
 }

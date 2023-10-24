@@ -36,8 +36,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests of {@link ChangelogWithKeyFileStoreTable} for schema evolution. */
-public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
+/** Tests of {@link PrimaryKeyFileStoreTable} for schema evolution. */
+public class PrimaryKeyFileDataTableTest extends FileDataFilterTestBase {
 
     @BeforeEach
     public void before() throws Exception {
@@ -244,7 +244,7 @@ public class ChangelogWithKeyFileDataTableTest extends FileDataFilterTestBase {
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new ChangelogWithKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
+        return new PrimaryKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
 
             @Override
             protected SchemaManager schemaManager() {

@@ -57,7 +57,7 @@ import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingO
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for changelog table with primary keys. */
-public class ChangelogWithKeyFileStoreTableITCase extends AbstractTestBase {
+public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     // ------------------------------------------------------------------------
     //  Test Utilities

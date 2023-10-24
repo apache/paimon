@@ -37,8 +37,8 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** File meta tests for column type evolution in {@link ChangelogWithKeyFileStoreTable}. */
-public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTestBase {
+/** File meta tests for column type evolution in {@link PrimaryKeyFileStoreTable}. */
+public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTestBase {
 
     @BeforeEach
     public void before() throws Exception {
@@ -48,7 +48,7 @@ public class ChangelogWithKeyTableColumnTypeFileMetaTest extends ColumnTypeFileM
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new ChangelogWithKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
+        return new PrimaryKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
             @Override
             protected SchemaManager schemaManager() {
                 return schemaManager;

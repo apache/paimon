@@ -78,8 +78,8 @@ import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Tests for {@link ChangelogWithKeyFileStoreTable}. */
-public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
+/** Tests for {@link PrimaryKeyFileStoreTable}. */
+public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     protected static final RowType COMPATIBILITY_ROW_TYPE =
             RowType.of(
@@ -1119,8 +1119,7 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pk", "pt0", "pt1"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(
-                FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 
     private FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
@@ -1137,7 +1136,6 @@ public class ChangelogWithKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 Arrays.asList("pt", "a"),
                                 conf.toMap(),
                                 ""));
-        return new ChangelogWithKeyFileStoreTable(
-                FileIOFinder.find(tablePath), tablePath, tableSchema);
+        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
 }

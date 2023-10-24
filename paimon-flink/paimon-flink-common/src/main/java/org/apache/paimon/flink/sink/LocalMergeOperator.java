@@ -28,7 +28,7 @@ import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.ChangelogWithKeyTableUtils;
+import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -77,8 +77,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     public void open() throws Exception {
         super.open();
 
-        RowType keyType =
-                ChangelogWithKeyTableUtils.addKeyNamePrefix(schema.logicalPrimaryKeysType());
+        RowType keyType = PrimaryKeyTableUtils.addKeyNamePrefix(schema.logicalPrimaryKeysType());
         RowType valueType = schema.logicalRowType();
         CoreOptions options = new CoreOptions(schema.options());
 
@@ -89,7 +88,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
         recordCount = 0;
         sequenceGenerator = SequenceGenerator.create(schema, options);
-        mergeFunction = ChangelogWithKeyTableUtils.createMergeFunctionFactory(schema).create();
+        mergeFunction = PrimaryKeyTableUtils.createMergeFunctionFactory(schema).create();
 
         buffer =
                 new SortBufferWriteBuffer(

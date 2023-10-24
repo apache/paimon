@@ -53,17 +53,17 @@ import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMap
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreTable} for primary key table. */
-public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
+public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
     private transient KeyValueFileStore lazyStore;
 
-    ChangelogWithKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
+    PrimaryKeyFileStoreTable(FileIO fileIO, Path path, TableSchema tableSchema) {
         this(fileIO, path, tableSchema, new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 
-    ChangelogWithKeyFileStoreTable(
+    PrimaryKeyFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
@@ -73,7 +73,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     protected FileStoreTable copy(TableSchema newTableSchema) {
-        return new ChangelogWithKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
+        return new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
     }
 
     @Override
@@ -83,10 +83,10 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
             Options conf = Options.fromMap(tableSchema.options());
             CoreOptions options = new CoreOptions(conf);
             KeyValueFieldsExtractor extractor =
-                    ChangelogWithKeyTableUtils.ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
+                    PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
 
             MergeFunctionFactory<KeyValue> mfFactory =
-                    ChangelogWithKeyTableUtils.createMergeFunctionFactory(tableSchema);
+                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema);
             if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
                 mfFactory =
                         LookupMergeFunction.wrap(
@@ -101,7 +101,7 @@ public class ChangelogWithKeyFileStoreTable extends AbstractFileStoreTable {
                             tableSchema.crossPartitionUpdate(),
                             options,
                             tableSchema.logicalPartitionType(),
-                            ChangelogWithKeyTableUtils.addKeyNamePrefix(
+                            PrimaryKeyTableUtils.addKeyNamePrefix(
                                     tableSchema.logicalBucketKeyType()),
                             new RowType(extractor.keyFields(tableSchema)),
                             rowType,

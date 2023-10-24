@@ -33,7 +33,7 @@ import org.apache.flink.table.data.RowData;
 
 import java.util.List;
 
-import static org.apache.paimon.table.ChangelogWithKeyTableUtils.addKeyNamePrefix;
+import static org.apache.paimon.table.PrimaryKeyTableUtils.addKeyNamePrefix;
 
 /** Alphabetical order sorter to sort records by the given `orderColNames`. */
 public class OrderSorter extends TableSorter {

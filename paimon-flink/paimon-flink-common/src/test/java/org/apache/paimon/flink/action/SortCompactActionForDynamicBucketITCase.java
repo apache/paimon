@@ -27,8 +27,8 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -60,7 +60,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
 
         List<ManifestEntry> files = ((FileStoreTable) getTable()).store().newScan().plan().files();
         List<ManifestEntry> filesFilter =
-                ((ChangelogWithKeyFileStoreTable) getTable())
+                ((PrimaryKeyFileStoreTable) getTable())
                         .store()
                         .newScan()
                         .withValueFilter(predicate)
@@ -72,7 +72,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         List<ManifestEntry> filesZorder =
                 ((FileStoreTable) getTable()).store().newScan().plan().files();
         List<ManifestEntry> filesFilterZorder =
-                ((ChangelogWithKeyFileStoreTable) getTable())
+                ((PrimaryKeyFileStoreTable) getTable())
                         .store()
                         .newScan()
                         .withValueFilter(predicate)
@@ -94,7 +94,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         order(Arrays.asList("f2", "f1"));
         List<ManifestEntry> files = ((FileStoreTable) getTable()).store().newScan().plan().files();
         List<ManifestEntry> filesFilter =
-                ((ChangelogWithKeyFileStoreTable) getTable())
+                ((PrimaryKeyFileStoreTable) getTable())
                         .store()
                         .newScan()
                         .withValueFilter(predicate)
@@ -106,7 +106,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         List<ManifestEntry> filesZorder =
                 ((FileStoreTable) getTable()).store().newScan().plan().files();
         List<ManifestEntry> filesFilterZorder =
-                ((ChangelogWithKeyFileStoreTable) getTable())
+                ((PrimaryKeyFileStoreTable) getTable())
                         .store()
                         .newScan()
                         .withValueFilter(predicate)
@@ -131,7 +131,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
 
         List<ManifestEntry> files = ((FileStoreTable) getTable()).store().newScan().plan().files();
         List<ManifestEntry> filesFilter =
-                ((ChangelogWithKeyFileStoreTable) getTable())
+                ((PrimaryKeyFileStoreTable) getTable())
                         .store()
                         .newScan()
                         .withValueFilter(predicate)
@@ -143,7 +143,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         List<ManifestEntry> filesZorder =
                 ((FileStoreTable) getTable()).store().newScan().plan().files();
         List<ManifestEntry> filesFilterZorder =
-                ((ChangelogWithKeyFileStoreTable) getTable())
+                ((PrimaryKeyFileStoreTable) getTable())
                         .store()
                         .newScan()
                         .withValueFilter(predicate)

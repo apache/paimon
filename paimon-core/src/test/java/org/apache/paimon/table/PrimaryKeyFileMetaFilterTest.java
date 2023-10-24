@@ -33,8 +33,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-/** Tests for meta files in {@link ChangelogWithKeyFileStoreTable} with schema evolution. */
-public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
+/** Tests for meta files in {@link PrimaryKeyFileStoreTable} with schema evolution. */
+public class PrimaryKeyFileMetaFilterTest extends FileMetaFilterTestBase {
 
     @BeforeEach
     public void before() throws Exception {
@@ -59,8 +59,8 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     checkFilterRowCount(toDataFileMetas(splits), 12L);
 
                     /**
-                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
-                     * get value stats. The test for filtering the primary key and partition already
+                     * TODO PrimaryKeyFileStoreTable doesn't support value predicate and can't get
+                     * value stats. The test for filtering the primary key and partition already
                      * exists.
                      */
                 },
@@ -98,8 +98,8 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
                     checkFilterRowCount(toDataFileMetas(splits), 12L);
 
                     /**
-                     * TODO ChangelogWithKeyFileStoreTable doesn't support value predicate and can't
-                     * get value stats. The test for filtering the primary key and partition already
+                     * TODO PrimaryKeyFileStoreTable doesn't support value predicate and can't get
+                     * value stats. The test for filtering the primary key and partition already
                      * exists.
                      */
                 },
@@ -144,7 +144,7 @@ public class ChangelogWithKeyFileMetaFilterTest extends FileMetaFilterTestBase {
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new ChangelogWithKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
+        return new PrimaryKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
             @Override
             protected SchemaManager schemaManager() {
                 return schemaManager;

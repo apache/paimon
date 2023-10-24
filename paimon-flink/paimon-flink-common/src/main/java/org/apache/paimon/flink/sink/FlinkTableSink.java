@@ -30,7 +30,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
+import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableUtils;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -91,9 +91,9 @@ public class FlinkTableSink extends FlinkTableSinkBase
         // Since only UPDATE_AFTER type messages can be received at present,
         // AppendOnlyFileStoreTable cannot correctly handle old data, so they are marked as
         // unsupported. Similarly, it is not allowed to update the primary key column when updating
-        // the column of ChangelogWithKeyFileStoreTable, because the old data cannot be handled
+        // the column of PrimaryKeyFileStoreTable, because the old data cannot be handled
         // correctly.
-        if (table instanceof ChangelogWithKeyFileStoreTable) {
+        if (table instanceof PrimaryKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
             updatedColumns.forEach(
@@ -184,7 +184,7 @@ public class FlinkTableSink extends FlinkTableSinkBase
     }
 
     private void validateDeletable() {
-        if (table instanceof ChangelogWithKeyFileStoreTable) {
+        if (table instanceof PrimaryKeyFileStoreTable) {
             Options options = Options.fromMap(table.options());
             if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
                 return;
