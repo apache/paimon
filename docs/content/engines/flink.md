@@ -301,3 +301,19 @@ Users can set memory weight in SQL for Flink Managed Memory, then Flink sink ope
 INSERT INTO paimon_table /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='256M') */
 SELECT * FROM ....;
 ```
+## Setting dynamic options
+
+When interacting with the Paimon table, table options can be tuned without changing the options in the catalog. Paimon will extract job-level dynamic options and take effect in the current session.
+The dynamic option's key format is `paimon.${catalogName}.${dbName}.${tableName}.${config_key}`. The catalogName/dbName/tableName can be `*`, which means matching all the specific parts. 
+
+For example:
+
+```sql
+-- set scan.timestamp-millis=1697018249000 for the table mycatalog.default.T
+SET 'paimon.mycatalog.default.T.scan.timestamp-millis' = '1697018249000';
+SELECT * FROM T;
+
+-- set scan.timestamp-millis=1697018249000 for the table default.T in any catalog
+SET 'paimon.*.default.T.scan.timestamp-millis' = '1697018249000';
+SELECT * FROM T;
+```
