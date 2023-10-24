@@ -84,7 +84,7 @@ public class MetricGroupImpl implements MetricGroup {
                     metricName);
             return null;
         }
-        // add the metric only if the group is still open
+
         switch (metric.getMetricType()) {
             case COUNTER:
             case GAUGE:
