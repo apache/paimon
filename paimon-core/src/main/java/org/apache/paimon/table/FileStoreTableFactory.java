@@ -97,7 +97,7 @@ public class FileStoreTableFactory {
                 tableSchema.primaryKeys().isEmpty()
                         ? new AppendOnlyFileStoreTable(
                                 fileIO, tablePath, tableSchema, catalogEnvironment)
-                        : new ChangelogWithKeyFileStoreTable(
+                        : new PrimaryKeyFileStoreTable(
                                 fileIO, tablePath, tableSchema, catalogEnvironment);
         return table.copy(dynamicOptions.toMap());
     }

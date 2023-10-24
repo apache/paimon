@@ -25,17 +25,17 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.ChangelogWithKeyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/** Statistics tests for {@link ChangelogWithKeyFileStoreTable}. */
-public class ChangelogWithKeyTableStatisticsTest extends FileStoreTableStatisticsTestBase {
+/** Statistics tests for {@link PrimaryKeyFileStoreTable}. */
+public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestBase {
 
-    /** {@link ChangelogWithKeyFileStoreTable} does not support filter value. */
+    /** {@link PrimaryKeyFileStoreTable} does not support filter value. */
     @Test
     public void testTableFilterValueStatistics() throws Exception {
         FileStoreTable table = writeData();

@@ -37,7 +37,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 
 /** Utils for creating changelog table with primary keys. */
-public class ChangelogWithKeyTableUtils {
+public class PrimaryKeyTableUtils {
 
     public static RowType addKeyNamePrefix(RowType type) {
         return new RowType(addKeyNamePrefix(type.getFields()));
@@ -61,7 +61,7 @@ public class ChangelogWithKeyTableUtils {
         Options conf = Options.fromMap(tableSchema.options());
         CoreOptions options = new CoreOptions(conf);
         CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
-        KeyValueFieldsExtractor extractor = ChangelogWithKeyKeyValueFieldsExtractor.EXTRACTOR;
+        KeyValueFieldsExtractor extractor = PrimaryKeyFieldsExtractor.EXTRACTOR;
 
         switch (mergeEngine) {
             case DEDUPLICATE:
@@ -82,14 +82,13 @@ public class ChangelogWithKeyTableUtils {
         }
     }
 
-    static class ChangelogWithKeyKeyValueFieldsExtractor implements KeyValueFieldsExtractor {
+    static class PrimaryKeyFieldsExtractor implements KeyValueFieldsExtractor {
 
         private static final long serialVersionUID = 1L;
 
-        static final ChangelogWithKeyKeyValueFieldsExtractor EXTRACTOR =
-                new ChangelogWithKeyKeyValueFieldsExtractor();
+        static final PrimaryKeyFieldsExtractor EXTRACTOR = new PrimaryKeyFieldsExtractor();
 
-        private ChangelogWithKeyKeyValueFieldsExtractor() {}
+        private PrimaryKeyFieldsExtractor() {}
 
         @Override
         public List<DataField> keyFields(TableSchema schema) {

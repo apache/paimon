@@ -34,7 +34,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Column type evolution for file data in changelog with key table. */
-public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTestBase {
+public class PrimaryKeyColumnTypeFileDataTest extends ColumnTypeFileDataTestBase {
 
     @BeforeEach
     public void before() throws Exception {
@@ -89,7 +89,7 @@ public class ChangelogWithKeyColumnTypeFileDataTest extends ColumnTypeFileDataTe
     @Override
     protected FileStoreTable createFileStoreTable(Map<Long, TableSchema> tableSchemas) {
         SchemaManager schemaManager = new TestingSchemaManager(tablePath, tableSchemas);
-        return new ChangelogWithKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
+        return new PrimaryKeyFileStoreTable(fileIO, tablePath, schemaManager.latest().get()) {
             @Override
             protected SchemaManager schemaManager() {
                 return schemaManager;

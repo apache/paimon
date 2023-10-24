@@ -280,7 +280,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
         // We group files by bucket here, and filter them by the whole bucket filter.
         // Why do this: because in primary key table, we can't just filter the value
-        // by the stat in files (see `ChangelogWithKeyFileStoreTable.nonPartitionFilterConsumer`),
+        // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
         // but we can do this by filter the whole bucket files
         files =
                 files.stream()
