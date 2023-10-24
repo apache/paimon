@@ -52,7 +52,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     protected final String commitUser;
     protected final StoreSinkWriteState state;
-    private final IOManager ioManager;
+    private final IOManagerImpl paimonIOManager;
     private final boolean ignorePreviousFiles;
     private final boolean waitCompaction;
     private final boolean isStreamingMode;
@@ -115,7 +115,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             @Nullable MemoryPoolFactory memoryPoolFactory) {
         this.commitUser = commitUser;
         this.state = state;
-        this.ioManager = ioManager;
+        this.paimonIOManager = new IOManagerImpl(ioManager.getSpillingDirectoriesPaths());
         this.ignorePreviousFiles = ignorePreviousFiles;
         this.waitCompaction = waitCompaction;
         this.isStreamingMode = isStreamingMode;
@@ -134,7 +134,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                 commitUser,
                                 (part, bucket) ->
                                         state.stateValueFilter().filter(table.name(), part, bucket))
-                        .withIOManager(new IOManagerImpl(ioManager.getSpillingDirectoriesPaths()))
+                        .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .isStreamingMode(isStreamingMode);
 
@@ -216,6 +216,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         if (write != null) {
             write.close();
         }
+
+        paimonIOManager.close();
     }
 
     @Override

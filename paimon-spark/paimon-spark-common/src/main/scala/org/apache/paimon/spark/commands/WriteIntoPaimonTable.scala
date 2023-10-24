@@ -122,8 +122,9 @@ case class WriteIntoPaimonTable(
     val commitMessages = df
       .mapPartitions {
         iter =>
+          val ioManager = createIOManager
           val write = writeBuilder.newWrite()
-          write.withIOManager(createIOManager)
+          write.withIOManager(ioManager)
           try {
             iter.foreach {
               row =>
@@ -135,6 +136,7 @@ case class WriteIntoPaimonTable(
             write.prepareCommit().asScala.map(serializer.serialize).toIterator
           } finally {
             write.close()
+            ioManager.close()
           }
       }
       .collect()

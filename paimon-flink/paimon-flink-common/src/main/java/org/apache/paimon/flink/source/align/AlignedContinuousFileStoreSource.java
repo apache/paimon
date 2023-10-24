@@ -20,7 +20,6 @@ package org.apache.paimon.flink.source.align;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
@@ -60,7 +59,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
     @Override
     public SourceReader<RowData, FileStoreSourceSplit> createReader(SourceReaderContext context) {
         IOManager ioManager =
-                new IOManagerImpl(
+                IOManager.create(
                         splitPaths(
                                 context.getConfiguration()
                                         .get(org.apache.flink.configuration.CoreOptions.TMP_DIRS)));
@@ -68,7 +67,8 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 new FileStoreSourceReaderMetrics(context.metricGroup());
         return new AlignedSourceReader(
                 context,
-                readBuilder.newRead().withIOManager(ioManager),
+                readBuilder.newRead(),
+                ioManager,
                 limit,
                 new FutureCompletingBlockingQueue<>(
                         context.getConfiguration()

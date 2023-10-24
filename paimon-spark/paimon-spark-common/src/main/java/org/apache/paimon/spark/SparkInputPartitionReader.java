@@ -17,6 +17,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.reader.RecordReaderIterator;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -28,13 +29,15 @@ import java.io.IOException;
 /** A spark 3 {@link PartitionReader} for paimon, created by {@link PartitionReaderFactory}. */
 public class SparkInputPartitionReader implements PartitionReader<InternalRow> {
 
+    private final IOManager ioManager;
     private final RecordReaderIterator<org.apache.paimon.data.InternalRow> iterator;
-
     private final SparkInternalRow row;
 
     public SparkInputPartitionReader(
+            IOManager ioManager,
             RecordReaderIterator<org.apache.paimon.data.InternalRow> iterator,
             SparkInternalRow row) {
+        this.ioManager = ioManager;
         this.iterator = iterator;
         this.row = row;
     }
@@ -57,6 +60,11 @@ public class SparkInputPartitionReader implements PartitionReader<InternalRow> {
     public void close() throws IOException {
         try {
             iterator.close();
+        } catch (Exception e) {
+            throw new IOException(e);
+        }
+        try {
+            ioManager.close();
         } catch (Exception e) {
             throw new IOException(e);
         }
