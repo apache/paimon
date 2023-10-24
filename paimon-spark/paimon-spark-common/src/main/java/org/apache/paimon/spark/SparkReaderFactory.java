@@ -18,6 +18,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -46,17 +47,18 @@ public class SparkReaderFactory implements PartitionReaderFactory {
     public PartitionReader<org.apache.spark.sql.catalyst.InternalRow> createReader(
             InputPartition partition) {
         RecordReader<InternalRow> reader;
+        IOManager ioManager = createIOManager();
         try {
             reader =
                     readBuilder
                             .newRead()
-                            .withIOManager(createIOManager())
+                            .withIOManager(ioManager)
                             .createReader(((SparkInputPartition) partition).split());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
         RecordReaderIterator<InternalRow> iterator = new RecordReaderIterator<>(reader);
         SparkInternalRow row = new SparkInternalRow(readBuilder.readType());
-        return new SparkInputPartitionReader(iterator, row);
+        return new SparkInputPartitionReader(ioManager, iterator, row);
     }
 }

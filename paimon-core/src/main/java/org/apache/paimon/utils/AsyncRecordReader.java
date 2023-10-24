@@ -39,17 +39,17 @@ public class AsyncRecordReader<T> implements RecordReader<T> {
 
     private final BlockingQueue<Element> queue;
     private final Future<Void> future;
-    private final ClassLoader classLoader;
 
     private boolean isEnd = false;
 
     public AsyncRecordReader(IOExceptionSupplier<RecordReader<T>> supplier) {
         this.queue = new LinkedBlockingQueue<>();
-        this.future = ASYNC_EXECUTOR.submit(() -> asyncRead(supplier));
-        this.classLoader = Thread.currentThread().getContextClassLoader();
+        ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+        this.future = ASYNC_EXECUTOR.submit(() -> asyncRead(supplier, classLoader));
     }
 
-    private Void asyncRead(IOExceptionSupplier<RecordReader<T>> supplier) throws IOException {
+    private Void asyncRead(IOExceptionSupplier<RecordReader<T>> supplier, ClassLoader classLoader)
+            throws IOException {
         // set classloader, otherwise, its classloader belongs to its creator. It is possible that
         // its creator's classloader has already exited, which will cause subsequent reads to report
         // exceptions

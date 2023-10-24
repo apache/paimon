@@ -21,7 +21,7 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -62,7 +62,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     }
 
     private transient Catalog catalog;
-    private transient IOManagerImpl ioManager;
+    private transient IOManager ioManager;
     private transient Map<Identifier, BucketsTable> tablesMap;
     private transient Map<Identifier, TableRead> readsMap;
     private transient StreamRecord<RowData> reuseRecord;
@@ -72,7 +72,7 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
     public void open() throws Exception {
         super.open();
         ioManager =
-                new IOManagerImpl(
+                IOManager.create(
                         getContainingTask()
                                 .getEnvironment()
                                 .getIOManager()
@@ -121,5 +121,13 @@ public class MultiTablesReadOperator extends AbstractStreamOperator<RowData>
         }
 
         return readsMap.get(tableId);
+    }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (ioManager != null) {
+            ioManager.close();
+        }
     }
 }
