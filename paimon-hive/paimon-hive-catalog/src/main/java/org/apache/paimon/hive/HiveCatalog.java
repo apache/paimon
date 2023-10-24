@@ -293,17 +293,7 @@ public class HiveCatalog extends AbstractCatalog {
                     e);
         }
 
-        Table table =
-                newHmsTable(
-                        identifier,
-                        tableSchema.options().entrySet().stream()
-                                .filter(entry -> entry.getKey().startsWith(HIVE_PREFIX))
-                                .collect(
-                                        Collectors.toMap(
-                                                entry ->
-                                                        entry.getKey()
-                                                                .substring(HIVE_PREFIX_LENGTH),
-                                                Map.Entry::getValue)));
+        Table table = newHmsTable(identifier);
         try {
             updateHmsTable(table, identifier, tableSchema);
             client.createTable(table);
@@ -436,7 +426,7 @@ public class HiveCatalog extends AbstractCatalog {
         return database;
     }
 
-    private Table newHmsTable(Identifier identifier, Map<String, String> tableParameters) {
+    private Table newHmsTable(Identifier identifier) {
         long currentTimeMillis = System.currentTimeMillis();
         TableType tableType =
                 OptionsUtils.convertToEnum(
@@ -453,12 +443,11 @@ public class HiveCatalog extends AbstractCatalog {
                         Integer.MAX_VALUE,
                         null,
                         Collections.emptyList(),
-                        tableParameters,
+                        new HashMap<>(),
                         null,
                         null,
                         tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
-        table.getParameters()
-                .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
+
         if (TableType.EXTERNAL.equals(tableType)) {
             table.getParameters().put("EXTERNAL", "TRUE");
         }
@@ -501,6 +490,19 @@ public class HiveCatalog extends AbstractCatalog {
                             .collect(Collectors.toList()));
         }
         table.setSd(sd);
+
+        // set table parameters
+        Map<String, String> parameters =
+                schema.options().entrySet().stream()
+                        .filter(entry -> entry.getKey().startsWith(HIVE_PREFIX))
+                        .collect(
+                                Collectors.toMap(
+                                        entry -> entry.getKey().substring(HIVE_PREFIX_LENGTH),
+                                        Map.Entry::getValue,
+                                        (v1, v2) -> v2));
+        table.setParameters(parameters);
+        table.putToParameters(
+                hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
 
         // update location
         locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());
