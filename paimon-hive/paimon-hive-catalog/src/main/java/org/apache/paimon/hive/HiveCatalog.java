@@ -432,26 +432,20 @@ public class HiveCatalog extends AbstractCatalog {
                 OptionsUtils.convertToEnum(
                         hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
                         TableType.class);
-        Table table =
-                new Table(
-                        identifier.getObjectName(),
-                        identifier.getDatabaseName(),
-                        // current linux user
-                        System.getProperty("user.name"),
-                        (int) (currentTimeMillis / 1000),
-                        (int) (currentTimeMillis / 1000),
-                        Integer.MAX_VALUE,
-                        null,
-                        Collections.emptyList(),
-                        new HashMap<>(),
-                        null,
-                        null,
-                        tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
-
-        if (TableType.EXTERNAL.equals(tableType)) {
-            table.getParameters().put("EXTERNAL", "TRUE");
-        }
-        return table;
+        return new Table(
+                identifier.getObjectName(),
+                identifier.getDatabaseName(),
+                // current linux user
+                System.getProperty("user.name"),
+                (int) (currentTimeMillis / 1000),
+                (int) (currentTimeMillis / 1000),
+                Integer.MAX_VALUE,
+                null,
+                Collections.emptyList(),
+                new HashMap<>(),
+                null,
+                null,
+                tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
     }
 
     private void updateHmsTable(Table table, Identifier identifier, TableSchema schema) {
@@ -501,6 +495,11 @@ public class HiveCatalog extends AbstractCatalog {
                                         Map.Entry::getValue,
                                         (v1, v2) -> v2));
         table.setParameters(parameters);
+        if (org.apache.hadoop.hive.metastore.TableType.EXTERNAL_TABLE
+                .name()
+                .equalsIgnoreCase(table.getTableType())) {
+            table.putToParameters("EXTERNAL", "TRUE");
+        }
         table.putToParameters(
                 hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
 
