@@ -21,7 +21,7 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.metrics.AbstractMetricRegistry;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
@@ -132,7 +132,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public InnerTableCommit withMetricRegistry(AbstractMetricRegistry registry) {
+    public InnerTableCommit withMetricRegistry(MetricRegistry registry) {
         commit.withMetrics(new CommitMetrics(registry, tableName));
         return this;
     }

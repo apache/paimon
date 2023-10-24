@@ -22,7 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** Factory to create {@link MetricGroup}s. */
-public abstract class AbstractMetricRegistry {
+public abstract class MetricRegistry {
 
     private static final String KEY_TABLE = "table";
     private static final String KEY_PARTITION = "partition";

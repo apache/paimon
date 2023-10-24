@@ -20,8 +20,8 @@ package org.apache.paimon.metrics;
 
 import java.util.Map;
 
-/** Default implementation of {@link AbstractMetricRegistry}. */
-public class MetricRegistryImpl extends AbstractMetricRegistry {
+/** Default implementation of {@link MetricRegistry}. */
+public class MetricRegistryImpl extends MetricRegistry {
 
     @Override
     protected MetricGroup createMetricGroup(String groupName, Map<String, String> variables) {

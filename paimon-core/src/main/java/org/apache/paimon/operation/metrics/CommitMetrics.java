@@ -19,9 +19,9 @@
 package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.metrics.AbstractMetricRegistry;
 import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.MetricGroup;
+import org.apache.paimon.metrics.MetricRegistry;
 
 /** Metrics to measure a commit. */
 public class CommitMetrics {
@@ -31,7 +31,7 @@ public class CommitMetrics {
 
     private final MetricGroup metricGroup;
 
-    public CommitMetrics(AbstractMetricRegistry registry, String tableName) {
+    public CommitMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
         registerGenericCommitMetrics();
     }
