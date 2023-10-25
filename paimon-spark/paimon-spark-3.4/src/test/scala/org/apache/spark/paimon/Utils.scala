@@ -15,21 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.plans.logical
+package org.apache.spark.paimon
 
-import org.apache.paimon.spark.procedure.Procedure
+import org.apache.spark.util.{Utils => SparkUtils}
 
-import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
-import org.apache.spark.sql.catalyst.util.truncatedString
+import java.io.File
 
-/** A CALL command that resolves stored procedure from SQL. */
-case class CallCommand(procedure: Procedure, args: Seq[Expression]) extends LeafCommand {
+/**
+ * A wrapper that some Objects or Classes is limited to access beyond [[org.apache.spark]] package.
+ */
+object Utils {
 
-  override lazy val output: Seq[Attribute] =
-    procedure.outputType.map(
-      field => AttributeReference(field.name, field.dataType, field.nullable, field.metadata)())
+  def createTempDir: File = SparkUtils.createTempDir()
 
-  override def simpleString(maxFields: Int): String = {
-    s"Call${truncatedString(output, "[", ", ", "]", maxFields)} ${procedure.description}"
-  }
 }

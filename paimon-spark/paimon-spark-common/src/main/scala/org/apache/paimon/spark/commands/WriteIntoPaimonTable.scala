@@ -23,6 +23,7 @@ import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkConnectorOptions, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
+import org.apache.paimon.spark.util.EncoderUtils
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
@@ -30,7 +31,8 @@ import org.apache.paimon.types.RowType
 import org.apache.spark.TaskContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
-import org.apache.spark.sql.catalyst.encoders.{ExpressionEncoder, RowEncoder}
+import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
+import org.apache.spark.sql.catalyst.encoders.RowEncoder.encoderFor
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.functions._
@@ -74,13 +76,13 @@ case class WriteIntoPaimonTable(
     val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala.map(col)
     val partitionCols = tableSchema.partitionKeys().asScala.map(col)
 
-    val dataEncoder = RowEncoder.apply(data.schema).resolveAndBind()
+    val dataEncoder = EncoderUtils.encode(data.schema).resolveAndBind()
     val originFromRow = dataEncoder.createDeserializer()
 
     // append _bucket_ column as placeholder
     val withBucketCol = data.withColumn(BUCKET_COL, lit(-1))
     val bucketColIdx = withBucketCol.schema.size - 1
-    val withBucketDataEncoder = RowEncoder.apply(withBucketCol.schema).resolveAndBind()
+    val withBucketDataEncoder = EncoderUtils.encode(withBucketCol.schema).resolveAndBind()
     val toRow = withBucketDataEncoder.createSerializer()
     val fromRow = withBucketDataEncoder.createDeserializer()
 

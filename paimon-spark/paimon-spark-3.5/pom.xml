@@ -28,11 +28,11 @@ under the License.
         <version>0.6-SNAPSHOT</version>
     </parent>
 
-    <artifactId>paimon-spark-3.3</artifactId>
-    <name>Paimon : Spark : 3.3</name>
+    <artifactId>paimon-spark-3.5</artifactId>
+    <name>Paimon : Spark : 3.5</name>
 
     <properties>
-        <spark.version>3.3.3</spark.version>
+        <spark.version>3.5.0</spark.version>
     </properties>
 
     <dependencies>
