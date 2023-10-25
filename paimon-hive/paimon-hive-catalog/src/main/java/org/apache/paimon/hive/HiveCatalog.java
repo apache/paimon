@@ -295,7 +295,7 @@ public class HiveCatalog extends AbstractCatalog {
 
         Table table = newHmsTable(identifier);
         try {
-            updateHmsTable(table, identifier, tableSchema);
+            updateHmsTable(table, identifier, tableSchema, Collections.emptySet());
             client.createTable(table);
         } catch (Exception e) {
             Path path = getDataTableLocation(identifier);
@@ -355,7 +355,7 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             // sync to hive hms
             Table table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
-            updateHmsTable(table, identifier, schema);
+            updateHmsTable(table, identifier, schema, schemaManager.removeOptionChanges(changes));
             client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
         } catch (Exception te) {
             schemaManager.deleteSchema(schema.id());
@@ -432,23 +432,32 @@ public class HiveCatalog extends AbstractCatalog {
                 OptionsUtils.convertToEnum(
                         hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
                         TableType.class);
-        return new Table(
-                identifier.getObjectName(),
-                identifier.getDatabaseName(),
-                // current linux user
-                System.getProperty("user.name"),
-                (int) (currentTimeMillis / 1000),
-                (int) (currentTimeMillis / 1000),
-                Integer.MAX_VALUE,
-                null,
-                Collections.emptyList(),
-                new HashMap<>(),
-                null,
-                null,
-                tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
+        Table table =
+                new Table(
+                        identifier.getObjectName(),
+                        identifier.getDatabaseName(),
+                        // current linux user
+                        System.getProperty("user.name"),
+                        (int) (currentTimeMillis / 1000),
+                        (int) (currentTimeMillis / 1000),
+                        Integer.MAX_VALUE,
+                        null,
+                        Collections.emptyList(),
+                        new HashMap<>(),
+                        null,
+                        null,
+                        tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
+
+        table.putToParameters(
+                hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
+        if (TableType.EXTERNAL.equals(tableType)) {
+            table.putToParameters("EXTERNAL", "TRUE");
+        }
+        return table;
     }
 
-    private void updateHmsTable(Table table, Identifier identifier, TableSchema schema) {
+    private void updateHmsTable(
+            Table table, Identifier identifier, TableSchema schema, Set<String> removeParameters) {
         StorageDescriptor sd = new StorageDescriptor();
 
         sd.setInputFormat(INPUT_FORMAT_CLASS_NAME);
@@ -485,23 +494,16 @@ public class HiveCatalog extends AbstractCatalog {
         }
         table.setSd(sd);
 
-        // set table parameters
-        Map<String, String> parameters =
-                schema.options().entrySet().stream()
-                        .filter(entry -> entry.getKey().startsWith(HIVE_PREFIX))
-                        .collect(
-                                Collectors.toMap(
-                                        entry -> entry.getKey().substring(HIVE_PREFIX_LENGTH),
-                                        Map.Entry::getValue,
-                                        (v1, v2) -> v2));
-        table.setParameters(parameters);
-        if (org.apache.hadoop.hive.metastore.TableType.EXTERNAL_TABLE
-                .name()
-                .equalsIgnoreCase(table.getTableType())) {
-            table.putToParameters("EXTERNAL", "TRUE");
-        }
-        table.putToParameters(
-                hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
+        // update table parameters
+        schema.options().entrySet().stream()
+                .filter(entry -> entry.getKey().startsWith(HIVE_PREFIX))
+                .forEach(
+                        entry ->
+                                table.putToParameters(
+                                        entry.getKey().substring(HIVE_PREFIX_LENGTH),
+                                        entry.getValue()));
+
+        removeParameters.forEach(key -> table.getParameters().remove(key));
 
         // update location
         locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());

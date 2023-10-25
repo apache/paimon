@@ -50,12 +50,7 @@ import javax.annotation.concurrent.ThreadSafe;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -352,6 +347,13 @@ public class SchemaManager implements Serializable {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    public Set<String> removeOptionChanges(List<SchemaChange> changes) {
+        return changes.stream()
+                .filter(change -> change instanceof RemoveOption)
+                .map(change -> ((RemoveOption) change).key())
+                .collect(Collectors.toSet());
     }
 
     public boolean mergeSchema(RowType rowType, boolean allowExplicitCast) {
