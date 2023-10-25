@@ -35,7 +35,6 @@ import org.apache.hadoop.fs.Options;
 
 import java.io.IOException;
 import java.io.OutputStreamWriter;
-import java.io.UncheckedIOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -122,6 +121,14 @@ public class HadoopFileIO implements FileIO {
         org.apache.hadoop.fs.Path hadoopSrc = path(src);
         org.apache.hadoop.fs.Path hadoopDst = path(dst);
         return getFileSystem(hadoopSrc).rename(hadoopSrc, hadoopDst);
+    }
+
+    @Override
+    public void overwriteFileUtf8(Path path, String content) throws IOException {
+        boolean success = tryAtomicOverwriteViaRename(path, content);
+        if (!success) {
+            FileIO.super.overwriteFileUtf8(path, content);
+        }
     }
 
     private org.apache.hadoop.fs.Path path(Path path) {
@@ -340,8 +347,6 @@ public class HadoopFileIO implements FileIO {
                 OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
                 writer.write(content);
                 writer.flush();
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
             }
 
             renameMethod.invoke(

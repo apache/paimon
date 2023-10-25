@@ -26,6 +26,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -55,5 +57,53 @@ public class FileIOTest {
                         new Path("require-options://" + tempDir.toString()),
                         CatalogContext.create(options));
         assertThat(fileIO).isInstanceOf(RequireOptionsFileIOLoader.MyFileIO.class);
+    }
+
+    public static void testOverwriteFileUtf8(Path file, FileIO fileIO) throws InterruptedException {
+        AtomicReference<Exception> exception = new AtomicReference<>();
+        final int max = 10;
+
+        Thread writeThread =
+                new Thread(
+                        () -> {
+                            for (int i = 0; i <= max; i++) {
+                                try {
+                                    fileIO.overwriteFileUtf8(file, "" + i);
+                                    Thread.sleep(100);
+                                } catch (Exception e) {
+                                    exception.set(e);
+                                    return;
+                                }
+                            }
+                        });
+
+        Thread readThread =
+                new Thread(
+                        () -> {
+                            while (true) {
+                                try {
+                                    Optional<String> ret = fileIO.readOverwrittenFileUtf8(file);
+                                    if (!ret.isPresent()) {
+                                        continue;
+                                    }
+
+                                    int value = Integer.parseInt(ret.get());
+                                    if (value == max) {
+                                        return;
+                                    }
+                                } catch (Exception e) {
+                                    exception.set(e);
+                                    return;
+                                }
+                            }
+                        });
+
+        writeThread.start();
+        readThread.start();
+
+        writeThread.join();
+        readThread.join();
+
+        assertThat(exception.get()).isNull();
     }
 }

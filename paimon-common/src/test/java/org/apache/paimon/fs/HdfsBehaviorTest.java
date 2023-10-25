@@ -30,7 +30,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assumptions.assumeThat;
@@ -100,48 +99,7 @@ class HdfsBehaviorTest extends FileIOBehaviorTestBase {
     }
 
     @Test
-    public void testAtomicWriteMultipleThreads() throws InterruptedException, IOException {
-        Path file = new Path(getBasePath(), randomName());
-        AtomicReference<Exception> exception = new AtomicReference<>();
-        final int max = 10;
-        fs.tryAtomicOverwriteViaRename(file, "0");
-
-        Thread writeThread =
-                new Thread(
-                        () -> {
-                            for (int i = 1; i <= max; i++) {
-                                try {
-                                    fs.tryAtomicOverwriteViaRename(file, "" + i);
-                                    Thread.sleep(100);
-                                } catch (Exception e) {
-                                    exception.set(e);
-                                    return;
-                                }
-                            }
-                        });
-
-        Thread readThread =
-                new Thread(
-                        () -> {
-                            while (true) {
-                                try {
-                                    int value = Integer.parseInt(fs.readFileUtf8(file));
-                                    if (value == max) {
-                                        return;
-                                    }
-                                } catch (Exception e) {
-                                    exception.set(e);
-                                    return;
-                                }
-                            }
-                        });
-
-        writeThread.start();
-        readThread.start();
-
-        writeThread.join();
-        readThread.join();
-
-        assertThat(exception.get()).isNull();
+    public void testAtomicWriteMultipleThreads() throws InterruptedException {
+        FileIOTest.testOverwriteFileUtf8(new Path(getBasePath(), randomName()), fs);
     }
 }
