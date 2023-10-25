@@ -21,7 +21,6 @@ import org.apache.paimon.catalog.{Catalog, CatalogContext, CatalogFactory, Ident
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalog.Catalogs
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
-import org.apache.paimon.spark.sql.WithTableOptions
 import org.apache.paimon.table.AbstractFileStoreTable
 
 import org.apache.spark.paimon.Utils
@@ -32,7 +31,7 @@ import org.scalatest.Tag
 
 import java.io.File
 
-class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTableOptions {
+class PaimonSparkTestBase extends QueryTest with SharedSparkSession {
 
   protected lazy val tempDBDir: File = Utils.createTempDir
 
