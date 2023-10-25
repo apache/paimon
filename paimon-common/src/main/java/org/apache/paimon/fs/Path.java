@@ -28,6 +28,7 @@ import org.apache.paimon.utils.StringUtils;
 import java.io.Serializable;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
@@ -316,6 +317,11 @@ public class Path implements Comparable<Path>, Serializable {
         String path = uri.getPath();
         int slash = path.lastIndexOf(SEPARATOR);
         return path.substring(slash + 1);
+    }
+
+    /** Create a temporary path (to be used as a copy) for this path. */
+    public Path createTempPath() {
+        return new Path(getParent(), String.format(".%s.%s.tmp", getName(), UUID.randomUUID()));
     }
 
     /**

@@ -18,7 +18,11 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileIOTest;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.s3.MinioTestContainer;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
@@ -32,6 +36,7 @@ import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -46,12 +51,14 @@ public class SparkS3ITCase {
     @RegisterExtension
     public static final MinioTestContainer MINIO_CONTAINER = new MinioTestContainer();
 
+    private static Path warehousePath;
+
     private static SparkSession spark = null;
 
     @BeforeAll
     public static void startMetastoreAndSpark() {
         String path = MINIO_CONTAINER.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
-        Path warehousePath = new Path(path);
+        warehousePath = new Path(path);
         spark = SparkSession.builder().master("local[2]").getOrCreate();
         spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
@@ -83,7 +90,7 @@ public class SparkS3ITCase {
 
     @AfterEach
     public void afterEach() {
-        spark.sql("DROP TABLE T");
+        spark.sql("DROP TABLE IF EXISTS T");
     }
 
     @TestTemplate
@@ -96,5 +103,14 @@ public class SparkS3ITCase {
         spark.sql("INSERT INTO T VALUES (1, 2, '3')").collectAsList();
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).isEqualTo("[[1,2,3]]");
+    }
+
+    @TestTemplate
+    public void testS3AtomicWriteMultipleThreads() throws InterruptedException, IOException {
+        Path file = new Path(warehousePath, UUID.randomUUID().toString());
+        Options options = new Options();
+        MINIO_CONTAINER.getS3ConfigOptions().forEach(options::setString);
+        FileIO fileIO = FileIO.get(file, CatalogContext.create(options));
+        FileIOTest.testOverwriteFileUtf8(file, fileIO);
     }
 }
