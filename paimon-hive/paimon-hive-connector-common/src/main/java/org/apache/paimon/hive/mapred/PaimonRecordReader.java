@@ -19,7 +19,10 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -47,6 +50,7 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
 
     // project from selectedColumns to hiveColumns
     @Nullable private final ProjectedRow reusedProjectedRow;
+    @Nullable private final JoinedRow addTagToPartFieldRow;
 
     private float progress;
 
@@ -60,7 +64,8 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
             PaimonInputSplit split,
             List<String> paimonColumns,
             List<String> hiveColumns,
-            List<String> selectedColumns)
+            List<String> selectedColumns,
+            @Nullable String tagToPartField)
             throws IOException {
         if (!paimonColumns.equals(selectedColumns)) {
             readBuilder.withProjection(
@@ -78,6 +83,16 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
         this.iterator =
                 new RecordReaderIterator<>(readBuilder.newRead().createReader(split.split()));
         this.splitLength = split.getLength();
+        if (tagToPartField != null) {
+            // in case of reading partition field
+            // add last field (partition field from tag name) to row
+            String tag =
+                    PaimonInputFormat.extractTagName(split.getPath().getName(), tagToPartField);
+            addTagToPartFieldRow = new JoinedRow();
+            addTagToPartFieldRow.replace(null, GenericRow.of(BinaryString.fromString(tag)));
+        } else {
+            addTagToPartFieldRow = null;
+        }
         this.progress = 0;
     }
 
@@ -93,6 +108,9 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
                 value.set(reusedProjectedRow.replaceRow(rowData));
             } else {
                 value.set(rowData);
+            }
+            if (addTagToPartFieldRow != null) {
+                value.set(addTagToPartFieldRow.replace(value.get(), addTagToPartFieldRow.row2()));
             }
             return true;
         }

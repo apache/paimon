@@ -34,6 +34,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.TableType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
@@ -79,6 +80,7 @@ import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
@@ -476,7 +478,8 @@ public class HiveCatalog extends AbstractCatalog {
         serDeInfo.setSerializationLib(SERDE_CLASS_NAME);
         sd.setSerdeInfo(serDeInfo);
 
-        if (new CoreOptions(schema.options()).partitionedTableInMetastore()) {
+        CoreOptions options = new CoreOptions(schema.options());
+        if (options.partitionedTableInMetastore() && schema.partitionKeys().size() > 0) {
             Map<String, DataField> fieldMap =
                     schema.fields().stream()
                             .collect(Collectors.toMap(DataField::name, Function.identity()));
@@ -495,6 +498,21 @@ public class HiveCatalog extends AbstractCatalog {
             }
             sd.setCols(normalFields);
         } else {
+            if (options.tagToPartitionField() != null) {
+                // map a non-partitioned table to a partitioned table
+                // partition field is tag field which is offered by user
+                checkArgument(
+                        schema.partitionKeys().isEmpty(),
+                        "Partition table can not use timeTravelToPartitionField.");
+                table.setPartitionKeys(
+                        Collections.singletonList(
+                                convertToFieldSchema(
+                                        new DataField(
+                                                0,
+                                                options.tagToPartitionField(),
+                                                DataTypes.STRING()))));
+            }
+
             sd.setCols(
                     schema.fields().stream()
                             .map(this::convertToFieldSchema)

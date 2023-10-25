@@ -87,6 +87,14 @@ public class JoinedRow implements InternalRow {
         return this;
     }
 
+    public InternalRow row1() {
+        return row1;
+    }
+
+    public InternalRow row2() {
+        return row2;
+    }
+
     // ---------------------------------------------------------------------------------------------
 
     @Override

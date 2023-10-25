@@ -36,8 +36,10 @@ import org.apache.hadoop.mapred.JobConf;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
@@ -58,15 +60,28 @@ public class HiveUtils {
         if (sarg == null) {
             return Optional.empty();
         }
+        Set<String> readColumnNames = null;
+        if (limitToReadColumnNames) {
+            readColumnNames =
+                    Arrays.stream(ColumnProjectionUtils.getReadColumnNames(jobConf))
+                            .collect(Collectors.toSet());
+        }
+        String tagToPartField =
+                tableSchema.options().get(CoreOptions.METASTORE_TAG_TO_PARTITION.key());
+        if (tagToPartField != null) {
+            // exclude tagToPartField, this should be done in Hive partition prune
+            // cannot find the field in paimon table schema
+            if (readColumnNames == null) {
+                readColumnNames = new HashSet<>(tableSchema.fieldNames());
+            }
+            readColumnNames.remove(tagToPartField);
+        }
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(
                         sarg,
                         tableSchema.fieldNames(),
                         tableSchema.logicalRowType().getFieldTypes(),
-                        limitToReadColumnNames
-                                ? Arrays.stream(ColumnProjectionUtils.getReadColumnNames(jobConf))
-                                        .collect(Collectors.toSet())
-                                : null);
+                        readColumnNames);
         return converter.convert();
     }
 

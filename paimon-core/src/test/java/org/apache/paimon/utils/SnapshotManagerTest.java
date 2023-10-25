@@ -30,7 +30,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -136,7 +135,7 @@ public class SnapshotManagerTest {
                 });
 
         // test safely
-        Function<Snapshot, Boolean> func =
+        Filter<Snapshot> func =
                 snapshot -> {
                     try {
                         Thread.sleep(100);

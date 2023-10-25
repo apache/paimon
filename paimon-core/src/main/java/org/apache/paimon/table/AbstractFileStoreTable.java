@@ -26,6 +26,9 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
+import org.apache.paimon.metastore.AddPartitionTagCallback;
+import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.metastore.TagPreviewCommitCallback;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
@@ -39,6 +42,7 @@ import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
@@ -51,6 +55,8 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.tag.TagPreview;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -58,6 +64,7 @@ import org.apache.paimon.utils.TagManager;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -267,20 +274,53 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private List<CommitCallback> createCommitCallbacks() {
         List<CommitCallback> callbacks = new ArrayList<>(loadCommitCallbacks());
-        if (coreOptions().partitionedTableInMetastore()
-                && catalogEnvironment.metastoreClientFactory() != null
+        CoreOptions options = coreOptions();
+        MetastoreClient.Factory metastoreClientFactory =
+                catalogEnvironment.metastoreClientFactory();
+        if (options.partitionedTableInMetastore()
+                && metastoreClientFactory != null
                 && tableSchema.partitionKeys().size() > 0) {
-            callbacks.add(
-                    new AddPartitionCommitCallback(
-                            catalogEnvironment.metastoreClientFactory().create()));
+            callbacks.add(new AddPartitionCommitCallback(metastoreClientFactory.create()));
+        }
+        TagPreview tagPreview = TagPreview.create(options);
+        if (options.tagToPartitionField() != null
+                && tagPreview != null
+                && metastoreClientFactory != null
+                && tableSchema.partitionKeys().isEmpty()) {
+            TagPreviewCommitCallback callback =
+                    new TagPreviewCommitCallback(
+                            new AddPartitionTagCallback(
+                                    metastoreClientFactory.create(), options.tagToPartitionField()),
+                            tagPreview);
+            callbacks.add(callback);
         }
         return callbacks;
     }
 
-    private List<CommitCallback> loadCommitCallbacks() {
-        List<CommitCallback> result = new ArrayList<>();
+    private List<TagCallback> createTagCallbacks() {
+        List<TagCallback> callbacks = new ArrayList<>(loadTagCallbacks());
+        String partitionField = coreOptions().tagToPartitionField();
+        MetastoreClient.Factory metastoreClientFactory =
+                catalogEnvironment.metastoreClientFactory();
+        if (partitionField != null && metastoreClientFactory != null) {
+            callbacks.add(
+                    new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
+        }
+        return callbacks;
+    }
 
-        Map<String, String> clazzParamMaps = coreOptions().commitCallbacks();
+    private List<TagCallback> loadTagCallbacks() {
+        return loadCallbacks(coreOptions().tagCallbacks(), TagCallback.class);
+    }
+
+    private List<CommitCallback> loadCommitCallbacks() {
+        return loadCallbacks(coreOptions().commitCallbacks(), CommitCallback.class);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> List<T> loadCallbacks(Map<String, String> clazzParamMaps, Class<T> expectClass) {
+        List<T> result = new ArrayList<>();
+
         for (Map.Entry<String, String> classParamEntry : clazzParamMaps.entrySet()) {
             String className = classParamEntry.getKey();
             String param = classParamEntry.getValue();
@@ -293,15 +333,14 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             }
 
             Preconditions.checkArgument(
-                    CommitCallback.class.isAssignableFrom(clazz),
-                    "Class " + clazz + " must implement " + CommitCallback.class);
+                    expectClass.isAssignableFrom(clazz),
+                    "Class " + clazz + " must implement " + expectClass);
 
             try {
                 if (param == null) {
-                    result.add((CommitCallback) clazz.newInstance());
+                    result.add((T) clazz.newInstance());
                 } else {
-                    result.add(
-                            (CommitCallback) clazz.getConstructor(String.class).newInstance(param));
+                    result.add((T) clazz.getConstructor(String.class).newInstance(param));
                 }
             } catch (Exception e) {
                 throw new RuntimeException(
@@ -414,6 +453,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
         Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
         tagManager().createTag(snapshot, tagName);
+
+        List<TagCallback> callbacks = Collections.emptyList();
+        try {
+            callbacks = createTagCallbacks();
+            callbacks.forEach(callback -> callback.notifyCreation(tagName));
+        } finally {
+            for (TagCallback tagCallback : callbacks) {
+                IOUtils.closeQuietly(tagCallback);
+            }
+        }
     }
 
     @Override

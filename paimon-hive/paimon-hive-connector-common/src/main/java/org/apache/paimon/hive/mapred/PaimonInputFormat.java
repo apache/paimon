@@ -18,6 +18,7 @@
 
 package org.apache.paimon.hive.mapred;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -25,7 +26,9 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.ql.io.IOConstants;
@@ -38,15 +41,20 @@ import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapred.Reporter;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static java.util.Collections.singletonMap;
+import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.hive.utils.HiveUtils.createFileStoreTable;
 import static org.apache.paimon.hive.utils.HiveUtils.createPredicate;
 
@@ -70,19 +78,37 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
         // the location of Hive.
         String locations = jobConf.get(FileInputFormat.INPUT_DIR);
 
+        @Nullable String tagToPartField = table.coreOptions().tagToPartitionField();
+        @Nullable TagPreview tagPreview = TagPreview.create(table.coreOptions());
+
         List<PaimonInputSplit> splits = new ArrayList<>();
         // locations may contain multiple partitions
         for (String location : locations.split(",")) {
-            List<Predicate> predicatePerPartition = new ArrayList<>(predicates);
-            createPartitionPredicate(
-                            table.schema().logicalRowType(),
-                            table.schema().partitionKeys(),
-                            location)
-                    .ifPresent(predicatePerPartition::add);
+            InnerTableScan scan;
+            if (tagToPartField != null) {
+                // the location should be pruned by partition predicate
+                // we can extract tag name from location, and use time travel to scan
+                String tag = extractTagName(location, tagToPartField);
+                Map<String, String> dynamicOptions =
+                        tagPreview == null
+                                ? singletonMap(SCAN_TAG_NAME.key(), tag)
+                                : tagPreview.timeTravel(table, tag);
+                scan = table.copy(dynamicOptions).newScan();
+                if (predicates.size() > 0) {
+                    scan.withFilter(PredicateBuilder.and(predicates));
+                }
+            } else {
+                List<Predicate> predicatePerPartition = new ArrayList<>(predicates);
+                createPartitionPredicate(
+                                table.schema().logicalRowType(),
+                                table.schema().partitionKeys(),
+                                location)
+                        .ifPresent(predicatePerPartition::add);
 
-            InnerTableScan scan = table.newScan();
-            if (predicatePerPartition.size() > 0) {
-                scan.withFilter(PredicateBuilder.and(predicatePerPartition));
+                scan = table.newScan();
+                if (predicatePerPartition.size() > 0) {
+                    scan.withFilter(PredicateBuilder.and(predicatePerPartition));
+                }
             }
             scan.plan()
                     .splits()
@@ -129,7 +155,8 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
                 split,
                 paimonColumns,
                 getHiveColumns(jobConf).orElse(paimonColumns),
-                Arrays.asList(getSelectedColumns(jobConf)));
+                Arrays.asList(getSelectedColumns(jobConf)),
+                table.coreOptions().tagToPartitionField());
     }
 
     private Optional<List<String>> getHiveColumns(JobConf jobConf) {
@@ -155,5 +182,12 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
         return Arrays.stream(ColumnProjectionUtils.getReadColumnNames(jobConf))
                 .distinct()
                 .toArray(String[]::new);
+    }
+
+    /** Extract tag name from location, partition field should be tag name. */
+    public static String extractTagName(String location, String tagToPartField) {
+        LinkedHashMap<String, String> partSpec =
+                PartitionPathUtils.extractPartitionSpecFromPath(new Path(location));
+        return partSpec.get(tagToPartField);
     }
 }

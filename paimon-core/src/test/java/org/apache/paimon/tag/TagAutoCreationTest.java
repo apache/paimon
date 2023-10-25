@@ -21,7 +21,6 @@ package org.apache.paimon.tag;
 import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.CoreOptions.TagCreationPeriod;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
-import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
@@ -187,10 +186,6 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         assertThat(tagManager.tags().values())
                 .containsOnly("2023-07-17", "2023-07-18", "2023-07-19");
         commit.close();
-    }
-
-    private long utcMills(String timestamp) {
-        return Timestamp.fromLocalDateTime(LocalDateTime.parse(timestamp)).getMillisecond();
     }
 
     private long localZoneMills(String timestamp) {

@@ -18,24 +18,34 @@
 
 package org.apache.paimon.metastore;
 
-import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.table.sink.TagCallback;
 
-import java.io.Serializable;
 import java.util.LinkedHashMap;
 
-/**
- * A metastore client related to a table. All methods of this interface operate on the same specific
- * table.
- */
-public interface MetastoreClient extends AutoCloseable {
+/** A {@link TagCallback} to add newly created partitions to metastore. */
+public class AddPartitionTagCallback implements TagCallback {
 
-    void addPartition(BinaryRow partition) throws Exception;
+    private final MetastoreClient client;
+    private final String partitionField;
 
-    void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception;
+    public AddPartitionTagCallback(MetastoreClient client, String partitionField) {
+        this.client = client;
+        this.partitionField = partitionField;
+    }
 
-    /** Factory to create {@link MetastoreClient}. */
-    interface Factory extends Serializable {
+    @Override
+    public void notifyCreation(String tagName) {
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put(partitionField, tagName);
+        try {
+            client.addPartition(partitionSpec);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
 
-        MetastoreClient create();
+    @Override
+    public void close() throws Exception {
+        client.close();
     }
 }

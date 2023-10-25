@@ -60,10 +60,12 @@ public class HiveMetastoreClient implements MetastoreClient {
 
     @Override
     public void addPartition(BinaryRow partition) throws Exception {
-        LinkedHashMap<String, String> partitionMap =
-                partitionComputer.generatePartValues(partition);
-        List<String> partitionValues = new ArrayList<>(partitionMap.values());
+        addPartition(partitionComputer.generatePartValues(partition));
+    }
 
+    @Override
+    public void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
+        List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         try {
             client.getPartition(
                     identifier.getDatabaseName(), identifier.getObjectName(), partitionValues);
@@ -74,7 +76,7 @@ public class HiveMetastoreClient implements MetastoreClient {
             newSd.setLocation(
                     sd.getLocation()
                             + "/"
-                            + PartitionPathUtils.generatePartitionPath(partitionMap));
+                            + PartitionPathUtils.generatePartitionPath(partitionSpec));
 
             Partition hivePartition = new Partition();
             hivePartition.setDbName(identifier.getDatabaseName());

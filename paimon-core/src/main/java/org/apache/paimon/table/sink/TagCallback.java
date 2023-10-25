@@ -16,26 +16,14 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.metastore;
-
-import org.apache.paimon.data.BinaryRow;
-
-import java.io.Serializable;
-import java.util.LinkedHashMap;
+package org.apache.paimon.table.sink;
 
 /**
- * A metastore client related to a table. All methods of this interface operate on the same specific
- * table.
+ * This callback will be called after tag operations.
+ *
+ * <p>NOTE: No guarantee that this callback must be called.
  */
-public interface MetastoreClient extends AutoCloseable {
+public interface TagCallback extends AutoCloseable {
 
-    void addPartition(BinaryRow partition) throws Exception;
-
-    void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception;
-
-    /** Factory to create {@link MetastoreClient}. */
-    interface Factory extends Serializable {
-
-        MetastoreClient create();
-    }
+    void notifyCreation(String tagName);
 }
