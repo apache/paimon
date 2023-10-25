@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.metrics.commit;
+package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;

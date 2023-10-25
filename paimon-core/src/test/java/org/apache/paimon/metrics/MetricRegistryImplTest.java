@@ -18,26 +18,26 @@
 
 package org.apache.paimon.metrics;
 
-import org.apache.paimon.metrics.groups.GenericMetricGroup;
-
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for the {@link MetricGroup}. */
-public class MetricGroupTest {
+/** Tests for the {@link MetricRegistryImpl}. */
+public class MetricRegistryImplTest {
+
     @Test
     public void testGroupRegisterMetrics() {
-        GenericMetricGroup group = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
-        assertThat(group.isClosed()).isFalse();
+        MetricRegistryImpl registry = new MetricRegistryImpl();
+        MetricGroup group = registry.tableMetricGroup("commit", "myTable");
+
         // these will fail is the registration is propagated
         group.counter("testcounter");
         group.gauge("testgauge", () -> null);
         assertThat(group.getGroupName()).isEqualTo("commit");
-        assertThat(group.getAllTags().size()).isEqualTo(1);
-        assertThat(group.getAllTags())
+        assertThat(group.getAllVariables().size()).isEqualTo(1);
+        assertThat(group.getAllVariables())
                 .containsExactlyEntriesOf(
                         new HashMap<String, String>() {
                             {
@@ -45,28 +45,16 @@ public class MetricGroupTest {
                             }
                         });
         assertThat(group.getMetrics().size()).isEqualTo(2);
-        group.close();
-        assertThat(group.isClosed()).isTrue();
     }
 
     @Test
     public void testTolerateMetricNameCollisions() {
         final String name = "abctestname";
-        GenericMetricGroup group = GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
+        MetricRegistryImpl registry = new MetricRegistryImpl();
+        MetricGroup group = registry.tableMetricGroup("commit", "myTable");
 
-        Counter counter1 = group.counter(name);
-
+        Counter counter = group.counter(name);
         // return the old one with the metric name collision
-        assertThat(group.counter(name)).isSameAs(counter1);
-        group.close();
-    }
-
-    @Test
-    public void testAddAndRemoveMetricGroups() {
-        AbstractMetricGroup metricGroup =
-                GenericMetricGroup.createGenericMetricGroup("myTable", "commit");
-        assertThat(Metrics.getInstance().getMetricGroups()).contains(metricGroup);
-        metricGroup.close();
-        assertThat(Metrics.getInstance().getMetricGroups()).doesNotContain(metricGroup);
+        assertThat(group.counter(name)).isSameAs(counter);
     }
 }

@@ -16,32 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.metrics.groups;
+package org.apache.paimon.metrics;
 
-import org.apache.paimon.metrics.AbstractMetricGroup;
-
-import java.util.HashMap;
 import java.util.Map;
 
-/** A simple named {@link org.apache.paimon.metrics.MetricGroup} that is untagged. */
-public class GenericMetricGroup extends AbstractMetricGroup {
-
-    private final String groupName;
-
-    GenericMetricGroup(final Map<String, String> tags, final String groupName) {
-        super(tags);
-        this.groupName = groupName;
-    }
-
-    public static GenericMetricGroup createGenericMetricGroup(
-            final String tableName, final String groupName) {
-        Map<String, String> tags = new HashMap<>();
-        tags.put("table", tableName);
-        return new GenericMetricGroup(tags, groupName);
-    }
+/** Default implementation of {@link MetricRegistry}. */
+public class MetricRegistryImpl extends MetricRegistry {
 
     @Override
-    public String getGroupName() {
-        return groupName;
+    protected MetricGroup createMetricGroup(String groupName, Map<String, String> variables) {
+        return new MetricGroupImpl(groupName, variables);
     }
 }

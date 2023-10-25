@@ -39,16 +39,6 @@ public interface MetricGroup {
     Counter counter(String name);
 
     /**
-     * Registers a {@link org.apache.paimon.metrics.Counter} with Paimon.
-     *
-     * @param name name of the counter
-     * @param counter counter to register
-     * @param <C> counter type
-     * @return the given counter
-     */
-    <C extends Counter> C counter(String name, C counter);
-
-    /**
      * Registers a new {@link org.apache.paimon.metrics.Gauge} with Paimon.
      *
      * @param name name of the gauge
@@ -56,28 +46,19 @@ public interface MetricGroup {
      * @param <T> return type of the gauge
      * @return the given gauge
      */
-    <T, G extends Gauge<T>> G gauge(String name, G gauge);
+    <T> Gauge<T> gauge(String name, Gauge<T> gauge);
 
     /**
      * Registers a new {@link Histogram} with Paimon.
      *
      * @param name name of the histogram
-     * @param histogram histogram to register
-     * @param <H> histogram type
+     * @param windowSize number of records this histogram keeps
      * @return the registered histogram
      */
-    <H extends Histogram> H histogram(String name, H histogram);
-
-    /**
-     * Returns the fully qualified metric name, for example {@code "myTable.bucket-1.metricName"}.
-     *
-     * @param metricName metric name
-     * @return fully qualified metric name
-     */
-    String getMetricIdentifier(String metricName, String delimiter);
+    Histogram histogram(String name, int windowSize);
 
     /** Returns a map of all variables and their associated value. */
-    Map<String, String> getAllTags();
+    Map<String, String> getAllVariables();
 
     /**
      * Returns the name for this group, meaning what kind of entity it represents, for example

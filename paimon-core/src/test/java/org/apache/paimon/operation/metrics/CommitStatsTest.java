@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.metrics.commit;
+package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -32,7 +32,7 @@ import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.manifest.ManifestFileMetaTestBase.makeEntry;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link CommitStats}. */
+/** Tests for {@link org.apache.paimon.operation.metrics.CommitStats}. */
 public class CommitStatsTest {
     private static List<ManifestEntry> files = new ArrayList<>();
     private static List<ManifestEntry> appendDataFiles = new ArrayList<>();
