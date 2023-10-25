@@ -44,6 +44,8 @@ public class InMemoryBuffer implements RowBuffer {
     private int numBytesInLastBuffer;
     private int numRecords = 0;
 
+    private boolean isInitialized;
+
     InMemoryBuffer(MemorySegmentPool pool, AbstractRowDataSerializer<InternalRow> serializer) {
         // serializer has states, so we must duplicate
         this.serializer = (AbstractRowDataSerializer<InternalRow>) serializer.duplicate();
@@ -52,14 +54,26 @@ public class InMemoryBuffer implements RowBuffer {
         this.recordBufferSegments = new ArrayList<>();
         this.recordCollector =
                 new SimpleCollectingOutputView(this.recordBufferSegments, pool, segmentSize);
+        this.isInitialized = true;
+    }
+
+    /** Try to initialize the buffer if all contained data is discarded. */
+    private void tryInitialize() {
+        if (!isInitialized) {
+            this.recordCollector.reset();
+            this.isInitialized = true;
+        }
     }
 
     @Override
     public void reset() {
-        this.currentDataBufferOffset = 0;
-        this.numRecords = 0;
-        returnToSegmentPool();
-        this.recordCollector.reset();
+        if (this.isInitialized) {
+            this.currentDataBufferOffset = 0;
+            this.numBytesInLastBuffer = 0;
+            this.numRecords = 0;
+            returnToSegmentPool();
+            this.isInitialized = false;
+        }
     }
 
     private void returnToSegmentPool() {
@@ -70,6 +84,7 @@ public class InMemoryBuffer implements RowBuffer {
     @Override
     public boolean put(InternalRow row) throws IOException {
         try {
+            tryInitialize();
             this.serializer.serializeToPages(row, this.recordCollector);
             currentDataBufferOffset = this.recordCollector.getCurrentOffset();
             numBytesInLastBuffer = this.recordCollector.getCurrentPositionInSegment();
@@ -95,6 +110,7 @@ public class InMemoryBuffer implements RowBuffer {
 
     @Override
     public InMemoryBufferIterator newIterator() {
+        tryInitialize();
         RandomAccessInputView recordBuffer =
                 new RandomAccessInputView(
                         this.recordBufferSegments, segmentSize, numBytesInLastBuffer);
