@@ -27,6 +27,7 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
@@ -63,6 +64,14 @@ public class SchemaValidation {
     public static final List<Class<? extends DataType>> PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES =
             Arrays.asList(MapType.class, ArrayType.class, RowType.class, MultisetType.class);
 
+    public static final List<Class<? extends DataType>> PARTITION_KEY_UNSUPPORTED_LOGICAL_TYPES =
+            Arrays.asList(
+                    MapType.class,
+                    ArrayType.class,
+                    RowType.class,
+                    MultisetType.class,
+                    BinaryType.class);
+
     /**
      * Validate the {@link TableSchema} and {@link CoreOptions}.
      *
@@ -72,6 +81,7 @@ public class SchemaValidation {
      */
     public static void validateTableSchema(TableSchema schema) {
         validatePrimaryKeysType(schema.fields(), schema.primaryKeys());
+        validatePartitionKeysType(schema.fields(), schema.partitionKeys());
 
         CoreOptions options = new CoreOptions(schema.options());
 
@@ -181,6 +191,27 @@ public class SchemaValidation {
                             String.format(
                                     "The type %s in primary key field %s is unsupported",
                                     dataType.getClass().getSimpleName(), primaryKeyName));
+                }
+            }
+        }
+    }
+
+    private static void validatePartitionKeysType(
+            List<DataField> fields, List<String> partitionKeys) {
+        if (!partitionKeys.isEmpty()) {
+            Map<String, DataField> rowFields = new HashMap<>();
+            for (DataField rowField : fields) {
+                rowFields.put(rowField.name(), rowField);
+            }
+            for (String partitionKeyName : partitionKeys) {
+                DataField rowField = rowFields.get(partitionKeyName);
+                DataType dataType = rowField.type();
+                if (PARTITION_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
+                        .anyMatch(c -> c.isInstance(dataType))) {
+                    throw new UnsupportedOperationException(
+                            String.format(
+                                    "The type %s in partition key field %s is unsupported",
+                                    dataType.getClass().getSimpleName(), partitionKeyName));
                 }
             }
         }

@@ -28,6 +28,7 @@ import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.flink.source.SystemTableSource;
+import org.apache.paimon.flink.source.table.PushedPartitionTableSource;
 import org.apache.paimon.flink.source.table.PushedRichTableSource;
 import org.apache.paimon.flink.source.table.PushedTableSource;
 import org.apache.paimon.flink.source.table.RichTableSource;
@@ -39,6 +40,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -56,6 +58,7 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -105,7 +108,9 @@ public abstract class AbstractFlinkTableFactory
                             context,
                             createOptionalLogStoreFactory(context).orElse(null));
             return new Options(table.options()).get(SCAN_PUSH_DOWN)
-                    ? new PushedRichTableSource(source)
+                    ? !isStreamingMode && isPartitionPushDownSupported(table)
+                            ? new PushedPartitionTableSource(source)
+                            : new PushedRichTableSource(source)
                     : new RichTableSource(source);
         }
     }
@@ -124,6 +129,29 @@ public abstract class AbstractFlinkTableFactory
                 table,
                 context,
                 createOptionalLogStoreFactory(context).orElse(null));
+    }
+
+    private boolean isPartitionPushDownSupported(Table table) {
+        Set<DataTypeRoot> supported = new HashSet<>();
+        supported.add(DataTypeRoot.INTEGER);
+        supported.add(DataTypeRoot.TINYINT);
+        supported.add(DataTypeRoot.SMALLINT);
+        supported.add(DataTypeRoot.BIGINT);
+        supported.add(DataTypeRoot.DOUBLE);
+        supported.add(DataTypeRoot.CHAR);
+        supported.add(DataTypeRoot.VARCHAR);
+        supported.add(DataTypeRoot.BOOLEAN);
+        supported.add(DataTypeRoot.FLOAT);
+        supported.add(DataTypeRoot.DECIMAL);
+        // DATE, TIMESTAMP, TIME is not compatible with the parse logic in flink's
+        // PartitionPruner#convertPartitionFieldValue
+        org.apache.paimon.types.RowType rowType = table.rowType();
+        List<String> partitionKeys = table.partitionKeys();
+        int[] indices =
+                partitionKeys.stream().mapToInt(p -> rowType.getFieldNames().indexOf(p)).toArray();
+        return Arrays.stream(indices)
+                .mapToObj(i -> rowType.getTypeAt(i).getTypeRoot())
+                .allMatch(supported::contains);
     }
 
     private void storeTableLineage(

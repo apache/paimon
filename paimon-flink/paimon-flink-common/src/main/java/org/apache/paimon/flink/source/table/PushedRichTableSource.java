@@ -31,7 +31,7 @@ import java.util.List;
 public class PushedRichTableSource extends RichTableSource
         implements SupportsFilterPushDown, SupportsProjectionPushDown, SupportsLimitPushDown {
 
-    private final FlinkTableSource source;
+    protected final FlinkTableSource source;
 
     public PushedRichTableSource(FlinkTableSource source) {
         super(source);

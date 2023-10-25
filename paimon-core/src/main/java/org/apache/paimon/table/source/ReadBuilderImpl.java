@@ -19,13 +19,19 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TypeUtils;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+
+import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** Implementation for {@link ReadBuilder}. */
 public class ReadBuilderImpl implements ReadBuilder {
@@ -78,7 +84,25 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableRead newRead() {
-        InnerTableRead read = table.newRead().withFilter(filter);
+        // Only push down non-partition filters
+        int[] fieldIdxToPartitionIdx =
+                table.rowType().getFieldNames().stream()
+                        .mapToInt(f -> table.rowType().getFieldNames().indexOf(f))
+                        .toArray();
+
+        List<Predicate> nonPartitionFilters = new ArrayList<>();
+        for (Predicate p : PredicateBuilder.splitAnd(filter)) {
+            Optional<Predicate> mapped = transformFieldMapping(p, fieldIdxToPartitionIdx);
+            if (!mapped.isPresent()) {
+                nonPartitionFilters.add(p);
+            }
+        }
+
+        InnerTableRead read = table.newRead();
+
+        if (!nonPartitionFilters.isEmpty()) {
+            read.withFilter(PredicateBuilder.and(nonPartitionFilters));
+        }
         if (projection != null) {
             read.withProjection(projection);
         }
