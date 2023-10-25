@@ -18,13 +18,13 @@
 
 package org.apache.paimon.flink.metrics;
 
-import org.apache.paimon.metrics.AbstractMetricRegistry;
 import org.apache.paimon.metrics.MetricGroup;
+import org.apache.paimon.metrics.MetricRegistry;
 
 import java.util.Map;
 
-/** {@link AbstractMetricRegistry} to create {@link FlinkMetricGroup}. */
-public class FlinkMetricRegistry extends AbstractMetricRegistry {
+/** {@link MetricRegistry} to create {@link FlinkMetricGroup}. */
+public class FlinkMetricRegistry extends MetricRegistry {
 
     private final org.apache.flink.metrics.MetricGroup group;
 
