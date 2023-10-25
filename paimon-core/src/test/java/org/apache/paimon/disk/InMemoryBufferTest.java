@@ -22,18 +22,19 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.disk.RowBuffer.RowBufferIterator;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.types.DataTypes;
 
-import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
 import static org.apache.paimon.memory.MemorySegmentPool.DEFAULT_PAGE_SIZE;
+import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link RowBuffer}. */
+/** Tests for {@link InMemoryBuffer}. */
 public class InMemoryBufferTest {
 
     private InternalRowSerializer serializer;
@@ -59,13 +60,13 @@ public class InMemoryBufferTest {
         binaryRowWriter.complete();
 
         boolean result = buffer.put(binaryRow);
-        Assertions.assertThat(result).isTrue();
+        assertThat(result).isTrue();
         result = buffer.put(binaryRow);
-        Assertions.assertThat(result).isTrue();
+        assertThat(result).isTrue();
         result = buffer.put(binaryRow);
-        Assertions.assertThat(result).isTrue();
+        assertThat(result).isTrue();
         result = buffer.put(binaryRow);
-        Assertions.assertThat(result).isFalse();
+        assertThat(result).isFalse();
     }
 
     @Test
@@ -86,16 +87,16 @@ public class InMemoryBufferTest {
             buffer.put(binaryRow.copy());
         }
 
-        Assertions.assertThat(buffer.size()).isEqualTo(100);
-        try (RowBuffer.RowBufferIterator iterator = buffer.newIterator()) {
+        assertThat(buffer.size()).isEqualTo(100);
+        try (RowBufferIterator iterator = buffer.newIterator()) {
             while (iterator.advanceNext()) {
-                Assertions.assertThat(iterator.getRow()).isEqualTo(binaryRow);
+                assertThat(iterator.getRow()).isEqualTo(binaryRow);
             }
         }
     }
 
     @Test
-    public void testClose() throws Exception {
+    public void testReset() throws Exception {
         InMemoryBuffer buffer =
                 new InMemoryBuffer(
                         new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
@@ -110,8 +111,36 @@ public class InMemoryBufferTest {
         binaryRowWriter.complete();
         buffer.put(binaryRow.copy());
 
-        Assertions.assertThat(buffer.memoryOccupancy()).isGreaterThan(0);
+        assertThat(buffer.memoryOccupancy()).isGreaterThan(0);
         buffer.reset();
-        Assertions.assertThat(buffer.memoryOccupancy()).isEqualTo(0);
+        assertThat(buffer.memoryOccupancy()).isEqualTo(0);
+
+        // test read after reset
+        try (RowBufferIterator iterator = buffer.newIterator()) {
+            assertThat(iterator.advanceNext()).isFalse();
+        }
+
+        // write again
+        buffer.put(binaryRow.copy());
+        buffer.put(binaryRow.copy());
+        buffer.put(binaryRow.copy());
+        try (RowBufferIterator iterator = buffer.newIterator()) {
+            int count = 0;
+            while (iterator.advanceNext()) {
+                assertThat(iterator.getRow()).isEqualTo(binaryRow);
+                count++;
+            }
+            assertThat(count).isEqualTo(3);
+        }
+    }
+
+    @Test
+    public void testEmpty() throws Exception {
+        InMemoryBuffer buffer =
+                new InMemoryBuffer(
+                        new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
+                        this.serializer);
+        RowBufferIterator iterator = buffer.newIterator();
+        assertThat(iterator.advanceNext()).isFalse();
     }
 }
