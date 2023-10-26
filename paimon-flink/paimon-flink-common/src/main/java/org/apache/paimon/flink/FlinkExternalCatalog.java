@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -63,6 +64,7 @@ import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 
+/** Catalog for persisting external tables  */
 public class FlinkExternalCatalog extends AbstractCatalog {
 
     private final FlinkCatalog paimon;
@@ -87,6 +89,10 @@ public class FlinkExternalCatalog extends AbstractCatalog {
         } catch (IOException ignore) {
 
         }
+    }
+
+    public org.apache.paimon.catalog.Catalog catalog() {
+        return paimon.catalog();
     }
 
     private String systemDb() {

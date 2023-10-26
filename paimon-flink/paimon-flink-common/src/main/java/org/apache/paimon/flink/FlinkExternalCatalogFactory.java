@@ -35,6 +35,7 @@ import java.util.Set;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 
+/** Factory for {@link FlinkExternalCatalog}. */
 public class FlinkExternalCatalogFactory implements CatalogFactory {
 
     public static final String IDENTIFIER = "paimon-external";
