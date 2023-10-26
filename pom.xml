@@ -127,7 +127,7 @@ under the License.
         <avro.version>1.11.1</avro.version>
         <kafka.version>3.2.3</kafka.version>
         <scala-maven-plugin.version>3.2.2</scala-maven-plugin.version>
-        <scalatest-maven-plugin.version>2.2.0</scalatest-maven-plugin.version>
+        <scalatest-maven-plugin.version>2.1.0</scalatest-maven-plugin.version>
         <antlr4-maven-plugin.version>4.8</antlr4-maven-plugin.version>
         <jsoup.version>1.15.3</jsoup.version>
         <CodeCacheSize>128m</CodeCacheSize>
