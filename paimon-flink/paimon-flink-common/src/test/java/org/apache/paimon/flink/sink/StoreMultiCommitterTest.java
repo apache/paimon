@@ -22,10 +22,12 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
+import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
@@ -49,6 +51,8 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
@@ -454,6 +458,92 @@ class StoreMultiCommitterTest {
         testHarness.close();
         assertThat(table1.snapshotManager().latestSnapshot().watermark()).isEqualTo(2048L);
         assertThat(table1.snapshotManager().latestSnapshot().watermark()).isEqualTo(2048L);
+    }
+
+    // ------------------------------------------------------------------------
+    //  Metrics tests
+    // ------------------------------------------------------------------------
+
+    @Test
+    public void testCommitMetrics() throws Exception {
+        FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
+        FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
+
+        StreamTableWrite write1 =
+                table1.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+        StreamTableWrite write2 =
+                table2.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+
+        OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable>
+                testHarness = createRecoverableTestHarness();
+        testHarness.open();
+        long timestamp = 0;
+        long cpId = 1;
+
+        write1.write(GenericRow.of(1, 10L));
+        write2.write(GenericRow.of(1, 1.1, BinaryString.fromString("AAA")));
+        write2.compact(BinaryRow.EMPTY_ROW, 0, false);
+        write2.write(GenericRow.of(1, 1.2, BinaryString.fromString("aaa")));
+        write2.compact(BinaryRow.EMPTY_ROW, 0, false);
+        write2.write(GenericRow.of(2, 2.1, BinaryString.fromString("BBB")));
+        write2.compact(BinaryRow.EMPTY_ROW, 0, true);
+        testHarness.processElement(
+                getMultiTableCommittable(
+                        firstTable,
+                        new Committable(
+                                cpId,
+                                Committable.Kind.FILE,
+                                write1.prepareCommit(true, cpId).get(0))),
+                timestamp++);
+        testHarness.processElement(
+                getMultiTableCommittable(
+                        secondTable,
+                        new Committable(
+                                cpId,
+                                Committable.Kind.FILE,
+                                write2.prepareCommit(true, cpId).get(0))),
+                timestamp++);
+        testHarness.snapshot(cpId, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(cpId);
+
+        OperatorMetricGroup operatorMetricGroup =
+                testHarness.getOperator().getRuntimeContext().getMetricGroup();
+        MetricGroup commitMetricGroup1 =
+                operatorMetricGroup
+                        .addGroup("paimon")
+                        .addGroup("table", table1.name())
+                        .addGroup("commit");
+        MetricGroup commitMetricGroup2 =
+                operatorMetricGroup
+                        .addGroup("paimon")
+                        .addGroup("table", table2.name())
+                        .addGroup("commit");
+
+        assertThat(MetricUtils.getGauge(commitMetricGroup1, "lastTableFilesAdded").getValue())
+                .isEqualTo(1L);
+        assertThat(MetricUtils.getGauge(commitMetricGroup1, "lastTableFilesDeleted").getValue())
+                .isEqualTo(0L);
+        assertThat(MetricUtils.getGauge(commitMetricGroup1, "lastTableFilesAppended").getValue())
+                .isEqualTo(1L);
+        assertThat(
+                        MetricUtils.getGauge(commitMetricGroup1, "lastTableFilesCommitCompacted")
+                                .getValue())
+                .isEqualTo(0L);
+
+        assertThat(MetricUtils.getGauge(commitMetricGroup2, "lastTableFilesAdded").getValue())
+                .isEqualTo(4L);
+        assertThat(MetricUtils.getGauge(commitMetricGroup2, "lastTableFilesDeleted").getValue())
+                .isEqualTo(3L);
+        assertThat(MetricUtils.getGauge(commitMetricGroup2, "lastTableFilesAppended").getValue())
+                .isEqualTo(3L);
+        assertThat(
+                        MetricUtils.getGauge(commitMetricGroup2, "lastTableFilesCommitCompacted")
+                                .getValue())
+                .isEqualTo(4L);
+
+        testHarness.close();
+        write1.close();
+        write2.close();
     }
 
     // ------------------------------------------------------------------------
