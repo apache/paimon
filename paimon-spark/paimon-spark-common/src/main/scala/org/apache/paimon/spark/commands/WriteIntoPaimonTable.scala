@@ -18,20 +18,25 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
-import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.codegen.{CodeGenUtils, Projection}
+import org.apache.paimon.crosspartition.{GlobalIndexAssigner, IndexBootstrap, KeyPartOrRow}
+import org.apache.paimon.data.{BinaryRow, GenericRow, JoinedRow}
+import org.apache.paimon.data.serializer.InternalSerializers
 import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkConnectorOptions, SparkRow}
+import org.apache.paimon.spark._
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
-import org.apache.paimon.types.RowType
+import org.apache.paimon.types.{RowKind, RowType}
+import org.apache.paimon.utils.SerializationUtils
 
-import org.apache.spark.TaskContext
+import org.apache.spark.{HashPartitioner, TaskContext}
 import org.apache.spark.internal.Logging
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
@@ -78,51 +83,154 @@ case class WriteIntoPaimonTable(
     val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala.map(col)
     val partitionCols = tableSchema.partitionKeys().asScala.map(col)
 
-    val dataEncoder = EncoderUtils.encode(dataSchema).resolveAndBind()
-    val originFromRow = dataEncoder.createDeserializer()
+    val (_, _, originFromRow) = EncoderUtils.getEncoderAndSerDe(dataSchema)
 
-    val rowkindColIdx = SparkRowUtils.getFieldIndex(data.schema, ROW_KIND_COL)
+    var newData = data
 
-    // append _bucket_ column as placeholder
-    val withBucketCol = data.withColumn(BUCKET_COL, lit(-1))
-    val bucketColIdx = withBucketCol.schema.size - 1
-    val withBucketDataEncoder = EncoderUtils.encode(withBucketCol.schema).resolveAndBind()
-    val toRow = withBucketDataEncoder.createSerializer()
-    val fromRow = withBucketDataEncoder.createDeserializer()
+    if (
+      bucketMode.equals(BucketMode.GLOBAL_DYNAMIC) && !newData.schema.fieldNames.contains(
+        ROW_KIND_COL)
+    ) {
+      newData = data.withColumn(ROW_KIND_COL, lit(RowKind.INSERT.toByteValue))
+    }
+    val rowkindColIdx = SparkRowUtils.getFieldIndex(newData.schema, ROW_KIND_COL)
 
-    def repartitionByBucket(ds: Dataset[Row]) = {
-      ds.toDF().repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
+    // append bucket column as placeholder
+    newData = newData.withColumn(BUCKET_COL, lit(-1))
+    val bucketColIdx = SparkRowUtils.getFieldIndex(newData.schema, BUCKET_COL)
+
+    val (newDataEncoder, toRow, fromRow) = EncoderUtils.getEncoderAndSerDe(newData.schema)
+
+    def repartitionByBucket(df: DataFrame) = {
+      df.repartition(partitionCols ++ Seq(col(BUCKET_COL)): _*)
     }
 
     val rowType = table.rowType()
     val writeBuilder = table.newBatchWriteBuilder()
 
-    val df =
+    val df: Dataset[Row] =
       bucketMode match {
         case BucketMode.DYNAMIC =>
+          // Topology: input -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
           val partitioned = if (primaryKeyCols.nonEmpty) {
             // Make sure that the records with the same bucket values is within a task.
-            withBucketCol.repartition(primaryKeyCols: _*)
+            newData.repartition(primaryKeyCols: _*)
           } else {
-            withBucketCol
+            newData
           }
           val numSparkPartitions = partitioned.rdd.getNumPartitions
           val dynamicBucketProcessor =
             DynamicBucketProcessor(table, rowType, bucketColIdx, numSparkPartitions, toRow, fromRow)
+
           repartitionByBucket(
-            partitioned.mapPartitions(dynamicBucketProcessor.processPartition)(
-              withBucketDataEncoder))
+            partitioned
+              .mapPartitions(dynamicBucketProcessor.processPartition)(newDataEncoder)
+              .toDF())
+        case BucketMode.GLOBAL_DYNAMIC =>
+          // Topology: input -> bootstrap -> shuffle by key hash -> bucket-assigner -> shuffle by partition & bucket
+          val numSparkPartitions = newData.rdd.getNumPartitions
+          val primaryKeys: java.util.List[String] = table.schema().primaryKeys()
+          val bootstrapType: RowType = IndexBootstrap.bootstrapType(table.schema())
+          val rowType: RowType = SparkTypeUtils.toPaimonType(newData.schema).asInstanceOf[RowType]
+
+          // row: (keyHash, (kind, internalRow))
+          val bootstrapRow: RDD[(Int, (KeyPartOrRow, Array[Byte]))] = newData.rdd.mapPartitions {
+            iter =>
+              {
+                val sparkPartitionId = TaskContext.getPartitionId()
+
+                val keyPartProject: Projection =
+                  CodeGenUtils.newProjection(bootstrapType, primaryKeys)
+                val rowProject: Projection = CodeGenUtils.newProjection(rowType, primaryKeys)
+                val bootstrapSer = InternalSerializers.create(bootstrapType)
+                val rowSer = InternalSerializers.create(rowType)
+
+                val lst = scala.collection.mutable.ListBuffer[(Int, (KeyPartOrRow, Array[Byte]))]()
+
+                val bootstrap = new IndexBootstrap(table)
+                bootstrap.bootstrap(
+                  numSparkPartitions,
+                  sparkPartitionId,
+                  row => {
+                    val bytes: Array[Byte] =
+                      SerializationUtils.serializeBinaryRow(bootstrapSer.toBinaryRow(row))
+                    lst.append((keyPartProject(row).hashCode(), (KeyPartOrRow.KEY_PART, bytes)))
+                  }
+                )
+                lst.iterator ++ iter.map(
+                  r => {
+                    val sparkRow =
+                      new SparkRow(rowType, r, SparkRowUtils.getRowKind(r, rowkindColIdx))
+                    val bytes: Array[Byte] =
+                      SerializationUtils.serializeBinaryRow(rowSer.toBinaryRow(sparkRow))
+                    (rowProject(sparkRow).hashCode(), (KeyPartOrRow.ROW, bytes))
+                  })
+              }
+          }
+
+          var assignerParallelism: Integer = table.coreOptions.dynamicBucketAssignerParallelism
+          if (assignerParallelism == null) {
+            assignerParallelism = numSparkPartitions
+          }
+
+          val rowRDD: RDD[Row] =
+            bootstrapRow.partitionBy(new HashPartitioner(assignerParallelism)).mapPartitions {
+              iter =>
+                {
+                  val sparkPartitionId = TaskContext.getPartitionId()
+                  val lst = scala.collection.mutable.ListBuffer[Row]()
+                  val ioManager = createIOManager
+                  val assigner = new GlobalIndexAssigner(table)
+                  try {
+                    assigner.open(
+                      ioManager,
+                      assignerParallelism,
+                      sparkPartitionId,
+                      (row, bucket) => {
+                        val extraRow: GenericRow = new GenericRow(2)
+                        extraRow.setField(0, row.getRowKind.toByteValue)
+                        extraRow.setField(1, bucket)
+                        lst.append(
+                          fromRow(
+                            SparkInternalRow.fromPaimon(new JoinedRow(row, extraRow), rowType)))
+                      }
+                    )
+                    iter.foreach(
+                      row => {
+                        val tuple: (KeyPartOrRow, Array[Byte]) = row._2
+                        val binaryRow = SerializationUtils.deserializeBinaryRow(tuple._2)
+                        tuple._1 match {
+                          case KeyPartOrRow.KEY_PART => assigner.bootstrapKey(binaryRow)
+                          case KeyPartOrRow.ROW => assigner.processInput(binaryRow)
+                          case _ =>
+                            throw new UnsupportedOperationException(s"unknown kind ${tuple._1}")
+                        }
+                      })
+                    assigner.endBoostrap(true)
+                    lst.iterator
+                  } finally {
+                    assigner.close()
+                    if (ioManager != null) {
+                      ioManager.close()
+                    }
+                  }
+                }
+            }
+          repartitionByBucket(sparkSession.createDataFrame(rowRDD, newData.schema))
         case BucketMode.UNAWARE =>
+          // Topology: input -> bucket-assigner
           val unawareBucketProcessor = UnawareBucketProcessor(bucketColIdx, toRow, fromRow)
-          withBucketCol
-            .mapPartitions(unawareBucketProcessor.processPartition)(withBucketDataEncoder)
+          newData
+            .mapPartitions(unawareBucketProcessor.processPartition)(newDataEncoder)
             .toDF()
         case BucketMode.FIXED =>
+          // Topology: input -> bucket-assigner -> shuffle by partition & bucket
           val commonBucketProcessor =
             CommonBucketProcessor(writeBuilder, bucketColIdx, toRow, fromRow)
           repartitionByBucket(
-            withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(
-              withBucketDataEncoder))
+            newData.mapPartitions(commonBucketProcessor.processPartition)(newDataEncoder).toDF())
+        case _ =>
+          throw new UnsupportedOperationException(s"unsupported bucket mode $bucketMode")
       }
 
     val commitMessages = df

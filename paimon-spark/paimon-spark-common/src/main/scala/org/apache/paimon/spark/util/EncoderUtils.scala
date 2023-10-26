@@ -63,4 +63,10 @@ object EncoderUtils {
       .reflectMethod(method)(schema)
       .asInstanceOf[ExpressionEncoder[Row]]
   }
+
+  def getEncoderAndSerDe(schema: StructType)
+      : (ExpressionEncoder[Row], ExpressionEncoder.Serializer[Row], ExpressionEncoder.Deserializer[Row]) = {
+    val encoder = encode(schema).resolveAndBind()
+    (encoder, encoder.createSerializer(), encoder.createDeserializer())
+  }
 }

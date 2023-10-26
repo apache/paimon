@@ -30,7 +30,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/** A {@link PartitionKeyExtractor} to {@link InternalRow} with only key and partiton fields. */
+/** A {@link PartitionKeyExtractor} to {@link InternalRow} with only key and partition fields. */
 public class KeyPartPartitionKeyExtractor implements PartitionKeyExtractor<InternalRow> {
 
     private final Projection partitionProjection;
