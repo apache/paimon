@@ -444,7 +444,8 @@ public abstract class MergeTreeTestBase {
                 comparator,
                 options.compactionFileSize(),
                 options.numSortedRunStopTrigger(),
-                new TestRewriter());
+                new TestRewriter(),
+                null);
     }
 
     static class MockFailResultCompactionManager extends MergeTreeCompactManager {
@@ -463,7 +464,8 @@ public abstract class MergeTreeTestBase {
                     keyComparator,
                     minFileSize,
                     numSortedRunStopTrigger,
-                    rewriter);
+                    rewriter,
+                    null);
         }
 
         protected CompactResult obtainCompactResult()

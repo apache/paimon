@@ -527,7 +527,8 @@ public class AppendOnlyWriterTest {
                                     ? Collections.emptyList()
                                     : Collections.singletonList(
                                             generateCompactAfter(compactBefore));
-                        });
+                        },
+                        null);
         CoreOptions options = new CoreOptions(new HashMap<>());
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
