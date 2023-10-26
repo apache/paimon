@@ -27,6 +27,7 @@ import org.apache.paimon.types.VarCharType;
 import org.junit.Assert;
 import org.junit.Test;
 
+/** IT cases for {@link UpdatedDataFieldsProcessFunctionBaseTest}. */
 public class UpdatedDataFieldsProcessFunctionBaseTest {
 
     @Test
