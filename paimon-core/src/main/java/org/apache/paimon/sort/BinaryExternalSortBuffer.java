@@ -25,17 +25,24 @@ import org.apache.paimon.compression.Lz4BlockCompressionFactory;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.ChannelWithMeta;
 import org.apache.paimon.disk.ChannelWriterOutputView;
 import org.apache.paimon.disk.FileChannelUtil;
 import org.apache.paimon.disk.FileIOChannel;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.paimon.codegen.CodeGenUtils.newNormalizedKeyComputer;
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 
 /** A spillable {@link SortBuffer}. */
 public class BinaryExternalSortBuffer implements SortBuffer {
@@ -80,6 +87,45 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                         compressionBlockSize);
         this.enumerator = ioManager.createChannelEnumerator();
         this.spillChannelIDs = new ArrayList<>();
+    }
+
+    public static BinaryExternalSortBuffer create(
+            IOManager ioManager,
+            RowType keyType,
+            RowType rowType,
+            long bufferSize,
+            int pageSize,
+            int maxNumFileHandles) {
+        return create(
+                ioManager,
+                keyType,
+                rowType,
+                new HeapMemorySegmentPool(bufferSize, pageSize),
+                maxNumFileHandles);
+    }
+
+    public static BinaryExternalSortBuffer create(
+            IOManager ioManager,
+            RowType keyType,
+            RowType rowType,
+            MemorySegmentPool pool,
+            int maxNumFileHandles) {
+        RecordComparator comparator =
+                newRecordComparator(keyType.getFieldTypes(), "ExternalSort_comparator");
+        BinaryInMemorySortBuffer sortBuffer =
+                BinaryInMemorySortBuffer.createBuffer(
+                        newNormalizedKeyComputer(
+                                keyType.getFieldTypes(), "ExternalSort_normalized_key"),
+                        new InternalRowSerializer(rowType),
+                        comparator,
+                        pool);
+        return new BinaryExternalSortBuffer(
+                new BinaryRowSerializer(rowType.getFieldCount()),
+                comparator,
+                pool.pageSize(),
+                sortBuffer,
+                ioManager,
+                maxNumFileHandles);
     }
 
     @Override
