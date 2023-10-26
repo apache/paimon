@@ -186,7 +186,15 @@ public class FlinkExternalCatalogTest {
         catalog.createTable(externalTable1, externalTable, false);
     }
 
-
+    private void checkEquals(ObjectPath path, CatalogTable t1, CatalogTable t2) {
+        Path tablePath =
+                ((AbstractCatalog) ((FlinkExternalCatalog) catalog).catalog())
+                        .getDataTableLocation(FlinkCatalog.toIdentifier(path));
+        Map<String, String> options = new HashMap<>(t1.getOptions());
+        options.put("path", tablePath.toString());
+        t1 = ((ResolvedCatalogTable) t1).copy(options);
+        checkEquals(t1, t2);
+    }
 
     private static void checkEquals(CatalogTable t1, CatalogTable t2) {
         assertThat(t2.getTableKind()).isEqualTo(t1.getTableKind());
@@ -202,11 +210,11 @@ public class FlinkExternalCatalogTest {
         HashMap<String, String> options = new HashMap<>();
         CatalogTable table = this.createTable(options);
         catalog.createTable(paimonTable1, table, false);
-        checkEquals(table, (CatalogTable) catalog.getTable(paimonTable1));
+        checkEquals(paimonTable1,table, (CatalogTable) catalog.getTable(paimonTable1));
         CatalogTable newTable = this.createAnotherTable(options);
         catalog.alterTable(paimonTable1, newTable, false);
         assertThat(catalog.getTable(paimonTable1)).isNotEqualTo(table);
-        checkEquals(newTable, (CatalogTable) catalog.getTable(paimonTable1));
+        checkEquals(paimonTable1,newTable, (CatalogTable) catalog.getTable(paimonTable1));
         catalog.dropTable(paimonTable1, false);
     }
 
@@ -216,11 +224,11 @@ public class FlinkExternalCatalogTest {
         externalTableOptions.put("connector","kafka");
         CatalogTable table = this.createTable(externalTableOptions);
         catalog.createTable(externalTable1, table, false);
-        checkEquals(((CatalogTable) catalog.getTable(externalTable1)),  table);
+        checkEquals(externalTable1,((CatalogTable) catalog.getTable(externalTable1)),  table);
         HashMap<String, String> options = new HashMap<>();
         externalTableOptions.put("connector","kafka");
         CatalogTable paimonTable = this.createTable(options);
         catalog.createTable(paimonTable1, paimonTable, false);
-        checkEquals(table, (CatalogTable) catalog.getTable(paimonTable1));
+        checkEquals(paimonTable1,table, (CatalogTable) catalog.getTable(paimonTable1));
     }
 }
