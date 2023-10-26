@@ -53,6 +53,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
+import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -86,6 +87,16 @@ public class SchemaValidation {
                     String.format(
                             "Can not set %s on table without primary keys, please define primary keys.",
                             CHANGELOG_PRODUCER.key()));
+        }
+        if (options.streamingReadOverwrite()
+                && (changelogProducer == ChangelogProducer.FULL_COMPACTION
+                        || changelogProducer == ChangelogProducer.LOOKUP)) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Cannot set %s to true when changelog producer is %s or %s.",
+                            STREAMING_READ_OVERWRITE.key(),
+                            ChangelogProducer.FULL_COMPACTION,
+                            ChangelogProducer.LOOKUP));
         }
 
         checkArgument(
