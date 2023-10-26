@@ -26,6 +26,7 @@ import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -110,9 +111,7 @@ public class MappingTableITCase extends AbstractTestBase {
                                 + "'connector'='paimon', 'path'='%s', 'auto-create'='true')",
                         path));
 
-        assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM T").collect().close())
-                .isInstanceOf(ValidationException.class)
-                .hasRootCauseMessage(
-                        "Flink schema and store schema are not the same, store schema is ROW<`i` INT, `j` INT>, Flink schema is ROW<`i` INT, `j` INT, `k` INT> NOT NULL");
+        CloseableIterator<Row> iterator = tEnv.executeSql("SELECT * FROM T").collect();
+        assertThat(iterator.hasNext()).isEqualTo(false);
     }
 }

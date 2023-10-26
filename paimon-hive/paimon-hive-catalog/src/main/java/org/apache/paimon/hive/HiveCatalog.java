@@ -154,7 +154,10 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             return Optional.of(
                     new HiveMetastoreClient.Factory(
-                            identifier, getDataTableSchema(identifier), hiveConf, clientClassName));
+                            identifier,
+                            getDataTableSchema(identifier, null),
+                            hiveConf,
+                            clientClassName));
         } catch (TableNotExistException e) {
             throw new RuntimeException(
                     "Table " + identifier + " does not exist. This is unexpected.", e);
@@ -246,13 +249,14 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
+    public TableSchema getDataTableSchema(Identifier identifier, Long timestamp)
+            throws TableNotExistException {
         if (!tableExists(identifier)) {
             throw new TableNotExistException(identifier);
         }
         Path tableLocation = getDataTableLocation(identifier);
         return new SchemaManager(fileIO, tableLocation)
-                .latest()
+                .schemaByTimestamp(timestamp)
                 .orElseThrow(
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
     }

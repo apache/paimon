@@ -24,6 +24,8 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.Collections;
 import java.util.List;
@@ -106,6 +108,16 @@ public interface Catalog extends AutoCloseable {
      * @throws TableNotExistException if the target does not exist
      */
     Table getTable(Identifier identifier) throws TableNotExistException;
+
+    /**
+     * Return a {@link Table} identified by the given {@link Identifier} and timestamp.
+     *
+     * @param identifier Path of the table
+     * @param timestamp Timestamp of the table snapshot
+     * @return The requested table
+     * @throws TableNotExistException if the target does not exist
+     */
+    Table getTable(Identifier identifier, @Nullable Long timestamp) throws TableNotExistException;
 
     /**
      * Get names of all tables under this database. An empty list is returned if none exists.

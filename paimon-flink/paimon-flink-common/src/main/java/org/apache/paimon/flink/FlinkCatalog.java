@@ -105,6 +105,7 @@ import static org.apache.flink.table.descriptors.Schema.SCHEMA;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.flink.table.types.utils.TypeConversions.fromLogicalToDataType;
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.CoreOptions.StartupMode.FROM_TIMESTAMP;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkCatalogOptions.REGISTER_TIMEOUT;
@@ -225,11 +226,27 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     @Override
+    public CatalogBaseTable getTable(ObjectPath tablePath, long timestamp)
+            throws TableNotExistException, CatalogException {
+        CatalogTable catalogTable = this.getCatalogTable(tablePath, timestamp);
+
+        Options option = new Options();
+        option.set(CoreOptions.SCAN_MODE, FROM_TIMESTAMP);
+        option.set(CoreOptions.SCAN_TIMESTAMP_MILLIS, timestamp);
+        return catalogTable.copy(option.toMap());
+    }
+
+    @Override
     public CatalogTable getTable(ObjectPath tablePath)
             throws TableNotExistException, CatalogException {
+        return getCatalogTable(tablePath, null);
+    }
+
+    private CatalogTable getCatalogTable(ObjectPath tablePath, Long timestamp)
+            throws TableNotExistException {
         Table table;
         try {
-            table = catalog.getTable(toIdentifier(tablePath));
+            table = catalog.getTable(toIdentifier(tablePath), timestamp);
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
         }

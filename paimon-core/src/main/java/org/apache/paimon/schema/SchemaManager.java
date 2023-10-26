@@ -61,6 +61,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.StartupMode.FROM_TIMESTAMP;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
@@ -455,6 +456,28 @@ public class SchemaManager implements Serializable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    public Optional<TableSchema> schemaByTimestamp(Long timestamp) {
+        if (timestamp == null) {
+            return latest();
+        }
+
+        List<TableSchema> sortedTableSchema =
+                listAll().stream()
+                        .sorted((t1, t2) -> Long.compare(t2.timeMillis(), t1.timeMillis()))
+                        .collect(Collectors.toList());
+
+        for (TableSchema schema : sortedTableSchema) {
+            if (schema.timeMillis() < timestamp) {
+                Map<String, String> options = new HashMap<>(schema.options());
+                options.put(CoreOptions.SCAN_MODE.key(), FROM_TIMESTAMP.toString());
+                options.put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), String.valueOf(timestamp));
+                return Optional.of(schema.copy(options));
+            }
+        }
+
+        return latest();
     }
 
     private Path schemaDirectory() {
