@@ -156,6 +156,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             "Append only writer can not accept row with RowKind %s",
                             record.row().getRowKind());
                     return record.row();
-                });
+                },
+                name());
     }
 }

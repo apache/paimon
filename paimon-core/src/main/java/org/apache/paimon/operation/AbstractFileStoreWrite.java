@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
@@ -73,6 +74,8 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
+
+    private CompactionMetrics compactionMetrics = null;
 
     protected AbstractFileStoreWrite(
             String commitUser,
@@ -341,6 +344,16 @@ public abstract class AbstractFileStoreWrite<T>
     @Override
     public void isStreamingMode(boolean isStreamingMode) {
         this.isStreamingMode = isStreamingMode;
+    }
+
+    @Override
+    public FileStoreWrite<T> withCompactionMetrics(CompactionMetrics metrics) {
+        this.compactionMetrics = metrics;
+        return this;
+    }
+
+    public CompactionMetrics getCompactionMetrics() {
+        return compactionMetrics;
     }
 
     private List<DataFileMeta> scanExistingFileMetas(
