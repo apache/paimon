@@ -51,9 +51,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -252,6 +252,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         long startDataFiles =
                 manifests.stream().mapToLong(f -> f.numAddedFiles() + f.numDeletedFiles()).sum();
 
+        AtomicLong cntEntries = new AtomicLong(0);
         Iterable<ManifestEntry> entries =
                 ParallellyExecuteUtils.parallelismBatchIterable(
                         files ->
@@ -259,12 +260,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                         .filter(this::filterManifestFileMeta)
                                         .flatMap(m -> readManifest.apply(m).stream())
                                         .filter(this::filterByStats)
+                                        .peek(e -> cntEntries.getAndIncrement())
                                         .collect(Collectors.toList()),
                         manifests,
                         scanManifestParallelism);
 
-        long skippedByPartitionAndStats =
-                startDataFiles - StreamSupport.stream(entries.spliterator(), false).count();
+        long skippedByPartitionAndStats = startDataFiles - cntEntries.get();
 
         List<ManifestEntry> files = new ArrayList<>();
         Collection<ManifestEntry> mergedEntries = ManifestEntry.mergeEntries(entries);
