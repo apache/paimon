@@ -122,17 +122,15 @@ public class StoreMultiCommitter
         // key by table id
         Map<Identifier, List<ManifestCommittable>> committableMap = groupByTable(committables);
 
-        for (Map.Entry<Identifier, List<ManifestCommittable>> entry : committableMap.entrySet()) {
-            Identifier tableId = entry.getKey();
-            List<ManifestCommittable> committableList = entry.getValue();
-            StoreCommitter committer = getStoreCommitter(tableId);
-            committer.commit(committableList);
-        }
-
-        if (committableMap.isEmpty()) {
-            long checkpointId = committables.get(0).checkpointId();
-            long watermark = committables.get(0).watermark();
-            for (StoreCommitter committer : tableCommitters.values()) {
+        long checkpointId = committables.get(0).checkpointId();
+        long watermark = committables.get(0).watermark();
+        for (Map.Entry<Identifier, StoreCommitter> entry : tableCommitters.entrySet()) {
+            List<ManifestCommittable> committableList = committableMap.get(entry.getKey());
+            StoreCommitter committer = entry.getValue();
+            if (committableList != null) {
+                committer.commit(committableList);
+            } else {
+                // try best to commit empty snapshot, but tableCommitters may not contain all tables
                 if (committer.forceCreatingSnapshot()) {
                     ManifestCommittable combine =
                             committer.combine(checkpointId, watermark, Collections.emptyList());
