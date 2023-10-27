@@ -121,6 +121,7 @@ public class StoreMultiCommitter
 
         // key by table id
         Map<Identifier, List<ManifestCommittable>> committableMap = groupByTable(committables);
+        committableMap.keySet().forEach(this::getStoreCommitter);
 
         long checkpointId = committables.get(0).checkpointId();
         long watermark = committables.get(0).watermark();

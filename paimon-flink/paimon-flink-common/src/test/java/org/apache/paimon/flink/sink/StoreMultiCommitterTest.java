@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -115,12 +116,15 @@ class StoreMultiCommitterTest {
                         },
                         new String[] {"a", "b", "c"});
 
+        Options firstOptions = new Options();
+        firstOptions.set(
+                CoreOptions.TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.PROCESS_TIME);
         Schema firstTableSchema =
                 new Schema(
                         rowType1.getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Collections.emptyMap(),
+                        firstOptions.toMap(),
                         "");
 
         Schema secondTableSchema =
@@ -464,6 +468,62 @@ class StoreMultiCommitterTest {
                 .isEqualTo(2048L);
         assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).watermark())
                 .isEqualTo(2048L);
+    }
+
+    @Test
+    public void testEmptyCommit() throws Exception {
+        // table1: TagCreationMode.PROCESS_TIME
+        FileStoreTable table1 = (FileStoreTable) catalog.getTable(firstTable);
+        FileStoreTable table2 = (FileStoreTable) catalog.getTable(secondTable);
+
+        StreamTableWrite write1 =
+                table1.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+
+        StreamTableWrite write2 =
+                table2.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+
+        OneInputStreamOperatorTestHarness<MultiTableCommittable, MultiTableCommittable>
+                testHarness = createRecoverableTestHarness();
+        testHarness.open();
+
+        // write to both tables
+        long timestamp = 0;
+        long cpId = 1;
+        write1.write(GenericRow.of(1, 20L));
+        write2.write(GenericRow.of(1, 20.0, BinaryString.fromString("s2")));
+        testHarness.processElement(
+                getMultiTableCommittable(
+                        firstTable,
+                        new Committable(
+                                cpId,
+                                Committable.Kind.FILE,
+                                write1.prepareCommit(true, cpId).get(0))),
+                timestamp++);
+        testHarness.processElement(
+                getMultiTableCommittable(
+                        secondTable,
+                        new Committable(
+                                cpId,
+                                Committable.Kind.FILE,
+                                write2.prepareCommit(true, cpId).get(0))),
+                timestamp++);
+        testHarness.processWatermark(new Watermark(2048));
+        testHarness.snapshot(cpId, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(cpId);
+        assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).watermark())
+                .isEqualTo(2048L);
+        assertThat(Objects.requireNonNull(table2.snapshotManager().latestSnapshot()).watermark())
+                .isEqualTo(2048L);
+
+        cpId++;
+        testHarness.snapshot(cpId, timestamp);
+        testHarness.notifyOfCompletedCheckpoint(cpId);
+        assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).id())
+                .isEqualTo(2);
+        assertThat(Objects.requireNonNull(table2.snapshotManager().latestSnapshot()).id())
+                .isEqualTo(1);
+
+        testHarness.close();
     }
 
     // ------------------------------------------------------------------------
