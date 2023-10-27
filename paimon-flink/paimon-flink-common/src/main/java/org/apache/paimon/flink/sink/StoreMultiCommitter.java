@@ -80,9 +80,15 @@ public class StoreMultiCommitter
     }
 
     @Override
+    public boolean forceCreatingSnapshot() {
+        return true;
+    }
+
+    @Override
     public WrappedManifestCommittable combine(
             long checkpointId, long watermark, List<MultiTableCommittable> committables) {
-        WrappedManifestCommittable wrappedManifestCommittable = new WrappedManifestCommittable();
+        WrappedManifestCommittable wrappedManifestCommittable =
+                new WrappedManifestCommittable(checkpointId, watermark);
         for (MultiTableCommittable committable : committables) {
 
             ManifestCommittable manifestCommittable =
@@ -109,6 +115,9 @@ public class StoreMultiCommitter
     @Override
     public void commit(List<WrappedManifestCommittable> committables)
             throws IOException, InterruptedException {
+        if (committables.isEmpty()) {
+            return;
+        }
 
         // key by table id
         Map<Identifier, List<ManifestCommittable>> committableMap = groupByTable(committables);
@@ -118,6 +127,18 @@ public class StoreMultiCommitter
             List<ManifestCommittable> committableList = entry.getValue();
             StoreCommitter committer = getStoreCommitter(tableId);
             committer.commit(committableList);
+        }
+
+        if (committableMap.isEmpty()) {
+            long checkpointId = committables.get(0).checkpointId();
+            long watermark = committables.get(0).watermark();
+            for (StoreCommitter committer : tableCommitters.values()) {
+                if (committer.forceCreatingSnapshot()) {
+                    ManifestCommittable combine =
+                            committer.combine(checkpointId, watermark, Collections.emptyList());
+                    committer.commit(Collections.singletonList(combine));
+                }
+            }
         }
     }
 
@@ -138,7 +159,7 @@ public class StoreMultiCommitter
                 .flatMap(
                         wrapped -> {
                             Map<Identifier, ManifestCommittable> manifestCommittables =
-                                    wrapped.getManifestCommittables();
+                                    wrapped.manifestCommittables();
                             return manifestCommittables.entrySet().stream()
                                     .map(entry -> Tuple2.of(entry.getKey(), entry.getValue()));
                         })

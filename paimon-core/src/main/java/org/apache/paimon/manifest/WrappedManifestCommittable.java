@@ -28,13 +28,42 @@ import java.util.TreeMap;
 /** Manifest commit message. */
 public class WrappedManifestCommittable {
 
-    private Map<Identifier, ManifestCommittable> manifestCommittables;
+    private final long checkpointId;
 
-    public WrappedManifestCommittable() {
+    private final long watermark;
+
+    private final Map<Identifier, ManifestCommittable> manifestCommittables;
+
+    public WrappedManifestCommittable(long checkpointId, long watermark) {
+        this.checkpointId = checkpointId;
+        this.watermark = watermark;
         this.manifestCommittables =
                 new TreeMap<>(
                         Comparator.comparing(Identifier::getDatabaseName)
                                 .thenComparing(Identifier::getObjectName));
+    }
+
+    public long checkpointId() {
+        return checkpointId;
+    }
+
+    public long watermark() {
+        return watermark;
+    }
+
+    public Map<Identifier, ManifestCommittable> manifestCommittables() {
+        return manifestCommittables;
+    }
+
+    public ManifestCommittable computeCommittableIfAbsent(
+            Identifier identifier, long checkpointId, long watermark) {
+        return manifestCommittables.computeIfAbsent(
+                identifier, id -> new ManifestCommittable(checkpointId, watermark));
+    }
+
+    public void putManifestCommittable(
+            Identifier identifier, ManifestCommittable manifestCommittable) {
+        manifestCommittables.put(identifier, manifestCommittable);
     }
 
     @Override
@@ -46,58 +75,25 @@ public class WrappedManifestCommittable {
             return false;
         }
         WrappedManifestCommittable that = (WrappedManifestCommittable) o;
-
-        if (manifestCommittables.size() != that.manifestCommittables.size()) {
-            return false;
-        }
-
-        for (Map.Entry<Identifier, ManifestCommittable> entry : manifestCommittables.entrySet()) {
-            if (!Objects.equals(entry.getValue(), that.manifestCommittables.get(entry.getKey()))) {
-                return false;
-            }
-        }
-
-        return true;
+        return checkpointId == that.checkpointId
+                && watermark == that.watermark
+                && Objects.equals(manifestCommittables, that.manifestCommittables);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(manifestCommittables.values().toArray(new Object[0]));
+        return Objects.hash(checkpointId, watermark, manifestCommittables);
     }
 
     @Override
     public String toString() {
-        return String.format(
-                "WrappedManifestCommittable {" + "manifestCommittables = %s",
-                formatManifestCommittables());
-    }
-
-    private String formatManifestCommittables() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
-        for (Identifier id : manifestCommittables.keySet()) {
-            ManifestCommittable committable = manifestCommittables.get(id);
-            sb.append(String.format("%s=%s, ", id.getFullName(), committable.toString()));
-        }
-        if (manifestCommittables.size() > 0) {
-            sb.delete(sb.length() - 2, sb.length());
-        }
-        sb.append("}");
-        return sb.toString();
-    }
-
-    public ManifestCommittable computeCommittableIfAbsent(
-            Identifier identifier, long checkpointId, long watermark) {
-        return manifestCommittables.computeIfAbsent(
-                identifier, id -> new ManifestCommittable(checkpointId, watermark));
-    }
-
-    public ManifestCommittable putManifestCommittable(
-            Identifier identifier, ManifestCommittable manifestCommittable) {
-        return manifestCommittables.put(identifier, manifestCommittable);
-    }
-
-    public Map<Identifier, ManifestCommittable> getManifestCommittables() {
-        return manifestCommittables;
+        return "WrappedManifestCommittable{"
+                + "checkpointId="
+                + checkpointId
+                + ", watermark="
+                + watermark
+                + ", manifestCommittables="
+                + manifestCommittables
+                + '}';
     }
 }

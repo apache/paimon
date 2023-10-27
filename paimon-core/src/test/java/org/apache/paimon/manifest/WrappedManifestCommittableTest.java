@@ -32,12 +32,12 @@ class WrappedManifestCommittableTest {
         ManifestCommittable committable1 = create();
         ManifestCommittable committable2 = create();
 
-        WrappedManifestCommittable wrapped1 = new WrappedManifestCommittable();
+        WrappedManifestCommittable wrapped1 = new WrappedManifestCommittable(-1, -1);
         wrapped1.putManifestCommittable(Identifier.create("db", "table1"), committable1);
         wrapped1.putManifestCommittable(Identifier.create("db", "table2"), committable2);
 
         // add manifest committables in reverse order
-        WrappedManifestCommittable wrapped2 = new WrappedManifestCommittable();
+        WrappedManifestCommittable wrapped2 = new WrappedManifestCommittable(-1, -1);
         wrapped2.putManifestCommittable(Identifier.create("db", "table2"), committable2);
         wrapped2.putManifestCommittable(Identifier.create("db", "table1"), committable1);
 

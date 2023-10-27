@@ -66,24 +66,26 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
 class StoreMultiCommitterTest {
+
     private String initialCommitUser;
     private Path warehouse;
     private Catalog.Loader catalogLoader;
     private Catalog catalog;
-    private String databaseName;
     private Identifier firstTable;
     private Identifier secondTable;
     private Path firstTablePath;
     private Path secondTablePath;
     @TempDir public java.nio.file.Path tempDir;
 
-    private void createTestTables(Catalog catalog, Tuple2<Identifier, Schema>... tableSpecs)
+    @SafeVarargs
+    private final void createTestTables(Catalog catalog, Tuple2<Identifier, Schema>... tableSpecs)
             throws Exception {
         for (Tuple2<Identifier, Schema> spec : tableSpecs) {
             catalog.createTable(spec.f0, spec.f1, false);
@@ -94,7 +96,7 @@ class StoreMultiCommitterTest {
     public void beforeEach() throws Exception {
         initialCommitUser = UUID.randomUUID().toString();
         warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
-        databaseName = "test_db";
+        String databaseName = "test_db";
         firstTable = Identifier.create(databaseName, "test_table1");
         secondTable = Identifier.create(databaseName, "test_table2");
 
@@ -112,21 +114,21 @@ class StoreMultiCommitterTest {
                             DataTypes.INT(), DataTypes.DOUBLE(), DataTypes.VARCHAR(5),
                         },
                         new String[] {"a", "b", "c"});
-        Options conf = new Options();
 
         Schema firstTableSchema =
                 new Schema(
                         rowType1.getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        conf.toMap(),
+                        Collections.emptyMap(),
                         "");
+
         Schema secondTableSchema =
                 new Schema(
                         rowType2.getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        conf.toMap(),
+                        Collections.emptyMap(),
                         "");
         createTestTables(
                 catalog,
@@ -140,6 +142,7 @@ class StoreMultiCommitterTest {
     //  Recoverable operator tests
     // ------------------------------------------------------------------------
 
+    @SuppressWarnings("CatchMayIgnoreException")
     @Test
     public void testFailIntentionallyAfterRestore() throws Exception {
         FileStoreTable table = (FileStoreTable) catalog.getTable(firstTable);
@@ -204,7 +207,7 @@ class StoreMultiCommitterTest {
 
         // test restore and fail for second table
         // checkpoint is completed but not notified, so no snapshot is committed
-        snapshot = testHarness.snapshot(1, timestamp++);
+        snapshot = testHarness.snapshot(1, timestamp);
         assertThat(table.snapshotManager().latestSnapshotId()).isNull();
         testHarness.close();
 
@@ -396,7 +399,7 @@ class StoreMultiCommitterTest {
                             secondTable, new Committable(2, Committable.Kind.FILE, committable)),
                     timestamp++);
         }
-        testHarness.snapshot(3, timestamp++);
+        testHarness.snapshot(3, timestamp);
         testHarness.notifyOfCompletedCheckpoint(3);
 
         write1.close();
@@ -437,7 +440,8 @@ class StoreMultiCommitterTest {
         testHarness.processWatermark(new Watermark(1024));
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
-        assertThat(table1.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
+        assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).watermark())
+                .isEqualTo(1024L);
         assertThat(table2.snapshotManager().latestSnapshot()).isNull();
 
         // write to both tables on second watermark
@@ -453,11 +457,13 @@ class StoreMultiCommitterTest {
                                 write1.prepareCommit(true, cpId).get(0))),
                 timestamp++);
         testHarness.processWatermark(new Watermark(2048));
-        testHarness.snapshot(cpId, timestamp++);
+        testHarness.snapshot(cpId, timestamp);
         testHarness.notifyOfCompletedCheckpoint(cpId);
         testHarness.close();
-        assertThat(table1.snapshotManager().latestSnapshot().watermark()).isEqualTo(2048L);
-        assertThat(table1.snapshotManager().latestSnapshot().watermark()).isEqualTo(2048L);
+        assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).watermark())
+                .isEqualTo(2048L);
+        assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).watermark())
+                .isEqualTo(2048L);
     }
 
     // ------------------------------------------------------------------------
@@ -503,7 +509,7 @@ class StoreMultiCommitterTest {
                                 Committable.Kind.FILE,
                                 write2.prepareCommit(true, cpId).get(0))),
                 timestamp++);
-        testHarness.snapshot(cpId, timestamp++);
+        testHarness.snapshot(cpId, timestamp);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
         OperatorMetricGroup operatorMetricGroup =
