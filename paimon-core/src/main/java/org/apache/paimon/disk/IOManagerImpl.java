@@ -34,9 +34,12 @@ import java.util.stream.Collectors;
 
 /** The facade for the provided I/O manager services. */
 public class IOManagerImpl implements IOManager {
+
     protected static final Logger LOG = LoggerFactory.getLogger(IOManager.class);
 
     private static final String DIR_NAME_PREFIX = "io";
+
+    private final String[] tempDirs;
 
     private final FileChannelManager fileChannelManager;
 
@@ -50,6 +53,7 @@ public class IOManagerImpl implements IOManager {
      * @param tempDirs The basic directories for files underlying anonymous channels.
      */
     public IOManagerImpl(String... tempDirs) {
+        this.tempDirs = tempDirs;
         this.fileChannelManager =
                 new FileChannelManagerImpl(Preconditions.checkNotNull(tempDirs), DIR_NAME_PREFIX);
         if (LOG.isInfoEnabled()) {
@@ -71,6 +75,11 @@ public class IOManagerImpl implements IOManager {
     @Override
     public ID createChannel() {
         return fileChannelManager.createChannel();
+    }
+
+    @Override
+    public String[] tempDirs() {
+        return tempDirs;
     }
 
     @Override
