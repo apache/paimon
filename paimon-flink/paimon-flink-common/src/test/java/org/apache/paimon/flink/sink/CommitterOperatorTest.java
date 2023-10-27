@@ -365,8 +365,16 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testCommitMetrics() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
+        OneInputStreamOperator<Committable, Committable> operator =
+                createCommitterOperator(
+                        table,
+                        null,
+                        new RestoreAndFailCommittableStateManager<>(
+                                () ->
+                                        new VersionedSerializerWrapper<>(
+                                                new ManifestCommittableSerializer())));
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
-                createRecoverableTestHarness(table);
+                createTestHarness(operator);
         testHarness.open();
         long timestamp = 0;
         StreamTableWrite write =
@@ -381,10 +389,8 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
-        OperatorMetricGroup operatorMetricGroup =
-                testHarness.getOperator().getRuntimeContext().getMetricGroup();
         MetricGroup commitMetricGroup =
-                operatorMetricGroup
+                operator.getMetricGroup()
                         .addGroup("paimon")
                         .addGroup("table", table.name())
                         .addGroup("commit");
