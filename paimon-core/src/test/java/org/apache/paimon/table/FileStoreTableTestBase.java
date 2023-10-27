@@ -44,8 +44,12 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -59,11 +63,14 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.system.FileMonitorTable;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -88,6 +95,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -1276,5 +1284,104 @@ public abstract class FileStoreTableTestBase {
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {
         return new ArrayList<>(dataSplits);
+    }
+
+    private FileStoreTable createFileStoreTableMultiPartition(
+            Consumer<Options> configure, RowType rowType, List<String> paritions) throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        configure.accept(conf);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
+                                paritions,
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+    }
+
+    @Test
+    public void testMultiParition() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT(),
+                        },
+                        new String[] {"pt1", "pt2", "pt3", "v"});
+        FileStoreTable fileStoreTable =
+                createFileStoreTableMultiPartition(
+                        (c) -> {}, rowType, Lists.newArrayList("pt1", "pt2", "pt3"));
+
+        try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
+             InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
+            write.write(GenericRow.of(1, 1, 1, 2));
+            commit.commit(0, write.prepareCommit(true, 0));
+            write.write(GenericRow.of(1, 1, 1, 3));
+            commit.commit(1, write.prepareCommit(true, 1));
+        }
+
+        FileMonitorTable fileMonitorTable = new FileMonitorTable(fileStoreTable);
+        ReadBuilder readBuilder = fileMonitorTable.newReadBuilder();
+        TableScan tableScan = readBuilder.newScan();
+        TableRead read = readBuilder.newRead();
+        List<FileMonitorTable.FileChange> results = new ArrayList<>();
+
+        read.createReader(tableScan.plan())
+                .forEachRemaining(
+                        row -> {
+                            try {
+                                FileMonitorTable.FileChange fileChange =
+                                        FileMonitorTable.toFileChange(row);
+                                results.add(fileChange);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+
+        TableSchema schema = fileStoreTable.schema();
+        RowDataToObjectArrayConverter rowDataToObjectArrayConverter =
+                new RowDataToObjectArrayConverter(schema.logicalPartitionType());
+        List<String> paritionToMonitor = Lists.newArrayList("pt1", "pt2");
+        List<String> partitionKeys = schema.partitionKeys();
+
+        List<Integer> paritionIndexToMonitor = Lists.newArrayList();
+        for (String s : paritionToMonitor) {
+            if (partitionKeys.contains(s)) {
+                int index = partitionKeys.indexOf(s);
+                paritionIndexToMonitor.add(index);
+            }
+        }
+
+        Map<GenericRow, Long> paritionWithMaxModifyTime = new HashMap<>();
+        for (FileMonitorTable.FileChange result : results) {
+            Optional<Long> maxModifyTimeOpt =
+                    result.dataFiles().stream()
+                            .map(DataFileMeta::creationTimeEpochMillis)
+                            .max(Long::compare);
+
+            if (maxModifyTimeOpt.isPresent()) {
+                Long maxModifyTime = maxModifyTimeOpt.get();
+                Object[] convert = rowDataToObjectArrayConverter.convert(result.partition());
+                GenericRow genericRow = new GenericRow(paritionIndexToMonitor.size());
+
+                for (int i = 0; i < paritionIndexToMonitor.size(); i++) {
+                    genericRow.setField(i, convert[i]);
+                }
+
+                if (paritionWithMaxModifyTime.containsKey(genericRow)) {
+                    Long old = paritionWithMaxModifyTime.get(genericRow);
+                    if (maxModifyTime > old) {
+                        paritionWithMaxModifyTime.put(genericRow, maxModifyTime);
+                    }
+                }else {
+                    paritionWithMaxModifyTime.put(genericRow,maxModifyTime);
+                }
+            }
+        }
+
+        System.out.println(paritionWithMaxModifyTime);
     }
 }
