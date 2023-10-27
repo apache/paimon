@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.index;
 
+import org.apache.paimon.crosspartition.IndexBootstrap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.DynamicBucketRowWriteOperator;
@@ -43,8 +44,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.crosspartition.IndexBootstrap.bootstrapType;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
-import static org.apache.paimon.flink.sink.index.IndexBootstrap.bootstrapType;
 
 /** Sink for global dynamic bucket table. */
 public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, Integer>> {

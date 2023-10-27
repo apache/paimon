@@ -16,9 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.lookup;
+package org.apache.paimon.lookup;
 
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.utils.ListDelimitedSerializer;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;

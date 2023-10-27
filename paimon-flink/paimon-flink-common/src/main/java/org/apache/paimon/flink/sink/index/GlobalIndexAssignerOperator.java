@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.index;
 
+import org.apache.paimon.crosspartition.GlobalIndexAssigner;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.table.Table;
@@ -103,10 +104,6 @@ public class GlobalIndexAssignerOperator
     }
 
     public static GlobalIndexAssignerOperator forRowData(Table table) {
-        return new GlobalIndexAssignerOperator(createRowDataAssigner(table));
-    }
-
-    public static GlobalIndexAssigner createRowDataAssigner(Table t) {
-        return new GlobalIndexAssigner(t);
+        return new GlobalIndexAssignerOperator(new GlobalIndexAssigner(table));
     }
 }

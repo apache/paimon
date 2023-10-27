@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.index;
+package org.apache.paimon.crosspartition;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
@@ -42,11 +42,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 
+import static org.apache.paimon.crosspartition.IndexBootstrap.filterSplit;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
-import static org.apache.paimon.flink.sink.index.IndexBootstrap.filterSplit;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link IndexBootstrap}. */
+/** Test for {@link org.apache.paimon.crosspartition.IndexBootstrap}. */
 public class IndexBootstrapTest extends TableTestBase {
 
     @Test

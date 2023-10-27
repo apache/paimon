@@ -26,6 +26,8 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.lookup.RocksDBListState;
+import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -40,7 +42,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link org.apache.paimon.flink.lookup.RocksDBListState}. */
+/** Test for {@link RocksDBListState}. */
 public class RocksDBListStateTest {
 
     @TempDir Path tempDir;

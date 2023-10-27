@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink;
+package org.apache.paimon.lookup;
 
 import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.options.ConfigOption;

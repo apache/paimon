@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.index;
+package org.apache.paimon.crosspartition;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
@@ -28,10 +28,9 @@ import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.RowBuffer;
-import org.apache.paimon.flink.RocksDBOptions;
-import org.apache.paimon.flink.lookup.RocksDBStateFactory;
-import org.apache.paimon.flink.lookup.RocksDBValueState;
-import org.apache.paimon.flink.utils.ProjectToRowDataFunction;
+import org.apache.paimon.lookup.RocksDBOptions;
+import org.apache.paimon.lookup.RocksDBStateFactory;
+import org.apache.paimon.lookup.RocksDBValueState;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
@@ -46,13 +45,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.IDMapping;
+import org.apache.paimon.utils.KeyValueIterator;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.PositiveIntInt;
 import org.apache.paimon.utils.PositiveIntIntSerializer;
+import org.apache.paimon.utils.ProjectToRowFunction;
 import org.apache.paimon.utils.TypeUtils;
-
-import org.apache.flink.table.runtime.util.KeyValueIterator;
 
 import java.io.Closeable;
 import java.io.File;
@@ -82,7 +81,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     private transient IOManager ioManager;
 
     private transient int bucketIndex;
-    private transient ProjectToRowDataFunction setPartition;
+    private transient ProjectToRowFunction setPartition;
     private transient boolean bootstrap;
     private transient BinaryExternalSortBuffer bootstrapKeys;
     private transient RowBuffer bootstrapRecords;
@@ -120,7 +119,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
         RowType bootstrapType = IndexBootstrap.bootstrapType(table.schema());
         this.bucketIndex = bootstrapType.getFieldCount() - 1;
-        this.setPartition = new ProjectToRowDataFunction(table.rowType(), table.partitionKeys());
+        this.setPartition = new ProjectToRowFunction(table.rowType(), table.partitionKeys());
 
         CoreOptions coreOptions = table.coreOptions();
         this.targetBucketRowNumber = (int) coreOptions.dynamicBucketTargetRowNum();
@@ -219,7 +218,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         }
                     };
 
-            stateFactory.bulkLoad(keyIndex.columnFamily(), kvIter);
+            stateFactory.bulkLoad(keyIndex, kvIter);
             isEmpty = false;
         }
 

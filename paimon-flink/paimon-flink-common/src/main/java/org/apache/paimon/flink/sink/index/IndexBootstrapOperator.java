@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.index;
 
+import org.apache.paimon.crosspartition.IndexBootstrap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.SerializableFunction;
 

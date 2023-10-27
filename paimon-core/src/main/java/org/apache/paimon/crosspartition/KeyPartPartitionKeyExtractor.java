@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.index;
+package org.apache.paimon.crosspartition;
 
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
@@ -26,13 +26,11 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.types.RowType;
 
-import org.apache.flink.table.data.RowData;
-
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-/** A {@link PartitionKeyExtractor} to {@link RowData} with only key and partiton fields. */
+/** A {@link PartitionKeyExtractor} to {@link InternalRow} with only key and partiton fields. */
 public class KeyPartPartitionKeyExtractor implements PartitionKeyExtractor<InternalRow> {
 
     private final Projection partitionProjection;

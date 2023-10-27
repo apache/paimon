@@ -20,6 +20,8 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.lookup.RocksDBStateFactory;
+import org.apache.paimon.lookup.RocksDBValueState;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
