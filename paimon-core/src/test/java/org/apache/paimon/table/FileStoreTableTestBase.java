@@ -49,7 +49,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -70,11 +69,13 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,7 +96,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -116,6 +116,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.table.system.FileMonitorTable.paritionWithLatestModifyTime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
@@ -1304,23 +1305,33 @@ public abstract class FileStoreTableTestBase {
     }
 
     @Test
-    public void testMultiParition() throws Exception {
+    public void testMultiParitionModifyTime() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT(),
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT(),
                         },
                         new String[] {"pt1", "pt2", "pt3", "v"});
         FileStoreTable fileStoreTable =
                 createFileStoreTableMultiPartition(
                         (c) -> {}, rowType, Lists.newArrayList("pt1", "pt2", "pt3"));
-
+        HashMap<GenericRow, Long> expected = new HashMap<>();
         try (StreamTableWrite write = fileStoreTable.newWrite(commitUser);
-             InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
+                InnerTableCommit commit = fileStoreTable.newCommit(commitUser)) {
+
             write.write(GenericRow.of(1, 1, 1, 2));
             commit.commit(0, write.prepareCommit(true, 0));
+
             write.write(GenericRow.of(1, 1, 1, 3));
-            commit.commit(1, write.prepareCommit(true, 1));
+            List<CommitMessage> commitMessages1 = write.prepareCommit(true, 1);
+            commit.commit(1, commitMessages1);
+
+            write.write(GenericRow.of(1, 2, 1, 3));
+            List<CommitMessage> commitMessages2 = write.prepareCommit(true, 2);
+            commit.commit(2, commitMessages2);
+
+            expected.put(GenericRow.of(1, 1), getMaxCreateTime(commitMessages1));
+            expected.put(GenericRow.of(1, 2), getMaxCreateTime(commitMessages2));
         }
 
         FileMonitorTable fileMonitorTable = new FileMonitorTable(fileStoreTable);
@@ -1341,47 +1352,24 @@ public abstract class FileStoreTableTestBase {
                             }
                         });
 
-        TableSchema schema = fileStoreTable.schema();
-        RowDataToObjectArrayConverter rowDataToObjectArrayConverter =
-                new RowDataToObjectArrayConverter(schema.logicalPartitionType());
         List<String> paritionToMonitor = Lists.newArrayList("pt1", "pt2");
-        List<String> partitionKeys = schema.partitionKeys();
 
-        List<Integer> paritionIndexToMonitor = Lists.newArrayList();
-        for (String s : paritionToMonitor) {
-            if (partitionKeys.contains(s)) {
-                int index = partitionKeys.indexOf(s);
-                paritionIndexToMonitor.add(index);
-            }
-        }
+        Map<GenericRow, Long> actual =
+                paritionWithLatestModifyTime(fileStoreTable.schema(), results, paritionToMonitor);
+        Assertions.assertThat(actual).isEqualTo(expected);
+    }
 
-        Map<GenericRow, Long> paritionWithMaxModifyTime = new HashMap<>();
-        for (FileMonitorTable.FileChange result : results) {
-            Optional<Long> maxModifyTimeOpt =
-                    result.dataFiles().stream()
-                            .map(DataFileMeta::creationTimeEpochMillis)
-                            .max(Long::compare);
-
-            if (maxModifyTimeOpt.isPresent()) {
-                Long maxModifyTime = maxModifyTimeOpt.get();
-                Object[] convert = rowDataToObjectArrayConverter.convert(result.partition());
-                GenericRow genericRow = new GenericRow(paritionIndexToMonitor.size());
-
-                for (int i = 0; i < paritionIndexToMonitor.size(); i++) {
-                    genericRow.setField(i, convert[i]);
-                }
-
-                if (paritionWithMaxModifyTime.containsKey(genericRow)) {
-                    Long old = paritionWithMaxModifyTime.get(genericRow);
-                    if (maxModifyTime > old) {
-                        paritionWithMaxModifyTime.put(genericRow, maxModifyTime);
-                    }
-                }else {
-                    paritionWithMaxModifyTime.put(genericRow,maxModifyTime);
+    private static long getMaxCreateTime(List<CommitMessage> commitMessages) {
+        long max = 0;
+        for (CommitMessage message : commitMessages) {
+            CommitMessageImpl commitMessage = (CommitMessageImpl) message;
+            List<DataFileMeta> dataFileMetas = commitMessage.newFilesIncrement().newFiles();
+            if (!dataFileMetas.isEmpty()) {
+                for (DataFileMeta dataFileMeta : dataFileMetas) {
+                    max = Math.max(dataFileMeta.creationTimeEpochMillis(), max);
                 }
             }
         }
-
-        System.out.println(paritionWithMaxModifyTime);
+        return max;
     }
 }

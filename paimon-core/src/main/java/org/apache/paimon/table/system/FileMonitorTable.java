@@ -30,6 +30,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -45,6 +46,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -53,6 +55,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
 import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
@@ -219,6 +222,45 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
                 row.getInt(2),
                 fileSerializer.deserializeList(row.getBinary(3)),
                 fileSerializer.deserializeList(row.getBinary(4)));
+    }
+
+    public static Map<GenericRow, Long> paritionWithLatestModifyTime(
+            TableSchema schema, List<FileMonitorTable.FileChange> results, List<String> paritions) {
+        RowDataToObjectArrayConverter rowDataToObjectArrayConverter =
+                new RowDataToObjectArrayConverter(schema.logicalPartitionType());
+        List<String> partitionKeys = schema.partitionKeys();
+
+        List<Integer> paritionIndexToMonitor =
+                paritions.stream()
+                        .map(partitionKeys::indexOf)
+                        .filter(i -> i != -1)
+                        .collect(Collectors.toList());
+
+        Map<GenericRow, Long> paritionWithLatestModifyTime = new HashMap<>();
+        for (FileMonitorTable.FileChange result : results) {
+            result.dataFiles().stream()
+                    .map(DataFileMeta::creationTimeEpochMillis)
+                    .max(Long::compare)
+                    .ifPresent(
+                            maxModifyTime -> {
+                                Object[] convert =
+                                        rowDataToObjectArrayConverter.convert(result.partition());
+                                GenericRow genericRow =
+                                        new GenericRow(paritionIndexToMonitor.size());
+
+                                for (int i = 0; i < paritionIndexToMonitor.size(); i++) {
+                                    genericRow.setField(i, convert[i]);
+                                }
+
+                                paritionWithLatestModifyTime.compute(
+                                        genericRow,
+                                        (k, old) ->
+                                                old == null || maxModifyTime > old
+                                                        ? maxModifyTime
+                                                        : old);
+                            });
+        }
+        return paritionWithLatestModifyTime;
     }
 
     /** Pojo to record of file change. */
