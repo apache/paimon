@@ -23,17 +23,23 @@ import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.RowBuffer;
 import org.apache.paimon.flink.RocksDBOptions;
 import org.apache.paimon.flink.lookup.RocksDBStateFactory;
 import org.apache.paimon.flink.lookup.RocksDBValueState;
+import org.apache.paimon.flink.utils.ProjectToRowDataFunction;
+import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
+import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -41,51 +47,52 @@ import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.IDMapping;
 import org.apache.paimon.utils.MutableObjectIterator;
+import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.PositiveIntInt;
 import org.apache.paimon.utils.PositiveIntIntSerializer;
-import org.apache.paimon.utils.SerBiFunction;
-import org.apache.paimon.utils.SerializableFunction;
+import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.flink.table.runtime.util.KeyValueIterator;
-import org.rocksdb.RocksDBException;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
-public class GlobalIndexAssigner<T> implements Serializable, Closeable {
+public class GlobalIndexAssigner implements Serializable, Closeable {
 
     private static final long serialVersionUID = 1L;
 
     private static final String INDEX_NAME = "keyIndex";
 
     private final AbstractFileStoreTable table;
-    private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
-    private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>>
-            bootstrapExtractorFunction;
-    private final SerializableFunction<T, Integer> bootstrapBucketFunction;
-    private final SerBiFunction<T, BinaryRow, T> setPartition;
-    private final SerBiFunction<T, RowKind, T> setRowKind;
 
+    private transient IOManager ioManager;
+
+    private transient int bucketIndex;
+    private transient ProjectToRowDataFunction setPartition;
     private transient boolean bootstrap;
-    private transient BinaryExternalSortBuffer bootstrapBuffer;
+    private transient BinaryExternalSortBuffer bootstrapKeys;
+    private transient RowBuffer bootstrapRecords;
 
     private transient int targetBucketRowNumber;
     private transient int assignId;
-    private transient BiConsumer<T, Integer> collector;
+    private transient BiConsumer<InternalRow, Integer> collector;
     private transient int numAssigners;
-    private transient PartitionKeyExtractor<T> extractor;
-    private transient PartitionKeyExtractor<T> keyPartExtractor;
+    private transient PartitionKeyExtractor<InternalRow> extractor;
+    private transient PartitionKeyExtractor<InternalRow> keyPartExtractor;
     private transient File path;
     private transient RocksDBStateFactory stateFactory;
     private transient RocksDBValueState<InternalRow, PositiveIntInt> keyIndex;
@@ -94,42 +101,39 @@ public class GlobalIndexAssigner<T> implements Serializable, Closeable {
     private transient BucketAssigner bucketAssigner;
     private transient ExistsAction existsAction;
 
-    public GlobalIndexAssigner(
-            Table table,
-            SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction,
-            SerializableFunction<TableSchema, PartitionKeyExtractor<T>> bootstrapExtractorFunction,
-            SerializableFunction<T, Integer> bootstrapBucketFunction,
-            SerBiFunction<T, BinaryRow, T> setPartition,
-            SerBiFunction<T, RowKind, T> setRowKind) {
+    public GlobalIndexAssigner(Table table) {
         this.table = (AbstractFileStoreTable) table;
-        this.extractorFunction = extractorFunction;
-        this.bootstrapExtractorFunction = bootstrapExtractorFunction;
-        this.bootstrapBucketFunction = bootstrapBucketFunction;
-        this.setPartition = setPartition;
-        this.setRowKind = setRowKind;
     }
 
     // ================== Start Public API ===================
 
     public void open(
             IOManager ioManager,
-            File tmpDir,
             int numAssigners,
             int assignId,
-            BiConsumer<T, Integer> collector)
+            BiConsumer<InternalRow, Integer> collector)
             throws Exception {
+        this.ioManager = ioManager;
         this.numAssigners = numAssigners;
         this.assignId = assignId;
         this.collector = collector;
 
+        RowType bootstrapType = IndexBootstrap.bootstrapType(table.schema());
+        this.bucketIndex = bootstrapType.getFieldCount() - 1;
+        this.setPartition = new ProjectToRowDataFunction(table.rowType(), table.partitionKeys());
+
         CoreOptions coreOptions = table.coreOptions();
         this.targetBucketRowNumber = (int) coreOptions.dynamicBucketTargetRowNum();
-        this.extractor = extractorFunction.apply(table.schema());
-        this.keyPartExtractor = bootstrapExtractorFunction.apply(table.schema());
+        this.extractor = new RowPartitionKeyExtractor(table.schema());
+        this.keyPartExtractor = new KeyPartPartitionKeyExtractor(table.schema());
 
         // state
         Options options = coreOptions.toConfiguration();
-        this.path = new File(tmpDir, "lookup-" + UUID.randomUUID());
+        String rocksDBDir =
+                ioManager
+                        .tempDirs()[
+                        ThreadLocalRandom.current().nextInt(ioManager.tempDirs().length)];
+        this.path = new File(rocksDBDir, "rocksdb-" + UUID.randomUUID());
 
         this.stateFactory =
                 new RocksDBStateFactory(
@@ -148,7 +152,7 @@ public class GlobalIndexAssigner<T> implements Serializable, Closeable {
 
         // create bootstrap sort buffer
         this.bootstrap = true;
-        this.bootstrapBuffer =
+        this.bootstrapKeys =
                 BinaryExternalSortBuffer.create(
                         ioManager,
                         RowType.of(DataTypes.BYTES()),
@@ -156,57 +160,86 @@ public class GlobalIndexAssigner<T> implements Serializable, Closeable {
                         coreOptions.writeBufferSize() / 2,
                         coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles());
+
+        this.bootstrapRecords =
+                RowBuffer.getBuffer(
+                        ioManager,
+                        new HeapMemorySegmentPool(
+                                coreOptions.writeBufferSize() / 2, coreOptions.pageSize()),
+                        new InternalRowSerializer(table.rowType()),
+                        true);
     }
 
-    public void bootstrap(T value) throws IOException {
-        checkArgument(bootstrap);
+    public void bootstrapKey(InternalRow value) throws IOException {
+        checkArgument(inBoostrap());
         BinaryRow partition = keyPartExtractor.partition(value);
         BinaryRow key = keyPartExtractor.trimmedPrimaryKey(value);
         int partId = partMapping.index(partition);
-        int bucket = bootstrapBucketFunction.apply(value);
+        int bucket = value.getInt(bucketIndex);
         bucketAssigner.bootstrapBucket(partition, bucket);
         PositiveIntInt partAndBucket = new PositiveIntInt(partId, bucket);
-        bootstrapBuffer.write(
+        bootstrapKeys.write(
                 GenericRow.of(keyIndex.serializeKey(key), keyIndex.serializeValue(partAndBucket)));
     }
 
-    public void endBoostrap() throws IOException, RocksDBException {
-        bootstrap = false;
-        MutableObjectIterator<BinaryRow> iterator = bootstrapBuffer.sortedIterator();
-        BinaryRow row = new BinaryRow(2);
-        KeyValueIterator<byte[], byte[]> kvIter =
-                new KeyValueIterator<byte[], byte[]>() {
-
-                    private BinaryRow current;
-
-                    @Override
-                    public boolean advanceNext() {
-                        try {
-                            current = iterator.next(row);
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                        return current != null;
-                    }
-
-                    @Override
-                    public byte[] getKey() {
-                        return current.getBinary(0);
-                    }
-
-                    @Override
-                    public byte[] getValue() {
-                        return current.getBinary(1);
-                    }
-                };
-
-        stateFactory.bulkLoad(keyIndex.columnFamily(), kvIter);
-        bootstrapBuffer.clear();
-        bootstrapBuffer = null;
+    public boolean inBoostrap() {
+        return bootstrap;
     }
 
-    public void processInput(T value) throws Exception {
-        checkArgument(!bootstrap);
+    public void endBoostrap(boolean isEndInput) throws Exception {
+        bootstrap = false;
+        bootstrapRecords.complete();
+        boolean isEmpty = true;
+        if (bootstrapKeys.size() > 0) {
+            MutableObjectIterator<BinaryRow> keyIterator = bootstrapKeys.sortedIterator();
+            BinaryRow row = new BinaryRow(2);
+            KeyValueIterator<byte[], byte[]> kvIter =
+                    new KeyValueIterator<byte[], byte[]>() {
+
+                        private BinaryRow current;
+
+                        @Override
+                        public boolean advanceNext() {
+                            try {
+                                current = keyIterator.next(row);
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
+                            }
+                            return current != null;
+                        }
+
+                        @Override
+                        public byte[] getKey() {
+                            return current.getBinary(0);
+                        }
+
+                        @Override
+                        public byte[] getValue() {
+                            return current.getBinary(1);
+                        }
+                    };
+
+            stateFactory.bulkLoad(keyIndex.columnFamily(), kvIter);
+            isEmpty = false;
+        }
+
+        bootstrapKeys.clear();
+        bootstrapKeys = null;
+
+        if (isEmpty && isEndInput) {
+            // optimization: bulk load mode
+            bulkLoadBootstrapRecords();
+        } else {
+            loopBootstrapRecords();
+        }
+    }
+
+    public void processInput(InternalRow value) throws Exception {
+        if (inBoostrap()) {
+            bootstrapRecords.put(value);
+            return;
+        }
+
         BinaryRow partition = extractor.partition(value);
         BinaryRow key = extractor.trimmedPrimaryKey(value);
 
@@ -224,8 +257,8 @@ public class GlobalIndexAssigner<T> implements Serializable, Closeable {
                         {
                             // retract old record
                             BinaryRow previousPart = partMapping.get(previousPartId);
-                            T retract = setPartition.apply(value, previousPart);
-                            retract = setRowKind.apply(retract, RowKind.DELETE);
+                            InternalRow retract = setPartition.apply(value, previousPart);
+                            retract.setRowKind(RowKind.DELETE);
                             collect(retract, previousBucket);
                             bucketAssigner.decrement(previousPart, previousBucket);
 
@@ -236,7 +269,7 @@ public class GlobalIndexAssigner<T> implements Serializable, Closeable {
                     case USE_OLD:
                         {
                             BinaryRow previousPart = partMapping.get(previousPartId);
-                            T newValue = setPartition.apply(value, previousPart);
+                            InternalRow newValue = setPartition.apply(value, previousPart);
                             collect(newValue, previousBucket);
                             break;
                         }
@@ -265,7 +298,77 @@ public class GlobalIndexAssigner<T> implements Serializable, Closeable {
 
     // ================== End Public API ===================
 
-    private void processNewRecord(BinaryRow partition, int partId, BinaryRow key, T value)
+    /** Sort bootstrap records and assign bucket without RocksDB. */
+    private void bulkLoadBootstrapRecords() throws Exception {
+        RowType rowType = table.rowType();
+        List<DataType> fields =
+                new ArrayList<>(TypeUtils.project(rowType, table.primaryKeys()).getFieldTypes());
+        fields.add(DataTypes.INT());
+        RowType keyWithIdType = DataTypes.ROW(fields.toArray(new DataType[0]));
+
+        fields.addAll(rowType.getFieldTypes());
+        RowType keyWithRowType = DataTypes.ROW(fields.toArray(new DataType[0]));
+
+        // 1. insert into external sort buffer
+        CoreOptions coreOptions = table.coreOptions();
+        BinaryExternalSortBuffer keyIdBuffer =
+                BinaryExternalSortBuffer.create(
+                        ioManager,
+                        keyWithIdType,
+                        keyWithRowType,
+                        coreOptions.writeBufferSize() / 2,
+                        coreOptions.pageSize(),
+                        coreOptions.localSortMaxNumFileHandles());
+        int id = Integer.MAX_VALUE;
+        GenericRow idRow = new GenericRow(1);
+        JoinedRow keyAndId = new JoinedRow();
+        JoinedRow keyAndRow = new JoinedRow();
+        try (RowBuffer.RowBufferIterator iterator = bootstrapRecords.newIterator()) {
+            while (iterator.advanceNext()) {
+                BinaryRow row = iterator.getRow();
+                BinaryRow key = extractor.trimmedPrimaryKey(row);
+                idRow.setField(0, id);
+                keyAndId.replace(key, idRow);
+                keyAndRow.replace(keyAndId, row);
+                keyIdBuffer.write(keyAndRow);
+                id--;
+            }
+        }
+        bootstrapRecords.reset();
+        bootstrapRecords = null;
+
+        // 2. loop sorted iterator to assign bucket
+        MutableObjectIterator<BinaryRow> iterator = keyIdBuffer.sortedIterator();
+        BinaryRow keyWithRow = new BinaryRow(keyWithRowType.getFieldCount());
+        OffsetRow row = new OffsetRow(rowType.getFieldCount(), keyWithIdType.getFieldCount());
+        BinaryRow currentKey = null;
+        while ((keyWithRow = iterator.next(keyWithRow)) != null) {
+            row.replace(keyWithRow);
+            BinaryRow key = extractor.trimmedPrimaryKey(row);
+            if (currentKey == null || !currentKey.equals(key)) {
+                // output first record
+                BinaryRow partition = extractor.partition(row);
+                collect(row, assignBucket(partition));
+                currentKey = key.copy();
+            }
+        }
+
+        keyIdBuffer.clear();
+    }
+
+    /** Loop bootstrap records to get and put RocksDB. */
+    private void loopBootstrapRecords() throws Exception {
+        try (RowBuffer.RowBufferIterator iterator = bootstrapRecords.newIterator()) {
+            while (iterator.advanceNext()) {
+                processInput(iterator.getRow());
+            }
+        }
+
+        bootstrapRecords.reset();
+        bootstrapRecords = null;
+    }
+
+    private void processNewRecord(BinaryRow partition, int partId, BinaryRow key, InternalRow value)
             throws IOException {
         int bucket = assignBucket(partition);
         keyIndex.put(key, new PositiveIntInt(partId, bucket));
@@ -284,7 +387,7 @@ public class GlobalIndexAssigner<T> implements Serializable, Closeable {
         return Math.abs(hash % numAssigners);
     }
 
-    private void collect(T value, int bucket) {
+    private void collect(InternalRow value, int bucket) {
         collector.accept(value, bucket);
     }
 

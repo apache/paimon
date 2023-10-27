@@ -36,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import java.io.File;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -45,13 +46,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link GlobalIndexAssigner}. */
 public class GlobalIndexAssignerTest extends TableTestBase {
 
-    private GlobalIndexAssigner<InternalRow> createAssigner(MergeEngine mergeEngine)
-            throws Exception {
+    private GlobalIndexAssigner createAssigner(MergeEngine mergeEngine) throws Exception {
         return createAssigner(mergeEngine, false);
     }
 
-    private GlobalIndexAssigner<InternalRow> createAssigner(
-            MergeEngine mergeEngine, boolean enableTtl) throws Exception {
+    private GlobalIndexAssigner createAssigner(MergeEngine mergeEngine, boolean enableTtl)
+            throws Exception {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(CoreOptions.MERGE_ENGINE, mergeEngine);
@@ -91,16 +91,10 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     }
 
     private void innerTestBucketAssign(boolean enableTtl) throws Exception {
-        GlobalIndexAssigner<InternalRow> assigner =
-                createAssigner(MergeEngine.DEDUPLICATE, enableTtl);
+        GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE, enableTtl);
         List<Integer> output = new ArrayList<>();
-        assigner.open(
-                ioManager(),
-                new File(warehouse.getPath()),
-                2,
-                0,
-                (row, bucket) -> output.add(bucket));
-        assigner.endBoostrap();
+        assigner.open(ioManager(), 2, 0, (row, bucket) -> output.add(bucket));
+        assigner.endBoostrap(false);
 
         // assign
         assigner.processInput(GenericRow.of(1, 1, 1));
@@ -131,15 +125,10 @@ public class GlobalIndexAssignerTest extends TableTestBase {
 
     @Test
     public void testUpsert() throws Exception {
-        GlobalIndexAssigner<InternalRow> assigner = createAssigner(MergeEngine.DEDUPLICATE);
+        GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
         List<Tuple2<InternalRow, Integer>> output = new ArrayList<>();
-        assigner.open(
-                ioManager(),
-                new File(warehouse.getPath()),
-                2,
-                0,
-                (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
-        assigner.endBoostrap();
+        assigner.open(ioManager(), 2, 0, (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
+        assigner.endBoostrap(false);
 
         // change partition
         assigner.processInput(GenericRow.of(1, 1, 1));
@@ -180,15 +169,10 @@ public class GlobalIndexAssignerTest extends TableTestBase {
                 ThreadLocalRandom.current().nextBoolean()
                         ? MergeEngine.PARTIAL_UPDATE
                         : MergeEngine.AGGREGATE;
-        GlobalIndexAssigner<InternalRow> assigner = createAssigner(mergeEngine);
+        GlobalIndexAssigner assigner = createAssigner(mergeEngine);
         List<Tuple2<InternalRow, Integer>> output = new ArrayList<>();
-        assigner.open(
-                ioManager(),
-                new File(warehouse.getPath()),
-                2,
-                0,
-                (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
-        assigner.endBoostrap();
+        assigner.open(ioManager(), 2, 0, (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
+        assigner.endBoostrap(false);
 
         // change partition
         assigner.processInput(GenericRow.of(1, 1, 1));
@@ -210,15 +194,10 @@ public class GlobalIndexAssignerTest extends TableTestBase {
 
     @Test
     public void testFirstRow() throws Exception {
-        GlobalIndexAssigner<InternalRow> assigner = createAssigner(MergeEngine.FIRST_ROW);
+        GlobalIndexAssigner assigner = createAssigner(MergeEngine.FIRST_ROW);
         List<Tuple2<InternalRow, Integer>> output = new ArrayList<>();
-        assigner.open(
-                ioManager(),
-                new File(warehouse.getPath()),
-                2,
-                0,
-                (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
-        assigner.endBoostrap();
+        assigner.open(ioManager(), 2, 0, (row, bucket) -> output.add(new Tuple2<>(row, bucket)));
+        assigner.endBoostrap(false);
 
         // change partition
         assigner.processInput(GenericRow.of(1, 1, 1));
@@ -231,6 +210,36 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         assigner.processInput(GenericRow.of(2, 3, 3));
         assigner.processInput(GenericRow.of(2, 4, 4));
         assertThat(output.stream().map(t -> t.f1)).containsExactly(0, 0, 0);
+        output.clear();
+        assigner.close();
+    }
+
+    @Test
+    public void testBootstrapRecords() throws Exception {
+        GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
+        List<List<Integer>> output = new ArrayList<>();
+        assigner.open(
+                ioManager(),
+                2,
+                0,
+                (row, bucket) ->
+                        output.add(
+                                Arrays.asList(
+                                        row.getInt(0), row.getInt(1), row.getInt(2), bucket)));
+
+        assigner.processInput(GenericRow.of(1, 1, 1));
+        assigner.processInput(GenericRow.of(2, 1, 2));
+        assigner.processInput(GenericRow.of(2, 2, 2));
+        assigner.processInput(GenericRow.of(2, 3, 3));
+        assigner.processInput(GenericRow.of(2, 4, 4));
+        assigner.endBoostrap(true);
+
+        assertThat(output)
+                .containsExactlyInAnyOrder(
+                        Arrays.asList(2, 1, 2, 0),
+                        Arrays.asList(2, 2, 2, 0),
+                        Arrays.asList(2, 3, 3, 0),
+                        Arrays.asList(2, 4, 4, 2));
         output.clear();
         assigner.close();
     }
