@@ -22,11 +22,10 @@ import org.apache.paimon.predicate.Predicate;
 
 import javax.annotation.Nullable;
 
-import java.io.Serializable;
 import java.util.Iterator;
 
 /** Metadata store will manage table lineage and data lineage information for the catalog. */
-public interface LineageMeta extends Serializable {
+public interface LineageMeta extends AutoCloseable {
     /**
      * Save the source table and job lineage.
      *

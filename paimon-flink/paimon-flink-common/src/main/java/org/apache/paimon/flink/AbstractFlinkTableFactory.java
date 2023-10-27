@@ -32,6 +32,7 @@ import org.apache.paimon.flink.source.table.PushedRichTableSource;
 import org.apache.paimon.flink.source.table.PushedTableSource;
 import org.apache.paimon.flink.source.table.RichTableSource;
 import org.apache.paimon.lineage.LineageMeta;
+import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.lineage.TableLineageEntity;
 import org.apache.paimon.lineage.TableLineageEntityImpl;
 import org.apache.paimon.options.Options;
@@ -104,9 +105,16 @@ public abstract class AbstractFlinkTableFactory
             Table table = buildPaimonTable(context);
             if (table instanceof FileStoreTable) {
                 storeTableLineage(
-                        ((FileStoreTable) table).catalogEnvironment().lineageMeta(),
+                        ((FileStoreTable) table).catalogEnvironment().lineageMetaFactory(),
                         context,
-                        (entity, lineage) -> lineage.saveSourceTableLineage(entity));
+                        (entity, lineageFactory) -> {
+                            try (LineageMeta lineage =
+                                    lineageFactory.create(() -> Options.fromMap(table.options()))) {
+                                lineage.saveSourceTableLineage(entity);
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
             }
             DataTableSource source =
                     new DataTableSource(
@@ -126,9 +134,16 @@ public abstract class AbstractFlinkTableFactory
         Table table = buildPaimonTable(context);
         if (table instanceof FileStoreTable) {
             storeTableLineage(
-                    ((FileStoreTable) table).catalogEnvironment().lineageMeta(),
+                    ((FileStoreTable) table).catalogEnvironment().lineageMetaFactory(),
                     context,
-                    (entity, lineage) -> lineage.saveSinkTableLineage(entity));
+                    (entity, lineageFactory) -> {
+                        try (LineageMeta lineage =
+                                lineageFactory.create(() -> Options.fromMap(table.options()))) {
+                            lineage.saveSinkTableLineage(entity);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
         }
         return new FlinkTableSink(
                 context.getObjectIdentifier(),
@@ -138,10 +153,10 @@ public abstract class AbstractFlinkTableFactory
     }
 
     private void storeTableLineage(
-            @Nullable LineageMeta lineageMeta,
+            @Nullable LineageMetaFactory lineageMetaFactory,
             Context context,
-            BiConsumer<TableLineageEntity, LineageMeta> tableLineage) {
-        if (lineageMeta != null) {
+            BiConsumer<TableLineageEntity, LineageMetaFactory> tableLineage) {
+        if (lineageMetaFactory != null) {
             String pipelineName = context.getConfiguration().get(PipelineOptions.NAME);
             if (pipelineName == null) {
                 throw new ValidationException("Cannot get pipeline name for lineage meta.");
@@ -152,7 +167,7 @@ public abstract class AbstractFlinkTableFactory
                             context.getObjectIdentifier().getObjectName(),
                             pipelineName,
                             Timestamp.fromEpochMillis(System.currentTimeMillis())),
-                    lineageMeta);
+                    lineageMetaFactory);
         }
     }
 
