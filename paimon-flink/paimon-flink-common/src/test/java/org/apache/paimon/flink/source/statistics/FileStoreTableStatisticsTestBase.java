@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source.statistics;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -32,9 +33,11 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.plan.stats.TableStats;
 import org.assertj.core.api.Assertions;
+import org.junit.Ignore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -60,7 +63,13 @@ public abstract class FileStoreTableStatisticsTestBase {
     @Test
     public void testTableScanStatistics() throws Exception {
         FileStoreTable table = writeData();
-        DataTableSource scanSource = new DataTableSource(identifier, table, false, null, null);
+        DataTableSource scanSource =
+                new DataTableSource(
+                        identifier,
+                        table,
+                        false,
+                        TestingDynamicTableFactoryContext.builder().build(),
+                        null);
         Assertions.assertThat(scanSource.reportStatistics().getRowCount()).isEqualTo(9L);
         // TODO validate column statistics
     }
@@ -68,7 +77,13 @@ public abstract class FileStoreTableStatisticsTestBase {
     @Test
     public void testTableStreamingStatistics() throws Exception {
         FileStoreTable table = writeData();
-        DataTableSource streamSource = new DataTableSource(identifier, table, true, null, null);
+        DataTableSource streamSource =
+                new DataTableSource(
+                        identifier,
+                        table,
+                        true,
+                        TestingDynamicTableFactoryContext.builder().build(),
+                        null);
         Assertions.assertThat(streamSource.reportStatistics()).isEqualTo(TableStats.UNKNOWN);
     }
 
@@ -81,7 +96,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         identifier,
                         table,
                         false,
-                        null,
+                        TestingDynamicTableFactoryContext.builder().build(),
                         null,
                         builder.equal(0, 1),
                         null,
@@ -101,7 +116,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         identifier,
                         table,
                         false,
-                        null,
+                        TestingDynamicTableFactoryContext.builder().build(),
                         null,
                         builder.equal(1, 50),
                         null,
@@ -121,7 +136,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         identifier,
                         table,
                         false,
-                        null,
+                        TestingDynamicTableFactoryContext.builder().build(),
                         null,
                         builder.greaterThan(2, 500L),
                         null,
@@ -129,6 +144,32 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(4L);
+        // TODO validate column statistics
+    }
+
+    @Test
+    @Ignore
+    public void testTableFilterValueDisableStatistics() throws Exception {
+        FileStoreTable table = writeData();
+        PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
+        Configuration configuration = new Configuration();
+        configuration.setString(
+                FlinkConnectorOptions.SOURCE_VALUE_FILTER_STATISTICS_DISABLE.key(), "true");
+        DataTableSource keyFilterSource =
+                new DataTableSource(
+                        identifier,
+                        table,
+                        false,
+                        TestingDynamicTableFactoryContext.builder()
+                                .configuration(configuration)
+                                .build(),
+                        null,
+                        builder.greaterThan(2, 500L),
+                        null,
+                        null,
+                        null,
+                        null);
+        Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(-1L);
         // TODO validate column statistics
     }
 

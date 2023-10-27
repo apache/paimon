@@ -24,6 +24,7 @@ import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
+import org.apache.paimon.flink.source.statistics.TestingDynamicTableFactoryContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -119,7 +120,12 @@ public class KafkaLogStoreFactoryTest {
 
         ObjectIdentifier identifier = ObjectIdentifier.of("c", "d", "t");
         DataTableSource source =
-                new DataTableSource(identifier, table, true, null, new KafkaLogStoreFactory());
+                new DataTableSource(
+                        identifier,
+                        table,
+                        true,
+                        TestingDynamicTableFactoryContext.builder().build(),
+                        new KafkaLogStoreFactory());
         assertThat(source.getChangelogMode()).isEqualTo(ChangelogMode.upsert());
 
         FlinkTableSink sink = new FlinkTableSink(identifier, table, null, null);

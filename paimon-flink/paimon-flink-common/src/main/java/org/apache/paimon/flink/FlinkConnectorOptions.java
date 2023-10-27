@@ -268,6 +268,13 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "If the new snapshot has not been generated when the checkpoint starts to trigger, the enumerator will block the checkpoint and wait for the new snapshot. Set the maximum waiting time to avoid infinite waiting, if timeout, the checkpoint will fail. Note that it should be set smaller than the checkpoint timeout.");
 
+    public static final ConfigOption<Boolean> SOURCE_VALUE_FILTER_STATISTICS_DISABLE =
+            ConfigOptions.key("source.value-filter-statistics.disable")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, the source will not report statistics when there are filters but all the filters are value filtering.");
+
     public static final ConfigOption<Boolean> LOOKUP_ASYNC =
             ConfigOptions.key("lookup.async")
                     .booleanType()

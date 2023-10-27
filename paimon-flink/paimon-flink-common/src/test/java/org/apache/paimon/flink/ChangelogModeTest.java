@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.sink.FlinkTableSink;
 import org.apache.paimon.flink.source.DataTableSource;
+import org.apache.paimon.flink.source.statistics.TestingDynamicTableFactoryContext;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
@@ -66,8 +67,13 @@ public class ChangelogModeTest {
                                 options.toMap(),
                                 ""));
         FileStoreTable table = FileStoreTableFactory.create(LocalFileIO.create(), path);
-
-        DataTableSource source = new DataTableSource(identifier, table, true, null, null);
+        DataTableSource source =
+                new DataTableSource(
+                        identifier,
+                        table,
+                        true,
+                        TestingDynamicTableFactoryContext.builder().build(),
+                        null);
         assertThat(source.getChangelogMode()).isEqualTo(expectSource);
 
         FlinkTableSink sink = new FlinkTableSink(identifier, table, null, null);

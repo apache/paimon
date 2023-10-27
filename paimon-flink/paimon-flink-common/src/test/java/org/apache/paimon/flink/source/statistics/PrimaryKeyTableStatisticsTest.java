@@ -45,7 +45,7 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
                         identifier,
                         table,
                         false,
-                        null,
+                        TestingDynamicTableFactoryContext.builder().build(),
                         null,
                         builder.greaterThan(2, 500L),
                         null,
@@ -64,7 +64,11 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
         TableSchema tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath)
                         .createTable(
-                                schemaBuilder().partitionKeys("pt").primaryKey("pt", "a").build());
+                                schemaBuilder()
+                                        .partitionKeys("pt")
+                                        .primaryKey("pt", "a")
+                                        .options(conf.toMap())
+                                        .build());
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 }

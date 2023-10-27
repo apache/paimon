@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
@@ -30,6 +31,8 @@ import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.PrimaryKeyFileStoreTable;
@@ -41,6 +44,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
@@ -69,6 +73,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SOURCE_VALUE_FILTER_STATISTICS_DISABLE;
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -88,6 +93,7 @@ public class DataTableSource extends FlinkTableSource {
     private final ObjectIdentifier tableIdentifier;
     private final boolean streaming;
     private final DynamicTableFactory.Context context;
+    private final boolean valueStatisticsDisable;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
@@ -130,6 +136,12 @@ public class DataTableSource extends FlinkTableSource {
         this.tableIdentifier = tableIdentifier;
         this.streaming = streaming;
         this.context = context;
+        this.valueStatisticsDisable =
+                Options.fromMap(
+                                ((TableConfig) context.getConfiguration())
+                                        .getConfiguration()
+                                        .toMap())
+                        .get(SOURCE_VALUE_FILTER_STATISTICS_DISABLE);
         this.logStoreTableFactory = logStoreTableFactory;
         this.predicate = predicate;
         this.projectFields = projectFields;
@@ -314,8 +326,39 @@ public class DataTableSource extends FlinkTableSource {
             return TableStats.UNKNOWN;
         }
 
+//        if (valueStatisticsDisable
+//                && checkAllValuePredication(
+//                        table.partitionKeys(), table.primaryKeys(), predicate)) {
+//            return TableStats.UNKNOWN;
+//        }
+
         scanSplitsForInference();
         return new TableStats(splitStatistics.totalRowCount());
+    }
+
+    @VisibleForTesting
+    static boolean checkAllValuePredication(
+            List<String> partitionKeys, List<String> primaryKeys, @Nullable Predicate predicate) {
+        if (predicate == null) {
+            return false;
+        }
+        if (predicate instanceof LeafPredicate) {
+            LeafPredicate leafPredicate = (LeafPredicate) predicate;
+            return !partitionKeys.contains(leafPredicate.fieldName())
+                    && !primaryKeys.contains(leafPredicate.fieldName());
+        } else if (predicate instanceof CompoundPredicate) {
+            CompoundPredicate compoundPredicate = (CompoundPredicate) predicate;
+            for (Predicate child : compoundPredicate.children()) {
+                if (!checkAllValuePredication(partitionKeys, primaryKeys, child)) {
+                    return false;
+                }
+            }
+        } else {
+            throw new UnsupportedOperationException(
+                    String.format("Unsupported predicate %s", predicate));
+        }
+
+        return true;
     }
 
     @Override

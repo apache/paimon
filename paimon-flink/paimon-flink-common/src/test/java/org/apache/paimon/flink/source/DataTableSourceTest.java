@@ -21,9 +21,13 @@ package org.apache.paimon.flink.source;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
+import org.apache.paimon.flink.source.statistics.TestingDynamicTableFactoryContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.predicate.And;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -32,6 +36,8 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.configuration.Configuration;
@@ -46,7 +52,9 @@ import org.apache.flink.table.types.logical.LogicalType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
@@ -88,7 +96,7 @@ class DataTableSourceTest {
                         ObjectIdentifier.of("cat", "db", "table"),
                         fileStoreTable,
                         true,
-                        null,
+                        TestingDynamicTableFactoryContext.builder().build(),
                         null);
         PaimonDataStreamScanProvider runtimeProvider =
                 (PaimonDataStreamScanProvider)
@@ -131,5 +139,69 @@ class DataTableSourceTest {
         // The default parallelism is not 1
         assertThat(sourceStream2.getParallelism()).isNotEqualTo(1);
         assertThat(sourceStream2.getParallelism()).isEqualTo(sEnv2.getParallelism());
+    }
+
+    @Test
+    void testCheckAllValuePredication() {
+        List<String> partitionKeys = Collections.singletonList("f0");
+        List<String> primaryKeys = Arrays.asList("f1", "f2");
+        RowType rowType =
+                RowType.of(
+                        new IntType(), new IntType(), new IntType(), new IntType(), new IntType());
+        assertThat(DataTableSource.checkAllValuePredication(partitionKeys, primaryKeys, null))
+                .isFalse();
+        // Filter with partition key
+        assertThat(
+                        DataTableSource.checkAllValuePredication(
+                                partitionKeys,
+                                primaryKeys,
+                                new PredicateBuilder(rowType).equal(0, 1)))
+                .isFalse();
+        // Filter with primary key
+        assertThat(
+                        DataTableSource.checkAllValuePredication(
+                                partitionKeys,
+                                primaryKeys,
+                                new PredicateBuilder(rowType).equal(1, 1)))
+                .isFalse();
+        // Filter with partition key and value key
+        assertThat(
+                        DataTableSource.checkAllValuePredication(
+                                partitionKeys,
+                                primaryKeys,
+                                new CompoundPredicate(
+                                        And.INSTANCE,
+                                        Arrays.asList(
+                                                new PredicateBuilder(rowType).equal(0, 1),
+                                                new PredicateBuilder(rowType).equal(3, 1)))))
+                .isFalse();
+        // Filter with primary key and value key
+        assertThat(
+                        DataTableSource.checkAllValuePredication(
+                                partitionKeys,
+                                primaryKeys,
+                                new CompoundPredicate(
+                                        And.INSTANCE,
+                                        Arrays.asList(
+                                                new PredicateBuilder(rowType).equal(1, 1),
+                                                new PredicateBuilder(rowType).equal(3, 1)))))
+                .isFalse();
+        // Filter with value key
+        assertThat(
+                        DataTableSource.checkAllValuePredication(
+                                partitionKeys,
+                                primaryKeys,
+                                new CompoundPredicate(
+                                        And.INSTANCE,
+                                        Arrays.asList(
+                                                new PredicateBuilder(rowType).equal(3, 1),
+                                                new PredicateBuilder(rowType).equal(4, 1)))))
+                .isTrue();
+        assertThat(
+                        DataTableSource.checkAllValuePredication(
+                                partitionKeys,
+                                primaryKeys,
+                                new PredicateBuilder(rowType).equal(3, 1)))
+                .isTrue();
     }
 }

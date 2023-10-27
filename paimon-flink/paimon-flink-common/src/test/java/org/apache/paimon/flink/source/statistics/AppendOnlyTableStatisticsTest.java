@@ -36,7 +36,8 @@ public class AppendOnlyTableStatisticsTest extends FileStoreTableStatisticsTestB
         conf.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath)
-                        .createTable(schemaBuilder().partitionKeys("pt").build());
+                        .createTable(
+                                schemaBuilder().partitionKeys("pt").options(conf.toMap()).build());
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 }

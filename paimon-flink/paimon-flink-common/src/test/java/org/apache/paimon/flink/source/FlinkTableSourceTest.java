@@ -20,6 +20,7 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.source.statistics.TestingDynamicTableFactoryContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -56,7 +57,11 @@ public class FlinkTableSourceTest extends TableTestBase {
         Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         FlinkTableSource tableSource =
                 new DataTableSource(
-                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null, null);
+                        ObjectIdentifier.of("catalog1", "db1", "T"),
+                        table,
+                        false,
+                        TestingDynamicTableFactoryContext.builder().build(),
+                        null);
 
         // col1 = 1
         List<ResolvedExpression> filters = ImmutableList.of(col1Equal1());
@@ -79,7 +84,11 @@ public class FlinkTableSourceTest extends TableTestBase {
         Table table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
         FlinkTableSource tableSource =
                 new DataTableSource(
-                        ObjectIdentifier.of("catalog1", "db1", "T"), table, false, null, null);
+                        ObjectIdentifier.of("catalog1", "db1", "T"),
+                        table,
+                        false,
+                        TestingDynamicTableFactoryContext.builder().build(),
+                        null);
 
         // col1 = 1 && p1 = 1 => [p1 = 1]
         List<ResolvedExpression> filters = ImmutableList.of(col1Equal1(), p1Equal1());
