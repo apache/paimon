@@ -21,16 +21,10 @@ package org.apache.paimon.mergetree;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.codegen.CodeGenUtils;
-import org.apache.paimon.codegen.NormalizedKeyComputer;
-import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
-import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.CachelessSegmentPool;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -40,11 +34,11 @@ import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.SortMergeReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.sort.SortBuffer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -181,37 +175,28 @@ public class MergeSorter {
         private final SortBuffer buffer;
 
         public ExternalSorterWithLevel() {
-            // user key + sequenceNumber
-            List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
-            sortKeyTypes.add(new BigIntType(false));
-
-            // for sort binary buffer
-            NormalizedKeyComputer normalizedKeyComputer =
-                    CodeGenUtils.newNormalizedKeyComputer(sortKeyTypes, "MemTableKeyComputer");
-            RecordComparator keyComparator =
-                    CodeGenUtils.newRecordComparator(sortKeyTypes, "MemTableComparator");
-
             if (memoryPool.freePages() < 3) {
                 throw new IllegalArgumentException(
                         "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
             }
 
+            // user key + sequenceNumber
+            List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
+            sortKeyTypes.add(new BigIntType(false));
+
+            // row type
             List<DataField> fields = new ArrayList<>(keyType.getFields());
             fields.add(new DataField(0, SEQUENCE_NUMBER, new BigIntType(false)));
             fields.add(new DataField(1, VALUE_KIND, new TinyIntType(false)));
             fields.add(new DataField(2, "_LEVEL", new IntType(false)));
             fields.addAll(valueType.getFields());
-            RowType schemaWithLevel = new RowType(fields);
-            InternalRowSerializer serializer = InternalSerializers.create(schemaWithLevel);
 
             this.buffer =
-                    new BinaryExternalSortBuffer(
-                            new BinaryRowSerializer(serializer.getArity()),
-                            keyComparator,
-                            memoryPool.pageSize(),
-                            BinaryInMemorySortBuffer.createBuffer(
-                                    normalizedKeyComputer, serializer, keyComparator, memoryPool),
+                    BinaryExternalSortBuffer.create(
                             ioManager,
+                            DataTypes.ROW(sortKeyTypes.toArray(new DataType[0])),
+                            new RowType(fields),
+                            memoryPool,
                             spillSortMaxNumFiles);
         }
 

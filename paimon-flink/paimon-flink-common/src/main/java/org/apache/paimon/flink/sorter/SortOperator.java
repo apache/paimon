@@ -19,19 +19,10 @@
 package org.apache.paimon.flink.sorter;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.codegen.CodeGenUtils;
-import org.apache.paimon.codegen.NormalizedKeyComputer;
-import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
-import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
 
@@ -76,19 +67,6 @@ public class SortOperator extends TableStreamOperator<InternalRow>
 
     @VisibleForTesting
     void initBuffer() {
-        InternalRowSerializer serializer = InternalSerializers.create(rowType);
-        NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(
-                        keyType.getFieldTypes(), "MemTableKeyComputer");
-        RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(keyType.getFieldTypes(), "MemTableComparator");
-
-        MemorySegmentPool memoryPool = new HeapMemorySegmentPool(maxMemory, pageSize);
-
-        BinaryInMemorySortBuffer inMemorySortBuffer =
-                BinaryInMemorySortBuffer.createBuffer(
-                        normalizedKeyComputer, serializer, keyComparator, memoryPool);
-
         this.ioManager =
                 IOManager.create(
                         getContainingTask()
@@ -96,13 +74,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
                                 .getIOManager()
                                 .getSpillingDirectoriesPaths());
         buffer =
-                new BinaryExternalSortBuffer(
-                        new BinaryRowSerializer(serializer.getArity()),
-                        keyComparator,
-                        memoryPool.pageSize(),
-                        inMemorySortBuffer,
-                        ioManager,
-                        spillSortMaxNumFiles);
+                BinaryExternalSortBuffer.create(
+                        ioManager, keyType, rowType, maxMemory, pageSize, spillSortMaxNumFiles);
     }
 
     @Override

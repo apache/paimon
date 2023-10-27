@@ -20,22 +20,17 @@ package org.apache.paimon.flink.sink.index;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.MergeEngine;
-import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.RocksDBOptions;
 import org.apache.paimon.flink.lookup.RocksDBStateFactory;
 import org.apache.paimon.flink.lookup.RocksDBValueState;
-import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
@@ -59,15 +54,12 @@ import java.io.File;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 
-import static org.apache.paimon.codegen.CodeGenUtils.newNormalizedKeyComputer;
-import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
@@ -156,26 +148,13 @@ public class GlobalIndexAssigner<T> implements Serializable, Closeable {
 
         // create bootstrap sort buffer
         this.bootstrap = true;
-        int pageSize = coreOptions.pageSize();
-        long bufferSize = coreOptions.writeBufferSize() / 2;
-        RecordComparator comparator =
-                newRecordComparator(
-                        Collections.singletonList(DataTypes.BYTES()), "binary_comparator");
-        BinaryInMemorySortBuffer sortBuffer =
-                BinaryInMemorySortBuffer.createBuffer(
-                        newNormalizedKeyComputer(
-                                Collections.singletonList(DataTypes.BYTES()),
-                                "binary_normalized_key"),
-                        new InternalRowSerializer(DataTypes.BYTES(), DataTypes.BYTES()),
-                        comparator,
-                        new HeapMemorySegmentPool(bufferSize, pageSize));
         this.bootstrapBuffer =
-                new BinaryExternalSortBuffer(
-                        new BinaryRowSerializer(2),
-                        comparator,
-                        pageSize,
-                        sortBuffer,
+                BinaryExternalSortBuffer.create(
                         ioManager,
+                        RowType.of(DataTypes.BYTES()),
+                        RowType.of(DataTypes.BYTES(), DataTypes.BYTES()),
+                        coreOptions.writeBufferSize() / 2,
+                        coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles());
     }
 
