@@ -93,7 +93,7 @@ public class SchemaValidation {
                         || changelogProducer == ChangelogProducer.LOOKUP)) {
             throw new UnsupportedOperationException(
                     String.format(
-                            "Cannot set %s to true when changelog producer is %s or %s.",
+                            "Cannot set %s to true when changelog producer is %s or %s because it will read duplicated changes.",
                             STREAMING_READ_OVERWRITE.key(),
                             ChangelogProducer.FULL_COMPACTION,
                             ChangelogProducer.LOOKUP));
