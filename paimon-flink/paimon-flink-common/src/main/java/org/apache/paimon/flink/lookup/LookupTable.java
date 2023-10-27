@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.types.RowType;
 
 import java.io.IOException;

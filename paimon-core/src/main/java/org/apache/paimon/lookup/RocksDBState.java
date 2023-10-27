@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.lookup;
+package org.apache.paimon.lookup;
 
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.io.DataInputDeserializer;
@@ -75,10 +75,6 @@ public abstract class RocksDBState<K, V, CacheV> {
                         .maximumSize(lruCacheSize)
                         .executor(MoreExecutors.directExecutor())
                         .build();
-    }
-
-    public ColumnFamilyHandle columnFamily() {
-        return columnFamily;
     }
 
     public byte[] serializeKey(K key) throws IOException {

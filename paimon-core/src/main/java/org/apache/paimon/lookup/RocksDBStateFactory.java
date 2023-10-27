@@ -16,12 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.lookup;
+package org.apache.paimon.lookup;
 
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.flink.RocksDBOptions;
+import org.apache.paimon.utils.KeyValueIterator;
 
-import org.apache.flink.table.runtime.util.KeyValueIterator;
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
@@ -82,39 +81,43 @@ public class RocksDBStateFactory implements Closeable {
         }
     }
 
-    public void bulkLoad(ColumnFamilyHandle columnFamily, KeyValueIterator<byte[], byte[]> iterator)
-            throws RocksDBException, IOException {
-        long targetFileSize = options.targetFileSizeBase();
+    public void bulkLoad(RocksDBState<?, ?, ?> state, KeyValueIterator<byte[], byte[]> iterator)
+            throws IOException {
+        try {
+            long targetFileSize = options.targetFileSizeBase();
 
-        List<String> files = new ArrayList<>();
-        SstFileWriter writer = null;
-        long recordNum = 0;
-        while (iterator.advanceNext()) {
-            byte[] key = iterator.getKey();
-            byte[] value = iterator.getValue();
+            List<String> files = new ArrayList<>();
+            SstFileWriter writer = null;
+            long recordNum = 0;
+            while (iterator.advanceNext()) {
+                byte[] key = iterator.getKey();
+                byte[] value = iterator.getValue();
 
-            if (writer == null) {
-                writer = new SstFileWriter(new EnvOptions(), options);
-                String path = new File(this.path, "sst-" + (sstIndex++)).getPath();
-                writer.open(path);
-                files.add(path);
+                if (writer == null) {
+                    writer = new SstFileWriter(new EnvOptions(), options);
+                    String path = new File(this.path, "sst-" + (sstIndex++)).getPath();
+                    writer.open(path);
+                    files.add(path);
+                }
+
+                writer.put(key, value);
+                recordNum++;
+                if (recordNum % 1000 == 0 && writer.fileSize() >= targetFileSize) {
+                    writer.finish();
+                    writer = null;
+                    recordNum = 0;
+                }
             }
 
-            writer.put(key, value);
-            recordNum++;
-            if (recordNum % 1000 == 0 && writer.fileSize() >= targetFileSize) {
+            if (writer != null) {
                 writer.finish();
-                writer = null;
-                recordNum = 0;
             }
-        }
 
-        if (writer != null) {
-            writer.finish();
-        }
-
-        if (files.size() > 0) {
-            db.ingestExternalFile(columnFamily, files, new IngestExternalFileOptions());
+            if (files.size() > 0) {
+                db.ingestExternalFile(state.columnFamily, files, new IngestExternalFileOptions());
+            }
+        } catch (Exception e) {
+            throw new IOException(e);
         }
     }
 

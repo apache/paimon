@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.lookup;
+package org.apache.paimon.lookup;
 
 import org.apache.paimon.data.serializer.Serializer;
 

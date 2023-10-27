@@ -16,14 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.utils;
+package org.apache.paimon.utils;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.SerBiFunction;
 
 import java.util.List;
 import java.util.Map;
@@ -33,15 +32,14 @@ import java.util.stream.IntStream;
 import static org.apache.paimon.data.InternalRow.createFieldGetter;
 
 /** Project {@link BinaryRow} fields into {@link InternalRow}. */
-public class ProjectToRowDataFunction
-        implements SerBiFunction<InternalRow, BinaryRow, InternalRow> {
+public class ProjectToRowFunction implements SerBiFunction<InternalRow, BinaryRow, InternalRow> {
 
     private final InternalRow.FieldGetter[] fieldGetters;
 
     private final Map<Integer, Integer> projectMapping;
     private final InternalRow.FieldGetter[] projectGetters;
 
-    public ProjectToRowDataFunction(RowType rowType, List<String> projectFields) {
+    public ProjectToRowFunction(RowType rowType, List<String> projectFields) {
         DataType[] types = rowType.getFieldTypes().toArray(new DataType[0]);
         this.fieldGetters =
                 IntStream.range(0, types.length)

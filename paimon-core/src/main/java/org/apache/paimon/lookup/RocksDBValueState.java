@@ -16,13 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.lookup;
+package org.apache.paimon.lookup;
 
 import org.apache.paimon.data.serializer.Serializer;
 
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.RocksDB;
-import org.rocksdb.RocksDBException;
 
 import javax.annotation.Nullable;
 
@@ -52,7 +51,7 @@ public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Ref
         }
     }
 
-    private Reference get(ByteArray keyBytes) throws RocksDBException {
+    private Reference get(ByteArray keyBytes) throws Exception {
         Reference valueRef = cache.getIfPresent(keyBytes);
         if (valueRef == null) {
             valueRef = ref(db.get(columnFamily, keyBytes.bytes));
@@ -70,7 +69,7 @@ public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Ref
             byte[] valueBytes = serializeValue(value);
             db.put(columnFamily, writeOptions, keyBytes, valueBytes);
             cache.put(wrap(keyBytes), ref(valueBytes));
-        } catch (RocksDBException e) {
+        } catch (Exception e) {
             throw new IOException(e);
         }
     }
@@ -83,7 +82,7 @@ public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Ref
                 db.delete(columnFamily, writeOptions, keyBytes);
                 cache.put(keyByteArray, ref(null));
             }
-        } catch (RocksDBException e) {
+        } catch (Exception e) {
             throw new IOException(e);
         }
     }
