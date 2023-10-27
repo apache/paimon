@@ -265,10 +265,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         manifests,
                         scanManifestParallelism);
 
-        long skippedByPartitionAndStats = startDataFiles - cntEntries.get();
-
         List<ManifestEntry> files = new ArrayList<>();
         Collection<ManifestEntry> mergedEntries = ManifestEntry.mergeEntries(entries);
+        long skippedByPartitionAndStats = startDataFiles - cntEntries.get();
         for (ManifestEntry file : mergedEntries) {
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
