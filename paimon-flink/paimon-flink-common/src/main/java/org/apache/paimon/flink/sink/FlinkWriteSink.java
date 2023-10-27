@@ -51,7 +51,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
                         table.newCommit(user)
                                 .withOverwrite(overwritePartition)
                                 .ignoreEmptyCommit(!streamingCheckpointEnabled),
-                        new CommitterMetrics(metricGroup));
+                        metricGroup);
     }
 
     @Override

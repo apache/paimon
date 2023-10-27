@@ -18,8 +18,10 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
+import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
@@ -37,6 +39,8 @@ import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
+import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -214,7 +218,6 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
 
     @Test
     public void testRestoreCommitUser() throws Exception {
-
         FileStoreTable table = createFileStoreTable();
         String commitUser = UUID.randomUUID().toString();
 
@@ -323,9 +326,15 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.processWatermark(new Watermark(Long.MAX_VALUE));
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
+
         testHarness.close();
+        write.close();
         assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
     }
+
+    // ------------------------------------------------------------------------
+    //  Metrics tests
+    // ------------------------------------------------------------------------
 
     @Test
     public void testCalcDataBytesSend() throws Exception {
@@ -343,13 +352,86 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         }
 
         StreamTableCommit commit = table.newCommit(initialCommitUser);
-        CommitterMetrics metrics =
-                new CommitterMetrics(UnregisteredMetricsGroup.createOperatorIOMetricGroup());
-        StoreCommitter committer = new StoreCommitter(commit, metrics);
+        OperatorMetricGroup metricGroup = UnregisteredMetricsGroup.createOperatorMetricGroup();
+        StoreCommitter committer = new StoreCommitter(commit, metricGroup);
         committer.commit(Collections.singletonList(manifestCommittable));
+        CommitterMetrics metrics = committer.getCommitterMetrics();
         assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(275);
         assertThat(metrics.getNumRecordsOutCounter().getCount()).isEqualTo(2);
         committer.close();
+    }
+
+    @Test
+    public void testCommitMetrics() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        OneInputStreamOperator<Committable, Committable> operator =
+                createCommitterOperator(
+                        table,
+                        null,
+                        new RestoreAndFailCommittableStateManager<>(
+                                () ->
+                                        new VersionedSerializerWrapper<>(
+                                                new ManifestCommittableSerializer())));
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createTestHarness(operator);
+        testHarness.open();
+        long timestamp = 0;
+        StreamTableWrite write =
+                table.newStreamWriteBuilder().withCommitUser(initialCommitUser).newWrite();
+
+        long cpId = 1;
+        write.write(GenericRow.of(1, 100L));
+        testHarness.processElement(
+                new Committable(
+                        cpId, Committable.Kind.FILE, write.prepareCommit(false, cpId).get(0)),
+                timestamp++);
+        testHarness.snapshot(cpId, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(cpId);
+
+        MetricGroup commitMetricGroup =
+                operator.getMetricGroup()
+                        .addGroup("paimon")
+                        .addGroup("table", table.name())
+                        .addGroup("commit");
+        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
+                .isEqualTo(1L);
+        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted").getValue())
+                .isEqualTo(0L);
+        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended").getValue())
+                .isEqualTo(1L);
+        assertThat(
+                        MetricUtils.getGauge(commitMetricGroup, "lastTableFilesCommitCompacted")
+                                .getValue())
+                .isEqualTo(0L);
+
+        cpId = 2;
+        write.write(GenericRow.of(1, 101L));
+        // just flush the writer
+        write.compact(BinaryRow.EMPTY_ROW, 0, false);
+        write.write(GenericRow.of(2, 200L));
+        // real compaction
+        write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        testHarness.processElement(
+                new Committable(
+                        cpId, Committable.Kind.FILE, write.prepareCommit(true, cpId).get(0)),
+                timestamp++);
+        testHarness.snapshot(cpId, timestamp++);
+        testHarness.notifyOfCompletedCheckpoint(cpId);
+
+        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
+                .isEqualTo(3L);
+        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted").getValue())
+                .isEqualTo(3L);
+        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended").getValue())
+                .isEqualTo(2L);
+        assertThat(
+                        MetricUtils.getGauge(commitMetricGroup, "lastTableFilesCommitCompacted")
+                                .getValue())
+                .isEqualTo(4L);
+
+        testHarness.close();
+        write.close();
     }
 
     // ------------------------------------------------------------------------
@@ -401,7 +483,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 (user, metricGroup) ->
                         new StoreCommitter(
                                 table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                new CommitterMetrics(metricGroup)),
+                                metricGroup),
                 committableStateManager);
     }
 
@@ -416,7 +498,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                 (user, metricGroup) ->
                         new StoreCommitter(
                                 table.newStreamWriteBuilder().withCommitUser(user).newCommit(),
-                                new CommitterMetrics(metricGroup)),
+                                metricGroup),
                 committableStateManager) {
             @Override
             public void initializeState(StateInitializationContext context) throws Exception {

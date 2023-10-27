@@ -27,6 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 
 import javax.annotation.Nullable;
 
@@ -49,7 +50,7 @@ public class StoreMultiCommitter
 
     private final Catalog catalog;
     private final String commitUser;
-    @Nullable private final CommitterMetrics metrics;
+    @Nullable private final OperatorMetricGroup flinkMetricGroup;
 
     // To make the commit behavior consistent with that of Committer,
     //    StoreMultiCommitter manages multiple committers which are
@@ -60,18 +61,20 @@ public class StoreMultiCommitter
     private final boolean isCompactJob;
 
     public StoreMultiCommitter(
-            Catalog.Loader catalogLoader, String commitUser, @Nullable CommitterMetrics metrics) {
-        this(catalogLoader, commitUser, metrics, false);
+            Catalog.Loader catalogLoader,
+            String commitUser,
+            @Nullable OperatorMetricGroup flinkMetricGroup) {
+        this(catalogLoader, commitUser, flinkMetricGroup, false);
     }
 
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader,
             String commitUser,
-            @Nullable CommitterMetrics metrics,
+            @Nullable OperatorMetricGroup flinkMetricGroup,
             boolean isCompactJob) {
         this.catalog = catalogLoader.load();
         this.commitUser = commitUser;
-        this.metrics = metrics;
+        this.flinkMetricGroup = flinkMetricGroup;
         this.tableCommitters = new HashMap<>();
         this.isCompactJob = isCompactJob;
     }
@@ -175,7 +178,8 @@ public class StoreMultiCommitter
             }
             committer =
                     new StoreCommitter(
-                            table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob), metrics);
+                            table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob),
+                            flinkMetricGroup);
             tableCommitters.put(tableId, committer);
         }
 

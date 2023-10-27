@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.sink.CommittableStateManager;
 import org.apache.paimon.flink.sink.Committer;
-import org.apache.paimon.flink.sink.CommitterMetrics;
 import org.apache.paimon.flink.sink.CommitterOperator;
 import org.apache.paimon.flink.sink.FlinkSink;
 import org.apache.paimon.flink.sink.FlinkStreamPartitioner;
@@ -158,8 +157,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
         // a restart.
-        return (user, metricGroup) ->
-                new StoreMultiCommitter(catalogLoader, user, new CommitterMetrics(metricGroup));
+        return (user, metricGroup) -> new StoreMultiCommitter(catalogLoader, user, metricGroup);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
