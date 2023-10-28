@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.lineage.LineageMeta;
+import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
 
@@ -36,15 +36,15 @@ public class CatalogEnvironment implements Serializable {
 
     private final Lock.Factory lockFactory;
     @Nullable private final MetastoreClient.Factory metastoreClientFactory;
-    @Nullable private final LineageMeta lineageMeta;
+    @Nullable private final LineageMetaFactory lineageMetaFactory;
 
     public CatalogEnvironment(
             Lock.Factory lockFactory,
             @Nullable MetastoreClient.Factory metastoreClientFactory,
-            @Nullable LineageMeta lineageMeta) {
+            @Nullable LineageMetaFactory lineageMetaFactory) {
         this.lockFactory = lockFactory;
         this.metastoreClientFactory = metastoreClientFactory;
-        this.lineageMeta = lineageMeta;
+        this.lineageMetaFactory = lineageMetaFactory;
     }
 
     public Lock.Factory lockFactory() {
@@ -57,7 +57,7 @@ public class CatalogEnvironment implements Serializable {
     }
 
     @Nullable
-    public LineageMeta lineageMeta() {
-        return lineageMeta;
+    public LineageMetaFactory lineageMetaFactory() {
+        return lineageMetaFactory;
     }
 }

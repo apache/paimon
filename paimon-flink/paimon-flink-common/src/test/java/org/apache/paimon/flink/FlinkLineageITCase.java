@@ -68,12 +68,12 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
         tEnv.getConfig().getConfiguration().set(PipelineOptions.NAME, "insert_t_job");
         assertThatThrownBy(
                         () -> tEnv.executeSql("INSERT INTO T VALUES (1, 2, 3),(4, 5, 6);").await())
-                .hasCauseExactlyInstanceOf(UnsupportedOperationException.class)
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
                 .hasRootCauseMessage("Method saveSinkTableLineage is not supported");
 
         tEnv.getConfig().getConfiguration().set(PipelineOptions.NAME, "select_t_job");
         assertThatThrownBy(() -> tEnv.executeSql("SELECT * FROM T").collect().close())
-                .hasCauseExactlyInstanceOf(UnsupportedOperationException.class)
+                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
                 .hasRootCauseMessage("Method saveSourceTableLineage is not supported");
     }
 
@@ -151,5 +151,8 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
         public Iterator<DataLineageEntity> sinkDataLineages(@Nullable Predicate predicate) {
             throw new UnsupportedOperationException();
         }
+
+        @Override
+        public void close() throws Exception {}
     }
 }
