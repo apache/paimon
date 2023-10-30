@@ -25,6 +25,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -681,5 +682,26 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         for (Row row : rows2) {
             assertThat((String) row.getField(0)).containsAnyOf("[1]", "[2]", "[3]", "[4]");
         }
+    }
+
+    @Test
+    public void testInvalidStreamingReadOverwrite() {
+        String ddl =
+                "CREATE TABLE T (a INT PRIMARY KEY NOT ENFORCED, b STRING)"
+                        + "WITH ('changelog-producer' = '%s', 'streaming-read-overwrite' = 'true')";
+
+        assertThatThrownBy(() -> sql(ddl, "full-compaction"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot set streaming-read-overwrite to true when changelog producer "
+                                        + "is full-compaction or lookup because it will read duplicated changes."));
+
+        assertThatThrownBy(() -> sql(ddl, "lookup"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "Cannot set streaming-read-overwrite to true when changelog producer "
+                                        + "is full-compaction or lookup because it will read duplicated changes."));
     }
 }
