@@ -37,13 +37,16 @@ import org.apache.paimon.types.VarCharType;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
@@ -54,6 +57,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
+import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -80,6 +84,8 @@ public class SchemaValidation {
         validateDefaultValues(schema);
 
         validateStartupMode(options);
+
+        validateSequenceGroup(schema, options);
 
         ChangelogProducer changelogProducer = options.changelogProducer();
         if (schema.primaryKeys().isEmpty() && changelogProducer != ChangelogProducer.NONE) {
@@ -306,6 +312,41 @@ public class SchemaValidation {
 
     private static String concatConfigKeys(List<ConfigOption<?>> configOptions) {
         return configOptions.stream().map(ConfigOption::key).collect(Collectors.joining(","));
+    }
+
+    private static void validateSequenceGroup(TableSchema schema, CoreOptions options) {
+        Map<String, Set<String>> fields2Group = new HashMap<>();
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            String k = entry.getKey();
+            String v = entry.getValue();
+            List<String> fieldNames = schema.fieldNames();
+            if (k.startsWith(FIELDS_PREFIX) && k.endsWith(SEQUENCE_GROUP)) {
+                String sequenceFieldName =
+                        k.substring(
+                                FIELDS_PREFIX.length() + 1,
+                                k.length() - SEQUENCE_GROUP.length() - 1);
+                if (!fieldNames.contains(sequenceFieldName)) {
+                    throw new IllegalArgumentException(
+                            String.format(
+                                    "The sequence field group: %s can not be found in table schema.",
+                                    sequenceFieldName));
+                }
+
+                for (String field : v.split(",")) {
+                    if (!fieldNames.contains(field)) {
+                        throw new IllegalArgumentException(
+                                String.format("Field %s can not be found in table schema.", field));
+                    }
+                    Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
+                    if (group.add(k) && group.size() > 1) {
+                        throw new IllegalArgumentException(
+                                String.format(
+                                        "Field %s is defined repeatedly by multiple groups: %s.",
+                                        field, group));
+                    }
+                }
+            }
+        }
     }
 
     private static void validateDefaultValues(TableSchema schema) {
