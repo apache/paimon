@@ -119,6 +119,10 @@ public class TableCommitImpl implements InnerTableCommit {
         this.tableName = tableName;
     }
 
+    public boolean forceCreatingSnapshot() {
+        return tagAutoCreation != null && tagAutoCreation.forceCreatingSnapshot();
+    }
+
     @Override
     public TableCommitImpl withOverwrite(@Nullable Map<String, String> overwritePartitions) {
         this.overwritePartition = overwritePartitions;

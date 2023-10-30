@@ -28,6 +28,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
@@ -154,8 +155,16 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
     private void commitUpToCheckpoint(long checkpointId) throws Exception {
         NavigableMap<Long, GlobalCommitT> headMap =
                 committablesPerCheckpoint.headMap(checkpointId, true);
-        committer.commit(committables(headMap));
+        List<GlobalCommitT> committables = committables(headMap);
+        committer.commit(committables);
         headMap.clear();
+
+        if (committables.isEmpty()) {
+            if (committer.forceCreatingSnapshot()) {
+                GlobalCommitT commit = toCommittables(checkpointId, Collections.emptyList());
+                committer.commit(Collections.singletonList(commit));
+            }
+        }
     }
 
     @Override

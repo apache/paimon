@@ -33,6 +33,8 @@ public interface TagTimeExtractor {
 
     Optional<LocalDateTime> extract(long timeMilli, @Nullable Long watermark);
 
+    boolean forceCreatingSnapshot();
+
     /** Extract time from snapshot time millis. */
     class ProcessTimeExtractor implements TagTimeExtractor {
 
@@ -42,6 +44,11 @@ public interface TagTimeExtractor {
                     Instant.ofEpochMilli(timeMilli)
                             .atZone(ZoneId.systemDefault())
                             .toLocalDateTime());
+        }
+
+        @Override
+        public boolean forceCreatingSnapshot() {
+            return true;
         }
     }
 
@@ -62,6 +69,11 @@ public interface TagTimeExtractor {
 
             return Optional.of(
                     Instant.ofEpochMilli(watermark).atZone(watermarkZoneId).toLocalDateTime());
+        }
+
+        @Override
+        public boolean forceCreatingSnapshot() {
+            return false;
         }
     }
 

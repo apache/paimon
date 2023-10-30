@@ -80,6 +80,10 @@ public class TagAutoCreation {
         }
     }
 
+    public boolean forceCreatingSnapshot() {
+        return timeExtractor.forceCreatingSnapshot();
+    }
+
     public void run() {
         while (true) {
             if (snapshotManager.snapshotExists(nextSnapshot)) {
