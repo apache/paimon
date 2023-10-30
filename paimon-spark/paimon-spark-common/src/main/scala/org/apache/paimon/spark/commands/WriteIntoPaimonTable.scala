@@ -23,7 +23,9 @@ import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkConnectorOptions, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.spark.util.EncoderUtils
+import org.apache.paimon.spark.schema.SparkSystemColumns
+import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
+import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
@@ -32,7 +34,6 @@ import org.apache.spark.TaskContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.{DataFrame, Dataset, Row, SparkSession}
 import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder
-import org.apache.spark.sql.catalyst.encoders.RowEncoder.encoderFor
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.functions._
@@ -59,13 +60,14 @@ case class WriteIntoPaimonTable(
 
   private lazy val mergeSchema = options.get(SparkConnectorOptions.MERGE_SCHEMA)
 
-  /** \1. 2. */
   override def run(sparkSession: SparkSession): Seq[Row] = {
     import sparkSession.implicits._
 
+    val dataSchema = SparkSystemColumns.filterSparkSystemColumns(data.schema)
+
     if (mergeSchema) {
       val allowExplicitCast = options.get(SparkConnectorOptions.EXPLICIT_CAST)
-      mergeAndCommitSchema(data.schema, allowExplicitCast)
+      mergeAndCommitSchema(dataSchema, allowExplicitCast)
     }
 
     val (dynamicPartitionOverwriteMode, overwritePartition) = parseSaveMode()
@@ -76,8 +78,10 @@ case class WriteIntoPaimonTable(
     val primaryKeyCols = tableSchema.trimmedPrimaryKeys().asScala.map(col)
     val partitionCols = tableSchema.partitionKeys().asScala.map(col)
 
-    val dataEncoder = EncoderUtils.encode(data.schema).resolveAndBind()
+    val dataEncoder = EncoderUtils.encode(dataSchema).resolveAndBind()
     val originFromRow = dataEncoder.createDeserializer()
+
+    val rowkindColIdx = SparkRowUtils.getFieldIndex(data.schema, ROW_KIND_COL)
 
     // append _bucket_ column as placeholder
     val withBucketCol = data.withColumn(BUCKET_COL, lit(-1))
@@ -132,7 +136,11 @@ case class WriteIntoPaimonTable(
               row =>
                 val bucket = row.getInt(bucketColIdx)
                 val bucketColDropped = originFromRow(toRow(row))
-                write.write(new DynamicBucketRow(new SparkRow(rowType, bucketColDropped), bucket))
+                val sparkRow = new SparkRow(
+                  rowType,
+                  bucketColDropped,
+                  SparkRowUtils.getRowKind(row, rowkindColIdx))
+                write.write(new DynamicBucketRow(sparkRow, bucket))
             }
             val serializer = new CommitMessageSerializer
             write.prepareCommit().asScala.map(serializer.serialize).toIterator
