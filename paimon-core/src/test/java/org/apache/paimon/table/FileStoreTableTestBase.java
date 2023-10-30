@@ -1338,15 +1338,15 @@ public abstract class FileStoreTableTestBase {
         ReadBuilder readBuilder = fileMonitorTable.newReadBuilder();
         TableScan tableScan = readBuilder.newScan();
         TableRead read = readBuilder.newRead();
-        List<FileMonitorTable.FileChange> results = new ArrayList<>();
+        List<FileMonitorTable.ParitionChange> results = new ArrayList<>();
 
         read.createReader(tableScan.plan())
                 .forEachRemaining(
                         row -> {
                             try {
-                                FileMonitorTable.FileChange fileChange =
-                                        FileMonitorTable.toFileChange(row);
-                                results.add(fileChange);
+                                FileMonitorTable.ParitionChange paritionChange =
+                                        FileMonitorTable.toPartitionChange(row);
+                                results.add(paritionChange);
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }

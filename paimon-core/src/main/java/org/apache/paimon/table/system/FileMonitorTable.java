@@ -79,10 +79,16 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
                         newBytesType(false),
                         new IntType(false),
                         newBytesType(false),
-                        newBytesType(false)
+                        newBytesType(false),
+                        new BigIntType(false)
                     },
                     new String[] {
-                        "_SNAPSHOT_ID", "_PARTITION", "_BUCKET", "_BEFORE_FILES", "_DATA_FILES"
+                        "_SNAPSHOT_ID",
+                        "_PARTITION",
+                        "_BUCKET",
+                        "_BEFORE_FILES",
+                        "_DATA_FILES",
+                        "_LATEST_FILE_CREATION_EPOCH_MILLIS"
                     });
 
     public FileMonitorTable(FileStoreTable wrapped) {
@@ -198,8 +204,8 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
                             dataSplit.partition(),
                             dataSplit.bucket(),
                             dataSplit.beforeFiles(),
-                            dataSplit.dataFiles());
-
+                            dataSplit.dataFiles(),
+                            dataSplit.getLatestFileCreationEpochMillis().orElse(-1));
             return new IteratorRecordReader<>(Collections.singletonList(toRow(change)).iterator());
         }
     }
@@ -211,7 +217,8 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
                 serializeBinaryRow(change.partition()),
                 change.bucket(),
                 fileSerializer.serializeList(change.beforeFiles()),
-                fileSerializer.serializeList(change.dataFiles()));
+                fileSerializer.serializeList(change.dataFiles()),
+                change.latestFileCreationEpochMillis());
     }
 
     public static FileChange toFileChange(InternalRow row) throws IOException {
@@ -221,11 +228,18 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
                 deserializeBinaryRow(row.getBinary(1)),
                 row.getInt(2),
                 fileSerializer.deserializeList(row.getBinary(3)),
-                fileSerializer.deserializeList(row.getBinary(4)));
+                fileSerializer.deserializeList(row.getBinary(4)),
+                row.getLong(5));
+    }
+
+    public static ParitionChange toPartitionChange(InternalRow row) throws IOException {
+        return new ParitionChange(deserializeBinaryRow(row.getBinary(1)), row.getLong(5));
     }
 
     public static Map<GenericRow, Long> paritionWithLatestModifyTime(
-            TableSchema schema, List<FileMonitorTable.FileChange> results, List<String> paritions) {
+            TableSchema schema,
+            List<FileMonitorTable.ParitionChange> results,
+            List<String> paritions) {
         RowDataToObjectArrayConverter rowDataToObjectArrayConverter =
                 new RowDataToObjectArrayConverter(schema.logicalPartitionType());
         List<String> partitionKeys = schema.partitionKeys();
@@ -237,30 +251,40 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
                         .collect(Collectors.toList());
 
         Map<GenericRow, Long> paritionWithLatestModifyTime = new HashMap<>();
-        for (FileMonitorTable.FileChange result : results) {
-            result.dataFiles().stream()
-                    .map(DataFileMeta::creationTimeEpochMillis)
-                    .max(Long::compare)
-                    .ifPresent(
-                            maxModifyTime -> {
-                                Object[] convert =
-                                        rowDataToObjectArrayConverter.convert(result.partition());
-                                GenericRow genericRow =
-                                        new GenericRow(paritionIndexToMonitor.size());
+        for (FileMonitorTable.ParitionChange paritionChange : results) {
+            long latestModifyTime = paritionChange.latestModifyTime();
 
-                                for (int i = 0; i < paritionIndexToMonitor.size(); i++) {
-                                    genericRow.setField(i, convert[i]);
-                                }
+            Object[] convert = rowDataToObjectArrayConverter.convert(paritionChange.partition());
 
-                                paritionWithLatestModifyTime.compute(
-                                        genericRow,
-                                        (k, old) ->
-                                                old == null || maxModifyTime > old
-                                                        ? maxModifyTime
-                                                        : old);
-                            });
+            GenericRow genericRow = new GenericRow(paritionIndexToMonitor.size());
+            for (int i = 0; i < paritionIndexToMonitor.size(); i++) {
+                genericRow.setField(i, convert[paritionIndexToMonitor.get(i)]);
+            }
+
+            paritionWithLatestModifyTime.compute(
+                    genericRow,
+                    (k, old) -> old == null || latestModifyTime > old ? latestModifyTime : old);
         }
         return paritionWithLatestModifyTime;
+    }
+
+    /** Record Parition Change. */
+    public static class ParitionChange {
+        private final BinaryRow partition;
+        private final long latestModifyTime;
+
+        public ParitionChange(BinaryRow partition, long latestModifyTime) {
+            this.partition = partition;
+            this.latestModifyTime = latestModifyTime;
+        }
+
+        public BinaryRow partition() {
+            return partition;
+        }
+
+        public long latestModifyTime() {
+            return latestModifyTime;
+        }
     }
 
     /** Pojo to record of file change. */
@@ -272,17 +296,25 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
         private final List<DataFileMeta> beforeFiles;
         private final List<DataFileMeta> dataFiles;
 
+        private final long latestFileCreationEpochMillis;
+
         public FileChange(
                 long snapshotId,
                 BinaryRow partition,
                 int bucket,
                 List<DataFileMeta> beforeFiles,
-                List<DataFileMeta> dataFiles) {
+                List<DataFileMeta> dataFiles,
+                long latestModifyTime) {
             this.snapshotId = snapshotId;
             this.partition = partition;
             this.bucket = bucket;
             this.beforeFiles = beforeFiles;
             this.dataFiles = dataFiles;
+            this.latestFileCreationEpochMillis = latestModifyTime;
+        }
+
+        public long latestFileCreationEpochMillis() {
+            return latestFileCreationEpochMillis;
         }
 
         public long snapshotId() {
