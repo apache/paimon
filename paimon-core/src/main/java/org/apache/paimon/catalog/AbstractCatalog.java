@@ -246,7 +246,7 @@ public abstract class AbstractCatalog implements Catalog {
             String tableName = identifier.getObjectName();
             Table table =
                     SystemTableLoader.loadGlobal(
-                            tableName, fileIO, allTablePaths(), catalogOptions);
+                            tableName, fileIO, this::allTablePaths, catalogOptions);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
