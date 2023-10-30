@@ -177,8 +177,8 @@ class OrcReaderFactoryTest {
             List<OrcFilters.Predicate> conjunctPredicates) {
         return new OrcReaderFactory(
                 new Configuration(),
-                formatType,
-                Projection.of(selectedFields).project(conjunctPredicates),
+                Projection.of(selectedFields).project(formatType),
+                conjunctPredicates,
                 BATCH_SIZE);
     }
 
