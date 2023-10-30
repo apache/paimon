@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -47,7 +48,11 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
+import java.util.TreeMap;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -71,6 +76,12 @@ public class ContinuousFileSplitEnumerator
 
     protected final SplitAssigner splitAssigner;
 
+    private final TreeMap<Long, Long> minNextSnapshotPerCheckpoint;
+
+    private final Map<Integer, Long> assignedSnapshotPerReader;
+
+    private final Map<Integer, Long> consumingSnapshotPerReader;
+
     @Nullable protected Long nextSnapshotId;
 
     protected boolean finished = false;
@@ -93,6 +104,10 @@ public class ContinuousFileSplitEnumerator
         this.scan = scan;
         this.splitAssigner = createSplitAssigner(bucketMode);
         addSplits(remainSplits);
+
+        this.minNextSnapshotPerCheckpoint = new TreeMap<>();
+        this.assignedSnapshotPerReader = new HashMap<>(context.currentParallelism());
+        this.consumingSnapshotPerReader = new HashMap<>(context.currentParallelism());
     }
 
     @VisibleForTesting
@@ -140,7 +155,13 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void handleSourceEvent(int subtaskId, SourceEvent sourceEvent) {
-        LOG.error("Received unrecognized event: {}", sourceEvent);
+        if (sourceEvent instanceof ReaderConsumeProgressEvent) {
+            long currentSnapshotId =
+                    ((ReaderConsumeProgressEvent) sourceEvent).lastConsumeSnapshotId();
+            consumingSnapshotPerReader.put(subtaskId, currentSnapshotId);
+        } else {
+            LOG.error("Received unrecognized event: {}", sourceEvent);
+        }
     }
 
     @Override
@@ -156,7 +177,21 @@ public class ContinuousFileSplitEnumerator
                 new PendingSplitsCheckpoint(splits, nextSnapshotId);
 
         LOG.debug("Source Checkpoint is {}", checkpoint);
+
+        computeMinNextSnapshotId()
+                .ifPresent(
+                        minNextSnapshotId ->
+                                minNextSnapshotPerCheckpoint.put(checkpointId, minNextSnapshotId));
         return checkpoint;
+    }
+
+    @Override
+    public void notifyCheckpointComplete(long checkpointId) throws Exception {
+        NavigableMap<Long, Long> nextSnapshots =
+                minNextSnapshotPerCheckpoint.headMap(checkpointId, true);
+        OptionalLong max = nextSnapshots.values().stream().mapToLong(Long::longValue).max();
+        max.ifPresent(scan::notifyCheckpointComplete);
+        nextSnapshots.clear();
     }
 
     // ------------------------------------------------------------------------
@@ -218,6 +253,8 @@ public class ContinuousFileSplitEnumerator
             List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
             if (splits.size() > 0) {
                 assignment.put(task, splits);
+                TableScanUtils.getSnapshotId(splits.get(0))
+                        .ifPresent(snapshotId -> assignedSnapshotPerReader.put(task, snapshotId));
             }
         }
 
@@ -248,6 +285,38 @@ public class ContinuousFileSplitEnumerator
 
     protected boolean noMoreSplits() {
         return finished;
+    }
+
+    /** Calculate the minimum snapshot currently being consumed by all readers. */
+    private Optional<Long> computeMinNextSnapshotId() {
+        long globalMinSnapshotId = Long.MAX_VALUE;
+        for (int subtask = 0; subtask < context.currentParallelism(); subtask++) {
+            // 1. if the reader is in the waiting list, it means that all allocated splits have been
+            // consumed, and the next snapshotId is calculated from splitAssigner.
+            //
+            // 2. if the reader is not in the waiting list, the larger value between the consumption
+            // progress reported by the reader and the most recently assigned snapshot id is used.
+            Long snapshotIdForTask;
+            if (readersAwaitingSplit.contains(subtask)) {
+                snapshotIdForTask = splitAssigner.getNextSnapshotId(subtask).orElse(nextSnapshotId);
+            } else {
+                Long consumingSnapshotId = consumingSnapshotPerReader.get(subtask);
+                Long assignedSnapshotId = assignedSnapshotPerReader.get(subtask);
+                if (consumingSnapshotId != null && assignedSnapshotId != null) {
+                    snapshotIdForTask = Math.max(consumingSnapshotId, assignedSnapshotId);
+                } else {
+                    snapshotIdForTask =
+                            consumingSnapshotId != null ? consumingSnapshotId : assignedSnapshotId;
+                }
+            }
+
+            if (snapshotIdForTask != null) {
+                globalMinSnapshotId = Math.min(globalMinSnapshotId, snapshotIdForTask);
+            } else {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(globalMinSnapshotId);
     }
 
     /** The result of scan. */

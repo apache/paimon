@@ -32,7 +32,10 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Queue;
+
+import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
 
 /**
  * Pre-calculate which splits each task should process according to the weight, and then distribute
@@ -103,5 +106,13 @@ public class PreAssignSplitAssigner implements SplitAssigner {
             assignment.put(i, new LinkedList<>(assignmentList.get(i)));
         }
         return assignment;
+    }
+
+    @Override
+    public Optional<Long> getNextSnapshotId(int subtask) {
+        LinkedList<FileStoreSourceSplit> pendingSplits = pendingSplitAssignment.get(subtask);
+        return (pendingSplits == null || pendingSplits.isEmpty())
+                ? Optional.empty()
+                : getSnapshotId(pendingSplits.peekFirst());
     }
 }

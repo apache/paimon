@@ -332,6 +332,17 @@ NOTE: The consumer will prevent expiration of the snapshot. You can specify 'con
 lifetime of consumers.
 {{< /hint >}}
 
+You can set `consumer.use-legacy-mode` to `false` to use the consumer function implemented based on 
+[flip-27](https://cwiki.apache.org/confluence/display/FLINK/FLIP-27%3A+Refactor+Source+Interface), which can provide 
+more capabilities, such as watermark alignment.
+
+{{< hint warning >}}
+1. When there is no watermark definition, the consumer in non-legacy mode cannot provide the ability to pass the 
+watermark in the snapshot to the downstream. 
+2. Since the implementation of legacy mode and non-legacy mode are completely different, the state of flink is 
+incompatible and cannot be restored from the state when switching modes.
+{{< /hint >}}
+
 You can reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.
 
 {{< hint info >}}

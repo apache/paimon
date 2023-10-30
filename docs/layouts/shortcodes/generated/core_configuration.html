@@ -111,6 +111,12 @@ under the License.
             <td>The expiration interval of consumer files. A consumer file will be expired if it's lifetime after last modification is over this value.</td>
         </tr>
         <tr>
+            <td><h5>consumer.use-legacy-mode</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to use legacy mode when setting consumer-id. Legacy mode is implemented through the flink legacy source interface and will not have flip-27 related features. To maintain compatibility with the previous state, the default value is set to true.</td>
+        </tr>
+        <tr>
             <td><h5>continuous.discovery-interval</h5></td>
             <td style="word-wrap: break-word;">10 s</td>
             <td>Duration</td>

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
+import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.table.source.TableRead;
 
 import org.apache.flink.api.connector.source.SourceReader;
@@ -33,6 +34,7 @@ import org.apache.flink.table.data.RowData;
 import javax.annotation.Nullable;
 
 import java.util.Map;
+import java.util.Optional;
 
 /** A {@link SourceReader} that read records from {@link FileStoreSourceSplit}. */
 public class FileStoreSourceReader
@@ -40,6 +42,7 @@ public class FileStoreSourceReader
                 RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
     @Nullable private final IOManager ioManager;
+    private long lastConsumeSnapshotId = Long.MIN_VALUE;
 
     public FileStoreSourceReader(
             SourceReaderContext readerContext,
@@ -92,6 +95,20 @@ public class FileStoreSourceReader
         // we should only require for more splits after we've consumed all given splits
         if (getNumberOfCurrentlyAssignedSplits() == 0) {
             context.sendSplitRequest();
+        }
+
+        long maxFinishedSplits =
+                finishedSplitIds.values().stream()
+                        .map(splitState -> TableScanUtils.getSnapshotId(splitState.toSourceSplit()))
+                        .filter(Optional::isPresent)
+                        .mapToLong(Optional::get)
+                        .max()
+                        .orElse(Long.MIN_VALUE);
+
+        if (lastConsumeSnapshotId < maxFinishedSplits) {
+            lastConsumeSnapshotId = maxFinishedSplits;
+            context.sendSourceEventToCoordinator(
+                    new ReaderConsumeProgressEvent(lastConsumeSnapshotId));
         }
     }
 

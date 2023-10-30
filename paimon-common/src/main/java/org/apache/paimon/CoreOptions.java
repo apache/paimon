@@ -709,6 +709,13 @@ public class CoreOptions implements Serializable {
                             "The expiration interval of consumer files. A consumer file will be expired if "
                                     + "it's lifetime after last modification is over this value.");
 
+    public static final ConfigOption<Boolean> CONSUMER_WITH_LEGACY_MODE =
+            key("consumer.use-legacy-mode")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to use legacy mode when setting consumer-id. Legacy mode is implemented through the flink legacy source interface and will not have flip-27 related features. To maintain compatibility with the previous state, the default value is set to true.");
+
     public static final ConfigOption<Long> DYNAMIC_BUCKET_TARGET_ROW_NUM =
             key("dynamic-bucket.target-row-num")
                     .longType()
@@ -1305,6 +1312,10 @@ public class CoreOptions implements Serializable {
 
     public Duration consumerExpireTime() {
         return options.get(CONSUMER_EXPIRATION_TIME);
+    }
+
+    public boolean consumerWithLegacyMode() {
+        return options.get(CONSUMER_WITH_LEGACY_MODE);
     }
 
     public boolean partitionedTableInMetastore() {

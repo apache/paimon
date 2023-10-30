@@ -235,7 +235,8 @@ public class FlinkSourceBuilder {
             } else {
                 if (conf.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_ENABLED)) {
                     return buildAlignedContinuousFileSource();
-                } else if (conf.contains(CoreOptions.CONSUMER_ID)) {
+                } else if (conf.contains(CoreOptions.CONSUMER_ID)
+                        && conf.get(CoreOptions.CONSUMER_WITH_LEGACY_MODE)) {
                     return buildContinuousStreamOperator();
                 } else {
                     return buildContinuousFileSource();
