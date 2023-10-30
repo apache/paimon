@@ -32,6 +32,9 @@ import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -46,7 +49,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -284,28 +286,26 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                                 monitoredTables,
                                 excludedTables));
 
-        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
-        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        TypeMapping typeMapping = this.typeMapping;
-        MySqlTableSchemaBuilder schemaBuilder =
-                new MySqlTableSchemaBuilder(tableConfig, caseSensitive, typeMapping);
+        RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
+                new RichCdcMultiplexRecordSchemaBuilder(tableConfig, caseSensitive);
 
-        EventParser.Factory<String> parserFactory =
+        TypeMapping typeMapping = this.typeMapping;
+        MySqlRecordParser recordParser =
+                new MySqlRecordParser(mySqlConfig, caseSensitive, typeMapping, metadataConverters);
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
                 () ->
-                        new MySqlDebeziumJsonEventParser(
-                                zoneId,
-                                caseSensitive,
-                                tableNameConverter,
+                        new RichCdcMultiplexRecordEventParser(
                                 schemaBuilder,
                                 includingPattern,
                                 excludingPattern,
-                                typeMapping,
-                                metadataConverters);
+                                tableNameConverter);
 
         String database = this.database;
         MultiTablesSinkMode mode = this.mode;
-        new FlinkCdcSyncDatabaseSinkBuilder<String>()
-                .withInput(env.fromSource(source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
+        new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
+                .withInput(
+                        env.fromSource(source, WatermarkStrategy.noWatermarks(), "MySQL Source")
+                                .flatMap(recordParser))
                 .withParserFactory(parserFactory)
                 .withDatabase(database)
                 .withCatalogLoader(catalogLoader())

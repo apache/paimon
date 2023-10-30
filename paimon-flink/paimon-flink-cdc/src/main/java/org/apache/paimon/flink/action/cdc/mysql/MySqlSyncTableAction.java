@@ -32,6 +32,8 @@ import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -40,7 +42,6 @@ import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
 
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -202,7 +203,7 @@ public class MySqlSyncTableAction extends ActionBase {
         try {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = fileStoreTable.copy(tableConfig);
-            if (computedColumns.size() > 0) {
+            if (!computedColumns.isEmpty()) {
                 List<String> computedFields =
                         computedColumns.stream()
                                 .map(ComputedColumn::columnName)
@@ -227,23 +228,26 @@ public class MySqlSyncTableAction extends ActionBase {
                         .collect(Collectors.joining("|"));
         MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig, tableList);
 
-        String serverTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
-        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
         TypeMapping typeMapping = this.typeMapping;
-        EventParser.Factory<String> parserFactory =
-                () ->
-                        new MySqlDebeziumJsonEventParser(
-                                zoneId,
-                                caseSensitive,
-                                computedColumns,
-                                typeMapping,
-                                metadataConverters);
+        MySqlRecordParser recordParser =
+                new MySqlRecordParser(
+                        mySqlConfig,
+                        caseSensitive,
+                        computedColumns,
+                        typeMapping,
+                        metadataConverters);
 
-        CdcSinkBuilder<String> sinkBuilder =
-                new CdcSinkBuilder<String>()
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
+                () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
+
+        CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
+                new CdcSinkBuilder<RichCdcMultiplexRecord>()
                         .withInput(
                                 env.fromSource(
-                                        source, WatermarkStrategy.noWatermarks(), "MySQL Source"))
+                                                source,
+                                                WatermarkStrategy.noWatermarks(),
+                                                "MySQL Source")
+                                        .flatMap(recordParser))
                         .withParserFactory(parserFactory)
                         .withTable(fileStoreTable)
                         .withIdentifier(identifier)
