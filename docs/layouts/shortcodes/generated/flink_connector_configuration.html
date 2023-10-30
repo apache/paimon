@@ -69,6 +69,12 @@ under the License.
             <td>If it is false, parallelism of source are set by global parallelism. Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).</td>
         </tr>
         <tr>
+            <td><h5>scan.infer-parallelism.max</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>If scan.infer-parallelism is true, limit the parallelism of source through this option.</td>
+        </tr>
+        <tr>
             <td><h5>scan.parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
