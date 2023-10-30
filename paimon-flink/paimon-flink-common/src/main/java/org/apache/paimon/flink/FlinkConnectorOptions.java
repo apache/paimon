@@ -120,6 +120,13 @@ public class FlinkConnectorOptions {
                             "If it is false, parallelism of source are set by global parallelism."
                                     + " Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).");
 
+    public static final ConfigOption<Integer> INFER_SCAN_MAX_PARALLELISM =
+            ConfigOptions.key("scan.infer-parallelism.max")
+                    .intType()
+                    .defaultValue(Integer.MAX_VALUE)
+                    .withDescription(
+                            "If scan.infer-parallelism is true, limit the parallelism of source through this option.");
+
     @Deprecated
     @ExcludeFromDocumentation("Deprecated")
     public static final ConfigOption<Duration> CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL =
