@@ -97,7 +97,7 @@ If you are using HDFS, choose one of the following ways to configure your HDFS:
 
 - set environment variable HADOOP_HOME.
 - set environment variable HADOOP_CONF_DIR.
-- configure fs.hdfs.hadoopconf in the properties.
+- configure `hadoop-conf-dir` in the properties.
 
 ## Kerberos
 
