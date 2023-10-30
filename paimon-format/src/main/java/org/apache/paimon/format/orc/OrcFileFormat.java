@@ -110,8 +110,7 @@ public class OrcFileFormat extends FileFormat {
 
         return new OrcReaderFactory(
                 readerConf,
-                (RowType) refineDataType(type),
-                Projection.of(projection).toTopLevelIndexes(),
+                Projection.of(projection).project((RowType) refineDataType(type)),
                 orcPredicates,
                 formatContext.readBatchSize());
     }
