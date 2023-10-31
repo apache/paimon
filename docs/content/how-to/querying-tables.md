@@ -134,6 +134,12 @@ Hive requires adding the following configuration parameters to the hive-site.xml
 ```
 
 ```sql
+-- read the snapshot with id 1L (use snapshot id as version)
+SET paimon.scan.snapshot-id=1
+SELECT * FROM t;
+SET paimon.scan.snapshot-id=null;
+
+-- read the snapshot from specified timestamp in unix seconds
 SET paimon.scan.timestamp-millis=1679486589444;
 SELECT * FROM t;
 SET paimon.scan.timestamp-millis=null;
