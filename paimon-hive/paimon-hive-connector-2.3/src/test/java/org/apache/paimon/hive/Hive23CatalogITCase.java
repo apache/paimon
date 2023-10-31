@@ -21,6 +21,7 @@ package org.apache.paimon.hive;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 
 import com.klarna.hiverunner.annotations.HiveRunnerSetup;
 import com.klarna.hiverunner.config.HiveRunnerConfig;
@@ -136,11 +137,10 @@ public class Hive23CatalogITCase extends HiveCatalogITCaseBase {
         tEnv.executeSql("CREATE TABLE alter_failed_table(a INT, b STRING)").await();
 
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE alter_failed_table SET ('aa'='bb')"))
-                .isInstanceOf(TableException.class)
-                .hasMessage(
-                        "Could not execute "
-                                + "ALTER TABLE my_alter_hive.default.alter_failed_table\n"
-                                + "  SET 'aa' = 'bb'");
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                TableException.class,
+                                "Could not execute AlterTable in path `my_alter_hive`.`default`.`alter_failed_table`"));
 
         assertThat(
                         new SchemaManager(
