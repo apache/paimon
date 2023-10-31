@@ -115,7 +115,9 @@ public class OrcWriterFactory implements FormatWriterFactory {
                             public void close() throws IOException {
                                 // do nothing
                             }
-                        }, opts, new WriterEncryptionVariant[0]));
+                        },
+                        opts,
+                        new WriterEncryptionVariant[0]));
 
         // The path of the Writer is not used to indicate the destination file
         // in this case since we have used a dedicated physical writer to write
