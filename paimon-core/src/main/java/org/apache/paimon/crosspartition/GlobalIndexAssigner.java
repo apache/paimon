@@ -225,7 +225,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         bootstrapKeys.clear();
         bootstrapKeys = null;
 
-        if (isEmpty && isEndInput) {
+        if (isEmpty && isEndInput && table.coreOptions().mergeEngine() == MergeEngine.DEDUPLICATE) {
             // optimization: bulk load mode
             bulkLoadBootstrapRecords();
         } else {
