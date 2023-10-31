@@ -225,7 +225,6 @@ public class FlinkCatalog extends AbstractCatalog {
         }
     }
 
-    @Override
     public CatalogBaseTable getTable(ObjectPath tablePath, long timestamp)
             throws TableNotExistException, CatalogException {
         CatalogTable catalogTable = this.getCatalogTable(tablePath, timestamp);
