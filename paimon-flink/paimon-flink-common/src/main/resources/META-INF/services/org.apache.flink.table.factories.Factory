@@ -16,3 +16,4 @@
 org.apache.paimon.flink.FlinkTableFactory
 org.apache.paimon.flink.FlinkCatalogFactory
 org.apache.paimon.flink.FlinkGenericCatalogFactory
+org.apache.paimon.flink.FlinkExternalCatalogFactory

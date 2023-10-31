@@ -18,16 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.JsonSerdeUtil;
-import org.apache.paimon.utils.StringUtils;
-
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -52,6 +42,13 @@ import org.apache.flink.table.catalog.exceptions.TablePartitionedException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.StringUtils;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -64,7 +61,9 @@ import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_DATABASE_NAME;
 
-/** Catalog for persisting external tables  */
+/**
+ * Catalog for persisting external tables
+ */
 public class FlinkExternalCatalog extends AbstractCatalog {
 
     private final FlinkCatalog paimon;
@@ -73,19 +72,31 @@ public class FlinkExternalCatalog extends AbstractCatalog {
     private static final String EXTERNAL_TABLE_STORE_PATH = ".FLINK_EXTERNAL_TABLE";
     private static final String EXTERNAL_FUNCTION_STORE_PATH = ".FLINK_EXTERNAL_FUNCTION";
     private final FileIO fileIO;
+    private final String systemDbDir;
+    
+    private final String externalFunctionDir;
+    
+    private final String externalTableDir;
 
     public FlinkExternalCatalog(FlinkCatalog paimon, FileIO fileIO, String warehousePath) {
         super(paimon.getName(), paimon.getDefaultDatabase());
         this.paimon = paimon;
         this.fileIO = fileIO;
         this.warehousePath = warehousePath;
+        this.systemDbDir = this.warehousePath
+                + Path.SEPARATOR
+                + SYSTEM_DATABASE_NAME
+                + DB_SUFFIX
+                + Path.SEPARATOR;
+        externalFunctionDir = systemDbDir + EXTERNAL_FUNCTION_STORE_PATH + Path.SEPARATOR;
+        externalTableDir = systemDbDir + EXTERNAL_FUNCTION_STORE_PATH + Path.SEPARATOR;
         try {
-            fileIO.mkdirs(new Path(externalTableDir()));
+            fileIO.mkdirs(new Path(externalTableDir));
         } catch (IOException ignore) {
 
         }
         try {
-            fileIO.mkdirs(new Path(externalFunctionDir()));
+            fileIO.mkdirs(new Path(externalFunctionDir));
         } catch (IOException ignore) {
 
         }
@@ -94,25 +105,10 @@ public class FlinkExternalCatalog extends AbstractCatalog {
     public org.apache.paimon.catalog.Catalog catalog() {
         return paimon.catalog();
     }
-
-    private String systemDb() {
-        return this.warehousePath
-                + Path.SEPARATOR
-                + SYSTEM_DATABASE_NAME
-                + DB_SUFFIX
-                + Path.SEPARATOR;
-    }
-
-    private String externalTableDir() {
-        return systemDb() + EXTERNAL_TABLE_STORE_PATH + Path.SEPARATOR;
-    }
-
-    private String externalFunctionDir() {
-        return systemDb() + EXTERNAL_FUNCTION_STORE_PATH + Path.SEPARATOR;
-    }
+    
 
     private String externalTableSchemaDir(ObjectPath table) {
-        return externalTableDir()
+        return externalTableDir
                 + Path.SEPARATOR
                 + table.getDatabaseName()
                 + Path.SEPARATOR
@@ -174,7 +170,7 @@ public class FlinkExternalCatalog extends AbstractCatalog {
     @Override
     public List<String> listTables(String databaseName)
             throws DatabaseNotExistException, CatalogException {
-        Path databasePath = new Path(externalTableDir() + Path.SEPARATOR + databaseName);
+        Path databasePath = new Path(externalTableDir + Path.SEPARATOR + databaseName);
         try {
             FileStatus[] fileStatuses = fileIO.listStatus(databasePath);
             List<String> tableList =
@@ -204,7 +200,8 @@ public class FlinkExternalCatalog extends AbstractCatalog {
                 Map<String, Object> propertiesMap =
                         new ObjectMapper()
                                 .readValue(
-                                        schemaStr, new TypeReference<HashMap<String, Object>>() {});
+                                        schemaStr, new TypeReference<HashMap<String, Object>>() {
+                                        });
                 Map<String, String> properties = new HashMap<>();
                 propertiesMap.forEach(
                         (key, value) -> {
@@ -279,7 +276,7 @@ public class FlinkExternalCatalog extends AbstractCatalog {
             if (fileIO.exists(tableSchemaPath) && !ignoreIfExists) {
                 throw new TableAlreadyExistException(getName(), tablePath);
             }
-            String tableMetaJson = JsonSerdeUtil.toJson(catalogTable.toProperties());
+            String tableMetaJson = JsonSerdeUtil.toJson(FlinkCatalog.fromCatalogTable(catalogTable));
             fileIO.writeFileUtf8(tableSchemaPath, tableMetaJson);
         } catch (IOException e) {
             throw new CatalogException("can not create external table", e);
@@ -319,7 +316,7 @@ public class FlinkExternalCatalog extends AbstractCatalog {
     public List<CatalogPartitionSpec> listPartitions(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws TableNotExistException, TableNotPartitionedException,
-                    PartitionSpecInvalidException, CatalogException {
+            PartitionSpecInvalidException, CatalogException {
         return paimon.listPartitions(tablePath, partitionSpec);
     }
 
@@ -349,8 +346,8 @@ public class FlinkExternalCatalog extends AbstractCatalog {
             CatalogPartition partition,
             boolean ignoreIfExists)
             throws TableNotExistException, TableNotPartitionedException,
-                    PartitionSpecInvalidException, PartitionAlreadyExistsException,
-                    CatalogException {
+            PartitionSpecInvalidException, PartitionAlreadyExistsException,
+            CatalogException {
         paimon.createPartition(tablePath, partitionSpec, partition, ignoreIfExists);
     }
 
