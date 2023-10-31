@@ -123,7 +123,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<Integer> INFER_SCAN_MAX_PARALLELISM =
             ConfigOptions.key("scan.infer-parallelism.max")
                     .intType()
-                    .defaultValue(Integer.MAX_VALUE)
+                    .defaultValue(1024)
                     .withDescription(
                             "If scan.infer-parallelism is true, limit the parallelism of source through this option.");
 
