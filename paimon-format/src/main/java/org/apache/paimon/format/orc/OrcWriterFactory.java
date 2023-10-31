@@ -24,15 +24,17 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.orc.writer.OrcBulkWriter;
-import org.apache.paimon.format.orc.writer.PhysicalWriterImpl;
 import org.apache.paimon.format.orc.writer.Vectorizer;
 import org.apache.paimon.fs.PositionOutputStream;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.Path;
 import org.apache.orc.OrcConf;
 import org.apache.orc.OrcFile;
+import org.apache.orc.impl.PhysicalFsWriter;
 import org.apache.orc.impl.WriterImpl;
+import org.apache.orc.impl.writer.WriterEncryptionVariant;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -106,7 +108,16 @@ public class OrcWriterFactory implements FormatWriterFactory {
         }
 
         OrcFile.WriterOptions opts = getWriterOptions();
-        opts.physicalWriter(new PhysicalWriterImpl(out, opts));
+        opts.physicalWriter(
+                new PhysicalFsWriter(
+                        new FSDataOutputStream(out, null) {
+                            @Override
+                            public void close() throws IOException {
+                                // do nothing
+                            }
+                        },
+                        opts,
+                        new WriterEncryptionVariant[0]));
 
         // The path of the Writer is not used to indicate the destination file
         // in this case since we have used a dedicated physical writer to write

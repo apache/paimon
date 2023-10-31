@@ -64,28 +64,23 @@ public class OrcReaderFactory implements FormatReaderFactory {
 
     private final RowType tableType;
 
-    protected final int[] selectedFields;
-
     protected final List<OrcFilters.Predicate> conjunctPredicates;
 
     protected final int batchSize;
 
     /**
      * @param hadoopConfig the hadoop config for orc reader.
-     * @param selectedFields the read selected field of orc format.
      * @param conjunctPredicates the filter predicates that can be evaluated.
      * @param batchSize the batch size of orc reader.
      */
     public OrcReaderFactory(
             final org.apache.hadoop.conf.Configuration hadoopConfig,
-            final RowType tableType,
-            final int[] selectedFields,
+            final RowType readType,
             final List<OrcFilters.Predicate> conjunctPredicates,
             final int batchSize) {
         this.hadoopConfigWrapper = new SerializableHadoopConfigWrapper(checkNotNull(hadoopConfig));
-        this.schema = toOrcType(tableType);
-        this.tableType = tableType;
-        this.selectedFields = checkNotNull(selectedFields);
+        this.schema = toOrcType(readType);
+        this.tableType = readType;
         this.conjunctPredicates = checkNotNull(conjunctPredicates);
         this.batchSize = batchSize;
     }
@@ -105,7 +100,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
                 createRecordReader(
                         hadoopConfigWrapper.getHadoopConfig(),
                         schema,
-                        selectedFields,
                         conjunctPredicates,
                         fileIO,
                         file,
@@ -126,10 +120,10 @@ public class OrcReaderFactory implements FormatReaderFactory {
         List<DataType> tableFieldTypes = tableType.getFieldTypes();
 
         // create and initialize the row batch
-        ColumnVector[] vectors = new ColumnVector[selectedFields.length];
+        ColumnVector[] vectors = new ColumnVector[tableType.getFieldCount()];
         for (int i = 0; i < vectors.length; i++) {
-            String name = tableFieldNames.get(selectedFields[i]);
-            DataType type = tableFieldTypes.get(selectedFields[i]);
+            String name = tableFieldNames.get(i);
+            DataType type = tableFieldTypes.get(i);
             vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
         }
         return new OrcReaderBatch(orcBatch, new VectorizedColumnBatch(vectors), recycler);
@@ -251,7 +245,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
     private static RecordReader createRecordReader(
             org.apache.hadoop.conf.Configuration conf,
             TypeDescription schema,
-            int[] selectedFields,
             List<OrcFilters.Predicate> conjunctPredicates,
             FileIO fileIO,
             org.apache.paimon.fs.Path path,
@@ -284,9 +277,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
                 b = b.end();
                 options.searchArgument(b.build(), new String[] {});
             }
-
-            // configure selected fields
-            options.include(computeProjectionMask(schema, selectedFields));
 
             // create ORC row reader
             RecordReader orcRowsReader = orcReader.rows(options);
