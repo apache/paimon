@@ -41,10 +41,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link CoreOptions#INCREMENTAL_BETWEEN_TIMESTAMP}. */
 public class IncrementalTimeStampTableTest extends TableTestBase {
 
-    public static void main(String[] args) {
-        System.out.println(System.currentTimeMillis());
-    }
-
     @Test
     public void testPrimaryKeyTable() throws Exception {
         Identifier identifier = identifier("T");
