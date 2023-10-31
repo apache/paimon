@@ -142,6 +142,6 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private boolean shouldCreateCurrentTable() {
         return shouldSynchronizeCurrentTable
                 && !record.fieldTypes().isEmpty()
-                && createdTables.add(currentTable);
+                && createdTables.add(parseTableName());
     }
 }
