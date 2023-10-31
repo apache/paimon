@@ -54,8 +54,11 @@ public class WrappedManifestCommittableSerializer
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         DataOutputViewStreamWrapper view = new DataOutputViewStreamWrapper(out);
 
+        view.writeLong(wrapped.checkpointId());
+        view.writeLong(wrapped.watermark());
+
         // Serialize ManifestCommittable map inside WrappedManifestCommittable
-        Map<Identifier, ManifestCommittable> map = wrapped.getManifestCommittables();
+        Map<Identifier, ManifestCommittable> map = wrapped.manifestCommittables();
         view.writeInt(map.size());
         for (Map.Entry<Identifier, ManifestCommittable> entry : map.entrySet()) {
             byte[] serializedKey = entry.getKey().getFullName().getBytes(StandardCharsets.UTF_8);
@@ -83,9 +86,13 @@ public class WrappedManifestCommittableSerializer
 
         DataInputDeserializer view = new DataInputDeserializer(serialized);
 
+        long checkpointId = view.readLong();
+        long watermark = view.readLong();
+
         // Deserialize ManifestCommittable map inside WrappedManifestCommittable
         int mapSize = view.readInt();
-        WrappedManifestCommittable wrappedManifestCommittable = new WrappedManifestCommittable();
+        WrappedManifestCommittable wrappedManifestCommittable =
+                new WrappedManifestCommittable(checkpointId, watermark);
         for (int i = 0; i < mapSize; i++) {
             int keyLength = view.readInt();
             byte[] serializedKey = new byte[keyLength];

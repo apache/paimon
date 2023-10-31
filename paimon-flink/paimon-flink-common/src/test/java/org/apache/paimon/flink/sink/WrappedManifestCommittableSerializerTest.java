@@ -51,7 +51,8 @@ class WrappedManifestCommittableSerializerTest {
         WrappedManifestCommittableSerializer serializer = serializer();
         ManifestCommittable committable1 = createManifestCommittable();
         ManifestCommittable committable2 = createManifestCommittable();
-        WrappedManifestCommittable wrappedManifestCommittable = new WrappedManifestCommittable();
+        WrappedManifestCommittable wrappedManifestCommittable =
+                new WrappedManifestCommittable(-1, -1);
         wrappedManifestCommittable.putManifestCommittable(
                 Identifier.create("db", "table1"), committable1);
         wrappedManifestCommittable.putManifestCommittable(
@@ -59,7 +60,7 @@ class WrappedManifestCommittableSerializerTest {
         byte[] serialized = serializer.serialize(wrappedManifestCommittable);
         WrappedManifestCommittable deserialize = serializer.deserialize(VERSION, serialized);
         Map<Identifier, ManifestCommittable> manifestCommittables =
-                deserialize.getManifestCommittables();
+                deserialize.manifestCommittables();
 
         assertThat(manifestCommittables.size()).isEqualTo(2);
         assertThat(deserialize).isEqualTo(wrappedManifestCommittable);

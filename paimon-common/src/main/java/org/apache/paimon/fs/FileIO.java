@@ -250,6 +250,12 @@ public interface FileIO extends Serializable {
                 if (e.getClass()
                         .getName()
                         .endsWith("org.apache.hadoop.fs.s3a.RemoteFileChangedException")) {
+                    // retry for S3 RemoteFileChangedException
+                    exception = e;
+                } else if (e.getMessage() != null
+                        && e.getMessage().contains("Blocklist for")
+                        && e.getMessage().contains("has changed")) {
+                    // retry for HDFS blocklist has changed exception
                     exception = e;
                 } else {
                     throw e;

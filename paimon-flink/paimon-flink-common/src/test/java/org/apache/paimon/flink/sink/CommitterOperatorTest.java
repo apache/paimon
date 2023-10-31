@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
@@ -332,6 +334,46 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         assertThat(table.snapshotManager().latestSnapshot().watermark()).isEqualTo(1024L);
     }
 
+    @Test
+    public void testEmptyCommit() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+
+        testHarness.snapshot(1, 1);
+        testHarness.notifyOfCompletedCheckpoint(1);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNull();
+    }
+
+    @Test
+    public void testEmptyCommitWithProcessTimeTag() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options ->
+                                options.set(
+                                        CoreOptions.TAG_AUTOMATIC_CREATION,
+                                        CoreOptions.TagCreationMode.PROCESS_TIME));
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+
+        testHarness.snapshot(1, 1);
+        testHarness.notifyOfCompletedCheckpoint(1);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.id()).isEqualTo(1);
+
+        testHarness.snapshot(2, 2);
+        testHarness.notifyOfCompletedCheckpoint(2);
+        snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.id()).isEqualTo(2);
+    }
+
     // ------------------------------------------------------------------------
     //  Metrics tests
     // ------------------------------------------------------------------------
@@ -356,7 +398,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         StoreCommitter committer = new StoreCommitter(commit, metricGroup);
         committer.commit(Collections.singletonList(manifestCommittable));
         CommitterMetrics metrics = committer.getCommitterMetrics();
-        assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(275);
+        assertThat(metrics.getNumBytesOutCounter().getCount()).isEqualTo(285);
         assertThat(metrics.getNumRecordsOutCounter().getCount()).isEqualTo(2);
         committer.close();
     }

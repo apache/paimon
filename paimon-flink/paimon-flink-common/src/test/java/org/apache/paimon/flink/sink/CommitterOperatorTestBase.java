@@ -42,6 +42,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -87,8 +88,13 @@ public abstract class CommitterOperatorTestBase {
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
+        return createFileStoreTable(options -> {});
+    }
+
+    protected FileStoreTable createFileStoreTable(Consumer<Options> setOptions) throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
+        setOptions.accept(conf);
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.createTable(
                 new Schema(

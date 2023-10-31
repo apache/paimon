@@ -28,6 +28,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DecimalUtils;
+import org.apache.paimon.utils.Projection;
 
 import org.apache.hadoop.conf.Configuration;
 import org.junit.jupiter.api.BeforeAll;
@@ -175,7 +176,10 @@ class OrcReaderFactoryTest {
             int[] selectedFields,
             List<OrcFilters.Predicate> conjunctPredicates) {
         return new OrcReaderFactory(
-                new Configuration(), formatType, selectedFields, conjunctPredicates, BATCH_SIZE);
+                new Configuration(),
+                Projection.of(selectedFields).project(formatType),
+                conjunctPredicates,
+                BATCH_SIZE);
     }
 
     private RecordReader<InternalRow> createReader(OrcReaderFactory format, Path split)

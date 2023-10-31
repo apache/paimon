@@ -61,6 +61,11 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     }
 
     @Override
+    public boolean forceCreatingSnapshot() {
+        return commit.forceCreatingSnapshot();
+    }
+
+    @Override
     public ManifestCommittable combine(
             long checkpointId, long watermark, List<Committable> committables) {
         ManifestCommittable manifestCommittable = new ManifestCommittable(checkpointId, watermark);

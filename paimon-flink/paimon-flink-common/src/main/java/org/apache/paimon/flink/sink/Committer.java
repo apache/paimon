@@ -35,6 +35,8 @@ import java.util.Map;
  */
 public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
 
+    boolean forceCreatingSnapshot();
+
     /** Compute an aggregated committable from a list of committables. */
     GlobalCommitT combine(long checkpointId, long watermark, List<CommitT> committables)
             throws IOException;
