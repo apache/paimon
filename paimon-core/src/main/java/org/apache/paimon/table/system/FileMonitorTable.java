@@ -239,18 +239,31 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     public static Map<GenericRow, Long> paritionWithLatestModifyTime(
             TableSchema schema,
             List<FileMonitorTable.ParitionChange> results,
-            List<String> paritions) {
+            List<String> paritionsToMonitor) {
+        Map<GenericRow, Long> paritionWithLatestModifyTime = new HashMap<>();
+
+        List<String> partitionKeys = schema.partitionKeys();
+        if (partitionKeys.isEmpty()) {
+            return paritionWithLatestModifyTime;
+        }
+
+        paritionsToMonitor.stream()
+                .filter(part -> !partitionKeys.contains(part))
+                .findAny()
+                .ifPresent(
+                        part -> {
+                            throw new RuntimeException(String.format("%s cannot be found", part));
+                        });
+
         RowDataToObjectArrayConverter rowDataToObjectArrayConverter =
                 new RowDataToObjectArrayConverter(schema.logicalPartitionType());
-        List<String> partitionKeys = schema.partitionKeys();
 
         List<Integer> paritionIndexToMonitor =
-                paritions.stream()
+                paritionsToMonitor.stream()
                         .map(partitionKeys::indexOf)
                         .filter(i -> i != -1)
                         .collect(Collectors.toList());
 
-        Map<GenericRow, Long> paritionWithLatestModifyTime = new HashMap<>();
         for (FileMonitorTable.ParitionChange paritionChange : results) {
             long latestModifyTime = paritionChange.latestModifyTime();
 
