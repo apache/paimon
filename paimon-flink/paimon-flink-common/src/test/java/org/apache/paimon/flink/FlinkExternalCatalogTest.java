@@ -135,18 +135,18 @@ public class FlinkExternalCatalogTest {
 
     @Test
     public void testListDatabases() throws Exception {
-        assertThat(catalog.listDatabases().size()).isEqualTo(2);
+        assertThat(catalog.listDatabases().size()).isEqualTo(1);
         catalog.createDatabase(database1, null, true);
         catalog.createDatabase(database2, null, false);
-        assertThat(catalog.listDatabases().size()).isEqualTo(4);
+        assertThat(catalog.listDatabases().size()).isEqualTo(3);
     }
 
     @Test
     public void dropDatabase() throws Exception {
         catalog.createDatabase(database1, null, true);
-        assertThat(catalog.listDatabases().size()).isEqualTo(3);
-        catalog.dropDatabase(database1, true);
         assertThat(catalog.listDatabases().size()).isEqualTo(2);
+        catalog.dropDatabase(database1, true);
+        assertThat(catalog.listDatabases().size()).isEqualTo(1);
     }
 
     @Test
@@ -205,6 +205,15 @@ public class FlinkExternalCatalogTest {
         assertThat(t2.getOptions()).isEqualTo(t1.getOptions());
     }
 
+    private static void checkOriginEquals(CatalogTable t1,CatalogTable t2){
+        assertThat(t2.getTableKind()).isEqualTo(t1.getTableKind());
+        assertThat(t2.getUnresolvedSchema()).isEqualTo(t1.getUnresolvedSchema());
+        assertThat(t2.getComment()).isEqualTo(t1.getComment());
+        assertThat(t2.getPartitionKeys()).isEqualTo(t1.getPartitionKeys());
+        assertThat(t2.isPartitioned()).isEqualTo(t1.isPartitioned());
+        assertThat(t2.getOptions()).isEqualTo(t1.getOptions());
+    }
+
     @Test
     public void testAlterTable() throws Exception {
         HashMap<String, String> options = new HashMap<>();
@@ -224,11 +233,11 @@ public class FlinkExternalCatalogTest {
         externalTableOptions.put("connector","kafka");
         CatalogTable table = this.createTable(externalTableOptions);
         catalog.createTable(externalTable1, table, false);
-        checkEquals(externalTable1,((CatalogTable) catalog.getTable(externalTable1)),  table);
+        checkOriginEquals(((CatalogTable) catalog.getTable(externalTable1)),  table);
         HashMap<String, String> options = new HashMap<>();
-        externalTableOptions.put("connector","kafka");
+        externalTableOptions.put("connector","paimon");
         CatalogTable paimonTable = this.createTable(options);
         catalog.createTable(paimonTable1, paimonTable, false);
-        checkEquals(paimonTable1,table, (CatalogTable) catalog.getTable(paimonTable1));
+        checkEquals(paimonTable1,paimonTable, (CatalogTable) catalog.getTable(paimonTable1));
     }
 }

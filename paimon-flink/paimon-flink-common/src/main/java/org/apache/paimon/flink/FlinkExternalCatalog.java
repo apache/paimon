@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.avro.data.Json;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -42,6 +43,7 @@ import org.apache.flink.table.catalog.exceptions.TablePartitionedException;
 import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.expressions.Expression;
+import org.apache.hadoop.hdfs.web.JsonUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -69,8 +71,8 @@ public class FlinkExternalCatalog extends AbstractCatalog {
     private final FlinkCatalog paimon;
     private final String warehousePath;
 
-    private static final String EXTERNAL_TABLE_STORE_PATH = ".FLINK_EXTERNAL_TABLE";
-    private static final String EXTERNAL_FUNCTION_STORE_PATH = ".FLINK_EXTERNAL_FUNCTION";
+    private static final String EXTERNAL_TABLE_STORE_PATH = "TABLE";
+    private static final String EXTERNAL_FUNCTION_STORE_PATH = "FUNCTION";
     private final FileIO fileIO;
     private final String systemDbDir;
     
@@ -85,11 +87,10 @@ public class FlinkExternalCatalog extends AbstractCatalog {
         this.warehousePath = warehousePath;
         this.systemDbDir = this.warehousePath
                 + Path.SEPARATOR
-                + SYSTEM_DATABASE_NAME
-                + DB_SUFFIX
+                + "FLINK_EXTERNAL_METADATA"
                 + Path.SEPARATOR;
         externalFunctionDir = systemDbDir + EXTERNAL_FUNCTION_STORE_PATH + Path.SEPARATOR;
-        externalTableDir = systemDbDir + EXTERNAL_FUNCTION_STORE_PATH + Path.SEPARATOR;
+        externalTableDir = systemDbDir + EXTERNAL_TABLE_STORE_PATH + Path.SEPARATOR;
         try {
             fileIO.mkdirs(new Path(externalTableDir));
         } catch (IOException ignore) {
@@ -276,7 +277,7 @@ public class FlinkExternalCatalog extends AbstractCatalog {
             if (fileIO.exists(tableSchemaPath) && !ignoreIfExists) {
                 throw new TableAlreadyExistException(getName(), tablePath);
             }
-            String tableMetaJson = JsonSerdeUtil.toJson(FlinkCatalog.fromCatalogTable(catalogTable));
+            String tableMetaJson = JsonSerdeUtil.toJson(catalogTable);
             fileIO.writeFileUtf8(tableSchemaPath, tableMetaJson);
         } catch (IOException e) {
             throw new CatalogException("can not create external table", e);
