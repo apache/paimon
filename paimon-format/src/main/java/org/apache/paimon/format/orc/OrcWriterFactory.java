@@ -110,7 +110,12 @@ public class OrcWriterFactory implements FormatWriterFactory {
         OrcFile.WriterOptions opts = getWriterOptions();
         opts.physicalWriter(
                 new PhysicalFsWriter(
-                        new FSDataOutputStream(out), opts, new WriterEncryptionVariant[0]));
+                        new FSDataOutputStream(out, null) {
+                            @Override
+                            public void close() throws IOException {
+                                // do nothing
+                            }
+                        }, opts, new WriterEncryptionVariant[0]));
 
         // The path of the Writer is not used to indicate the destination file
         // in this case since we have used a dedicated physical writer to write
