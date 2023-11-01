@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -73,16 +74,9 @@ public abstract class AbstractCatalog implements Catalog {
         this.lineageMetaFactory =
                 findAndCreateLineageMeta(
                         Options.fromMap(options), AbstractCatalog.class.getClassLoader());
-        this.tableDefaultOptions = new HashMap<>();
+        this.tableDefaultOptions =
+                convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
         this.catalogOptions = options;
-
-        options.keySet().stream()
-                .filter(key -> key.startsWith(TABLE_DEFAULT_OPTION_PREFIX))
-                .forEach(
-                        key ->
-                                this.tableDefaultOptions.put(
-                                        key.substring(TABLE_DEFAULT_OPTION_PREFIX.length()),
-                                        options.get(key)));
     }
 
     @Override

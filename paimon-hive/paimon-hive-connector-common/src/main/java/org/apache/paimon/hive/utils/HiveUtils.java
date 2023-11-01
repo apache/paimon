@@ -43,6 +43,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** Utils for create {@link FileStoreTable} and {@link Predicate}. */
 public class HiveUtils {
@@ -87,18 +88,11 @@ public class HiveUtils {
 
     /** Extract paimon catalog conf from Hive conf. */
     public static Options extractCatalogConfig(Configuration hiveConf) {
-        Map<String, String> configMap = new HashMap<>();
-
-        if (hiveConf != null) {
-            for (Map.Entry<String, String> entry : hiveConf) {
-                String name = entry.getKey();
-                String value = entry.getValue();
-                if (name.startsWith(PAIMON_PREFIX) && !"NULL".equalsIgnoreCase(value)) {
-                    name = name.substring(PAIMON_PREFIX.length());
-                    configMap.put(name, value);
-                }
-            }
-        }
+        Map<String, String> configMap =
+                hiveConf == null
+                        ? new HashMap<>()
+                        : convertToPropertiesPrefixKey(
+                                hiveConf, PAIMON_PREFIX, v -> !"NULL".equalsIgnoreCase(v));
         return Options.fromMap(configMap);
     }
 }
