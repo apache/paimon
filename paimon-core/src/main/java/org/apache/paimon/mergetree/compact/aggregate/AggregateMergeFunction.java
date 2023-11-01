@@ -151,7 +151,11 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                                         .defaultValue(false));
                 fieldAggregators[i] =
                         FieldAggregator.createFieldAggregator(
-                                fieldType, strAggFunc, ignoreRetract, isPrimaryKey);
+                                fieldType,
+                                strAggFunc,
+                                ignoreRetract,
+                                isPrimaryKey,
+                                () -> new FieldLastNonNullValueAgg(fieldType));
             }
 
             return new AggregateMergeFunction(createFieldGetters(fieldTypes), fieldAggregators);

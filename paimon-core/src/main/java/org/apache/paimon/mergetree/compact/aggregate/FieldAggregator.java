@@ -20,7 +20,10 @@ package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.types.DataType;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
+import java.util.function.Supplier;
 
 /** abstract class of aggregating a field of a row. */
 public abstract class FieldAggregator implements Serializable {
@@ -30,15 +33,19 @@ public abstract class FieldAggregator implements Serializable {
         this.fieldType = dataType;
     }
 
-    static FieldAggregator createFieldAggregator(
-            DataType fieldType, String strAgg, boolean ignoreRetract, boolean isPrimaryKey) {
+    public static FieldAggregator createFieldAggregator(
+            DataType fieldType,
+            @Nullable String strAgg,
+            boolean ignoreRetract,
+            boolean isPrimaryKey,
+            Supplier<FieldAggregator> defaultAggregator) {
         FieldAggregator fieldAggregator;
         if (isPrimaryKey) {
             fieldAggregator = new FieldPrimaryKeyAgg(fieldType);
         } else {
             // If the field has no aggregate function, use last_non_null_value.
             if (strAgg == null) {
-                fieldAggregator = new FieldLastNonNullValueAgg(fieldType);
+                fieldAggregator = defaultAggregator.get();
             } else {
                 // ordered by type root definition
                 switch (strAgg) {
@@ -81,9 +88,9 @@ public abstract class FieldAggregator implements Serializable {
 
     abstract String name();
 
-    abstract Object agg(Object accumulator, Object inputField);
+    public abstract Object agg(Object accumulator, Object inputField);
 
-    Object retract(Object accumulator, Object retractField) {
+    public Object retract(Object accumulator, Object retractField) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Aggregate function '%s' does not support retraction,"
