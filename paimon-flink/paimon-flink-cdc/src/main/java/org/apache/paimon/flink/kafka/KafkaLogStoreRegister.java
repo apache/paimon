@@ -21,7 +21,6 @@ package org.apache.paimon.flink.kafka;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.log.LogStoreRegister;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
-import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
@@ -43,6 +42,8 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_PARTITION
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_REPLICATION;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
+import static org.apache.paimon.flink.kafka.KafkaLogStoreFactory.toKafkaProperties;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** KafkaLogStoreRegister is used to register/unregister topics in Kafka for paimon table. */
 public class KafkaLogStoreRegister implements LogStoreRegister {
@@ -73,9 +74,9 @@ public class KafkaLogStoreRegister implements LogStoreRegister {
                                 this.identifier.getObjectName(),
                                 UUID.randomUUID().toString().replace("-", ""));
 
-        Preconditions.checkArgument(this.bootstrapServers != null);
-        Preconditions.checkArgument(this.topic != null);
-        Preconditions.checkArgument(this.identifier != null);
+        checkNotNull(context.getOptions().get(BOOTSTRAP_SERVERS));
+        checkNotNull(this.topic);
+        checkNotNull(this.identifier);
 
         // handle the type information missing when Map is converted to Options
         if (context.getOptions().get(REGISTER_TIMEOUT.key()) == null) {
@@ -94,8 +95,7 @@ public class KafkaLogStoreRegister implements LogStoreRegister {
 
         this.replicationFactor = context.getOptions().get(LOG_SYSTEM_REPLICATION);
 
-        this.properties = new Properties();
-        this.properties.put("bootstrap.servers", this.bootstrapServers);
+        this.properties = toKafkaProperties(context.getOptions());
     }
 
     @Override
