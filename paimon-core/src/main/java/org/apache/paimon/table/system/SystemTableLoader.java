@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -79,7 +80,7 @@ public class SystemTableLoader {
             FileIO fileIO,
             Supplier<Map<String, Map<String, Path>>> allTablePaths,
             Map<String, String> catalogOptions,
-            LineageMetaFactory lineageMetaFactory) {
+            @Nullable LineageMetaFactory lineageMetaFactory) {
         switch (tableName.toLowerCase()) {
             case ALL_TABLE_OPTIONS:
                 return new AllTableOptionsTable(fileIO, allTablePaths.get());
@@ -87,7 +88,11 @@ public class SystemTableLoader {
                 return new CatalogOptionsTable(catalogOptions);
             case SOURCE_TABLE_LINEAGE:
                 {
-                    checkNotNull(lineageMetaFactory);
+                    checkNotNull(
+                            lineageMetaFactory,
+                            String.format(
+                                    "Lineage meta should be configured for catalog with %s",
+                                    LINEAGE_META.key()));
                     return new SourceTableLineageTable(lineageMetaFactory, catalogOptions);
                 }
             default:

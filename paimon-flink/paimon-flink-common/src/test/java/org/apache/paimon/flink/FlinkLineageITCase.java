@@ -79,7 +79,7 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
         tEnv.getConfig().getConfiguration().set(PipelineOptions.NAME, "select_t_job");
         tEnv.executeSql("SELECT * FROM T").collect().close();
-        assertThat(jobSourceTableLineages.isEmpty()).isFalse();
+        assertThat(jobSourceTableLineages).isNotEmpty();
         TableLineageEntity sourceTableLineage =
                 jobSourceTableLineages.get("select_t_job").get("default.T.select_t_job");
         assertThat(sourceTableLineage.getTable()).isEqualTo("T");
