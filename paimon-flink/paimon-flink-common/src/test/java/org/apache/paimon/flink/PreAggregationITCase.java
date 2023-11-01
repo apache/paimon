@@ -862,4 +862,26 @@ public class PreAggregationITCase {
             insert.close();
         }
     }
+
+    /** IT Test for aggregation merge engine. */
+    public static class BasicAggregateITCase extends CatalogITCaseBase {
+
+        @Test
+        public void testLocalMerge() {
+            sql(
+                    "CREATE TABLE T ("
+                            + "k INT,"
+                            + "v INT,"
+                            + "d INT,"
+                            + "PRIMARY KEY (k, d) NOT ENFORCED) PARTITIONED BY (d) "
+                            + " WITH ('merge-engine'='aggregation', "
+                            + "'fields.v.aggregate-function'='sum',"
+                            + "'local-merge-buffer-size'='1m'"
+                            + ");");
+
+            sql("INSERT INTO T VALUES(1, 1, 1), (2, 1, 1), (1, 2, 1)");
+            assertThat(batchSql("SELECT * FROM T"))
+                    .containsExactlyInAnyOrder(Row.of(1, 3, 1), Row.of(2, 1, 1));
+        }
+    }
 }

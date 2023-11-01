@@ -56,12 +56,11 @@ public class PrimaryKeyTableUtils {
     }
 
     public static MergeFunctionFactory<KeyValue> createMergeFunctionFactory(
-            TableSchema tableSchema) {
+            TableSchema tableSchema, KeyValueFieldsExtractor extractor) {
         RowType rowType = tableSchema.logicalRowType();
         Options conf = Options.fromMap(tableSchema.options());
         CoreOptions options = new CoreOptions(conf);
         CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
-        KeyValueFieldsExtractor extractor = PrimaryKeyFieldsExtractor.EXTRACTOR;
 
         switch (mergeEngine) {
             case DEDUPLICATE:
