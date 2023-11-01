@@ -111,13 +111,15 @@ public class KafkaLogStoreRegister implements LogStoreRegister {
         } catch (TimeoutException e) {
             throw new IllegalStateException(
                     String.format(
-                            "Register topic for table %s timeout %s",
-                            this.identifier.getFullName(), e.getMessage()));
+                            "Register topic for table %s timeout with properties %s",
+                            this.identifier.getFullName(), properties),
+                    e);
         } catch (Exception e) {
             throw new IllegalStateException(
                     String.format(
-                            "Register topic for table %s exception %s",
-                            this.identifier.getFullName(), e.getMessage()));
+                            "Register topic for table %s failed with properties %s",
+                            this.identifier.getFullName(), properties),
+                    e);
         }
 
         return ImmutableMap.of(
@@ -143,19 +145,22 @@ public class KafkaLogStoreRegister implements LogStoreRegister {
             } else {
                 throw new IllegalStateException(
                         String.format(
-                                "Unregister topic for table %s exception %s",
-                                this.identifier.getFullName(), e.getMessage()));
+                                "Unregister topic for table %s failed with properties %s",
+                                this.identifier.getFullName(), properties),
+                        e);
             }
         } catch (TimeoutException e) {
             throw new RuntimeException(
                     String.format(
-                            "Unregister topic for table %s timeout %s",
-                            this.identifier.getFullName(), e.getMessage()));
+                            "Unregister topic for table %s timeout with properties %s",
+                            this.identifier.getFullName(), properties),
+                    e);
         } catch (Exception e) {
             throw new RuntimeException(
                     String.format(
-                            "Unregister topic for table %s exception %s",
-                            this.identifier.getFullName(), e.getMessage()));
+                            "Unregister topic for table %s failed with properties %s",
+                            this.identifier.getFullName(), properties),
+                    e);
         }
     }
 }
