@@ -115,5 +115,10 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
                     projection == null ? rowType : Projection.of(projection).project(rowType);
             return new LookupMergeFunction(wrapped.create(projection), keyType, valueType);
         }
+
+        @Override
+        public AdjustedProjection adjustProjection(@Nullable int[][] projection) {
+            return wrapped.adjustProjection(projection);
+        }
     }
 }
