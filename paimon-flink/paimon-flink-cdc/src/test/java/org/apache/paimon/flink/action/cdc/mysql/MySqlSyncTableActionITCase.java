@@ -896,7 +896,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testMetadataColumns() throws Exception {
         try (Statement statement = getStatement()) {
             statement.execute("USE metadata");
@@ -910,7 +910,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
                         .withPrimaryKeys("pk")
-                        .withMetadataColumn(Arrays.asList("table_name", "database_name"))
+                        .withMetadataColumns("table_name", "database_name", "op_ts")
                         .build();
 
         runActionWithDefaultEnv(action);
@@ -922,13 +922,14 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.INT().notNull(),
                             DataTypes.VARCHAR(10),
                             DataTypes.STRING().notNull(),
-                            DataTypes.STRING().notNull()
+                            DataTypes.STRING().notNull(),
+                            DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3).notNull()
                         },
-                        new String[] {"pk", "_date", "table_name", "database_name"});
+                        new String[] {"pk", "_date", "table_name", "database_name", "op_ts"});
         waitForResult(
                 Arrays.asList(
-                        "+I[1, 2023-07-30, test_metadata_columns, metadata]",
-                        "+I[2, 2023-07-30, test_metadata_columns, metadata]"),
+                        "+I[1, 2023-07-30, test_metadata_columns, metadata, 1970-01-01T00:00]",
+                        "+I[2, 2023-07-30, test_metadata_columns, metadata, 1970-01-01T00:00]"),
                 table,
                 rowType,
                 Collections.singletonList("pk"));

@@ -55,7 +55,6 @@ import java.util.Map;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.DIVIDED;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.schemaCompatible;
@@ -225,15 +224,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
 
-        CdcMetadataConverter[] metadataConverters =
+        CdcMetadataConverter<?>[] metadataConverters =
                 metadataColumn.stream()
-                        .map(
-                                key ->
-                                        Stream.of(MySqlMetadataProcessor.values())
-                                                .filter(m -> m.getKey().equals(key))
-                                                .findFirst()
-                                                .orElseThrow(IllegalStateException::new))
-                        .map(MySqlMetadataProcessor::getConverter)
+                        .map(MySqlMetadataProcessor::converter)
                         .toArray(CdcMetadataConverter[]::new);
 
         List<FileStoreTable> fileStoreTables = new ArrayList<>();

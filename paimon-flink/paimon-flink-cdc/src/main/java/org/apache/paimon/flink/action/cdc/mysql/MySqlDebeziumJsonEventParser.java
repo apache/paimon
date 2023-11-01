@@ -36,7 +36,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -427,7 +426,9 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            resultMap.putAll(metadataConverter.read(JsonSerdeUtil.toTree(root.payload())));
+            resultMap.put(
+                    metadataConverter.columnName(),
+                    metadataConverter.read(root.payload().source()));
         }
 
         return resultMap;

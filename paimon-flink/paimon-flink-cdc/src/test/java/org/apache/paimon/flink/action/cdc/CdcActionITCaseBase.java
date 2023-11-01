@@ -213,7 +213,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         protected final List<String> primaryKeys = new ArrayList<>();
         protected final List<String> computedColumnArgs = new ArrayList<>();
         protected final List<String> typeMappingModes = new ArrayList<>();
-        protected final List<String> metadataColumn = new ArrayList<>();
+        protected final List<String> metadataColumns = new ArrayList<>();
 
         public SyncTableActionBuilder(Map<String, String> sourceConfig) {
             this.sourceConfig = sourceConfig;
@@ -253,8 +253,8 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
-        public SyncTableActionBuilder<T> withMetadataColumn(List<String> metadataColumn) {
-            this.metadataColumn.addAll(metadataColumn);
+        public SyncTableActionBuilder<T> withMetadataColumns(String... metadataColumns) {
+            this.metadataColumns.addAll(Arrays.asList(metadataColumns));
             return this;
         }
 

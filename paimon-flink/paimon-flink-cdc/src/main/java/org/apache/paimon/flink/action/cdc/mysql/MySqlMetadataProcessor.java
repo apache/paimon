@@ -18,16 +18,20 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
+import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
-import io.debezium.connector.AbstractSourceInfo;
-
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.Map;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * Enumerates the metadata processing behaviors for MySQL CDC related data.
@@ -43,50 +47,42 @@ import java.util.Map;
 public enum MySqlMetadataProcessor {
     /** Name of the table that contain the row. */
     TABLE_NAME(
-            "table_name",
-            DataTypes.STRING().notNull(),
-            new CdcMetadataConverter() {
+            new CdcMetadataConverter<DebeziumEvent.Source>() {
                 private static final long serialVersionUID = 1L;
 
                 @Override
-                public Map<String, String> read(JsonNode record) {
-                    String table =
-                            record.get("source").get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
-                    return Collections.singletonMap("table_name", table);
+                public String read(DebeziumEvent.Source source) {
+                    return source.table();
                 }
 
                 @Override
-                public DataType getDataType() {
+                public DataType dataType() {
                     return DataTypes.STRING().notNull();
                 }
 
                 @Override
-                public String getColumnName() {
+                public String columnName() {
                     return "table_name";
                 }
             }),
 
     /** Name of the database that contain the row. */
     DATABASE_NAME(
-            "database_name",
-            DataTypes.STRING().notNull(),
-            new CdcMetadataConverter() {
+            new CdcMetadataConverter<DebeziumEvent.Source>() {
                 private static final long serialVersionUID = 1L;
 
                 @Override
-                public Map<String, String> read(JsonNode record) {
-                    String database =
-                            record.get("source").get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
-                    return Collections.singletonMap("database_name", database);
+                public String read(DebeziumEvent.Source source) {
+                    return source.db();
                 }
 
                 @Override
-                public DataType getDataType() {
+                public DataType dataType() {
                     return DataTypes.STRING().notNull();
                 }
 
                 @Override
-                public String getColumnName() {
+                public String columnName() {
                     return "database_name";
                 }
             }),
@@ -96,50 +92,44 @@ public enum MySqlMetadataProcessor {
      * snapshot of the table instead of the binlog, the value is always 0.
      */
     OP_TS(
-            "op_ts",
-            DataTypes.TIMESTAMP(3).notNull(),
-            new CdcMetadataConverter() {
+            new CdcMetadataConverter<DebeziumEvent.Source>() {
                 private static final long serialVersionUID = 1L;
 
                 @Override
-                public Map<String, String> read(JsonNode record) {
-                    String timestamp =
-                            record.get("source").get(AbstractSourceInfo.TIMESTAMP_KEY).asText();
-                    return Collections.singletonMap("op_ts", timestamp);
+                public String read(DebeziumEvent.Source source) {
+                    return DateTimeUtils.formatTimestamp(
+                            Timestamp.fromEpochMillis(source.tsMs()), DateTimeUtils.LOCAL_TZ, 3);
                 }
 
                 @Override
-                public DataType getDataType() {
-                    return DataTypes.TIMESTAMP(3).notNull();
+                public DataType dataType() {
+                    return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3).notNull();
                 }
 
                 @Override
-                public String getColumnName() {
+                public String columnName() {
                     return "op_ts";
                 }
             });
 
-    private final String key;
+    private final CdcMetadataConverter<?> converter;
 
-    private final DataType dataType;
-
-    private final CdcMetadataConverter converter;
-
-    MySqlMetadataProcessor(String key, DataType dataType, CdcMetadataConverter converter) {
-        this.key = key;
-        this.dataType = dataType;
+    MySqlMetadataProcessor(CdcMetadataConverter<?> converter) {
         this.converter = converter;
     }
 
-    public String getKey() {
-        return key;
+    private static final Map<String, CdcMetadataConverter<?>> CONVERTERS =
+            Arrays.stream(MySqlMetadataProcessor.values())
+                    .collect(
+                            Collectors.toMap(
+                                    value -> value.converter.columnName(),
+                                    MySqlMetadataProcessor::converter));
+
+    public static CdcMetadataConverter<?> converter(String column) {
+        return checkNotNull(CONVERTERS.get(column));
     }
 
-    public DataType getDataType() {
-        return dataType;
-    }
-
-    public CdcMetadataConverter getConverter() {
+    private CdcMetadataConverter<?> converter() {
         return converter;
     }
 }

@@ -188,7 +188,7 @@ public class CdcActionCommonUtils {
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            builder.column(metadataConverter.getColumnName(), metadataConverter.getDataType());
+            builder.column(metadataConverter.columnName(), metadataConverter.dataType());
         }
 
         // primary keys
