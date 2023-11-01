@@ -42,7 +42,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_PARTITION
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM_REPLICATION;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.BOOTSTRAP_SERVERS;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
-import static org.apache.paimon.flink.kafka.KafkaLogStoreFactory.toKafkaProperties;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** KafkaLogStoreRegister is used to register/unregister topics in Kafka for paimon table. */
@@ -95,7 +94,7 @@ public class KafkaLogStoreRegister implements LogStoreRegister {
 
         this.replicationFactor = context.getOptions().get(LOG_SYSTEM_REPLICATION);
 
-        this.properties = toKafkaProperties(context.getOptions());
+        this.properties = KafkaLogStoreFactory.toKafkaProperties(context.getOptions());
     }
 
     @Override

@@ -48,7 +48,6 @@ import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LogConsistency;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.flink.factories.FlinkFactoryUtil.createFlinkTableFactoryHelper;
-import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** The Kafka {@link LogStoreTableFactory} implementation. */
@@ -64,7 +63,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
     }
 
     private String topic(Context context) {
-        return context.getCatalogTable().getOptions().get(TOPIC.key());
+        return context.getCatalogTable().getOptions().get(KafkaLogOptions.TOPIC.key());
     }
 
     @Override

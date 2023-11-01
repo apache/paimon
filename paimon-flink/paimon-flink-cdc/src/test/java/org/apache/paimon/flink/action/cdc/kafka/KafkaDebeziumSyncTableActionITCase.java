@@ -23,6 +23,10 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -30,12 +34,18 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
-/** IT cases for {@link KafkaDebeziumSyncTableActionITCase}. */
+import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testSchemaEvolution() throws Exception {
         runSingleTableSchemaEvolution("schemaevolution");
     }
@@ -60,7 +70,6 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
-
         testSchemaEvolutionImpl(topic, sourceDir);
     }
 
@@ -141,7 +150,320 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
+    @Timeout(120)
+    public void testNotSupportFormat() throws Exception {
+        final String topic = "not_support";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the debezium json into Kafka -------------------
+        List<String> lines = readLines("kafka/debezium/table/schemaevolution/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "debeziums-json");
+        kafkaConfig.put("topic", topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                UnsupportedOperationException.class,
+                                "This format: debeziums-json is not supported."));
+    }
+
+    @Test
+    @Timeout(120)
+    public void testAssertSchemaCompatible() throws Exception {
+        final String topic = "assert_schema_compatible";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the debezium json into Kafka -------------------
+        List<String> lines = readLines("kafka/debezium/table/schemaevolution/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put("topic", topic);
+
+        // create an incompatible table
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {DataTypes.STRING(), DataTypes.STRING()},
+                        new String[] {"k", "v1"}),
+                Collections.emptyList(),
+                Collections.singletonList("k"),
+                Collections.emptyMap());
+
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Paimon schema and source table schema are not compatible.\n"
+                                        + "Paimon fields are: [`k` STRING NOT NULL, `v1` STRING].\n"
+                                        + "Source table fields are: [`id` STRING NOT NULL, `name` STRING, `description` STRING, `weight` STRING]"));
+    }
+
+    @Test
     @Timeout(60)
+    public void testStarUpOptionSpecific() throws Exception {
+        final String topic = "start_up_specific";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the debezium json into Kafka -------------------
+        List<String> lines = readLines("kafka/debezium/table/startupmode/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "specific-offsets");
+        kafkaConfig.put("scan.startup.specific-offsets", "partition:0,offset:1");
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        // topic has two records we read two
+        List<String> expected =
+                Collections.singletonList("+I[102, car battery, 12V car battery, 8.1]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testStarUpOptionLatest() throws Exception {
+        final String topic = "start_up_latest";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the debezium json into Kafka -------------------
+        List<String> lines = readLines("kafka/debezium/table/startupmode/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "latest-offset");
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        Thread.sleep(5000);
+        FileStoreTable table = getFileStoreTable(tableName);
+        try {
+            writeRecordsToKafka(
+                    topic, readLines("kafka/debezium/table/startupmode/debezium-data-2.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        // topic has four records we read two
+        List<String> expected =
+                Arrays.asList(
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testStarUpOptionTimestamp() throws Exception {
+        final String topic = "start_up_timestamp";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the debezium json into Kafka -------------------
+        List<String> lines = readLines("kafka/debezium/table/startupmode/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "timestamp");
+        kafkaConfig.put(
+                "scan.startup.timestamp-millis", String.valueOf(System.currentTimeMillis()));
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try {
+            writeRecordsToKafka(
+                    topic, readLines("kafka/debezium/table/startupmode/debezium-data-2.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        // topic has four records we read two
+        List<String> expected =
+                Arrays.asList(
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testStarUpOptionEarliest() throws Exception {
+        final String topic = "start_up_earliest";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the debezium json into Kafka -------------------
+        List<String> lines = readLines("kafka/debezium/table/startupmode/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "earliest-offset");
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try {
+            writeRecordsToKafka(
+                    topic, readLines("kafka/debezium/table/startupmode/debezium-data-2.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        // topic has four records we read all
+        List<String> expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.14]",
+                        "+I[102, car battery, 12V car battery, 8.1]",
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(120)
+    public void testStarUpOptionGroup() throws Exception {
+        final String topic = "start_up_group";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the debezium json into Kafka -------------------
+        List<String> lines = readLines("kafka/debezium/table/startupmode/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put("topic", topic);
+        kafkaConfig.put("scan.startup.mode", "group-offsets");
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try {
+            writeRecordsToKafka(
+                    topic, readLines("kafka/debezium/table/startupmode/debezium-data-2.txt"));
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        // topic has four records we read all
+        List<String> expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.14]",
+                        "+I[102, car battery, 12V car battery, 8.1]",
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(120)
     public void testComputedColumn() throws Exception {
         String topic = "computed_column";
         createTestTopic(topic, 1, 1);
@@ -150,15 +472,16 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
-            throw new Exception("Failed to write canal data to Kafka.", e);
+            throw new Exception("Failed to write debezium data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put("value.format", "debezium-json");
         kafkaConfig.put("topic", topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
-                        .withPrimaryKeys("id")
-                        .withComputedColumnArgs("_year=year(date)")
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("_id", "_year")
+                        .withComputedColumnArgs("_year=year(_date)")
                         .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
@@ -166,13 +489,40 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.INT()
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT().notNull()
                         },
-                        new String[] {"id", "date", "_year"});
+                        new String[] {"_id", "_date", "_year"});
         waitForResult(
                 Collections.singletonList("+I[101, 2023-03-23, 2023]"),
                 getFileStoreTable(tableName),
                 rowType,
-                Collections.singletonList("id"));
+                Arrays.asList("_id", "_year"));
+    }
+
+    @Override
+    protected void writeRecordsToKafka(String topic, List<String> lines) throws Exception {
+        Properties producerProperties = getStandardProps();
+        producerProperties.setProperty("retries", "0");
+        producerProperties.put(
+                "key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        producerProperties.put(
+                "value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        KafkaProducer kafkaProducer = new KafkaProducer(producerProperties);
+        for (int i = 0; i < lines.size(); i++) {
+            try {
+                String[] keyValue = lines.get(i).split(";");
+                if (keyValue.length < 2) {
+                    continue;
+                }
+                objectMapper.readTree(keyValue[0]);
+                objectMapper.readTree(keyValue[1]);
+                kafkaProducer.send(new ProducerRecord<>(topic, keyValue[0], keyValue[1]));
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        kafkaProducer.close();
     }
 }

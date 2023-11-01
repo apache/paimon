@@ -41,7 +41,7 @@ public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
 
     @Override
     protected Source<String, ?, ?> buildSource() {
-        return KafkaActionUtils.buildKafkaSource(mqConfig, primaryKeys);
+        return KafkaActionUtils.buildKafkaSource(mqConfig);
     }
 
     @Override
@@ -51,7 +51,7 @@ public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
 
     @Override
     protected MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic) {
-        return KafkaActionUtils.getKafkaEarliestConsumer(mqConfig, topic, primaryKeys);
+        return KafkaActionUtils.getKafkaEarliestConsumer(mqConfig, topic);
     }
 
     @Override

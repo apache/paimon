@@ -24,6 +24,7 @@ import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import javax.annotation.Nullable;
@@ -52,6 +53,9 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  */
 public class DebeziumRecordParser extends RecordParser {
 
+    private static final String RECORD_PAYLOAD = "payload";
+    private static final String RECORD_SCHEMA = "schema";
+    private static final String RECORD_SOURCE = "source";
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_AFTER = "after";
     private static final String FIELD_SOURCE = "source";
@@ -66,6 +70,29 @@ public class DebeziumRecordParser extends RecordParser {
     public DebeziumRecordParser(
             boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         super(caseSensitive, typeMapping, computedColumns);
+    }
+
+    @Override
+    protected void setRoot(String record) {
+        try {
+            JsonNode recordData = OBJECT_MAPPER.readValue(record, JsonNode.class);
+            extractValuePayload(recordData);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Error processing JSON: " + record, e);
+        }
+    }
+
+    private void extractValuePayload(JsonNode recordData) {
+        // for extract record value
+        if (includeSchema(recordData)) {
+            root = recordData.get(RECORD_PAYLOAD);
+        } else {
+            root = recordData;
+        }
+    }
+
+    private boolean includeSchema(JsonNode record) {
+        return record.size() == 2 && record.has(RECORD_SCHEMA) && record.has(RECORD_PAYLOAD);
     }
 
     @Override
