@@ -255,13 +255,16 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         AtomicLong cntEntries = new AtomicLong(0);
         Iterable<ManifestEntry> entries =
                 ParallellyExecuteUtils.parallelismBatchIterable(
-                        files ->
-                                files.parallelStream()
-                                        .filter(this::filterManifestFileMeta)
-                                        .flatMap(m -> readManifest.apply(m).stream())
-                                        .filter(this::filterByStats)
-                                        .peek(e -> cntEntries.getAndIncrement())
-                                        .collect(Collectors.toList()),
+                        files -> {
+                            List<ManifestEntry> entryList =
+                                    files.parallelStream()
+                                            .filter(this::filterManifestFileMeta)
+                                            .flatMap(m -> readManifest.apply(m).stream())
+                                            .filter(this::filterByStats)
+                                            .collect(Collectors.toList());
+                            cntEntries.getAndAdd(entryList.size());
+                            return entryList;
+                        },
                         manifests,
                         scanManifestParallelism);
 

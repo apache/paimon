@@ -250,7 +250,7 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
 
         @Override
         public SnapshotReader withMetricRegistry(MetricRegistry registry) {
-            // won't register metric
+            snapshotReader.withMetricRegistry(registry);
             return this;
         }
 
