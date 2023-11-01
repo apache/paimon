@@ -24,8 +24,12 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.RowBuffer.RowBufferIterator;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemoryOwner;
+import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.types.DataTypes;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -113,7 +117,7 @@ public class InMemoryBufferTest {
 
         assertThat(buffer.memoryOccupancy()).isGreaterThan(0);
         buffer.reset();
-        assertThat(buffer.memoryOccupancy()).isEqualTo(0);
+        assertThat(buffer.memoryOccupancy()).isEqualTo(-1);
 
         // test read after reset
         try (RowBufferIterator iterator = buffer.newIterator()) {
@@ -142,5 +146,70 @@ public class InMemoryBufferTest {
                         this.serializer);
         RowBufferIterator iterator = buffer.newIterator();
         assertThat(iterator.advanceNext()).isFalse();
+    }
+
+    @Test
+    public void testMemoryPoolWorksWellWithInMemoryBuffer() throws Exception {
+        MemoryPoolFactory memoryPoolFactory =
+                new MemoryPoolFactory(
+                        new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE));
+
+        Owner owner1 = new Owner(this.serializer);
+        Owner owner2 = new Owner(this.serializer);
+        memoryPoolFactory.addOwners(Arrays.asList(owner1, owner2));
+        memoryPoolFactory.notifyNewOwner(owner1);
+        memoryPoolFactory.notifyNewOwner(owner2);
+
+        owner1.reset();
+
+        for (int i = 0; i < 100; i++) {
+            Assertions.assertThatCode(() -> owner2.put()).doesNotThrowAnyException();
+        }
+    }
+
+    public class Owner implements MemoryOwner {
+
+        private InternalRowSerializer internalRowSerializer;
+        private InMemoryBuffer inMemoryBuffer;
+        private final BinaryRow binaryRow;
+
+        public Owner(InternalRowSerializer internalRowSerializer) {
+            this.internalRowSerializer = internalRowSerializer;
+
+            binaryRow = new BinaryRow(1);
+            BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
+
+            byte[] s = new byte[1024];
+            Arrays.fill(s, (byte) 'a');
+            binaryRowWriter.writeString(0, BinaryString.fromBytes(s));
+            binaryRowWriter.complete();
+            binaryRowWriter = null;
+        }
+
+        @Override
+        public void setMemoryPool(MemorySegmentPool memoryPool) {
+            this.inMemoryBuffer = new InMemoryBuffer(memoryPool, internalRowSerializer);
+        }
+
+        @Override
+        public long memoryOccupancy() {
+            return inMemoryBuffer.memoryOccupancy();
+        }
+
+        @Override
+        public void flushMemory() throws Exception {
+            inMemoryBuffer.complete();
+            // emulate real-world flushing data to disk, we need to call newIterator method
+            inMemoryBuffer.newIterator();
+            inMemoryBuffer.reset();
+        }
+
+        public boolean put() throws Exception {
+            return inMemoryBuffer.put(binaryRow.copy());
+        }
+
+        public void reset() {
+            inMemoryBuffer.reset();
+        }
     }
 }

@@ -52,6 +52,7 @@ public class SimpleCollectingOutputView extends AbstractPagedOutputView {
         this.fullSegments = fullSegmentTarget;
         this.memorySource = memSource;
         this.fullSegments.add(getCurrentSegment());
+        segmentNum = 0;
     }
 
     public void reset() {
