@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.Filter;
@@ -61,6 +62,8 @@ public interface FileStoreScan {
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
 
     FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter);
+
+    FileStoreScan withMetrics(ScanMetrics metrics);
 
     /** Produce a {@link Plan}. */
     Plan plan();
