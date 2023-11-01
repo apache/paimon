@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.utils.BlockingIterator;
+
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +32,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** IT case for flink time travel. */
 public class TimeTravelITCase extends CatalogITCaseBase {
 
+    // -------------------------------------------------------
+    //                          Batch
+    // -------------------------------------------------------
+
     @Test
     public void testTravelToTimestampString() throws Exception {
         sql("CREATE TABLE t (k INT, v STRING)");
@@ -37,8 +43,7 @@ public class TimeTravelITCase extends CatalogITCaseBase {
         // snapshot 1
         sql("INSERT INTO t VALUES(1, 'hello'), (2, 'world')");
         Thread.sleep(3000);
-        String anchor =
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        String anchor = now();
         // snapshot 2
         sql("INSERT INTO t VALUES(1, 'flink'), (2, 'paimon')");
 
@@ -47,7 +52,32 @@ public class TimeTravelITCase extends CatalogITCaseBase {
                 .isEqualTo("[+I[1, hello], +I[2, world], +I[1, flink], +I[2, paimon]]");
 
         // time travel to snapshot 1
-        result = sql(String.format("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '%s'", anchor));
+        result = sql("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '%s'", anchor);
+        assertThat(result.toString()).isEqualTo("[+I[1, hello], +I[2, world]]");
+    }
+
+    @Test
+    public void testExpression() throws Exception {
+        sql("CREATE TABLE t (k INT, v STRING)");
+
+        // snapshot 1
+        sql("INSERT INTO t VALUES(1, 'hello'), (2, 'world')");
+
+        String anchor = now();
+        Thread.sleep(3000);
+
+        // snapshot 2
+        sql("INSERT INTO t VALUES(1, 'flink'), (2, 'paimon')");
+
+        List<Row> result = sql("SELECT * FROM t");
+        assertThat(result.toString())
+                .isEqualTo("[+I[1, hello], +I[2, world], +I[1, flink], +I[2, paimon]]");
+
+        // time travel to snapshot 1
+        result =
+                sql(
+                        "SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '%s' + INTERVAL '1' SECOND",
+                        anchor);
         assertThat(result.toString()).isEqualTo("[+I[1, hello], +I[2, world]]");
     }
 
@@ -60,8 +90,7 @@ public class TimeTravelITCase extends CatalogITCaseBase {
         sql("INSERT INTO t VALUES(1, 'hello'), (2, 'world')");
 
         Thread.sleep(3000);
-        String anchor =
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        String anchor = now();
 
         // new schema
         sql("ALTER TABLE t ADD dt STRING");
@@ -75,7 +104,7 @@ public class TimeTravelITCase extends CatalogITCaseBase {
                         "[+I[1, hello, null], +I[2, world, null], +I[1, flink, 2020-01-01], +I[2, paimon, 2020-01-02]]");
 
         // time travel to snapshot 1
-        result = sql(String.format("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '%s'", anchor));
+        result = sql("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '%s'", anchor);
         assertThat(result.toString()).isEqualTo("[+I[1, hello], +I[2, world]]");
     }
 
@@ -89,31 +118,49 @@ public class TimeTravelITCase extends CatalogITCaseBase {
 
     @Test
     public void testSystemTableTimeTravel() throws Exception {
-        // old schema
         sql("CREATE TABLE t (k INT, v STRING)");
 
         // snapshot 1
         sql("INSERT INTO t VALUES(1, 'hello'), (2, 'world')");
 
         Thread.sleep(3000);
-        String anchor =
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-
-        // new schema
-        sql("ALTER TABLE t ADD dt STRING");
+        String anchor = now();
 
         // snapshot 2
-        sql("INSERT INTO t VALUES(1, 'flink', '2020-01-01'), (2, 'paimon', '2020-01-02')");
+        sql("INSERT INTO t VALUES(1, 'flink'), (2, 'paimon')");
 
         List<Row> result = sql("SELECT * FROM t$files");
         assertThat(result.size()).isEqualTo(2);
 
         // time travel to snapshot 1
-        result =
-                sql(
-                        String.format(
-                                "SELECT * FROM t$files FOR SYSTEM_TIME AS OF TIMESTAMP '%s'",
-                                anchor));
+        result = sql("SELECT * FROM t$files FOR SYSTEM_TIME AS OF TIMESTAMP '%s'", anchor);
+
         assertThat(result.size()).isEqualTo(1);
+    }
+
+    // -------------------------------------------------------
+    //                        Streaming
+    // -------------------------------------------------------
+
+    @Test
+    public void testStreamingTravel() throws Exception {
+        sql("CREATE TABLE t (k INT PRIMARY KEY NOT ENFORCED, v STRING)");
+
+        BlockingIterator<Row, Row> streamIter =
+                streamSqlBlockIter("SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '%s'", now());
+
+        // snapshot 1
+        sql("INSERT INTO t VALUES(1, 'hello')");
+        // snapshot 2
+        sql("INSERT INTO t VALUES(1, 'apache')");
+
+        List<Row> result = streamIter.collect(3);
+        assertThat(result.toString()).isEqualTo("[+I[1, hello], -U[1, hello], +U[1, apache]]");
+
+        streamIter.close();
+    }
+
+    private String now() {
+        return LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
     }
 }

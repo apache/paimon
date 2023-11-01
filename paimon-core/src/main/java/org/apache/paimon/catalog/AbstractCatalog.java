@@ -239,8 +239,7 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @Override
-    public Table getTable(Identifier identifier, @Nullable Long timestamp)
-            throws TableNotExistException {
+    public Table getTable(Identifier identifier) throws TableNotExistException {
         if (isSystemDatabase(identifier.getDatabaseName())) {
             String tableName = identifier.getObjectName();
             Table table =
@@ -255,26 +254,19 @@ public abstract class AbstractCatalog implements Catalog {
             String tableName = splits[0];
             String type = splits[1];
             FileStoreTable originTable =
-                    getDataTable(
-                            new Identifier(identifier.getDatabaseName(), tableName), timestamp);
+                    getDataTable(new Identifier(identifier.getDatabaseName(), tableName));
             Table table = SystemTableLoader.load(type, fileIO, originTable);
             if (table == null) {
                 throw new TableNotExistException(identifier);
             }
             return table;
         } else {
-            return getDataTable(identifier, timestamp);
+            return getDataTable(identifier);
         }
     }
 
-    @Override
-    public Table getTable(Identifier identifier) throws TableNotExistException {
-        return getTable(identifier, null);
-    }
-
-    private FileStoreTable getDataTable(Identifier identifier, Long timestamp)
-            throws TableNotExistException {
-        TableSchema tableSchema = getDataTableSchema(identifier, timestamp);
+    private FileStoreTable getDataTable(Identifier identifier) throws TableNotExistException {
+        TableSchema tableSchema = getDataTableSchema(identifier);
         return FileStoreTableFactory.create(
                 fileIO,
                 getDataTableLocation(identifier),
@@ -314,7 +306,7 @@ public abstract class AbstractCatalog implements Catalog {
         return catalogOptions;
     }
 
-    protected abstract TableSchema getDataTableSchema(Identifier identifier, Long timestamp)
+    protected abstract TableSchema getDataTableSchema(Identifier identifier)
             throws TableNotExistException;
 
     @VisibleForTesting

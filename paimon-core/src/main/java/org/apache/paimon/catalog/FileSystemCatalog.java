@@ -104,11 +104,10 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public TableSchema getDataTableSchema(Identifier identifier, Long timestamp)
-            throws TableNotExistException {
+    public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
         Path path = getDataTableLocation(identifier);
         return new SchemaManager(fileIO, path)
-                .schemaByTimestamp(timestamp)
+                .latest()
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
 
