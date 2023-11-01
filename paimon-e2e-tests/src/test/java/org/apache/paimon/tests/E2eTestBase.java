@@ -142,7 +142,7 @@ public abstract class E2eTestBase {
         environment.withServices(services.toArray(new String[0])).withLocalCompose(true);
 
         environment.waitingFor(
-                "jobmanager_1", Wait.forLogMessage(".*Registering task executor.*", 1));
+                "jobmanager_1", Wait.forLogMessage(".*Registering TaskManager.*", 1));
         environment.waitingFor(
                 "taskmanager_1",
                 Wait.forLogMessage(".*Successful registration at resource manager.*", 1));
