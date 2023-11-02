@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.RandomAccessInputView;
 import org.apache.paimon.data.SimpleCollectingOutputView;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -33,6 +34,9 @@ import java.util.ArrayList;
 
 /** Only cache {@link InternalRow}s in memory. */
 public class InMemoryBuffer implements RowBuffer {
+
+    private static final EmptyInMemoryBufferIterator EMPTY_ITERATOR =
+            new EmptyInMemoryBufferIterator();
 
     private final AbstractRowDataSerializer<InternalRow> serializer;
     private final ArrayList<MemorySegment> recordBufferSegments;
@@ -110,7 +114,10 @@ public class InMemoryBuffer implements RowBuffer {
 
     @Override
     public InMemoryBufferIterator newIterator() {
-        tryInitialize();
+        if (!isInitialized) {
+            // to avoid request memory
+            return EMPTY_ITERATOR;
+        }
         RandomAccessInputView recordBuffer =
                 new RandomAccessInputView(
                         this.recordBufferSegments, segmentSize, numBytesInLastBuffer);
@@ -126,6 +133,9 @@ public class InMemoryBuffer implements RowBuffer {
     }
 
     int getNumRecordBuffers() {
+        if (!isInitialized) {
+            return 0;
+        }
         int result = (int) (currentDataBufferOffset / segmentSize);
         long mod = currentDataBufferOffset % segmentSize;
         if (mod != 0) {
@@ -189,5 +199,34 @@ public class InMemoryBuffer implements RowBuffer {
 
         @Override
         public void close() {}
+    }
+
+    // Use this to return an empty iterator, instead of use an interface (virtual function call will
+    // cause performance loss)
+    private static class EmptyInMemoryBufferIterator extends InMemoryBufferIterator {
+
+        private EmptyInMemoryBufferIterator() {
+            super(null, new InternalRowSerializer());
+        }
+
+        @Override
+        public boolean advanceNext() {
+            return false;
+        }
+
+        @Override
+        public BinaryRow getRow() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public BinaryRow next(BinaryRow reuse) {
+            return null;
+        }
+
+        @Override
+        public BinaryRow next() {
+            return null;
+        }
     }
 }

@@ -67,7 +67,7 @@ public class MemoryPoolFactory {
     }
 
     private void preemptMemory(MemoryOwner owner) {
-        long maxMemory = -1;
+        long maxMemory = 0;
         MemoryOwner max = null;
         for (MemoryOwner other : owners) {
             // Don't preempt yourself! Write and flush at the same time, which may lead to
