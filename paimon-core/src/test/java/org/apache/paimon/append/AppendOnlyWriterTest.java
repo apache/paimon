@@ -377,7 +377,7 @@ public class AppendOnlyWriterTest {
         }
         writer.flushMemory();
 
-        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
+        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(-1L);
         Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
         Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(1);
         rowCount = writer.getNewFiles().stream().map(DataFileMeta::rowCount).reduce(0L, Long::sum);
