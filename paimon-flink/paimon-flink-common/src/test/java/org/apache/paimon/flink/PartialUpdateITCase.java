@@ -297,7 +297,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         // g_1 should not be updated
         sql("INSERT INTO AGG VALUES (1, 3, 3, 1, '3', 3)");
 
-        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 3, 3, 2, "3", 3));
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 6, 3, 2, "3", 3));
 
         sql(
                 "INSERT INTO AGG VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, CAST(NULL AS VARCHAR), 4)");
@@ -305,6 +305,6 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         // a keep the last accumulator
         // b is not updated to null
         // c updated to null
-        assertThat(sql("SELECT a, b, c FROM AGG")).containsExactlyInAnyOrder(Row.of(3, 3, null));
+        assertThat(sql("SELECT a, b, c FROM AGG")).containsExactlyInAnyOrder(Row.of(6, 3, null));
     }
 }

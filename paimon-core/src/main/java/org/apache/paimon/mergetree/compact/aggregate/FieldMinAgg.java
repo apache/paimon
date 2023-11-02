@@ -52,4 +52,9 @@ public class FieldMinAgg extends FieldAggregator {
         }
         return min;
     }
+
+    @Override
+    public Object aggForOldSequence(Object accumulator, Object inputField) {
+        return agg(accumulator, inputField);
+    }
 }

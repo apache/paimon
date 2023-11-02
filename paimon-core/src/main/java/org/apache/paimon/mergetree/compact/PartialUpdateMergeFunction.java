@@ -133,6 +133,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     Long previousSeq = sequenceGen.generateNullable(row);
                     if (previousSeq == null || currentSeq >= previousSeq) {
                         row.setField(i, aggregator.agg(accumulator, field));
+                    } else {
+                        row.setField(i, aggregator.aggForOldSequence(accumulator, field));
                     }
                 }
             }

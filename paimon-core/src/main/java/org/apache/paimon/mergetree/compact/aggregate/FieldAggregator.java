@@ -90,6 +90,8 @@ public abstract class FieldAggregator implements Serializable {
 
     public abstract Object agg(Object accumulator, Object inputField);
 
+    public abstract Object aggForOldSequence(Object accumulator, Object inputField);
+
     public Object retract(Object accumulator, Object retractField) {
         throw new UnsupportedOperationException(
                 String.format(

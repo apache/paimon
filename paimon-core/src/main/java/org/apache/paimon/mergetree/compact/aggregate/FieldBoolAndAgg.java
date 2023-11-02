@@ -51,4 +51,9 @@ public class FieldBoolAndAgg extends FieldAggregator {
         }
         return boolAnd;
     }
+
+    @Override
+    public Object aggForOldSequence(Object accumulator, Object inputField) {
+        return agg(accumulator, inputField);
+    }
 }

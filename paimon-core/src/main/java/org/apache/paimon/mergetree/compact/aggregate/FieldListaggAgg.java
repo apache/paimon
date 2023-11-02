@@ -62,4 +62,9 @@ public class FieldListaggAgg extends FieldAggregator {
         }
         return concatenate;
     }
+
+    @Override
+    public Object aggForOldSequence(Object accumulator, Object inputField) {
+        return agg(accumulator, inputField);
+    }
 }

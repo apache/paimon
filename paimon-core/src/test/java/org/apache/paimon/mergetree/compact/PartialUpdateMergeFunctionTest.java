@@ -108,7 +108,10 @@ public class PartialUpdateMergeFunctionTest {
                         DataTypes.INT(),
                         DataTypes.INT(),
                         DataTypes.INT());
-        assertThatThrownBy(() -> PartialUpdateMergeFunction.factory(options, rowType))
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(
+                                        options, rowType, ImmutableList.of("f0")))
                 .hasMessageContaining("can not be found in table schema");
     }
 
@@ -357,6 +360,12 @@ public class PartialUpdateMergeFunctionTest {
         add(func, 1, 2, 1, 2, 2, 2, 2, 0);
         validate(func, 1, 2, 2, 2, 2, 2, 1, 1);
 
+        // g_1, g_2 not advanced
+        add(func, 1, 1, 1, 1, 1, 1, 2, 0);
+        validate(func, 1, 2, 3, 2, 2, 1, 1, 1);
+        add(func, 1, 1, -1, 1, 1, 2, 2, 0);
+
+        // test null
         add(func, 1, 3, null, null, null, null, null, 2);
         validate(func, 1, 3, 2, null, null, 2, 1, 2);
 
