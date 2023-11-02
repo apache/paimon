@@ -149,7 +149,7 @@ public class InMemoryBufferTest {
     }
 
     @Test
-    public void testMemoryPoolWorksWellWithInMemoryBuffer() throws Exception {
+    public void testMemoryPoolWorksWellWithInMemoryBuffer() {
         MemoryPoolFactory memoryPoolFactory =
                 new MemoryPoolFactory(
                         new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE));
@@ -163,14 +163,14 @@ public class InMemoryBufferTest {
         owner1.reset();
 
         for (int i = 0; i < 100; i++) {
-            Assertions.assertThatCode(() -> owner2.put()).doesNotThrowAnyException();
+            Assertions.assertThatCode(owner2::put).doesNotThrowAnyException();
         }
     }
 
     /** Used for test. */
-    public class Owner implements MemoryOwner {
+    public static class Owner implements MemoryOwner {
 
-        private InternalRowSerializer internalRowSerializer;
+        private final InternalRowSerializer internalRowSerializer;
         private InMemoryBuffer inMemoryBuffer;
         private final BinaryRow binaryRow;
 
@@ -184,7 +184,6 @@ public class InMemoryBufferTest {
             Arrays.fill(s, (byte) 'a');
             binaryRowWriter.writeString(0, BinaryString.fromBytes(s));
             binaryRowWriter.complete();
-            binaryRowWriter = null;
         }
 
         @Override
@@ -198,7 +197,7 @@ public class InMemoryBufferTest {
         }
 
         @Override
-        public void flushMemory() throws Exception {
+        public void flushMemory() {
             inMemoryBuffer.complete();
             // emulate real-world flushing data to disk, we need to call newIterator method
             inMemoryBuffer.newIterator();
