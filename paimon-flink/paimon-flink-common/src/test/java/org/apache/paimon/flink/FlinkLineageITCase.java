@@ -48,6 +48,8 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
     private static final String THROWING_META = "throwing-meta";
     private static final Map<String, Map<String, TableLineageEntity>> jobSourceTableLineages =
             new HashMap<>();
+    private static final Map<String, Map<String, TableLineageEntity>> jobSinkTableLineages =
+            new HashMap<>();
 
     @Override
     protected List<String> ddl() {
@@ -72,10 +74,24 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
         // Call storeSinkTableLineage and storeSourceTableLineage methods
         tEnv.getConfig().getConfiguration().set(PipelineOptions.NAME, "insert_t_job");
-        assertThatThrownBy(
-                        () -> tEnv.executeSql("INSERT INTO T VALUES (1, 2, 3),(4, 5, 6);").await())
-                .hasRootCauseInstanceOf(UnsupportedOperationException.class)
-                .hasRootCauseMessage("Method saveSinkTableLineage is not supported");
+        tEnv.executeSql("INSERT INTO T VALUES (1, 2, 3),(4, 5, 6);").await();
+        assertThat(jobSinkTableLineages).isNotEmpty();
+        TableLineageEntity sinkTableLineage =
+                jobSinkTableLineages.get("insert_t_job").get("default.T.insert_t_job");
+        assertThat(sinkTableLineage.getTable()).isEqualTo("T");
+
+        List<Row> sinkTableRows = new ArrayList<>();
+        try (CloseableIterator<Row> iterator =
+                tEnv.executeSql("SELECT * FROM sys.sink_table_lineage").collect()) {
+            while (iterator.hasNext()) {
+                sinkTableRows.add(iterator.next());
+            }
+        }
+        assertThat(sinkTableRows.size()).isEqualTo(1);
+        Row sinkTableRow = sinkTableRows.get(0);
+        assertThat(sinkTableRow.getField("database_name")).isEqualTo("default");
+        assertThat(sinkTableRow.getField("table_name")).isEqualTo("T");
+        assertThat(sinkTableRow.getField("job_name")).isEqualTo("insert_t_job");
 
         tEnv.getConfig().getConfiguration().set(PipelineOptions.NAME, "select_t_job");
         tEnv.executeSql("SELECT * FROM T").collect().close();
@@ -84,18 +100,18 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
                 jobSourceTableLineages.get("select_t_job").get("default.T.select_t_job");
         assertThat(sourceTableLineage.getTable()).isEqualTo("T");
 
-        List<Row> lineageRows = new ArrayList<>();
+        List<Row> sourceTableRows = new ArrayList<>();
         try (CloseableIterator<Row> iterator =
                 tEnv.executeSql("SELECT * FROM sys.source_table_lineage").collect()) {
             while (iterator.hasNext()) {
-                lineageRows.add(iterator.next());
+                sourceTableRows.add(iterator.next());
             }
         }
-        assertThat(lineageRows.size()).isEqualTo(1);
-        Row lineageRow = lineageRows.get(0);
-        assertThat(lineageRow.getField("database_name")).isEqualTo("default");
-        assertThat(lineageRow.getField("table_name")).isEqualTo("T");
-        assertThat(lineageRow.getField("job_name")).isEqualTo("select_t_job");
+        assertThat(sourceTableRows.size()).isEqualTo(1);
+        Row sourceTableRow = sourceTableRows.get(0);
+        assertThat(sourceTableRow.getField("database_name")).isEqualTo("default");
+        assertThat(sourceTableRow.getField("table_name")).isEqualTo("T");
+        assertThat(sourceTableRow.getField("job_name")).isEqualTo("select_t_job");
     }
 
     private static String getTableLineageKey(TableLineageEntity entity) {
@@ -144,17 +160,21 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
             assertThat(entity.getJob()).isEqualTo("insert_t_job");
             assertThat(entity.getTable()).isEqualTo("T");
             assertThat(entity.getDatabase()).isEqualTo("default");
-            throw new UnsupportedOperationException("Method saveSinkTableLineage is not supported");
+            jobSinkTableLineages
+                    .computeIfAbsent(entity.getJob(), key -> new HashMap<>())
+                    .put(getTableLineageKey(entity), entity);
         }
 
         @Override
         public Iterator<TableLineageEntity> sinkTableLineages(@Nullable Predicate predicate) {
-            throw new UnsupportedOperationException();
+            return jobSinkTableLineages.values().stream()
+                    .flatMap(v -> v.values().stream())
+                    .iterator();
         }
 
         @Override
         public void deleteSinkTableLineage(String job) {
-            throw new UnsupportedOperationException();
+            jobSinkTableLineages.remove(job);
         }
 
         @Override
