@@ -350,7 +350,7 @@ commits of `OVERWRITE`, you can configure `streaming-read-overwrite`.
 {{< tab "Flink" >}}
 
 By default, the parallelism of batch reads is the same as the number of splits, while the parallelism of stream 
-reads is the same as the number of buckets.
+reads is the same as the number of buckets, but not greater than `scan.infer-parallelism.max`.
 
 Disable `scan.infer-parallelism`, global parallelism will be used for reads.
 
@@ -371,6 +371,12 @@ You can also manually specify the parallelism from `scan.parallelism`.
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
             <td>If it is false, parallelism of source are set by global parallelism. Otherwise, source parallelism is inferred from splits number (batch mode) or bucket number(streaming mode).</td>
+        </tr>
+         <tr>
+            <td><h5>scan.infer-parallelism.max</h5></td>
+            <td style="word-wrap: break-word;">1024</td>
+            <td>Integer</td>
+            <td>If scan.infer-parallelism is true, limit the parallelism of source through this option.</td>
         </tr>
         <tr>
             <td><h5>scan.parallelism</h5></td>

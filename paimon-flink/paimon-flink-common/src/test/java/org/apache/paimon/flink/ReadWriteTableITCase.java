@@ -78,6 +78,7 @@ import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_OPEN_FILE_COST;
 import static org.apache.paimon.CoreOptions.SOURCE_SPLIT_TARGET_SIZE;
 import static org.apache.paimon.flink.AbstractFlinkTableFactory.buildPaimonTable;
+import static org.apache.paimon.flink.FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.INFER_SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_PARALLELISM;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM;
@@ -1136,6 +1137,22 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                             }
                                         })))
                 .isEqualTo(3);
+
+        // when scan.infer-parallelism.max less than infer parallelism, the parallelism is
+        // scan.infer-parallelism.max
+        assertThat(
+                        sourceParallelism(
+                                buildQueryWithTableOptions(
+                                        table,
+                                        "*",
+                                        "",
+                                        new HashMap<String, String>() {
+                                            {
+                                                put(INFER_SCAN_PARALLELISM.key(), "true");
+                                                put(INFER_SCAN_MAX_PARALLELISM.key(), "1");
+                                            }
+                                        })))
+                .isEqualTo(1);
 
         // for streaming mode
         assertThat(
