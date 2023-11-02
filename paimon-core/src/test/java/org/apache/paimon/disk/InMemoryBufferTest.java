@@ -167,6 +167,7 @@ public class InMemoryBufferTest {
         }
     }
 
+    /** Used for test. */
     public class Owner implements MemoryOwner {
 
         private InternalRowSerializer internalRowSerializer;
