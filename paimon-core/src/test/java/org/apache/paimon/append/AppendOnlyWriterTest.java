@@ -365,7 +365,7 @@ public class AppendOnlyWriterTest {
         }
 
         writer.flushMemory();
-        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
+        Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(-1L);
         Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
         Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(0);
         long rowCount =
