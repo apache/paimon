@@ -40,7 +40,7 @@ By partitioning, users can efficiently operate on a slice of records in the tabl
 
 {{< hint info >}}
 
-Partition keys must be a subset of primary keys if primary keys are defined.
+Partition keys must be a subset of primary keys if primary keys are defined. If you need cross partition upsert (primary keys not contain all partition fields), you should use [Dynamic Bucket]({{< ref "concepts/primary-key-table#dynamic-bucket">}}) mode.
 
 {{< /hint >}}
 
