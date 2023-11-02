@@ -29,6 +29,6 @@ public enum RetractStrategy {
     /** Set the aggregate column to null. */
     SET_NULL,
 
-    /** Using the aggregate function's retract strategy */
+    /** Using the aggregate function's retract strategy. */
     DEFAULT,
 }
