@@ -16,4 +16,4 @@
 org.apache.paimon.flink.FlinkCatalogTest$TestingLogSoreRegisterFactory
 
 # Lineage meta factory
-org.apache.paimon.flink.FlinkLineageITCase$ThrowingLineageMetaFactory
+org.apache.paimon.flink.FlinkLineageITCase$TestingMemoryLineageMetaFactory

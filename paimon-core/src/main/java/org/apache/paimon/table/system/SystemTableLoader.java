@@ -20,6 +20,7 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
@@ -28,6 +29,7 @@ import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
@@ -38,7 +40,9 @@ import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
+import static org.apache.paimon.table.system.SourceTableLineageTable.SOURCE_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Loader to load system {@link Table}s. */
 public class SystemTableLoader {
@@ -75,12 +79,22 @@ public class SystemTableLoader {
             String tableName,
             FileIO fileIO,
             Supplier<Map<String, Map<String, Path>>> allTablePaths,
-            Map<String, String> catalogOptions) {
+            Map<String, String> catalogOptions,
+            @Nullable LineageMetaFactory lineageMetaFactory) {
         switch (tableName.toLowerCase()) {
             case ALL_TABLE_OPTIONS:
                 return new AllTableOptionsTable(fileIO, allTablePaths.get());
             case CATALOG_OPTIONS:
                 return new CatalogOptionsTable(catalogOptions);
+            case SOURCE_TABLE_LINEAGE:
+                {
+                    checkNotNull(
+                            lineageMetaFactory,
+                            String.format(
+                                    "Lineage meta should be configured for catalog with %s",
+                                    LINEAGE_META.key()));
+                    return new SourceTableLineageTable(lineageMetaFactory, catalogOptions);
+                }
             default:
                 return null;
         }

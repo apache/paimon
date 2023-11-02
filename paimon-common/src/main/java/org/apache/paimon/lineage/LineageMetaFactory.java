@@ -21,8 +21,10 @@ package org.apache.paimon.lineage;
 import org.apache.paimon.factories.Factory;
 import org.apache.paimon.options.Options;
 
+import java.io.Serializable;
+
 /** Factory to create {@link LineageMeta}. Each factory should have a unique identifier. */
-public interface LineageMetaFactory extends Factory {
+public interface LineageMetaFactory extends Factory, Serializable {
 
     LineageMeta create(LineageMetaContext context);
 
