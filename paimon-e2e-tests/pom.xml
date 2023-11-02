@@ -211,7 +211,7 @@ under the License.
                         <artifactItem>
                             <groupId>org.apache.flink</groupId>
                             <artifactId>${flink.sql.connector.kafka}</artifactId>
-                            <version>${test.flink.version}</version>
+                            <version>${test.flink.connector.kafka.version}</version>
                             <destFileName>flink-sql-connector-kafka.jar</destFileName>
                             <type>jar</type>
                             <overWrite>true</overWrite>
@@ -277,10 +277,20 @@ under the License.
     <profiles>
         <!-- Activate these profiles with -Pflink-x.xx to build and test against different Flink versions -->
         <profile>
+            <id>flink-1.17</id>
+            <properties>
+                <test.flink.main.version>1.17</test.flink.main.version>
+                <test.flink.version>1.17.1</test.flink.version>
+                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
+            </properties>
+        </profile>
+
+        <profile>
             <id>flink-1.16</id>
             <properties>
                 <test.flink.main.version>1.16</test.flink.main.version>
                 <test.flink.version>1.16.2</test.flink.version>
+                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
             </properties>
         </profile>
 
@@ -289,6 +299,7 @@ under the License.
             <properties>
                 <test.flink.main.version>1.15</test.flink.main.version>
                 <test.flink.version>1.15.3</test.flink.version>
+                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
                 <flink.sql.connector.kafka>flink-sql-connector-kafka</flink.sql.connector.kafka>
                 <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
             </properties>
@@ -299,6 +310,7 @@ under the License.
             <properties>
                 <test.flink.main.version>1.14</test.flink.main.version>
                 <test.flink.version>1.14.6</test.flink.version>
+                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
                 <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
                 <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
             </properties>

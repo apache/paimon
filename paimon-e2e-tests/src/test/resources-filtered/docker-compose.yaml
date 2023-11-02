@@ -126,7 +126,7 @@ services:
     env_file:
       - ./hadoop-hive.env
     ports:
-      - "50070:50070"
+      - "50070"
 
   datanode:
     image: bde2020/hadoop-datanode:2.0.0-hadoop2.7.4-java8
@@ -142,7 +142,7 @@ services:
     environment:
       SERVICE_PRECONDITION: "namenode:50070"
     ports:
-      - "50075:50075"
+      - "50075"
 
   hive-server:
     image: bde2020/hive:2.3.2-postgresql-metastore
@@ -159,7 +159,7 @@ services:
       HIVE_CORE_CONF_javax_jdo_option_ConnectionURL: "jdbc:postgresql://hive-metastore/metastore"
       SERVICE_PRECONDITION: "hive-metastore:9083"
     ports:
-      - "10000:10000"
+      - "10000"
 
   hive-metastore:
     image: bde2020/hive:2.3.2-postgresql-metastore
@@ -175,7 +175,7 @@ services:
     environment:
       SERVICE_PRECONDITION: "namenode:50070 datanode:50075 hive-metastore-postgresql:5432"
     ports:
-      - "9083:9083"
+      - "9083"
 
   hive-metastore-postgresql:
     image: bde2020/hive-metastore-postgresql:2.3.0
