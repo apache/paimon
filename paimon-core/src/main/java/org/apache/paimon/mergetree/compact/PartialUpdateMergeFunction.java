@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldLastNonNullValueAgg;
 import org.apache.paimon.mergetree.compact.aggregate.FieldLastValueAgg;
+import org.apache.paimon.mergetree.compact.aggregate.RetractStrategy;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.DataType;
@@ -47,6 +48,7 @@ import java.util.stream.Stream;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction.AGG_FUNCTION;
 import static org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction.IGNORE_RETRACT;
+import static org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction.RETRACT_STRATEGY;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
@@ -154,17 +156,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             row.setField(i, getters[i].getFieldOrNull(kv.value()));
                         } else {
                             // retract normal field
-                            if (kv.valueKind() == RowKind.UPDATE_BEFORE) {
-                                FieldAggregator aggregator = fieldAggregators.get(i);
-                                Object accumulator = getters[i].getFieldOrNull(row);
-                                row.setField(
-                                        i,
-                                        aggregator.retract(
-                                                accumulator,
-                                                getters[i].getFieldOrNull(kv.value())));
-                            } else {
-                                row.setField(i, null);
-                            }
+                            FieldAggregator aggregator = fieldAggregators.get(i);
+                            Object accumulator = getters[i].getFieldOrNull(row);
+                            row.setField(
+                                    i,
+                                    aggregator.retract(
+                                            accumulator, getters[i].getFieldOrNull(kv.value())));
                         }
                     }
                 }
@@ -343,11 +340,26 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
                                         .stringType()
                                         .noDefaultValue());
+                RetractStrategy retractStrategy =
+                        options.get(
+                                key(FIELDS_PREFIX + "." + fieldName + "." + RETRACT_STRATEGY)
+                                        .enumType(RetractStrategy.class)
+                                        .noDefaultValue());
                 boolean ignoreRetract =
                         options.get(
                                 key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
                                         .booleanType()
                                         .defaultValue(false));
+
+                if (retractStrategy == null) {
+                    // for not agg field, we use set null for compatibility
+                    if (strAggFunc == null) {
+                        retractStrategy = RetractStrategy.SET_NULL;
+                    } else {
+                        retractStrategy =
+                                ignoreRetract ? RetractStrategy.IGNORE : RetractStrategy.DEFAULT;
+                    }
+                }
 
                 if (strAggFunc != null) {
                     fieldAggregators.put(
@@ -355,7 +367,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             FieldAggregator.createFieldAggregator(
                                     fieldType,
                                     strAggFunc,
-                                    ignoreRetract,
+                                    retractStrategy,
                                     isPrimaryKey,
                                     () -> {
                                         throw new RuntimeException("Unexpected usage!");
@@ -369,7 +381,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 FieldAggregator.createFieldAggregator(
                                         fieldType,
                                         null,
-                                        ignoreRetract,
+                                        retractStrategy,
                                         isPrimaryKey,
                                         () -> new FieldLastValueAgg(fieldType)));
                     } else {
@@ -378,7 +390,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                                 FieldAggregator.createFieldAggregator(
                                         fieldType,
                                         null,
-                                        ignoreRetract,
+                                        retractStrategy,
                                         isPrimaryKey,
                                         () -> new FieldLastNonNullValueAgg(fieldType)));
                     }

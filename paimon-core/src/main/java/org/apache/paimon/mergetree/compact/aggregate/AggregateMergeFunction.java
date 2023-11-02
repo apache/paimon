@@ -46,6 +46,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     public static final String AGG_FUNCTION = "aggregate-function";
     public static final String IGNORE_RETRACT = "ignore-retract";
 
+    public static final String RETRACT_STRATEGY = "retract-strategy";
+
     private final InternalRow.FieldGetter[] getters;
     private final FieldAggregator[] aggregators;
 
@@ -144,16 +146,27 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                                 key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
                                         .stringType()
                                         .noDefaultValue());
+                RetractStrategy retractStrategy =
+                        conf.get(
+                                key(FIELDS_PREFIX + "." + fieldName + "." + RETRACT_STRATEGY)
+                                        .enumType(RetractStrategy.class)
+                                        .noDefaultValue());
                 boolean ignoreRetract =
                         conf.get(
                                 key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
                                         .booleanType()
                                         .defaultValue(false));
+                retractStrategy =
+                        retractStrategy != null
+                                ? retractStrategy
+                                : (ignoreRetract
+                                        ? RetractStrategy.IGNORE
+                                        : RetractStrategy.DEFAULT);
                 fieldAggregators[i] =
                         FieldAggregator.createFieldAggregator(
                                 fieldType,
                                 strAggFunc,
-                                ignoreRetract,
+                                retractStrategy,
                                 isPrimaryKey,
                                 () -> new FieldLastNonNullValueAgg(fieldType));
             }

@@ -36,7 +36,7 @@ public abstract class FieldAggregator implements Serializable {
     public static FieldAggregator createFieldAggregator(
             DataType fieldType,
             @Nullable String strAgg,
-            boolean ignoreRetract,
+            RetractStrategy retractStrategy,
             boolean isPrimaryKey,
             Supplier<FieldAggregator> defaultAggregator) {
         FieldAggregator fieldAggregator;
@@ -80,8 +80,13 @@ public abstract class FieldAggregator implements Serializable {
             }
         }
 
-        if (ignoreRetract) {
-            fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
+        switch (retractStrategy) {
+            case IGNORE:
+                fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
+                break;
+            case SET_NULL:
+                fieldAggregator = new FieldSetNullRetractAgg(fieldAggregator);
+                break;
         }
         return fieldAggregator;
     }

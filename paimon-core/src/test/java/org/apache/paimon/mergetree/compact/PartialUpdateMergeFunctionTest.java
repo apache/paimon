@@ -330,8 +330,8 @@ public class PartialUpdateMergeFunctionTest {
         options.set("fields.f2.aggregate-function", "sum");
         options.set("fields.f4.aggregate-function", "last_value");
         options.set("fields.f6.aggregate-function", "last_non_null_value");
-        options.set("fields.f3.ignore-retract", "true");
-        options.set("fields.f4.ignore-retract", "true");
+        options.set("fields.f3.retract-strategy", "IGNORE");
+        options.set("fields.f4.retract-strategy", "SET_NULL");
         options.set("fields.f6.ignore-retract", "true");
         RowType rowType =
                 RowType.of(
@@ -370,10 +370,12 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, 1, 3, 2, null, null, 2, 1, 2);
 
         // test retract
-        add(func, RowKind.UPDATE_BEFORE, 1, 3, 2, 1, 1, 1, 1, 2);
-        validate(func, 1, 3, 0, null, null, 2, 1, 2);
-        add(func, RowKind.DELETE, 1, 3, 2, 1, 1, 1, 1, 2);
-        validate(func, 1, 3, null, null, null, 2, null, 2);
+        add(func, 1, 3, 1, 1, 1, 1, 1, 3);
+        validate(func, 1, 3, 3, 1, 1, 1, 1, 3);
+        add(func, RowKind.UPDATE_BEFORE, 1, 3, 2, 1, 1, 1, 1, 3);
+        validate(func, 1, 3, 1, 1, null, 1, 1, 3);
+        add(func, RowKind.DELETE, 1, 3, 2, 1, 1, 1, 1, 3);
+        validate(func, 1, 3, -1, 1, null, 1, 1, 3);
     }
 
     @Test
@@ -385,8 +387,8 @@ public class PartialUpdateMergeFunctionTest {
         options.set("fields.f2.aggregate-function", "sum");
         options.set("fields.f4.aggregate-function", "last_value");
         options.set("fields.f6.aggregate-function", "last_non_null_value");
-        options.set("fields.f3.ignore-retract", "true");
-        options.set("fields.f4.ignore-retract", "true");
+        options.set("fields.f3.retract-strategy", "IGNORE");
+        options.set("fields.f4.retract-strategy", "SET_NULL");
         options.set("fields.f6.ignore-retract", "true");
         RowType rowType =
                 RowType.of(
@@ -428,7 +430,7 @@ public class PartialUpdateMergeFunctionTest {
         add(func, RowKind.UPDATE_BEFORE, 1, 2, 1, 3);
         validate(func, null, 0, 2, 3);
         add(func, RowKind.DELETE, 1, 2, 1, 3);
-        validate(func, null, null, 2, 3);
+        validate(func, null, -2, 2, 3);
     }
 
     private void add(MergeFunction<KeyValue> function, Integer... f) {
