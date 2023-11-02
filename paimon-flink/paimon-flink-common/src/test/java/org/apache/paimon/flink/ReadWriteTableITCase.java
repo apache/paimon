@@ -1783,6 +1783,19 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         }
     }
 
+    @Test
+    public void testStreamingReadDeleteData() throws Exception {
+        bEnv.executeSql("CREATE TABLE t1 (id INT PRIMARY KEY NOT ENFORCED, name STRING)");
+        bEnv.executeSql("INSERT INTO t1 SELECT 1,'aa'").await();
+        bEnv.executeSql("DELETE FROM t1");
+        testBatchRead("SELECT * FROM t1", Collections.emptyList());
+
+        testStreamingRead(
+                        "SELECT * FROM t1 /*+ options('scan.mode'='from-snapshot','scan.snapshot-id'='1')*/",
+                        Arrays.asList(changelogRow("+I", 1, "aa"), changelogRow("-D", 1, "aa")))
+                .close();
+    }
+
     // ----------------------------------------------------------------------------------------------------------------
     // Tools
     // ----------------------------------------------------------------------------------------------------------------
