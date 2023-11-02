@@ -72,8 +72,7 @@ public class InMemoryBuffer implements RowBuffer {
     @Override
     public void reset() {
         if (this.isInitialized) {
-            // we need to set -1 here to avoid been preempt
-            this.currentDataBufferOffset = -1;
+            this.currentDataBufferOffset = 0;
             this.numBytesInLastBuffer = 0;
             this.numRecords = 0;
             returnToSegmentPool();
@@ -116,6 +115,7 @@ public class InMemoryBuffer implements RowBuffer {
     @Override
     public InMemoryBufferIterator newIterator() {
         if (!isInitialized) {
+            // to avoid request memory
             return EMPTY_ITERATOR;
         }
         RandomAccessInputView recordBuffer =
@@ -133,7 +133,7 @@ public class InMemoryBuffer implements RowBuffer {
     }
 
     int getNumRecordBuffers() {
-        if (currentDataBufferOffset < 0) {
+        if (!isInitialized) {
             return 0;
         }
         int result = (int) (currentDataBufferOffset / segmentSize);
@@ -216,7 +216,7 @@ public class InMemoryBuffer implements RowBuffer {
 
         @Override
         public BinaryRow getRow() {
-            return null;
+            throw new UnsupportedOperationException();
         }
 
         @Override

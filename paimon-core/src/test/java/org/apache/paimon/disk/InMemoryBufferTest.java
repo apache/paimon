@@ -117,7 +117,7 @@ public class InMemoryBufferTest {
 
         assertThat(buffer.memoryOccupancy()).isGreaterThan(0);
         buffer.reset();
-        assertThat(buffer.memoryOccupancy()).isEqualTo(-1);
+        assertThat(buffer.memoryOccupancy()).isEqualTo(0);
 
         // test read after reset
         try (RowBufferIterator iterator = buffer.newIterator()) {
