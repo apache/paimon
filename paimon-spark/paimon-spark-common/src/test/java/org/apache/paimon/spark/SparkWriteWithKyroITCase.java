@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.BeforeAll;
@@ -34,6 +35,9 @@ public class SparkWriteWithKyroITCase extends SparkWriteITCase {
         spark =
                 SparkSession.builder()
                         .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+                        .config(
+                                "spark.sql.extensions",
+                                PaimonSparkSessionExtensions.class.getName())
                         .master("local[2]")
                         .getOrCreate();
         spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());

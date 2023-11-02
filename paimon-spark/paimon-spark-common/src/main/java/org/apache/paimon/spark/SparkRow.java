@@ -54,10 +54,16 @@ public class SparkRow implements InternalRow, Serializable {
 
     private final RowType type;
     private final Row row;
+    private final RowKind rowKind;
 
     public SparkRow(RowType type, Row row) {
+        this(type, row, RowKind.INSERT);
+    }
+
+    public SparkRow(RowType type, Row row, RowKind rowkind) {
         this.type = type;
         this.row = row;
+        this.rowKind = rowkind;
     }
 
     @Override
@@ -67,16 +73,13 @@ public class SparkRow implements InternalRow, Serializable {
 
     @Override
     public RowKind getRowKind() {
-        return RowKind.INSERT;
+        return rowKind;
     }
 
     @Override
     public void setRowKind(RowKind rowKind) {
-        if (rowKind == RowKind.INSERT) {
-            return;
-        }
-
-        throw new UnsupportedOperationException("Can not set row kind for this row except INSERT.");
+        throw new UnsupportedOperationException(
+                "Spark row does not support modifying rowkind field");
     }
 
     @Override
