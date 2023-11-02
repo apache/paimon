@@ -173,49 +173,12 @@ case class WriteIntoPaimonTable(
             assignerParallelism = numSparkPartitions
           }
 
-          val rowRDD: RDD[Row] =
-            bootstrapRow.partitionBy(new HashPartitioner(assignerParallelism)).mapPartitions {
-              iter =>
-                {
-                  val sparkPartitionId = TaskContext.getPartitionId()
-                  val lst = scala.collection.mutable.ListBuffer[Row]()
-                  val ioManager = createIOManager
-                  val assigner = new GlobalIndexAssigner(table)
-                  try {
-                    assigner.open(
-                      ioManager,
-                      assignerParallelism,
-                      sparkPartitionId,
-                      (row, bucket) => {
-                        val extraRow: GenericRow = new GenericRow(2)
-                        extraRow.setField(0, row.getRowKind.toByteValue)
-                        extraRow.setField(1, bucket)
-                        lst.append(
-                          fromRow(
-                            SparkInternalRow.fromPaimon(new JoinedRow(row, extraRow), rowType)))
-                      }
-                    )
-                    iter.foreach(
-                      row => {
-                        val tuple: (KeyPartOrRow, Array[Byte]) = row._2
-                        val binaryRow = SerializationUtils.deserializeBinaryRow(tuple._2)
-                        tuple._1 match {
-                          case KeyPartOrRow.KEY_PART => assigner.bootstrapKey(binaryRow)
-                          case KeyPartOrRow.ROW => assigner.processInput(binaryRow)
-                          case _ =>
-                            throw new UnsupportedOperationException(s"unknown kind ${tuple._1}")
-                        }
-                      })
-                    assigner.endBoostrap(true)
-                    lst.iterator
-                  } finally {
-                    assigner.close()
-                    if (ioManager != null) {
-                      ioManager.close()
-                    }
-                  }
-                }
-            }
+          val globalDynamicBucketProcessor =
+            GlobalDynamicBucketProcessor(table, rowType, fromRow, assignerParallelism)
+          val rowRDD = bootstrapRow
+            .partitionBy(new HashPartitioner(assignerParallelism))
+            .mapPartitions(globalDynamicBucketProcessor.processPartition)
+
           repartitionByBucket(sparkSession.createDataFrame(rowRDD, newData.schema))
         case BucketMode.UNAWARE =>
           // Topology: input -> bucket-assigner
@@ -304,8 +267,8 @@ case class WriteIntoPaimonTable(
 
 object WriteIntoPaimonTable {
 
-  sealed trait BucketProcessor {
-    def processPartition(rowIterator: Iterator[Row]): Iterator[Row]
+  sealed trait BucketProcessor[In] {
+    def processPartition(rowIterator: Iterator[In]): Iterator[Row]
   }
 
   case class CommonBucketProcessor(
@@ -313,7 +276,7 @@ object WriteIntoPaimonTable {
       bucketColIndex: Int,
       toRow: ExpressionEncoder.Serializer[Row],
       fromRow: ExpressionEncoder.Deserializer[Row])
-    extends BucketProcessor {
+    extends BucketProcessor[Row] {
 
     private val rowType = writeBuilder.rowType
 
@@ -341,7 +304,7 @@ object WriteIntoPaimonTable {
       numSparkPartitions: Long,
       toRow: ExpressionEncoder.Serializer[Row],
       fromRow: ExpressionEncoder.Deserializer[Row]
-  ) extends BucketProcessor {
+  ) extends BucketProcessor[Row] {
 
     private val targetBucketRowNumber = fileStoreTable.coreOptions.dynamicBucketTargetRowNum
 
@@ -378,11 +341,58 @@ object WriteIntoPaimonTable {
     }
   }
 
+  case class GlobalDynamicBucketProcessor(
+      fileStoreTable: FileStoreTable,
+      rowType: RowType,
+      fromRow: ExpressionEncoder.Deserializer[Row],
+      assignerParallelism: Integer)
+    extends BucketProcessor[(Int, (KeyPartOrRow, Array[Byte]))] {
+
+    override def processPartition(
+        iter: Iterator[(Int, (KeyPartOrRow, Array[Byte]))]): Iterator[Row] = {
+      val sparkPartitionId = TaskContext.getPartitionId()
+      val lst = scala.collection.mutable.ListBuffer[Row]()
+      val ioManager = createIOManager
+      val assigner = new GlobalIndexAssigner(fileStoreTable)
+      try {
+        assigner.open(
+          ioManager,
+          assignerParallelism,
+          sparkPartitionId,
+          (row, bucket) => {
+            val extraRow: GenericRow = new GenericRow(2)
+            extraRow.setField(0, row.getRowKind.toByteValue)
+            extraRow.setField(1, bucket)
+            lst.append(fromRow(SparkInternalRow.fromPaimon(new JoinedRow(row, extraRow), rowType)))
+          }
+        )
+        iter.foreach(
+          row => {
+            val tuple: (KeyPartOrRow, Array[Byte]) = row._2
+            val binaryRow = SerializationUtils.deserializeBinaryRow(tuple._2)
+            tuple._1 match {
+              case KeyPartOrRow.KEY_PART => assigner.bootstrapKey(binaryRow)
+              case KeyPartOrRow.ROW => assigner.processInput(binaryRow)
+              case _ =>
+                throw new UnsupportedOperationException(s"unknown kind ${tuple._1}")
+            }
+          })
+        assigner.endBoostrap(true)
+        lst.iterator
+      } finally {
+        assigner.close()
+        if (ioManager != null) {
+          ioManager.close()
+        }
+      }
+    }
+  }
+
   case class UnawareBucketProcessor(
       bucketColIndex: Int,
       toRow: ExpressionEncoder.Serializer[Row],
       fromRow: ExpressionEncoder.Deserializer[Row])
-    extends BucketProcessor {
+    extends BucketProcessor[Row] {
 
     def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
       new Iterator[Row] {
