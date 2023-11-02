@@ -43,7 +43,7 @@ Paimon batch reads with time travel can specify a snapshot or a tag and read the
 
 {{< tabs "time-travel-example" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink (dynamic option)" >}}
 ```sql
 -- read the snapshot with id 1L
 SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
@@ -53,6 +53,17 @@ SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
 
 -- read tag 'my-tag'
 SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
+```
+{{< /tab >}}
+
+{{< tab "Flink 1.18+" >}}
+Flink SQL supports time travel syntax after 1.18.
+```sql
+-- read the snapshot from specified timestamp
+SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00';
+
+-- you can also use some simple expressions (see flink document to get supported functions)
+SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL '1' DAY
 ```
 {{< /tab >}}
 
@@ -274,7 +285,7 @@ SELECT * FROM t WHERE dt > '2023-06-26';
 If it's not a partitioned table, or you can't filter by partition, you can use Time travel's stream read.
 
 {{< tabs "streaming-time-travel" >}}
-{{< tab "Flink" >}}
+{{< tab "Flink (dynamic option)" >}}
 ```sql
 -- read changes from snapshot id 1L 
 SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
@@ -286,6 +297,18 @@ SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
 SELECT * FROM t /*+ OPTIONS('scan.mode'='from-snapshot-full','scan.snapshot-id' = '1') */;
 ```
 {{< /tab >}}
+
+{{< tab "Flink 1.18+" >}}
+Flink SQL supports time travel syntax after 1.18.
+```sql
+-- read the snapshot from specified timestamp
+SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00';
+
+-- you can also use some simple expressions (see flink document to get supported functions)
+SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL '1' DAY
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 ### Consumer ID

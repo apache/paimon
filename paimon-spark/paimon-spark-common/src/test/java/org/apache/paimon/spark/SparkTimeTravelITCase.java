@@ -71,7 +71,6 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
                 GenericRow.of(2, BinaryString.fromString("Paimon")));
 
         String anchor = LocalDateTime.now().toString();
-        // Thread.sleep(1000);
 
         // snapshot 2
         writeTable(
@@ -168,14 +167,36 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
     }
 
     @Test
-    public void testUnsupportedSystemTableTimeTravel() {
+    public void testSystemTableTimeTravel() throws Exception {
         spark.sql("CREATE TABLE t (k INT, v STRING)");
 
-        assertThatThrownBy(() -> spark.sql("SELECT * FROM `t$snapshots` VERSION AS OF 1"))
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                UnsupportedOperationException.class,
-                                "Only DataTable supports time travel but given table type is 'org.apache.paimon.table.system.SnapshotsTable'"));
+        // snapshot 1
+        writeTable(
+                "t",
+                GenericRow.of(1, BinaryString.fromString("Hello")),
+                GenericRow.of(2, BinaryString.fromString("Paimon")));
+
+        String anchor = LocalDateTime.now().toString();
+
+        // snapshot 2
+        writeTable(
+                "t",
+                GenericRow.of(3, BinaryString.fromString("Test")),
+                GenericRow.of(4, BinaryString.fromString("Case")));
+
+        assertThat(spark.sql("SELECT * FROM `t$files`").collectAsList().size()).isEqualTo(2);
+
+        // time travel to snapshot 1
+        assertThat(spark.sql("SELECT * FROM `t$files` VERSION AS OF 1").collectAsList().size())
+                .isEqualTo(1);
+        assertThat(
+                        spark.sql(
+                                        String.format(
+                                                "SELECT * FROM `t$files` TIMESTAMP AS OF '%s'",
+                                                anchor))
+                                .collectAsList()
+                                .size())
+                .isEqualTo(1);
     }
 
     @Test

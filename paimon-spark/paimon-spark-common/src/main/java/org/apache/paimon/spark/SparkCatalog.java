@@ -29,7 +29,6 @@ import org.apache.paimon.spark.analysis.NoSuchProcedureException;
 import org.apache.paimon.spark.catalog.ProcedureCatalog;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
-import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
 
@@ -218,7 +217,7 @@ public class SparkCatalog implements TableCatalog, ProcedureCatalog, SupportsNam
      * Do not annotate with <code>@override</code> here to maintain compatibility with Spark 3.2-.
      */
     public SparkTable loadTable(Identifier ident, String version) throws NoSuchTableException {
-        Table table = loadAndRequireDataTable(ident);
+        Table table = loadPaimonTable(ident);
         Options dynamicOptions = new Options();
 
         if (version.chars().allMatch(Character::isDigit)) {
@@ -240,7 +239,7 @@ public class SparkCatalog implements TableCatalog, ProcedureCatalog, SupportsNam
      * TableCatalog#loadTable(Identifier, long)}). But in SQL you should use seconds.
      */
     public SparkTable loadTable(Identifier ident, long timestamp) throws NoSuchTableException {
-        Table table = loadAndRequireDataTable(ident);
+        Table table = loadPaimonTable(ident);
         // Paimon's timestamp use millisecond
         timestamp = timestamp / 1000;
 
@@ -250,16 +249,9 @@ public class SparkCatalog implements TableCatalog, ProcedureCatalog, SupportsNam
         return new SparkTable(table.copy(option.toMap()));
     }
 
-    private Table loadAndRequireDataTable(Identifier ident) throws NoSuchTableException {
+    private Table loadPaimonTable(Identifier ident) throws NoSuchTableException {
         try {
-            Table table = load(ident);
-            if (!(table instanceof DataTable)) {
-                throw new UnsupportedOperationException(
-                        String.format(
-                                "Only DataTable supports time travel but given table type is '%s'.",
-                                table.getClass().getName()));
-            }
-            return table;
+            return load(ident);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
