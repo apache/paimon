@@ -64,7 +64,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final KeyValueFieldsExtractor keyValueFieldsExtractor;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final Supplier<RecordEqualiser> valueEqualiserSupplier;
-    private final MergeFunctionFactory<KeyValue> mfFactory;
+    private final MergeFunctionFactory<KeyValue> readerMfFactory;
+
+    private final MergeFunctionFactory<KeyValue> writerMfFactory;
 
     public KeyValueFileStore(
             FileIO fileIO,
@@ -77,14 +79,16 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
-            MergeFunctionFactory<KeyValue> mfFactory) {
+            MergeFunctionFactory<KeyValue> readerMfFactory,
+            MergeFunctionFactory<KeyValue> writerMfFactory) {
         super(fileIO, schemaManager, schemaId, options, partitionType);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
         this.valueType = valueType;
         this.keyValueFieldsExtractor = keyValueFieldsExtractor;
-        this.mfFactory = mfFactory;
+        this.readerMfFactory = readerMfFactory;
+        this.writerMfFactory = writerMfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
         this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
     }
@@ -113,7 +117,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 newKeyComparator(),
-                mfFactory,
+                readerMfFactory,
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 keyValueFieldsExtractor,
@@ -140,7 +144,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 keyComparatorSupplier,
                 valueEqualiserSupplier,
-                mfFactory,
+                writerMfFactory,
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),

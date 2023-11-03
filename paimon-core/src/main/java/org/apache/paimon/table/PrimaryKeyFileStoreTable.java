@@ -85,12 +85,15 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             KeyValueFieldsExtractor extractor =
                     PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
 
-            MergeFunctionFactory<KeyValue> mfFactory =
+            MergeFunctionFactory<KeyValue> readerMfFactory =
                     PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema);
+            MergeFunctionFactory<KeyValue> writerMfFactory = readerMfFactory;
             if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
-                mfFactory =
+                writerMfFactory =
                         LookupMergeFunction.wrap(
-                                mfFactory, new RowType(extractor.keyFields(tableSchema)), rowType);
+                                readerMfFactory,
+                                new RowType(extractor.keyFields(tableSchema)),
+                                rowType);
             }
 
             lazyStore =
@@ -106,7 +109,8 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             new RowType(extractor.keyFields(tableSchema)),
                             rowType,
                             extractor,
-                            mfFactory);
+                            readerMfFactory,
+                            writerMfFactory);
         }
         return lazyStore;
     }
