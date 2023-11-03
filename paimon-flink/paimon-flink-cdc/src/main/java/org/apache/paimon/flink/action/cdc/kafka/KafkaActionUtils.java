@@ -20,6 +20,8 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.flink.action.cdc.format.debezium.JsonPrimaryKeyDeserializationSchema;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
@@ -34,7 +36,6 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.util.CollectionUtil;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -54,6 +55,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -65,8 +67,14 @@ public class KafkaActionUtils {
 
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
+    private static final String DEBEZIUM_JSON = "debezium-json";
 
     public static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
+        return buildKafkaSource(kafkaConfig, new ArrayList<>());
+    }
+
+    public static KafkaSource<String> buildKafkaSource(
+            Configuration kafkaConfig, List<String> primaryKeys) {
         validateKafkaConfig(kafkaConfig);
         KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
 
@@ -77,8 +85,11 @@ public class KafkaActionUtils {
 
         kafkaSourceBuilder
                 .setTopics(topics)
-                .setValueOnlyDeserializer(new SimpleStringSchema())
-                .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
+                .setGroupId(kafkaPropertiesGroupId(kafkaConfig))
+                .setValueOnlyDeserializer(
+                        DEBEZIUM_JSON.equals(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT))
+                                ? new JsonPrimaryKeyDeserializationSchema(primaryKeys)
+                                : new SimpleStringSchema());
         Properties properties = new Properties();
         for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
             String key = entry.getKey();
@@ -262,6 +273,11 @@ public class KafkaActionUtils {
 
     static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
             Configuration kafkaConfig, String topic) {
+        return getKafkaEarliestConsumer(kafkaConfig, topic, new ArrayList<>());
+    }
+
+    static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
+            Configuration kafkaConfig, String topic, List<String> primaryKeys) {
         Properties props = new Properties();
         props.put(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
@@ -286,26 +302,33 @@ public class KafkaActionUtils {
                 Collections.singletonList(new TopicPartition(topic, firstPartition));
         consumer.assign(topicPartitions);
         consumer.seekToBeginning(topicPartitions);
-
-        return new KafkaConsumerWrapper(consumer);
+        return new KafkaConsumerWrapper(
+                consumer,
+                DEBEZIUM_JSON.equals(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT))
+                        ? primaryKeys
+                        : new ArrayList<>());
     }
 
     private static class KafkaConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
 
+        private static final String PK_NAMES_KEY = "pkNames";
+
         private final KafkaConsumer<String, String> consumer;
 
-        KafkaConsumerWrapper(KafkaConsumer<String, String> kafkaConsumer) {
+        private final List<String> pkNames;
+
+        KafkaConsumerWrapper(KafkaConsumer<String, String> kafkaConsumer, List<String> pkNames) {
             this.consumer = kafkaConsumer;
+            this.pkNames = pkNames;
         }
 
         @Override
         public List<String> getRecords(String topic, int pollTimeOutMills) {
             ConsumerRecords<String, String> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
-            Iterable<ConsumerRecord<String, String>> records = consumerRecords.records(topic);
-            List<String> result = new ArrayList<>();
-            records.forEach(r -> result.add(r.value()));
-            return result;
+            return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
+                    .map(r -> JsonSerdeUtil.addPrimaryKeysToJson(r.value(), pkNames, PK_NAMES_KEY))
+                    .collect(Collectors.toList());
         }
 
         @Override

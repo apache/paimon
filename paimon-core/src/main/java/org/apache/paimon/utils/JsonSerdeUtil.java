@@ -35,11 +35,13 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializerProvider;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ser.std.StdSerializer;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -217,6 +219,43 @@ public class JsonSerdeUtil {
      */
     public static <T> JsonNode toTree(T value) {
         return OBJECT_MAPPER_INSTANCE.valueToTree(value);
+    }
+
+    /**
+     * Adds primary key fields to a JSON string.
+     *
+     * @param value The original JSON string.
+     * @param pkNames A list of primary key names to be added to the JSON string.
+     * @param pkNamesKey The key under which the primary key names will be added.
+     * @return The JSON string with the added primary key names. If the JSON string is not a valid
+     *     JSON object, or if the list of primary key names is empty or null, the original JSON
+     *     string will be returned.
+     * @throws RuntimeException If an error occurs while parsing the JSON string or adding the
+     *     primary key names.
+     */
+    public static String addPrimaryKeysToJson(
+            String value, List<String> pkNames, String pkNamesKey) {
+        if (pkNames == null || pkNames.isEmpty()) {
+            return value;
+        }
+
+        try {
+            JsonNode jsonNode = OBJECT_MAPPER_INSTANCE.readTree(value);
+            if (jsonNode.isObject()) {
+                ObjectNode objectNode = (ObjectNode) jsonNode;
+                objectNode
+                        .putArray(pkNamesKey)
+                        .addAll(
+                                pkNames.stream()
+                                        .map(objectNode::textNode)
+                                        .collect(Collectors.toList()));
+                return OBJECT_MAPPER_INSTANCE.writeValueAsString(objectNode);
+            } else {
+                return value;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to add primary key", e);
+        }
     }
 
     public static boolean isNull(JsonNode jsonNode) {
