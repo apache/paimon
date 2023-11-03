@@ -43,6 +43,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 
@@ -145,7 +146,7 @@ public abstract class AbstractCatalog implements Catalog {
             throw new DatabaseNotExistException(databaseName);
         }
 
-        return listTablesImpl(databaseName);
+        return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
 
     protected abstract List<String> listTablesImpl(String databaseName);
