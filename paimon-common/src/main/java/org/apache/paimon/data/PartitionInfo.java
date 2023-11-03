@@ -31,7 +31,7 @@ public class PartitionInfo {
     // If the value of map[i] is minus, that means the row located in partition row, otherwise, the
     // row is located in outer row.
     // To avoid conflict of map[0] = 0, (because 0 is equals to -0), add every index by 1, that
-    // means, if map[0] = -1, then the 0 row is located in partition row (Math.abs(-1) - 1), i
+    // means, if map[0] = -1, then the 0 row is located in partition row (Math.abs(-1) - 1), if
     // map[0] = 1, mean it is located in (Math.abs(1) - 1) in the outer row.
     private final int[] map;
     private final RowType partitionType;
