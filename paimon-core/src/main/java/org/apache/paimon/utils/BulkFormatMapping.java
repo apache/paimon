@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -39,15 +40,18 @@ public class BulkFormatMapping {
 
     @Nullable private final int[] indexMapping;
     @Nullable private final CastFieldGetter[] castMapping;
+    @Nullable private final Pair<int[], RowType> partitionPair;
     private final FormatReaderFactory bulkFormat;
 
     public BulkFormatMapping(
             int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
+            @Nullable Pair<int[], RowType> partitionPair,
             FormatReaderFactory bulkFormat) {
         this.indexMapping = indexMapping;
         this.castMapping = castMapping;
         this.bulkFormat = bulkFormat;
+        this.partitionPair = partitionPair;
     }
 
     @Nullable
@@ -58,6 +62,10 @@ public class BulkFormatMapping {
     @Nullable
     public CastFieldGetter[] getCastMapping() {
         return castMapping;
+    }
+
+    public Pair<int[], RowType> getPartitionPair() {
+        return partitionPair;
     }
 
     public FormatReaderFactory getReaderFactory() {
@@ -155,9 +163,22 @@ public class BulkFormatMapping {
                             ? filters
                             : SchemaEvolutionUtil.createDataFilters(
                                     tableSchema.fields(), dataSchema.fields(), filters);
+
+            Pair<int[], RowType> partitionPair = null;
+            if (dataSchema.partitionKeys().size() != 0) {
+                Pair<int[], int[][]> partitionMappping =
+                        PartitionUtils.constructPartitionMapping(
+                                dataRecordType, dataSchema.partitionKeys(), dataProjection);
+                dataProjection = partitionMappping.getRight();
+                partitionPair =
+                        Pair.of(
+                                partitionMappping.getLeft(),
+                                dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
+            }
             return new BulkFormatMapping(
                     indexCastMapping.getIndexMapping(),
                     indexCastMapping.getCastMapping(),
+                    partitionPair,
                     formatDiscover
                             .discover(formatIdentifier)
                             .createReaderFactory(dataRecordType, dataProjection, dataFilters));

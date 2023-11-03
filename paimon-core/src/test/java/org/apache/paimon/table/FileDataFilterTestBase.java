@@ -245,7 +245,7 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                                             Collections.singletonList(21)),
                                     new LeafPredicate(
                                             IsNull.INSTANCE,
-                                            DataTypes.INT(),
+                                            DataTypes.STRING(),
                                             4,
                                             "f",
                                             Collections.emptyList()));
@@ -260,26 +260,19 @@ public abstract class FileDataFilterTestBase extends SchemaEvolutionTableTestBas
                             .hasSameElementsAs(
                                     Arrays.asList(
                                             "2|12|112|null|null|null",
-                                            "2|20|120|1120|S010|S20",
                                             "2|15|115|null|null|null",
                                             "2|16|116|null|null|null",
-                                            "2|18|118|1118|S008|S18",
                                             "1|11|111|null|null|null",
                                             "1|13|113|null|null|null",
                                             "1|14|114|null|null|null",
                                             "1|21|121|1121|S011|S21",
-                                            "1|22|122|1122|S012|S22",
-                                            "1|17|117|1117|S007|S17",
-                                            "1|19|119|1119|S009|S19"));
+                                            "1|22|122|1122|S012|S22"));
 
                     splits = toSplits(table.newSnapshotReader().read().dataSplits());
-                    // filter with "d" = 21 or "f" is null, read snapshot which contains "d" = 21
+                    // filter with "d" = 21 and "f" is null, read snapshot which contains "d" = 21
                     TableRead read2 =
                             table.newRead().withFilter(PredicateBuilder.and(predicateList));
-                    assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING))
-                            .hasSameElementsAs(
-                                    Arrays.asList(
-                                            "1|21|121|1121|S011|S21", "1|22|122|1122|S012|S22"));
+                    assertThat(getResult(read2, splits, SCHEMA_1_ROW_TO_STRING)).isEmpty();
                 },
                 getPrimaryKeyNames(),
                 tableConfig,

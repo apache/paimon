@@ -24,12 +24,15 @@ import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 
 import org.apache.avro.Schema;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.util.Utf8;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -144,7 +147,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
     @Override
     public FieldReader visitRecord(Schema schema, List<DataType> fieldTypes) {
-        return new RowReader(schema, fieldTypes);
+        return new RowReader(schema, fieldTypes, null, null);
     }
 
     private static class NullableReader implements FieldReader {
@@ -432,8 +435,13 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         }
     }
 
-    public RowReader createRowReader(Schema schema, List<DataType> fieldTypes, int[] projection) {
-        return new RowReader(schema, fieldTypes, projection);
+    public RowReader createRowReader(
+            Schema schema,
+            List<DataType> fieldTypes,
+            int[] projection,
+            @Nullable PartitionInfo partitionInfo,
+            @Nullable int[] indexMapping) {
+        return new RowReader(schema, fieldTypes, projection, partitionInfo, indexMapping);
     }
 
     /** A {@link FieldReader} to read {@link InternalRow}. */
@@ -442,12 +450,28 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         private final FieldReader[] fieldReaders;
         private final int[] projection;
         private final int[][] mapping;
+        private final @Nullable PartitionConverter partitionConverter;
+        private final @Nullable int[] indexMapping;
 
-        public RowReader(Schema schema, List<DataType> fieldTypes) {
-            this(schema, fieldTypes, IntStream.range(0, fieldTypes.size()).toArray());
+        public RowReader(
+                Schema schema,
+                List<DataType> fieldTypes,
+                @Nullable PartitionInfo partitionInfo,
+                @Nullable int[] indexMapping) {
+            this(
+                    schema,
+                    fieldTypes,
+                    IntStream.range(0, fieldTypes.size()).toArray(),
+                    partitionInfo,
+                    indexMapping);
         }
 
-        public RowReader(Schema schema, List<DataType> fieldTypes, int[] projection) {
+        public RowReader(
+                Schema schema,
+                List<DataType> fieldTypes,
+                int[] projection,
+                @Nullable PartitionInfo partitionInfo,
+                @Nullable int[] indexMapping) {
             List<Schema.Field> schemaFields = schema.getFields();
             this.fieldReaders = new FieldReader[schemaFields.size()];
             for (int i = 0, fieldsSize = schemaFields.size(); i < fieldsSize; i++) {
@@ -456,6 +480,9 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
                 fieldReaders[i] = visit(field.schema(), type);
             }
             this.projection = projection;
+            this.partitionConverter =
+                    partitionInfo == null ? null : new PartitionConverter(partitionInfo);
+            this.indexMapping = indexMapping;
 
             // use fieldTypes to compatible with less fields in avro
 
@@ -489,6 +516,8 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
                 row = new GenericRow(projection.length);
             }
 
+            Object[] values = new Object[projection.length];
+
             for (int i = 0; i < fieldReaders.length; i += 1) {
                 int[] columns = mapping[i];
                 FieldReader reader = fieldReaders[i];
@@ -497,11 +526,36 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
                 } else {
                     Object value = reader.read(decoder, row.getField(columns[0]));
                     for (int column : columns) {
-                        row.setField(column, value);
+                        values[column] = value;
                     }
                 }
             }
-            return row;
+
+            if (partitionConverter != null) {
+                values = partitionConverter.convert(values);
+            }
+
+            if (indexMapping != null) {
+                Object[] newValues = new Object[indexMapping.length];
+                for (int i = 0; i < indexMapping.length; i++) {
+                    int realIndex = indexMapping[i];
+                    if (realIndex >= 0) {
+                        newValues[i] = values[indexMapping[i]];
+                    } else {
+                        newValues[i] = null;
+                    }
+                }
+
+                values = newValues;
+            }
+
+            GenericRow returnRow =
+                    row.getFieldCount() == values.length ? row : new GenericRow(values.length);
+            for (int i = 0; i < values.length; i++) {
+                returnRow.setField(i, values[i]);
+            }
+
+            return returnRow;
         }
 
         @Override
@@ -509,6 +563,41 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
             for (FieldReader fieldReader : fieldReaders) {
                 fieldReader.skip(decoder);
             }
+        }
+    }
+
+    /** Convert rows with their partition value. */
+    private static class PartitionConverter {
+
+        private final PartitionInfo partitionInfo;
+        private final Object[] partitionValues;
+
+        public PartitionConverter(PartitionInfo partitionInfo) {
+            this.partitionInfo = partitionInfo;
+            this.partitionValues = new Object[partitionInfo.getPartitionRow().getFieldCount()];
+
+            for (int i = 0; i < partitionInfo.size(); i++) {
+                if (partitionInfo.isPartitionRow(i)) {
+                    InternalRow.FieldGetter getter =
+                            InternalRow.createFieldGetter(
+                                    partitionInfo.getType(i), partitionInfo.getRealIndex(i));
+                    partitionValues[partitionInfo.getRealIndex(i)] =
+                            getter.getFieldOrNull(partitionInfo.getPartitionRow());
+                }
+            }
+        }
+
+        public Object[] convert(Object[] in) {
+            int length = partitionInfo.size();
+            Object[] out = new Object[length];
+            for (int i = 0; i < length; i++) {
+                if (partitionInfo.isPartitionRow(i)) {
+                    out[i] = partitionValues[partitionInfo.getRealIndex(i)];
+                } else {
+                    out[i] = in[partitionInfo.getRealIndex(i)];
+                }
+            }
+            return out;
         }
     }
 }

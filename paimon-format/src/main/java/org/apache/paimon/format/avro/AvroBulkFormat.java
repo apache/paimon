@@ -19,6 +19,7 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -51,12 +52,33 @@ public class AvroBulkFormat implements FormatReaderFactory {
     }
 
     @Override
-    public AvroReader createReader(FileIO fileIO, Path file) throws IOException {
-        return new AvroReader(fileIO, file);
+    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file) throws IOException {
+        return createReader(fileIO, file, null, null);
     }
 
     @Override
     public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
+            throws IOException {
+        return createReader(fileIO, file, poolSize, null, null);
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(
+            FileIO fileIO,
+            Path file,
+            @Nullable PartitionInfo partitionInfo,
+            @Nullable int[] indexMapping)
+            throws IOException {
+        return new AvroReader(fileIO, file, partitionInfo, indexMapping);
+    }
+
+    @Override
+    public RecordReader<InternalRow> createReader(
+            FileIO fileIO,
+            Path file,
+            int poolSize,
+            @Nullable PartitionInfo partitionInfo,
+            @Nullable int[] indexMapping)
             throws IOException {
         throw new UnsupportedOperationException();
     }
@@ -68,9 +90,18 @@ public class AvroBulkFormat implements FormatReaderFactory {
 
         private final long end;
         private final Pool<Object> pool;
+        private final @Nullable PartitionInfo partitionInfo;
+        private final @Nullable int[] indexMapping;
 
-        private AvroReader(FileIO fileIO, Path path) throws IOException {
+        private AvroReader(
+                FileIO fileIO,
+                Path path,
+                @Nullable PartitionInfo partitionInfo,
+                @Nullable int[] indexMapping)
+                throws IOException {
             this.fileIO = fileIO;
+            this.partitionInfo = partitionInfo;
+            this.indexMapping = indexMapping;
             this.reader = createReaderFromPath(path);
             this.reader.sync(0);
             this.end = fileIO.getFileSize(path);
@@ -79,7 +110,8 @@ public class AvroBulkFormat implements FormatReaderFactory {
         }
 
         private DataFileReader<InternalRow> createReaderFromPath(Path path) throws IOException {
-            DatumReader<InternalRow> datumReader = new AvroRowDatumReader(rowType, projection);
+            DatumReader<InternalRow> datumReader =
+                    new AvroRowDatumReader(rowType, projection, partitionInfo, indexMapping);
             SeekableInput in =
                     new SeekableInputStreamWrapper(
                             fileIO.newInputStream(path), fileIO.getFileSize(path));

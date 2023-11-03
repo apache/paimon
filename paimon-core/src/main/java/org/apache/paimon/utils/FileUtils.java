@@ -19,11 +19,14 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
+
+import javax.annotation.Nullable;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -127,7 +130,17 @@ public class FileUtils {
 
     public static RecordReader<InternalRow> createFormatReader(
             FileIO fileIO, FormatReaderFactory format, Path file) throws IOException {
+        return createFormatReader(fileIO, format, file, null, null);
+    }
+
+    public static RecordReader<InternalRow> createFormatReader(
+            FileIO fileIO,
+            FormatReaderFactory format,
+            Path file,
+            @Nullable PartitionInfo partitionInfo,
+            @Nullable int[] indexMapping)
+            throws IOException {
         checkExists(fileIO, file);
-        return format.createReader(fileIO, file);
+        return format.createReader(fileIO, file, partitionInfo, indexMapping);
     }
 }

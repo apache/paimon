@@ -20,6 +20,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -34,7 +35,6 @@ import java.io.IOException;
 public class RowDataFileRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
-    @Nullable private final int[] indexMapping;
     @Nullable private final CastFieldGetter[] castMapping;
 
     public RowDataFileRecordReader(
@@ -42,10 +42,12 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
             Path path,
             FormatReaderFactory readerFactory,
             @Nullable int[] indexMapping,
-            @Nullable CastFieldGetter[] castMapping)
+            @Nullable CastFieldGetter[] castMapping,
+            @Nullable PartitionInfo partitionInfo)
             throws IOException {
-        this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
-        this.indexMapping = indexMapping;
+        this.reader =
+                FileUtils.createFormatReader(
+                        fileIO, readerFactory, path, partitionInfo, indexMapping);
         this.castMapping = castMapping;
     }
 
@@ -53,9 +55,7 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
     @Override
     public RecordReader.RecordIterator<InternalRow> readBatch() throws IOException {
         RecordIterator<InternalRow> iterator = reader.readBatch();
-        return iterator == null
-                ? null
-                : new RowDataFileRecordIterator(iterator, indexMapping, castMapping);
+        return iterator == null ? null : new RowDataFileRecordIterator(iterator, castMapping);
     }
 
     @Override
@@ -68,10 +68,8 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
         private final RecordIterator<InternalRow> iterator;
 
         private RowDataFileRecordIterator(
-                RecordIterator<InternalRow> iterator,
-                @Nullable int[] indexMapping,
-                @Nullable CastFieldGetter[] castMapping) {
-            super(indexMapping, castMapping);
+                RecordIterator<InternalRow> iterator, @Nullable CastFieldGetter[] castMapping) {
+            super(castMapping);
             this.iterator = iterator;
         }
 

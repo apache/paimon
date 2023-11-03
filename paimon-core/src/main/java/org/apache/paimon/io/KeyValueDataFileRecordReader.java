@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -39,7 +40,6 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     private final RecordReader<InternalRow> reader;
     private final KeyValueSerializer serializer;
     private final int level;
-    @Nullable private final int[] indexMapping;
     @Nullable private final CastFieldGetter[] castMapping;
 
     public KeyValueDataFileRecordReader(
@@ -51,16 +51,17 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             int level,
             @Nullable Integer poolSize,
             @Nullable int[] indexMapping,
-            @Nullable CastFieldGetter[] castMapping)
+            @Nullable CastFieldGetter[] castMapping,
+            @Nullable PartitionInfo partitionInfo)
             throws IOException {
         FileUtils.checkExists(fileIO, path);
         this.reader =
                 poolSize == null
-                        ? readerFactory.createReader(fileIO, path)
-                        : readerFactory.createReader(fileIO, path, poolSize);
+                        ? readerFactory.createReader(fileIO, path, partitionInfo, indexMapping)
+                        : readerFactory.createReader(
+                                fileIO, path, poolSize, partitionInfo, indexMapping);
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
-        this.indexMapping = indexMapping;
         this.castMapping = castMapping;
     }
 
@@ -68,9 +69,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     @Override
     public RecordIterator<KeyValue> readBatch() throws IOException {
         RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
-        return iterator == null
-                ? null
-                : new KeyValueDataFileRecordIterator(iterator, indexMapping, castMapping);
+        return iterator == null ? null : new KeyValueDataFileRecordIterator(iterator, castMapping);
     }
 
     @Override
@@ -84,9 +83,8 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
 
         private KeyValueDataFileRecordIterator(
                 RecordReader.RecordIterator<InternalRow> iterator,
-                @Nullable int[] indexMapping,
                 @Nullable CastFieldGetter[] castMapping) {
-            super(indexMapping, castMapping);
+            super(castMapping);
             this.iterator = iterator;
         }
 
