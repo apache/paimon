@@ -38,6 +38,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
@@ -124,6 +125,9 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         Preconditions.checkNotNull(parserFactory);
         Preconditions.checkNotNull(database);
         Preconditions.checkNotNull(catalogLoader);
+        Preconditions.checkArgument(
+                !Optional.ofNullable(dynamicOptions.get("bucket-key")).isPresent(),
+                "The 'bucket-key' parameter is not supported for full database synchronization operations.");
 
         if (mode == COMBINED) {
             buildCombinedCdcSink();
