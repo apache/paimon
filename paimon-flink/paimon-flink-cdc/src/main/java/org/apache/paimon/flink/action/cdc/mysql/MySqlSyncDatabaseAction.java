@@ -128,6 +128,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         super(warehouse, catalogConfig);
         this.database = database;
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
+
+        MySqlActionUtils.registerJdbcDriver();
     }
 
     public MySqlSyncDatabaseAction withTableConfig(Map<String, String> tableConfig) {
