@@ -101,6 +101,12 @@ public class TagAutoCreation {
         }
     }
 
+    public boolean canProceedWithNextTag() {
+        LocalDateTime time = LocalDateTime.now();
+        return nextTag == null
+                || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag));
+    }
+
     private void tryToTag(Snapshot snapshot) {
         Optional<LocalDateTime> timeOptional =
                 timeExtractor.extract(snapshot.timeMillis(), snapshot.watermark());
