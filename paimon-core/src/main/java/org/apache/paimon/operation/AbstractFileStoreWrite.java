@@ -347,7 +347,7 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public FileStoreWrite<T> withCompactionMetrics(CompactionMetrics metrics) {
+    public FileStoreWrite<T> withMetrics(CompactionMetrics metrics) {
         this.compactionMetrics = metrics;
         return this;
     }

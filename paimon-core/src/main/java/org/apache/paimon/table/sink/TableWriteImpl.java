@@ -158,7 +158,7 @@ public class TableWriteImpl<T>
 
     @Override
     public TableWrite withMetricRegistry(MetricRegistry registry, BinaryRow partition, int bucket) {
-        write.withCompactionMetrics(
+        write.withMetrics(
                 new CompactionMetrics(registry, tableName, getPartitionString(partition), bucket));
         return this;
     }
