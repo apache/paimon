@@ -97,4 +97,31 @@ public class CatalogOptions {
                                             TextElement.text(
                                                     "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
                                     .build());
+
+    public static final ConfigOption<String> JDBC_URL =
+            key("jdbc.url")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Jdbc url for Paimon to store some information such as lineage and meta.");
+
+    public static final ConfigOption<String> JDBC_USER =
+            key("jdbc.user")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Jdbc user name for Paimon to store some information such as lineage and meta.");
+
+    public static final ConfigOption<String> JDBC_PASSWORD =
+            key("jdbc.password")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Jdbc password for Paimon to store some information such as lineage and meta.");
+
+    public static final ConfigOption<Boolean> JDBC_AUTO_DDL =
+            key("jdbc.auto-ddl")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("If true, jdbc will create tables automatically.");
 }

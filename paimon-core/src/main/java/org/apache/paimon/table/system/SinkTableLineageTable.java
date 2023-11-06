@@ -25,6 +25,8 @@ import org.apache.paimon.table.source.InnerTableRead;
 
 import java.util.Map;
 
+import static org.apache.paimon.lineage.LineageMetaUtils.SINK_TABLE_LINEAGE;
+
 /**
  * This is a system table to display all the sink table lineages.
  *
@@ -39,8 +41,6 @@ import java.util.Map;
  * </pre>
  */
 public class SinkTableLineageTable extends TableLineageTable {
-
-    public static final String SINK_TABLE_LINEAGE = "sink_table_lineage";
 
     public SinkTableLineageTable(
             LineageMetaFactory lineageMetaFactory, Map<String, String> options) {

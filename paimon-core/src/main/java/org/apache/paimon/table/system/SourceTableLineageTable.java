@@ -25,6 +25,8 @@ import org.apache.paimon.table.source.InnerTableRead;
 
 import java.util.Map;
 
+import static org.apache.paimon.lineage.LineageMetaUtils.SOURCE_TABLE_LINEAGE;
+
 /**
  * This is a system table to display all the source table lineages.
  *
@@ -39,8 +41,6 @@ import java.util.Map;
  * </pre>
  */
 public class SourceTableLineageTable extends TableLineageTable {
-
-    public static final String SOURCE_TABLE_LINEAGE = "source_table_lineage";
 
     public SourceTableLineageTable(
             LineageMetaFactory lineageMetaFactory, Map<String, String> options) {

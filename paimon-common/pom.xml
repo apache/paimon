@@ -206,6 +206,14 @@ under the License.
                 </exclusion>
             </exclusions>
         </dependency>
+
+        <!-- For jdbc lineage meta tests -->
+        <dependency>
+            <groupId>org.apache.derby</groupId>
+            <artifactId>derby</artifactId>
+            <version>10.14.2.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

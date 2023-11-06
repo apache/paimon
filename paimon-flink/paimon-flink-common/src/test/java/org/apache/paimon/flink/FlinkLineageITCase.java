@@ -45,7 +45,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for flink table and data lineage. */
 public class FlinkLineageITCase extends CatalogITCaseBase {
-    private static final String THROWING_META = "throwing-meta";
+    private static final String MEMORY_META = "memory-meta";
     private static final Map<String, Map<String, TableLineageEntity>> jobSourceTableLineages =
             new HashMap<>();
     private static final Map<String, Map<String, TableLineageEntity>> jobSinkTableLineages =
@@ -58,7 +58,7 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
     @Override
     protected Map<String, String> catalogOptions() {
-        return Collections.singletonMap(LINEAGE_META.key(), THROWING_META);
+        return Collections.singletonMap(LINEAGE_META.key(), MEMORY_META);
     }
 
     @Test
@@ -124,7 +124,7 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
         @Override
         public String identifier() {
-            return THROWING_META;
+            return MEMORY_META;
         }
 
         @Override

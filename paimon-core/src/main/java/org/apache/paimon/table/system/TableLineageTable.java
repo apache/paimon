@@ -34,10 +34,7 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.TimestampType;
-import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 
@@ -46,14 +43,14 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiFunction;
 
+import static org.apache.paimon.lineage.LineageMetaUtils.tableLineagePrimaryKeys;
+import static org.apache.paimon.lineage.LineageMetaUtils.tableLineageRowType;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Base lineage table for source and sink table lineage. */
@@ -85,17 +82,12 @@ public abstract class TableLineageTable implements ReadonlyTable {
 
     @Override
     public RowType rowType() {
-        List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "database_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(1, "table_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(2, "job_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(3, "create_time", new TimestampType()));
-        return new RowType(fields);
+        return tableLineageRowType();
     }
 
     @Override
     public List<String> primaryKeys() {
-        return Arrays.asList("database_name", "table_name", "job_name");
+        return tableLineagePrimaryKeys();
     }
 
     /** Table lineage read with lineage meta query. */
