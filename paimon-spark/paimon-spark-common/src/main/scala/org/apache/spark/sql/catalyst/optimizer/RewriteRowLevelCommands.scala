@@ -22,7 +22,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.table.Table
 
-import org.apache.spark.sql.{AnalysisException, Delete, RowLeverOp, Update}
+import org.apache.spark.sql.{AnalysisException, Delete, RowLevelOp, Update}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
@@ -32,11 +32,11 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
 import java.util
 
-object RewriteRowLeverCommands extends Rule[LogicalPlan] with PredicateHelper {
+object RewriteRowLevelCommands extends Rule[LogicalPlan] with PredicateHelper {
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperators {
     case d @ DeleteFromTable(r: DataSourceV2Relation, condition) =>
-      validateRowLeverOp(Delete, r.table.asInstanceOf[SparkTable].getTable, Option.empty)
+      validateRowLevelOp(Delete, r.table.asInstanceOf[SparkTable].getTable, Option.empty)
       if (canDeleteWhere(r, condition)) {
         d
       } else {
@@ -47,7 +47,7 @@ object RewriteRowLeverCommands extends Rule[LogicalPlan] with PredicateHelper {
           r: DataSourceV2Relation,
           assignments: Seq[Assignment],
           condition: Option[Expression]) =>
-      validateRowLeverOp(
+      validateRowLevelOp(
         Update,
         r.table.asInstanceOf[SparkTable].getTable,
         Option.apply(assignments))
@@ -57,8 +57,8 @@ object RewriteRowLeverCommands extends Rule[LogicalPlan] with PredicateHelper {
         condition: Option[Expression])
   }
 
-  private def validateRowLeverOp(
-      op: RowLeverOp,
+  private def validateRowLevelOp(
+      op: RowLevelOp,
       table: Table,
       assignments: Option[Seq[Assignment]]): Unit = {
     val options = Options.fromMap(table.options)

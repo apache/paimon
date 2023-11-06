@@ -19,17 +19,17 @@ package org.apache.spark.sql
 
 import org.apache.paimon.CoreOptions.MergeEngine
 
-sealed trait RowLeverOp {
+sealed trait RowLevelOp {
   val supportedMergeEngine: Seq[MergeEngine]
 }
 
-case object Delete extends RowLeverOp {
+case object Delete extends RowLevelOp {
   override def toString: String = "delete"
 
   override val supportedMergeEngine: Seq[MergeEngine] = Seq(MergeEngine.DEDUPLICATE)
 }
 
-case object Update extends RowLeverOp {
+case object Update extends RowLevelOp {
   override def toString: String = "update"
 
   override val supportedMergeEngine: Seq[MergeEngine] =
