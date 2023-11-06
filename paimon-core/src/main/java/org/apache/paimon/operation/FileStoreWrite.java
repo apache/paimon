@@ -124,5 +124,5 @@ public interface FileStoreWrite<T> {
     void close() throws Exception;
 
     /** With metrics to measure compaction. */
-    FileStoreWrite<T> withCompactionMetrics(CompactionMetrics metrics);
+    FileStoreWrite<T> withMetrics(CompactionMetrics metrics);
 }
