@@ -37,6 +37,8 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -55,6 +57,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for MySQL Action. */
 public class MySqlActionUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
 
     public static final ConfigOption<Boolean> SCAN_NEWLY_ADDED_TABLE_ENABLED =
             ConfigOptions.key("scan.newly-added-table.enabled")
@@ -221,6 +225,21 @@ public class MySqlActionUtils {
                 .includeSchemaChanges(true)
                 .scanNewlyAddedTableEnabled(scanNewlyAddedTables)
                 .build();
+    }
+
+    public static void registerJdbcDriver() {
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+        } catch (ClassNotFoundException ex) {
+            LOG.warn(
+                    "Cannot find class com.mysql.cj.jdbc.Driver. Try to load class com.mysql.jdbc.Driver.");
+            try {
+                Class.forName("com.mysql.jdbc.Driver");
+            } catch (Exception e) {
+                throw new RuntimeException(
+                        "No suitable driver found. Cannot find class com.mysql.cj.jdbc.Driver and com.mysql.jdbc.Driver.");
+            }
+        }
     }
 
     private static void validateMySqlConfig(Configuration mySqlConfig) {

@@ -111,6 +111,8 @@ public class MySqlSyncTableAction extends ActionBase {
         this.database = database;
         this.table = table;
         this.mySqlConfig = Configuration.fromMap(mySqlConfig);
+
+        MySqlActionUtils.registerJdbcDriver();
     }
 
     public MySqlSyncTableAction withPartitionKeys(String... partitionKeys) {
