@@ -224,7 +224,7 @@ By configuring [partition.expiration-time]({{< ref "maintenance/manage-partition
 #### Pick Partition Fields
 
 {{< hint info >}}
-Partition fields must be a subset of primary keys if primary keys are defined.
+Partition keys must be a subset of primary keys if primary keys are defined. If you need cross partition upsert (primary keys not contain all partition fields), you should use [Dynamic Bucket]({{< ref "concepts/primary-key-table#dynamic-bucket">}}) mode.
 {{< /hint >}}
 
 The following three types of fields may be defined as partition fields in the warehouse:

@@ -24,6 +24,8 @@ import org.apache.paimon.options.Options;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.common.config.ConfigException;
+import org.apache.kafka.common.errors.TopicExistsException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -101,11 +103,10 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
 
         KafkaLogStoreRegister kafkaLogStoreRegister =
                 createKafkaLogStoreRegister(invalidBootstrapServers, topic);
-
         assertThatThrownBy(kafkaLogStoreRegister::registerTopic)
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining(
-                        "Register topic for table mock_db.mock_table exception Failed to create new KafkaAdminClient");
+                .hasMessageContaining("Register topic for table mock_db.mock_table failed")
+                .hasRootCauseInstanceOf(ConfigException.class);
     }
 
     @Test
@@ -118,8 +119,8 @@ public class KafkaLogStoreRegisterITCase extends KafkaTableTestBase {
                                 createKafkaLogStoreRegister(getBootstrapServers(), topic)
                                         .registerTopic())
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage(
-                        "Register topic for table mock_db.mock_table exception org.apache.kafka.common.errors.TopicExistsException: Topic 'topic-exist' already exists.");
+                .hasMessageContaining("Register topic for table mock_db.mock_table failed")
+                .hasRootCauseInstanceOf(TopicExistsException.class);
     }
 
     @Test

@@ -60,7 +60,7 @@ public class CdcParsingProcessFunction<T> extends ProcessFunction<T, CdcRecord> 
             throws Exception {
         parser.setRawEvent(raw);
         List<DataField> schemaChange = parser.parseSchemaChange();
-        if (schemaChange.size() > 0) {
+        if (!schemaChange.isEmpty()) {
             context.output(NEW_DATA_FIELD_LIST_OUTPUT_TAG, schemaChange);
         }
         parser.parseRecords().forEach(collector::collect);

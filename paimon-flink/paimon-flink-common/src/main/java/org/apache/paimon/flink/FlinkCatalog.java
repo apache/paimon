@@ -227,11 +227,30 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public CatalogTable getTable(ObjectPath tablePath)
             throws TableNotExistException, CatalogException {
+        return getTable(tablePath, null);
+    }
+
+    /**
+     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.17-.
+     */
+    public CatalogTable getTable(ObjectPath tablePath, long timestamp)
+            throws TableNotExistException, CatalogException {
+        return getTable(tablePath, Long.valueOf(timestamp));
+    }
+
+    private CatalogTable getTable(ObjectPath tablePath, @Nullable Long timestamp)
+            throws TableNotExistException {
         Table table;
         try {
             table = catalog.getTable(toIdentifier(tablePath));
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
+        }
+
+        if (timestamp != null) {
+            Options options = new Options();
+            options.set(CoreOptions.SCAN_TIMESTAMP_MILLIS, timestamp);
+            table = table.copy(options.toMap());
         }
 
         if (table instanceof FileStoreTable) {

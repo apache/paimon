@@ -141,7 +141,13 @@ public abstract class E2eTestBase {
         }
         environment.withServices(services.toArray(new String[0])).withLocalCompose(true);
 
+        environment.waitingFor(
+                "jobmanager_1", Wait.forLogMessage(".*Registering TaskManager.*", 1));
+        environment.waitingFor(
+                "taskmanager_1",
+                Wait.forLogMessage(".*Successful registration at resource manager.*", 1));
         environment.start();
+
         jobManager = environment.getContainerByServiceName("jobmanager_1").get();
         jobManager.execInContainer("chown", "-R", "flink:flink", TEST_DATA_DIR);
     }

@@ -243,6 +243,10 @@ public class DataTableSource extends FlinkTableSource {
 
                 parallelism = Math.max(1, parallelism);
             }
+            parallelism =
+                    Math.min(
+                            parallelism,
+                            options.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
         }
 
         return sourceBuilder.withParallelism(parallelism).withEnv(env).build();

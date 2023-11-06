@@ -15,23 +15,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.paimon.spark.util
 
-package org.apache.paimon.lineage;
+import org.apache.paimon.types.RowKind
 
-import org.apache.paimon.factories.Factory;
-import org.apache.paimon.options.Options;
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.types.StructType
 
-import java.io.Serializable;
+object SparkRowUtils {
 
-/** Factory to create {@link LineageMeta}. Each factory should have a unique identifier. */
-public interface LineageMetaFactory extends Factory, Serializable {
-
-    LineageMeta create(LineageMetaContext context);
-
-    /**
-     * Context has all options in a catalog and is used in factory to create {@link LineageMeta}.
-     */
-    interface LineageMetaContext {
-        Options options();
+  def getRowKind(row: Row, rowkindColIdx: Int): RowKind = {
+    if (rowkindColIdx != -1) {
+      RowKind.fromByteValue(row.getByte(rowkindColIdx))
+    } else {
+      RowKind.INSERT
     }
+  }
+
+  def getFieldIndex(schema: StructType, colName: String): Int = {
+    try {
+      schema.fieldIndex(colName)
+    } catch {
+      case _: IllegalArgumentException =>
+        -1
+    }
+  }
+
 }

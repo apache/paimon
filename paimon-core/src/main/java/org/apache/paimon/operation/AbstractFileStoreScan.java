@@ -27,6 +27,8 @@ import org.apache.paimon.manifest.ManifestEntrySerializer;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.metrics.ScanMetrics;
+import org.apache.paimon.operation.metrics.ScanStats;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -49,6 +51,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -79,6 +82,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private ManifestCacheFilter manifestCacheFilter = null;
     private final Integer scanManifestParallelism;
+
+    private ScanMetrics scanMetrics = null;
 
     public AbstractFileStoreScan(
             RowType partitionType,
@@ -189,6 +194,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withMetrics(ScanMetrics metrics) {
+        this.scanMetrics = metrics;
+        return this;
+    }
+
+    @Override
     public Plan plan() {
 
         Pair<Snapshot, List<ManifestEntry>> planResult = doPlan(this::readManifestFileMeta);
@@ -223,6 +234,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private Pair<Snapshot, List<ManifestEntry>> doPlan(
             Function<ManifestFileMeta, List<ManifestEntry>> readManifest) {
+        long started = System.nanoTime();
         List<ManifestFileMeta> manifests = specifiedManifests;
         Snapshot snapshot = null;
         if (manifests == null) {
@@ -237,19 +249,29 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             }
         }
 
+        long startDataFiles =
+                manifests.stream().mapToLong(f -> f.numAddedFiles() + f.numDeletedFiles()).sum();
+
+        AtomicLong cntEntries = new AtomicLong(0);
         Iterable<ManifestEntry> entries =
                 ParallellyExecuteUtils.parallelismBatchIterable(
-                        files ->
-                                files.parallelStream()
-                                        .filter(this::filterManifestFileMeta)
-                                        .flatMap(m -> readManifest.apply(m).stream())
-                                        .filter(this::filterByStats)
-                                        .collect(Collectors.toList()),
+                        files -> {
+                            List<ManifestEntry> entryList =
+                                    files.parallelStream()
+                                            .filter(this::filterManifestFileMeta)
+                                            .flatMap(m -> readManifest.apply(m).stream())
+                                            .filter(this::filterByStats)
+                                            .collect(Collectors.toList());
+                            cntEntries.getAndAdd(entryList.size());
+                            return entryList;
+                        },
                         manifests,
                         scanManifestParallelism);
 
         List<ManifestEntry> files = new ArrayList<>();
-        for (ManifestEntry file : ManifestEntry.mergeEntries(entries)) {
+        Collection<ManifestEntry> mergedEntries = ManifestEntry.mergeEntries(entries);
+        long skippedByPartitionAndStats = startDataFiles - cntEntries.get();
+        for (ManifestEntry file : mergedEntries) {
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
                         partitionType.getFieldCount() > 0
@@ -278,6 +300,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             }
         }
 
+        long afterBucketFilter = files.size();
+        long skippedByBucketAndLevelFilter = mergedEntries.size() - files.size();
         // We group files by bucket here, and filter them by the whole bucket filter.
         // Why do this: because in primary key table, we can't just filter the value
         // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
@@ -296,6 +320,18 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                         .flatMap(Collection::stream)
                         .collect(Collectors.toList());
 
+        long skippedByWholeBucketFiles = afterBucketFilter - files.size();
+        long scanDuration = (System.nanoTime() - started) / 1_000_000;
+        if (scanMetrics != null) {
+            scanMetrics.reportScan(
+                    new ScanStats(
+                            scanDuration,
+                            manifests.size(),
+                            skippedByPartitionAndStats,
+                            skippedByBucketAndLevelFilter,
+                            skippedByWholeBucketFiles,
+                            files.size()));
+        }
         return Pair.of(snapshot, files);
     }
 

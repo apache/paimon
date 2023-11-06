@@ -21,6 +21,7 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
@@ -56,6 +57,8 @@ public interface SnapshotReader {
     SnapshotReader withBucket(int bucket);
 
     SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);
+
+    SnapshotReader withMetricRegistry(MetricRegistry registry);
 
     /** Get splits plan from snapshot. */
     Plan read();

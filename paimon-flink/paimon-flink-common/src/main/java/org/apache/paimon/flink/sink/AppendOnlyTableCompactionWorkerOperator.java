@@ -40,6 +40,7 @@ import java.util.Queue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -129,6 +130,10 @@ public class AppendOnlyTableCompactionWorkerOperator
         if (lazyCompactExecutor != null) {
             // ignore runnable tasks in queue
             lazyCompactExecutor.shutdownNow();
+            if (!lazyCompactExecutor.awaitTermination(120, TimeUnit.SECONDS)) {
+                LOG.warn(
+                        "Executors shutdown timeout, there may be some files aren't deleted correctly");
+            }
             List<CommitMessage> messages = new ArrayList<>();
             for (Future<CommitMessage> resultFuture : result) {
                 if (!resultFuture.isDone()) {

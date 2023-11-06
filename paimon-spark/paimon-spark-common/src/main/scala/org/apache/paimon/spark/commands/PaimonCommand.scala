@@ -29,8 +29,6 @@ import java.io.IOException
 /** Helper trait for all paimon commands. */
 trait PaimonCommand extends WithFileStoreTable {
 
-  val BUCKET_COL = "_bucket_"
-
   lazy val bucketMode: BucketMode = table match {
     case fileStoreTable: FileStoreTable =>
       fileStoreTable.bucketMode

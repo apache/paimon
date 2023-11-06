@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -244,6 +245,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public SnapshotReader withBucketFilter(Filter<Integer> bucketFilter) {
             snapshotReader.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
+        public SnapshotReader withMetricRegistry(MetricRegistry registry) {
+            snapshotReader.withMetricRegistry(registry);
             return this;
         }
 

@@ -165,7 +165,8 @@ public class MongoDBSyncTableAction extends ActionBase {
                                                 new MongoDBRecordParser(
                                                         caseSensitive,
                                                         computedColumns,
-                                                        mongodbConfig)))
+                                                        mongodbConfig))
+                                        .name("Parse"))
                         .withParserFactory(parserFactory)
                         .withTable(fileStoreTable)
                         .withIdentifier(identifier)

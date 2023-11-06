@@ -15,23 +15,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.paimon.spark.schema
 
-package org.apache.paimon.lineage;
+import org.apache.spark.sql.types.StructType
 
-import org.apache.paimon.factories.Factory;
-import org.apache.paimon.options.Options;
+/** System columns for paimon spark. */
+object SparkSystemColumns {
 
-import java.io.Serializable;
+  // for assigning bucket when writing
+  val BUCKET_COL = "_bucket_"
 
-/** Factory to create {@link LineageMeta}. Each factory should have a unique identifier. */
-public interface LineageMetaFactory extends Factory, Serializable {
+  // for row lever operation
+  val ROW_KIND_COL = "_row_kind_"
 
-    LineageMeta create(LineageMetaContext context);
+  val SPARK_SYSTEM_COLUMNS_NAME: Seq[String] = Seq(BUCKET_COL, ROW_KIND_COL)
 
-    /**
-     * Context has all options in a catalog and is used in factory to create {@link LineageMeta}.
-     */
-    interface LineageMetaContext {
-        Options options();
-    }
+  def filterSparkSystemColumns(schema: StructType): StructType = {
+    StructType(schema.fields.filterNot(field => SPARK_SYSTEM_COLUMNS_NAME.contains(field.name)))
+  }
 }
