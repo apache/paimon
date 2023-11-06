@@ -141,7 +141,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -166,7 +166,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -181,7 +181,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -196,7 +196,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -211,7 +211,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -226,7 +226,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -241,7 +241,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -256,7 +256,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -271,7 +271,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -286,7 +286,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -301,7 +301,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -316,7 +316,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -331,7 +331,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -346,7 +346,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -361,7 +361,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -376,7 +376,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
@@ -393,7 +393,7 @@ public class VectorMappingUtils {
 
                 @Override
                 public boolean isNullAt(int i) {
-                    return false;
+                    return partition.isNullAt(index);
                 }
             };
         }
