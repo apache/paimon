@@ -26,11 +26,11 @@ import org.apache.paimon.table.source.InnerTableRead;
 import java.util.Map;
 
 /**
- * This is a system table to display all the source table lineages.
+ * This is a system table to display all the sink table lineages.
  *
  * <pre>
  *  For example:
- *     If we select * from sys.source_table_lineage, we will get
+ *     If we select * from sys.sink_table_lineage, we will get
  *     database_name       table_name       job_name      create_time
  *        default            test0            job1    2023-10-22 20:35:12
  *       database1           test1            job1    2023-10-28 21:35:52
@@ -38,27 +38,27 @@ import java.util.Map;
  *     We can write sql to fetch the information we need.
  * </pre>
  */
-public class SourceTableLineageTable extends TableLineageTable {
+public class SinkTableLineageTable extends TableLineageTable {
 
-    public static final String SOURCE_TABLE_LINEAGE = "source_table_lineage";
+    public static final String SINK_TABLE_LINEAGE = "sink_table_lineage";
 
-    public SourceTableLineageTable(
+    public SinkTableLineageTable(
             LineageMetaFactory lineageMetaFactory, Map<String, String> options) {
         super(lineageMetaFactory, options);
     }
 
     @Override
     public InnerTableRead newRead() {
-        return new TableLineageRead(lineageMetaFactory, options, LineageMeta::sourceTableLineages);
+        return new TableLineageRead(lineageMetaFactory, options, LineageMeta::sinkTableLineages);
     }
 
     @Override
     public String name() {
-        return SOURCE_TABLE_LINEAGE;
+        return SINK_TABLE_LINEAGE;
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new SourceTableLineageTable(lineageMetaFactory, options);
+        return new SinkTableLineageTable(lineageMetaFactory, options);
     }
 }

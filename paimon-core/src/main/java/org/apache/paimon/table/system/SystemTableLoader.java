@@ -39,6 +39,7 @@ import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
+import static org.apache.paimon.table.system.SinkTableLineageTable.SINK_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
 import static org.apache.paimon.table.system.SourceTableLineageTable.SOURCE_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
@@ -94,6 +95,15 @@ public class SystemTableLoader {
                                     "Lineage meta should be configured for catalog with %s",
                                     LINEAGE_META.key()));
                     return new SourceTableLineageTable(lineageMetaFactory, catalogOptions);
+                }
+            case SINK_TABLE_LINEAGE:
+                {
+                    checkNotNull(
+                            lineageMetaFactory,
+                            String.format(
+                                    "Lineage meta should be configured for catalog with %s",
+                                    LINEAGE_META.key()));
+                    return new SinkTableLineageTable(lineageMetaFactory, catalogOptions);
                 }
             default:
                 return null;
