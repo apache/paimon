@@ -182,7 +182,6 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
             return Collections.emptyList();
         }
 
-        nonPkTables.remove(currentTable);
         Schema schema = buildSchema(tableChange);
         return Collections.singletonList(createRecord(schema));
     }

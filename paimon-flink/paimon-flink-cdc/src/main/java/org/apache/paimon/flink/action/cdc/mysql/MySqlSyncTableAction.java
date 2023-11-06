@@ -247,7 +247,8 @@ public class MySqlSyncTableAction extends ActionBase {
                                                 source,
                                                 WatermarkStrategy.noWatermarks(),
                                                 "MySQL Source")
-                                        .flatMap(recordParser))
+                                        .flatMap(recordParser)
+                                        .name("Parse"))
                         .withParserFactory(parserFactory)
                         .withTable(fileStoreTable)
                         .withIdentifier(identifier)

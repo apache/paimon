@@ -305,7 +305,8 @@ public class MySqlSyncDatabaseAction extends ActionBase {
         new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
                 .withInput(
                         env.fromSource(source, WatermarkStrategy.noWatermarks(), "MySQL Source")
-                                .flatMap(recordParser))
+                                .flatMap(recordParser)
+                                .name("Parse"))
                 .withParserFactory(parserFactory)
                 .withDatabase(database)
                 .withCatalogLoader(catalogLoader())
