@@ -204,6 +204,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             record.row().getRowKind(),
                             record.row());
                 },
-                name());
+                name(),
+                store().pathFactory());
     }
 }

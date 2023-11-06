@@ -60,5 +60,5 @@ public interface TableWrite extends AutoCloseable {
      */
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
 
-    TableWrite withMetricRegistry(MetricRegistry registry);
+    TableWrite withMetricRegistry(MetricRegistry registry, BinaryRow partition, int bucket);
 }

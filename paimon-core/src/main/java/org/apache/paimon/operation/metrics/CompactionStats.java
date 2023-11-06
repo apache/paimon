@@ -26,9 +26,12 @@ import java.util.List;
 /** Statistics for a compaction. */
 public class CompactionStats {
     private final long duration;
-    private final List<DataFileMeta> compactBefore;
-    private final List<DataFileMeta> compactAfter;
-    private final List<DataFileMeta> compactChangelog;
+    private final long compactedDataFilesBefore;
+    private final long compactedDataFilesAfter;
+    private final long compactedChangelogs;
+    private final long rewriteInputFileSize;
+    private final long rewriteOutputFileSize;
+    private final long rewriteChangelogFileSize;
 
     public CompactionStats(
             long compactionDuration,
@@ -36,9 +39,12 @@ public class CompactionStats {
             List<DataFileMeta> compactAfter,
             List<DataFileMeta> compactChangelog) {
         this.duration = compactionDuration;
-        this.compactBefore = compactBefore;
-        this.compactAfter = compactAfter;
-        this.compactChangelog = compactChangelog;
+        this.compactedDataFilesBefore = compactBefore.size();
+        this.compactedDataFilesAfter = compactAfter.size();
+        this.compactedChangelogs = compactChangelog.size();
+        this.rewriteInputFileSize = rewriteFileSize(compactBefore);
+        this.rewriteOutputFileSize = rewriteFileSize(compactAfter);
+        this.rewriteChangelogFileSize = rewriteFileSize(compactChangelog);
     }
 
     @VisibleForTesting
@@ -47,27 +53,27 @@ public class CompactionStats {
     }
 
     protected long getCompactedDataFilesBefore() {
-        return compactBefore.size();
+        return compactedDataFilesBefore;
     }
 
     protected long getCompactedDataFilesAfter() {
-        return compactAfter.size();
+        return compactedDataFilesAfter;
     }
 
     protected long getCompactedChangelogs() {
-        return compactChangelog.size();
+        return compactedChangelogs;
     }
 
     protected long getRewriteInputFileSize() {
-        return rewriteFileSize(compactBefore);
+        return rewriteInputFileSize;
     }
 
     protected long getRewriteOutputFileSize() {
-        return rewriteFileSize(compactAfter);
+        return rewriteOutputFileSize;
     }
 
     protected long getRewriteChangelogFileSize() {
-        return rewriteFileSize(compactChangelog);
+        return rewriteChangelogFileSize;
     }
 
     private long rewriteFileSize(List<DataFileMeta> files) {
@@ -80,17 +86,17 @@ public class CompactionStats {
                 + "duration="
                 + duration
                 + ", compactedDataFilesBefore="
-                + compactBefore.size()
+                + compactedDataFilesBefore
                 + ", compactedDataFilesAfter="
-                + compactAfter.size()
+                + compactedDataFilesAfter
                 + ", compactedChangelogs="
-                + compactChangelog.size()
+                + compactedChangelogs
                 + ", rewriteInputFileSize="
-                + rewriteFileSize(compactBefore)
+                + rewriteInputFileSize
                 + ", rewriteOutputFileSize="
-                + rewriteFileSize(compactAfter)
+                + rewriteOutputFileSize
                 + ", rewriteChangelogFileSize="
-                + rewriteFileSize(compactChangelog)
+                + rewriteChangelogFileSize
                 + '}';
     }
 }
