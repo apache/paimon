@@ -26,6 +26,8 @@ import org.apache.paimon.table.Table;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
@@ -108,5 +110,10 @@ public class SystemTableLoader {
             default:
                 return null;
         }
+    }
+
+    public static List<String> loadGlobalTableNames() {
+        return Arrays.asList(
+                ALL_TABLE_OPTIONS, CATALOG_OPTIONS, SOURCE_TABLE_LINEAGE, SINK_TABLE_LINEAGE);
     }
 }

@@ -32,14 +32,11 @@ import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.system.AllTableOptionsTable;
-import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,9 +48,6 @@ public abstract class AbstractCatalog implements Catalog {
 
     public static final String DB_SUFFIX = ".db";
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
-    protected static final List<String> GLOBAL_TABLES =
-            Arrays.asList(
-                    AllTableOptionsTable.ALL_TABLE_OPTIONS, CatalogOptionsTable.CATALOG_OPTIONS);
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
@@ -139,7 +133,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
         if (isSystemDatabase(databaseName)) {
-            return GLOBAL_TABLES;
+            return SystemTableLoader.loadGlobalTableNames();
         }
         if (!databaseExists(databaseName)) {
             throw new DatabaseNotExistException(databaseName);
