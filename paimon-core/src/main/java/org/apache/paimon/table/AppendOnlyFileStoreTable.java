@@ -157,6 +157,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             record.row().getRowKind());
                     return record.row();
                 },
-                name());
+                name(),
+                store().pathFactory());
     }
 }

@@ -34,8 +34,9 @@ public class CompactionMetrics {
 
     private final MetricGroup metricGroup;
 
-    public CompactionMetrics(MetricRegistry registry, String tableName) {
-        this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
+    public CompactionMetrics(
+            MetricRegistry registry, String tableName, String partition, int bucket) {
+        this.metricGroup = registry.bucketMetricGroup(GROUP_NAME, tableName, partition, bucket);
         registerGenericCompactionMetrics();
     }
 
