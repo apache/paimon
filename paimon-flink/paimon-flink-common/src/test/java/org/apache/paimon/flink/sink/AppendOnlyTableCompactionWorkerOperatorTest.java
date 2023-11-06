@@ -39,6 +39,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -78,7 +79,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
                                         workerOperator.prepareCommit(false, Long.MAX_VALUE));
 
                                 Long now = System.currentTimeMillis();
-                                if (timeStart - now > timeout && committables.size() != 4) {
+                                if (now - timeStart > timeout && committables.size() != 4) {
                                     throw new RuntimeException(
                                             "Timeout waiting for compaction, maybe some error happens in "
                                                     + AppendOnlyTableCompactionWorkerOperator.class
@@ -105,6 +106,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
         AppendOnlyTableCompactionWorkerOperator workerOperator =
                 new AppendOnlyTableCompactionWorkerOperator(
                         (AppendOnlyFileStoreTable) getTableDefault(), "user");
+        ExecutorService workerExecutor = workerOperator.workerExecutor();
 
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 40);
@@ -151,7 +153,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
         workerOperator.shutdown();
 
         // wait the last runnable in thread pool to stop
-        Thread.sleep(2_000);
+        workerExecutor.awaitTermination(120, TimeUnit.SECONDS);
 
         for (Future<CommitMessage> f : workerOperator.result()) {
             try {

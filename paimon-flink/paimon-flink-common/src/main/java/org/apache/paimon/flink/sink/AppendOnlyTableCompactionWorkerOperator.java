@@ -109,7 +109,8 @@ public class AppendOnlyTableCompactionWorkerOperator
         result.add(workerExecutor().submit(() -> task.doCompact(write)));
     }
 
-    private ExecutorService workerExecutor() {
+    @VisibleForTesting
+    ExecutorService workerExecutor() {
         if (lazyCompactExecutor == null) {
             lazyCompactExecutor =
                     Executors.newSingleThreadScheduledExecutor(
