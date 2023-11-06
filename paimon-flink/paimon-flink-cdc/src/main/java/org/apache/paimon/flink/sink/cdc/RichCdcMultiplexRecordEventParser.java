@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
@@ -84,7 +85,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
 
     @Override
     public String parseTableName() {
-        return tableNameConverter.convert(currentTable);
+        return tableNameConverter.convert(Identifier.create(record.databaseName(), currentTable));
     }
 
     @Override
@@ -139,6 +140,8 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     }
 
     private boolean shouldCreateCurrentTable() {
-        return shouldSynchronizeCurrentTable && createdTables.add(currentTable);
+        return shouldSynchronizeCurrentTable
+                && !record.fieldTypes().isEmpty()
+                && createdTables.add(parseTableName());
     }
 }

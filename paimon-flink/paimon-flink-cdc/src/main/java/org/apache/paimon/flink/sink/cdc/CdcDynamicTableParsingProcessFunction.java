@@ -95,8 +95,7 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
         parser.parseNewTable()
                 .ifPresent(
                         schema -> {
-                            Identifier identifier =
-                                    new Identifier(database, parser.parseTableName());
+                            Identifier identifier = new Identifier(database, tableName);
                             try {
                                 catalog.createTable(identifier, schema, true);
                             } catch (Exception e) {

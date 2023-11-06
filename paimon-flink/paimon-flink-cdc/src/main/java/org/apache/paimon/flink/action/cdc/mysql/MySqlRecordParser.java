@@ -16,24 +16,17 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from JsonDebeziumSchemaSerializer in the doris-flink-connector
- * (https://github.com/apache/doris-flink-connector/), licensed by the Apache Software Foundation (ASF) under the
- * Apache License, Version 2.0. See the NOTICE file distributed with this work for additional
- *  information regarding copyright ownership. */
-
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
-import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -44,21 +37,25 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.Deseriali
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
+import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import io.debezium.data.Bits;
 import io.debezium.data.geometry.Geometry;
 import io.debezium.data.geometry.Point;
+import io.debezium.relational.Column;
+import io.debezium.relational.Table;
 import io.debezium.relational.history.TableChanges;
 import io.debezium.time.Date;
 import io.debezium.time.MicroTime;
 import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
+import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.util.Collector;
 import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.annotation.Nullable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -74,124 +71,84 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Pattern;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
-/** {@link EventParser} for MySQL Debezium JSON. */
-public class MySqlDebeziumJsonEventParser implements EventParser<String> {
+/**
+ * A parser for MySql Debezium JSON strings, converting them into a list of {@link
+ * RichCdcMultiplexRecord}s.
+ */
+public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MySqlDebeziumJsonEventParser.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MySqlRecordParser.class);
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
     private final boolean caseSensitive;
-    private final TableNameConverter tableNameConverter;
     private final List<ComputedColumn> computedColumns;
-    private final NewTableSchemaBuilder<TableChanges.TableChange> schemaBuilder;
-    @Nullable private final Pattern includingPattern;
-    @Nullable private final Pattern excludingPattern;
-    private final Set<String> includedTables = new HashSet<>();
-    private final Set<String> excludedTables = new HashSet<>();
     private final TypeMapping typeMapping;
 
     private DebeziumEvent root;
 
     // NOTE: current table name is not converted by tableNameConverter
     private String currentTable;
-    private boolean shouldSynchronizeCurrentTable;
+    private String databaseName;
     private final CdcMetadataConverter[] metadataConverters;
 
-    public MySqlDebeziumJsonEventParser(
-            ZoneId serverTimeZone,
+    private final Set<String> nonPkTables = new HashSet<>();
+
+    public MySqlRecordParser(
+            Configuration mySqlConfig,
+            boolean caseSensitive,
+            TypeMapping typeMapping,
+            CdcMetadataConverter[] metadataConverters) {
+        this(mySqlConfig, caseSensitive, Collections.emptyList(), typeMapping, metadataConverters);
+    }
+
+    public MySqlRecordParser(
+            Configuration mySqlConfig,
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {
-        this(
-                serverTimeZone,
-                caseSensitive,
-                computedColumns,
-                new TableNameConverter(caseSensitive),
-                new MySqlTableSchemaBuilder(new HashMap<>(), caseSensitive, typeMapping),
-                null,
-                null,
-                typeMapping,
-                metadataConverters);
-    }
-
-    public MySqlDebeziumJsonEventParser(
-            ZoneId serverTimeZone,
-            boolean caseSensitive,
-            TableNameConverter tableNameConverter,
-            NewTableSchemaBuilder<TableChanges.TableChange> schemaBuilder,
-            @Nullable Pattern includingPattern,
-            @Nullable Pattern excludingPattern,
-            TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
-        this(
-                serverTimeZone,
-                caseSensitive,
-                Collections.emptyList(),
-                tableNameConverter,
-                schemaBuilder,
-                includingPattern,
-                excludingPattern,
-                typeMapping,
-                metadataConverters);
-    }
-
-    public MySqlDebeziumJsonEventParser(
-            ZoneId serverTimeZone,
-            boolean caseSensitive,
-            List<ComputedColumn> computedColumns,
-            TableNameConverter tableNameConverter,
-            NewTableSchemaBuilder<TableChanges.TableChange> schemaBuilder,
-            @Nullable Pattern includingPattern,
-            @Nullable Pattern excludingPattern,
-            TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
-        this.serverTimeZone = serverTimeZone;
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
-        this.tableNameConverter = tableNameConverter;
-        this.schemaBuilder = schemaBuilder;
-        this.includingPattern = includingPattern;
-        this.excludingPattern = excludingPattern;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
+        objectMapper
+                .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        String stringifyServerTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
+        this.serverTimeZone =
+                stringifyServerTimeZone == null
+                        ? ZoneId.systemDefault()
+                        : ZoneId.of(stringifyServerTimeZone);
     }
 
     @Override
-    public void setRawEvent(String rawEvent) {
-        try {
-            objectMapper
-                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
-                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-            root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
-            currentTable = root.payload().source().table();
-            shouldSynchronizeCurrentTable = shouldSynchronizeCurrentTable();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+    public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
+        root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
+        currentTable = root.payload().source().table();
+        databaseName = root.payload().source().db();
+
+        if (root.payload().isSchemaChange()) {
+            extractSchemaChange().forEach(out::collect);
+            return;
         }
+        extractRecords().forEach(out::collect);
     }
 
-    @Override
-    public String parseTableName() {
-        return tableNameConverter.convert(Identifier.create(getDatabaseName(), currentTable));
-    }
-
-    @Override
-    public List<DataField> parseSchemaChange() {
-        if (!shouldSynchronizeCurrentTable || !root.payload().isSchemaChange()) {
-            return Collections.emptyList();
-        }
-
+    private List<RichCdcMultiplexRecord> extractSchemaChange() {
         DebeziumEvent.Payload payload = root.payload();
         if (!payload.hasHistoryRecord()) {
             return Collections.emptyList();
@@ -211,85 +168,80 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
                 return Collections.emptyList();
             }
         } catch (Exception e) {
-            LOG.info("Failed to parse history record for schema changes", e);
+            LOG.error("Failed to parse history record for schema changes", e);
             return Collections.emptyList();
         }
 
-        Optional<Schema> schema = schemaBuilder.build(tableChange);
-        return schema.get().fields();
-    }
-
-    @Override
-    public Optional<Schema> parseNewTable() {
-        if (!shouldSynchronizeCurrentTable) {
-            return Optional.empty();
-        }
-
-        DebeziumEvent.Payload payload = root.payload();
-        if (!payload.hasHistoryRecord()) {
-            return Optional.empty();
-        }
-
-        try {
-            TableChanges.TableChange tableChange = null;
-            Iterator<TableChanges.TableChange> tableChanges = payload.getTableChanges();
-            long count;
-            for (count = 0L; tableChanges.hasNext(); ++count) {
-                tableChange = tableChanges.next();
-            }
-            if (count != 1) {
-                LOG.error(
-                        "Invalid historyRecord, because tableChanges should contain exactly 1 item.\n"
-                                + payload.historyRecord());
-                return Optional.empty();
-            }
-
-            if (TableChanges.TableChangeType.CREATE != tableChange.getType()) {
-                return Optional.empty();
-            }
-
-            List<String> primaryKeyColumnNames = tableChange.getTable().primaryKeyColumnNames();
-            if (primaryKeyColumnNames.isEmpty()) {
-                LOG.debug(
-                        "Didn't find primary keys from MySQL DDL for table '{}'. "
-                                + "This table won't be synchronized.",
-                        currentTable);
-                excludedTables.add(currentTable);
-                shouldSynchronizeCurrentTable = false;
-                return Optional.empty();
-            }
-
-            return schemaBuilder.build(tableChange);
-        } catch (Exception e) {
-            LOG.info("Failed to parse history record for schema changes", e);
-            return Optional.empty();
-        }
-    }
-
-    @Override
-    public List<CdcRecord> parseRecords() {
-        if (!shouldSynchronizeCurrentTable || root.payload().isSchemaChange()) {
+        if (TableChanges.TableChangeType.CREATE == tableChange.getType()
+                && tableChange.getTable().primaryKeyColumnNames().isEmpty()) {
+            LOG.error(
+                    "Didn't find primary keys from MySQL DDL for table '{}'. "
+                            + "This table won't be synchronized.",
+                    currentTable);
+            nonPkTables.add(currentTable);
             return Collections.emptyList();
         }
-        List<CdcRecord> records = new ArrayList<>();
+
+        Schema schema = buildSchema(tableChange);
+        return Collections.singletonList(createRecord(schema));
+    }
+
+    private Schema buildSchema(TableChanges.TableChange tableChange) {
+        Table table = tableChange.getTable();
+        String tableName = tableChange.getId().toString();
+        List<Column> columns = table.columns();
+
+        Set<String> existedFields = new HashSet<>();
+        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+
+        Schema.Builder builder = Schema.newBuilder();
+
+        // column
+        for (Column column : columns) {
+            DataType dataType =
+                    MySqlTypeUtils.toDataType(
+                            column.typeExpression(),
+                            column.length(),
+                            column.scale().orElse(null),
+                            typeMapping);
+
+            dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
+
+            String columnName =
+                    columnCaseConvertAndDuplicateCheck(
+                            column.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+
+            // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
+            builder.column(columnName, dataType, null);
+        }
+
+        // primaryKey
+        List<String> primaryKeys = table.primaryKeyColumnNames();
+        primaryKeys = listCaseConvert(primaryKeys, caseSensitive);
+        builder.primaryKey(primaryKeys);
+
+        return builder.build();
+    }
+
+    private List<RichCdcMultiplexRecord> extractRecords() {
+        if (nonPkTables.contains(currentTable)) {
+            return Collections.emptyList();
+        }
+        List<RichCdcMultiplexRecord> records = new ArrayList<>();
 
         Map<String, String> before = extractRow(root.payload().before());
         if (!before.isEmpty()) {
             before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
-            records.add(new CdcRecord(RowKind.DELETE, before));
+            records.add(createRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(root.payload().after());
         if (!after.isEmpty()) {
             after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
-            records.add(new CdcRecord(RowKind.INSERT, after));
+            records.add(createRecord(RowKind.INSERT, after));
         }
 
         return records;
-    }
-
-    private String getDatabaseName() {
-        return root.payload().source().db();
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
@@ -300,7 +252,7 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         DebeziumEvent.Field schema =
                 Preconditions.checkNotNull(
                         root.schema(),
-                        "MySqlDebeziumJsonEventParser only supports debezium JSON with schema. "
+                        "MySqlRecordParser only supports debezium JSON with schema. "
                                 + "Please make sure that `includeSchema` is true "
                                 + "in the JsonDebeziumDeserializationSchema you created");
 
@@ -433,37 +385,29 @@ public class MySqlDebeziumJsonEventParser implements EventParser<String> {
         return resultMap;
     }
 
-    private boolean shouldSynchronizeCurrentTable() {
-        // When database DDL operation, the current table is null.
-        if (currentTable == null) {
-            return false;
-        }
+    protected RichCdcMultiplexRecord createRecord(Schema schema) {
+        LinkedHashMap<String, DataType> fieldTypes =
+                schema.fields().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        DataField::name,
+                                        DataField::type,
+                                        (v1, v2) -> v2,
+                                        LinkedHashMap::new));
+        return new RichCdcMultiplexRecord(
+                databaseName,
+                currentTable,
+                fieldTypes,
+                schema.primaryKeys(),
+                CdcRecord.emptyRecord());
+    }
 
-        if (excludedTables.contains(currentTable)) {
-            return false;
-        }
-
-        if (includedTables.contains(currentTable)) {
-            return true;
-        }
-
-        boolean shouldSynchronize = true;
-        if (includingPattern != null) {
-            shouldSynchronize = includingPattern.matcher(currentTable).matches();
-        }
-        if (excludingPattern != null) {
-            shouldSynchronize =
-                    shouldSynchronize && !excludingPattern.matcher(currentTable).matches();
-        }
-        if (!shouldSynchronize) {
-            LOG.debug(
-                    "Source table {} won't be synchronized because it was excluded. ",
-                    currentTable);
-            excludedTables.add(currentTable);
-            return false;
-        }
-
-        includedTables.add(currentTable);
-        return true;
+    protected RichCdcMultiplexRecord createRecord(RowKind rowKind, Map<String, String> data) {
+        return new RichCdcMultiplexRecord(
+                databaseName,
+                currentTable,
+                new LinkedHashMap<>(0),
+                Collections.emptyList(),
+                new CdcRecord(rowKind, data));
     }
 }

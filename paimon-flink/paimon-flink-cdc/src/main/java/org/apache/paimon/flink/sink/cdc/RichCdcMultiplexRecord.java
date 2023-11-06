@@ -49,6 +49,10 @@ public class RichCdcMultiplexRecord implements Serializable {
         this.cdcRecord = cdcRecord;
     }
 
+    public String databaseName() {
+        return databaseName;
+    }
+
     public String tableName() {
         return tableName;
     }

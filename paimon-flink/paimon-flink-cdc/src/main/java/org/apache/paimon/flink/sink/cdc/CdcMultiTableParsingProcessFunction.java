@@ -63,7 +63,7 @@ public class CdcMultiTableParsingProcessFunction<T> extends ProcessFunction<T, V
         parser.setRawEvent(raw);
         String tableName = parser.parseTableName();
         List<DataField> schemaChange = parser.parseSchemaChange();
-        if (schemaChange.size() > 0) {
+        if (!schemaChange.isEmpty()) {
             context.output(getUpdatedDataFieldsOutputTag(tableName), schemaChange);
         }
         parser.parseRecords()
