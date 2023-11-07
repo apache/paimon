@@ -21,10 +21,19 @@ package org.apache.paimon.flink.metrics;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.Map;
 
 /** {@link MetricRegistry} to create {@link FlinkMetricGroup}. */
 public class FlinkMetricRegistry extends MetricRegistry {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FlinkMetricRegistry.class);
+
+    public org.apache.flink.metrics.MetricGroup getGroup() {
+        return group;
+    }
 
     private final org.apache.flink.metrics.MetricGroup group;
 
@@ -34,6 +43,12 @@ public class FlinkMetricRegistry extends MetricRegistry {
 
     @Override
     protected MetricGroup createMetricGroup(String groupName, Map<String, String> variables) {
-        return new FlinkMetricGroup(group, groupName, variables);
+        LOG.info(
+                "gjli: createMetricGroup by FlinkMetricRegistry, flink group info: {}, groupName: {}, variables: {}",
+                group.getAllVariables(),
+                groupName,
+                variables);
+        FlinkMetricGroup flinkMetricGroup = new FlinkMetricGroup(group, groupName, variables);
+        return flinkMetricGroup;
     }
 }

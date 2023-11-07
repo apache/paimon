@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
@@ -32,6 +33,7 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,6 +63,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     protected TableWriteImpl<?> write;
 
+    @Nullable protected final MetricGroup metricGroup;
+
     public StoreSinkWriteImpl(
             FileStoreTable table,
             String commitUser,
@@ -69,7 +73,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean ignorePreviousFiles,
             boolean waitCompaction,
             boolean isStreamingMode,
-            @Nullable MemorySegmentPool memoryPool) {
+            @Nullable MemorySegmentPool memoryPool,
+            MetricGroup metricGroup) {
         this(
                 table,
                 commitUser,
@@ -79,7 +84,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 waitCompaction,
                 isStreamingMode,
                 memoryPool,
-                null);
+                null,
+                metricGroup);
     }
 
     public StoreSinkWriteImpl(
@@ -90,7 +96,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean ignorePreviousFiles,
             boolean waitCompaction,
             boolean isStreamingMode,
-            MemoryPoolFactory memoryPoolFactory) {
+            MemoryPoolFactory memoryPoolFactory,
+            MetricGroup metricGroup) {
         this(
                 table,
                 commitUser,
@@ -100,7 +107,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 waitCompaction,
                 isStreamingMode,
                 null,
-                memoryPoolFactory);
+                memoryPoolFactory,
+                metricGroup);
     }
 
     private StoreSinkWriteImpl(
@@ -112,7 +120,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean waitCompaction,
             boolean isStreamingMode,
             @Nullable MemorySegmentPool memoryPool,
-            @Nullable MemoryPoolFactory memoryPoolFactory) {
+            @Nullable MemoryPoolFactory memoryPoolFactory,
+            MetricGroup metricGroup) {
         this.commitUser = commitUser;
         this.state = state;
         this.paimonIOManager = new IOManagerImpl(ioManager.getSpillingDirectoriesPaths());
@@ -121,6 +130,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.isStreamingMode = isStreamingMode;
         this.memoryPool = memoryPool;
         this.memoryPoolFactory = memoryPoolFactory;
+        this.metricGroup = metricGroup;
         this.write = newTableWrite(table);
     }
 
@@ -136,7 +146,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                         state.stateValueFilter().filter(table.name(), part, bucket))
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .isStreamingMode(isStreamingMode);
+                        .isStreamingMode(isStreamingMode)
+                        .withMetricRegistry(new FlinkMetricRegistry(metricGroup));
 
         if (memoryPoolFactory != null) {
             return tableWrite.withMemoryPoolFactory(memoryPoolFactory);

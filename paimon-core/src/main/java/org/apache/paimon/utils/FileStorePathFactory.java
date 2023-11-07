@@ -124,10 +124,13 @@ public class FileStorePathFactory {
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */
     public String getPartitionString(BinaryRow partition) {
-        return PartitionPathUtils.generatePartitionPath(
-                partitionComputer.generatePartValues(
-                        Preconditions.checkNotNull(
-                                partition, "Partition row data is null. This is unexpected.")));
+        String partStr =
+                PartitionPathUtils.generatePartitionPath(
+                        partitionComputer.generatePartValues(
+                                Preconditions.checkNotNull(
+                                        partition,
+                                        "Partition row data is null. This is unexpected.")));
+        return partStr;
     }
 
     public List<Path> getHierarchicalPartitionPath(BinaryRow partition) {

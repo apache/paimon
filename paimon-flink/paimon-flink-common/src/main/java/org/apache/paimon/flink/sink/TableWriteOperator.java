@@ -91,7 +91,12 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         // runtime context, we can test to construct a writer here
         state = new StoreSinkWriteState(context, stateFilter);
 
-        write = storeSinkWriteProvider.provide(table, commitUser, state, ioManager, memoryPool);
+        write =
+                storeSinkWriteProvider.provide(
+                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
+        LOG.info(
+                "gjli: get variables in InternalOperatorMetricGroup for TableWriteOperator: {}",
+                getMetricGroup().getAllVariables());
     }
 
     protected abstract boolean containLogSystem();

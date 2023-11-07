@@ -148,7 +148,8 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public TableWrite withMetricRegistry(MetricRegistry metricRegistry) {
+
+    public TableWriteImpl<T> withMetricRegistry(MetricRegistry metricRegistry) {
         write.withMetricRegistry(metricRegistry);
         return this;
     }
