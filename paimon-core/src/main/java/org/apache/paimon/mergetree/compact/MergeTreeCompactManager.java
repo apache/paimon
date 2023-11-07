@@ -56,7 +56,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final int numSortedRunStopTrigger;
     private final CompactRewriter rewriter;
 
-    private final CompactionMetrics metrics;
+    @Nullable private final CompactionMetrics metrics;
 
     public MergeTreeCompactManager(
             ExecutorService executor,

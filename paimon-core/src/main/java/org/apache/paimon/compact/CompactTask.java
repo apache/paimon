@@ -35,7 +35,7 @@ import java.util.concurrent.Callable;
 public abstract class CompactTask implements Callable<CompactResult> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CompactTask.class);
-    private CompactionMetrics metrics;
+    @Nullable private final CompactionMetrics metrics;
 
     public CompactTask(@Nullable CompactionMetrics metrics) {
         this.metrics = metrics;
