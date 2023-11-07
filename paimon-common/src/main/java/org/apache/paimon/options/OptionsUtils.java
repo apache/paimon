@@ -26,7 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.StructuredOptionsSplitter.escapeWithSingleQuote;
@@ -300,12 +300,12 @@ public class OptionsUtils {
     public static Map<String, String> convertToPropertiesPrefixKey(
             Iterable<Map.Entry<String, String>> confData,
             final String prefixKey,
-            Function<String, Boolean> valuePredicate) {
+            Predicate<String> valuePredicate) {
         Map<String, String> properties = new HashMap<>();
         confData.forEach(
                 entry -> {
                     if (entry.getKey().startsWith(prefixKey)
-                            && valuePredicate.apply(entry.getValue())) {
+                            && valuePredicate.test(entry.getValue())) {
                         properties.put(
                                 entry.getKey().substring(prefixKey.length()), entry.getValue());
                     }
