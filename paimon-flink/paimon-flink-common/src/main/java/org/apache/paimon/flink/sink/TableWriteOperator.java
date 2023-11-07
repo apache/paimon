@@ -94,9 +94,6 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         write =
                 storeSinkWriteProvider.provide(
                         table, commitUser, state, ioManager, memoryPool, getMetricGroup());
-        LOG.info(
-                "gjli: get variables in InternalOperatorMetricGroup for TableWriteOperator: {}",
-                getMetricGroup().getAllVariables());
     }
 
     protected abstract boolean containLogSystem();
