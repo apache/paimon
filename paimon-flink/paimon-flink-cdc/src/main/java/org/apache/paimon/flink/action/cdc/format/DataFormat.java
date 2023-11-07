@@ -21,7 +21,7 @@ package org.apache.paimon.flink.action.cdc.format;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.canal.CanalRecordParser;
-import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumRecordParser;
+import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaExcludeJsonRecordParser;
 import org.apache.paimon.flink.action.cdc.format.maxwell.MaxwellRecordParser;
 import org.apache.paimon.flink.action.cdc.format.ogg.OggRecordParser;
 
@@ -38,7 +38,7 @@ public enum DataFormat {
     CANAL_JSON(CanalRecordParser::new),
     OGG_JSON(OggRecordParser::new),
     MAXWELL_JSON(MaxwellRecordParser::new),
-    DEBEZIUM_JSON(DebeziumRecordParser::new);
+    DEBEZIUM_SCHEMA_EXCLUDE_JSON(DebeziumSchemaExcludeJsonRecordParser::new);
     // Add more data formats here if needed
 
     private final RecordParserFactory parser;

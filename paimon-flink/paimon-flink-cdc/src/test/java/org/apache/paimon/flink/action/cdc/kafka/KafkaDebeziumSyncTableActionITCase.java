@@ -45,14 +45,17 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         createTestTopic(topic, 1, 1);
         // ---------- Write the debezium json into Kafka -------------------
         List<String> lines =
-                readLines(String.format("kafka/debezium/table/%s/debezium-data-1.txt", sourceDir));
+                readLines(
+                        String.format(
+                                "kafka/debezium/table/%s/debezium-data-schema-exclude-1.txt",
+                                sourceDir));
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
             throw new Exception("Failed to write debezium data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put("value.format", "debezium-schema-exclude-json");
         kafkaConfig.put("topic", topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -88,7 +91,8 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
                     topic,
                     readLines(
                             String.format(
-                                    "kafka/debezium/table/%s/debezium-data-2.txt", sourceDir)));
+                                    "kafka/debezium/table/%s/debezium-data-schema-exclude-2.txt",
+                                    sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write debezium data to Kafka.", e);
         }
@@ -115,7 +119,8 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
                     topic,
                     readLines(
                             String.format(
-                                    "kafka/debezium/table/%s/debezium-data-3.txt", sourceDir)));
+                                    "kafka/debezium/table/%s/debezium-data-schema-exclude-3.txt",
+                                    sourceDir)));
         } catch (Exception e) {
             throw new Exception("Failed to write debezium data to Kafka.", e);
         }
@@ -146,14 +151,15 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         String topic = "computed_column";
         createTestTopic(topic, 1, 1);
 
-        List<String> lines = readLines("kafka/debezium/table/computedcolumn/debezium-data-1.txt");
+        List<String> lines =
+                readLines("kafka/debezium/table/computedcolumn/debezium-data-schema-exclude-1.txt");
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put("value.format", "debezium-schema-exclude-json");
         kafkaConfig.put("topic", topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)

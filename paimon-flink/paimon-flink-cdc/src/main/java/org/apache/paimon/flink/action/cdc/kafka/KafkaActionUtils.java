@@ -58,6 +58,8 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
+import static org.apache.paimon.flink.action.cdc.format.DataFormat.DEBEZIUM_SCHEMA_EXCLUDE_JSON;
+import static org.apache.paimon.flink.action.cdc.format.DataFormat.fromConfigString;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for Kafka Action. */
@@ -67,7 +69,6 @@ public class KafkaActionUtils {
 
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
-    private static final String DEBEZIUM_JSON = "debezium-json";
 
     public static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
         return buildKafkaSource(kafkaConfig, new ArrayList<>());
@@ -87,7 +88,8 @@ public class KafkaActionUtils {
                 .setTopics(topics)
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig))
                 .setValueOnlyDeserializer(
-                        DEBEZIUM_JSON.equals(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT))
+                        fromConfigString(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT))
+                                        .equals(DEBEZIUM_SCHEMA_EXCLUDE_JSON)
                                 ? new JsonPrimaryKeyDeserializationSchema(primaryKeys)
                                 : new SimpleStringSchema());
         Properties properties = new Properties();
@@ -268,7 +270,7 @@ public class KafkaActionUtils {
     }
 
     static DataFormat getDataFormat(Configuration kafkaConfig) {
-        return DataFormat.fromConfigString(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT));
+        return fromConfigString(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT));
     }
 
     static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
@@ -304,7 +306,8 @@ public class KafkaActionUtils {
         consumer.seekToBeginning(topicPartitions);
         return new KafkaConsumerWrapper(
                 consumer,
-                DEBEZIUM_JSON.equals(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT))
+                fromConfigString(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT))
+                                .equals(DEBEZIUM_SCHEMA_EXCLUDE_JSON)
                         ? primaryKeys
                         : new ArrayList<>());
     }

@@ -31,10 +31,10 @@ import static org.apache.flink.shaded.guava30.com.google.common.base.Preconditio
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
- * The {@code DebeziumRecordParser} class extends the abstract {@link RecordParser} and is designed
- * to parse records from Debezium's JSON change data capture (CDC) format. Debezium is a CDC
- * solution for MySQL databases that captures row-level changes to database tables and outputs them
- * in JSON format. This parser extracts relevant information from the Debezium-JSON format and
+ * The {@code DebeziumExcludeJsonRecordParser} class extends the abstract {@link RecordParser} and
+ * is designed to parse records from Debezium's JSON change data capture (CDC) format. Debezium is a
+ * CDC solution for MySQL databases that captures row-level changes to database tables and outputs
+ * them in JSON format. This parser extracts relevant information from the Debezium-JSON format and
  * converts it into a list of {@link RichCdcMultiplexRecord} objects.
  *
  * <p>The class supports various database operations such as INSERT, UPDATE, DELETE, and READ
@@ -47,7 +47,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  * operation type, and primary key field names are used to construct the details of each record
  * event.
  */
-public class DebeziumRecordParser extends RecordParser {
+public class DebeziumSchemaExcludeJsonRecordParser extends RecordParser {
 
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_AFTER = "after";
@@ -60,7 +60,7 @@ public class DebeziumRecordParser extends RecordParser {
     private static final String OP_DELETE = "d";
     private static final String OP_READE = "r";
 
-    public DebeziumRecordParser(
+    public DebeziumSchemaExcludeJsonRecordParser(
             boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
         super(caseSensitive, typeMapping, computedColumns);
     }
