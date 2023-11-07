@@ -188,6 +188,33 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         commit.close();
     }
 
+    @Test
+    public void testModifyTagPeriod() {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(SINK_WATERMARK_TIME_ZONE, ZoneId.systemDefault().toString());
+        FileStoreTable table;
+        TableCommitImpl commit;
+        TagManager tagManager;
+        table = this.table.copy(options.toMap());
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        tagManager = table.store().newTagManager();
+
+        // test first create
+        commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:09")));
+        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
+        table = table.copy(options.toMap());
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        tagManager = table.store().newTagManager();
+
+        // test newCommit create
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-20T12:00:01")));
+        assertThat(tagManager.tags().values()).contains("2023-07-18 11", "2023-07-19");
+    }
+
     private long localZoneMills(String timestamp) {
         return LocalDateTime.parse(timestamp)
                 .atZone(ZoneId.systemDefault())
