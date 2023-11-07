@@ -114,8 +114,11 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                 case EXCEPTION:
                     throw new UnsupportedOperationException(
                             String.format(
-                                    "Cannot convert field %s from type %s to %s",
-                                    updateColumnType.fieldName(), oldType, newType));
+                                    "Cannot convert field %s from type %s to %s of Paimon table %s.",
+                                    updateColumnType.fieldName(),
+                                    oldType,
+                                    newType,
+                                    identifier.getFullName()));
             }
         } else if (schemaChange instanceof SchemaChange.UpdateColumnComment) {
             catalog.alterTable(identifier, schemaChange, false);
