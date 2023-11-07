@@ -39,8 +39,10 @@ public class JsonPrimaryKeyDeserializationSchema implements DeserializationSchem
     private final List<String> primaryKeyNames;
 
     public JsonPrimaryKeyDeserializationSchema(List<String> primaryKeyNames) {
-        checkNotNull(primaryKeyNames);
-        this.primaryKeyNames = primaryKeyNames;
+        this.primaryKeyNames = checkNotNull(primaryKeyNames);
+        if (this.primaryKeyNames.isEmpty()) {
+            throw new IllegalArgumentException("primary key must not be empty");
+        }
     }
 
     @Override
