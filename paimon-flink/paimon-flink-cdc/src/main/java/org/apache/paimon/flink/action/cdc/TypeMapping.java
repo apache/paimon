@@ -70,6 +70,7 @@ public class TypeMapping implements Serializable {
         TINYINT1_NOT_BOOL,
         TO_NULLABLE,
         TO_STRING,
+        LONGTEXT_TO_BYTES,
         CHAR_TO_STRING;
 
         private static final Map<String, TypeMappingMode> TYPE_MAPPING_OPTIONS =

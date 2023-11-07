@@ -46,6 +46,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.CHAR_TO_STRING;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.LONGTEXT_TO_BYTES;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 
@@ -262,6 +263,9 @@ public class MySqlTypeUtils {
             case TEXT:
             case MEDIUMTEXT:
             case LONGTEXT:
+                return length == null || length == 0 || typeMapping.containsMode(LONGTEXT_TO_BYTES)
+                        ? DataTypes.VARCHAR(length)
+                        : DataTypes.STRING();
             case JSON:
             case ENUM:
             case GEOMETRY:
