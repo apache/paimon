@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.widetable;
 
+import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.TableActionBase;
 import org.apache.paimon.flink.widetable.bean.ChangeLog;
 import org.apache.paimon.flink.widetable.bean.DimensionTable;
@@ -36,7 +37,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** Delete tag action for Flink. */
-public class WideTableAction extends TableActionBase {
+public class WideTableAction extends ActionBase {
 
     private final String database;
     private final String table;
@@ -46,7 +47,7 @@ public class WideTableAction extends TableActionBase {
 
     public WideTableAction(
             String warehouse, String database, String table, Map<String, String> catalogConfig) {
-        super(warehouse, catalogConfig);
+        super(warehouse,catalogConfig);
         this.database = database;
         this.table = table;
     }
@@ -76,7 +77,7 @@ public class WideTableAction extends TableActionBase {
                 messageDataStream
                         // 开启窗口计算逻辑
                         .keyBy(t -> t.getHash_pk())
-                        .window(TumblingProcessingTimeWindows.of(Time.milliseconds(windowSize)))
+                        //.window(TumblingProcessingTimeWindows.of(Time.milliseconds(windowSize)))
                         .reduce(new DimensionWindowReduceFunction())
                         // end
                         .map(new MessageMysqlSinkMapFunction())
