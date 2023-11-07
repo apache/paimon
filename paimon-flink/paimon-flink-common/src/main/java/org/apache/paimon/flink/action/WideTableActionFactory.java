@@ -18,14 +18,19 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.flink.widetable.utils.options.DimensionOptions;
+import org.apache.paimon.flink.widetable.utils.options.JobOptions;
+import org.apache.paimon.flink.widetable.utils.options.SinkOptions;
+import org.apache.paimon.flink.widetable.utils.options.SourceOptions;
+import org.apache.paimon.flink.widetable.utils.options.SqlInfoOptions;
+
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 
-import java.util.Map;
 import java.util.Optional;
 
-/** Factory to create {@link wideTableAction}. */
-public class wideTableActionFactory implements ActionFactory {
+/** Factory to create {@link WideTableAction}. */
+public class WideTableActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "wide-table";
 
@@ -36,18 +41,27 @@ public class wideTableActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "tag-name");
-
+        checkRequiredArgument(params, JobOptions.PRE_NAME);
+        checkRequiredArgument(params, SourceOptions.PRE_NAME);
+        checkRequiredArgument(params, DimensionOptions.PRE_NAME);
+        checkRequiredArgument(params, SqlInfoOptions.PRE_NAME);
+        checkRequiredArgument(params, SinkOptions.PRE_NAME);
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        String tagName = params.get("tag-name");
 
-        wideTableAction action =
-                new wideTableAction(
-                        tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig, tagName);
+        WideTableAction action =
+                new WideTableAction(
+                        tablePath.f0,
+                        tablePath.f1,
+                        tablePath.f2,
+                        optionalConfigMap(params, "catalog-conf"),
+                        optionalConfigMap(params, "mysql-conf"));
+
         return Optional.of(action);
     }
 
     @Override
-    public void printHelp() {}
+    public void printHelp() {
+        System.out.println("Action \"wide-table\" creates a streaming job.");
+        System.out.println();
+    }
 }
