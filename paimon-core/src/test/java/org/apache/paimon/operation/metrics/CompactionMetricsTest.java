@@ -38,6 +38,8 @@ import static org.assertj.core.api.Assertions.offset;
 public class CompactionMetricsTest {
 
     private static final String TABLE_NAME = "myTable";
+    private static final String PARTITION = "date=20230623";
+    private static final int BUCKET = 5;
 
     /** Tests that the metrics are updated properly. */
     @SuppressWarnings("unchecked")
@@ -167,6 +169,6 @@ public class CompactionMetricsTest {
     }
 
     private CompactionMetrics getCompactionMetrics() {
-        return new CompactionMetrics(new MetricRegistryImpl(), TABLE_NAME);
+        return new CompactionMetrics(new MetricRegistryImpl(), TABLE_NAME, PARTITION, BUCKET);
     }
 }
