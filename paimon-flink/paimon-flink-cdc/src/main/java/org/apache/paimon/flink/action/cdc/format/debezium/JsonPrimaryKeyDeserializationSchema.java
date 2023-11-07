@@ -21,11 +21,13 @@ package org.apache.paimon.flink.action.cdc.format.debezium;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.flink.api.common.serialization.DeserializationSchema;
-import org.apache.flink.api.common.typeinfo.TypeHint;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
  * This class is used to deserialize byte[] messages into String format, and then add primary key
@@ -37,6 +39,7 @@ public class JsonPrimaryKeyDeserializationSchema implements DeserializationSchem
     private final List<String> primaryKeyNames;
 
     public JsonPrimaryKeyDeserializationSchema(List<String> primaryKeyNames) {
+        checkNotNull(primaryKeyNames);
         this.primaryKeyNames = primaryKeyNames;
     }
 
@@ -44,7 +47,7 @@ public class JsonPrimaryKeyDeserializationSchema implements DeserializationSchem
     public String deserialize(byte[] message) {
         try {
             String value = new String(message, StandardCharsets.UTF_8);
-            return JsonSerdeUtil.addPrimaryKeysToJson(value, primaryKeyNames, PRIMARY_KEY_NAMES);
+            return JsonSerdeUtil.putArrayToJsonString(value, PRIMARY_KEY_NAMES, primaryKeyNames);
         } catch (Exception e) {
             throw new RuntimeException("Failed to deserialize message", e);
         }
@@ -57,6 +60,6 @@ public class JsonPrimaryKeyDeserializationSchema implements DeserializationSchem
 
     @Override
     public TypeInformation<String> getProducedType() {
-        return TypeInformation.of(new TypeHint<String>() {});
+        return BasicTypeInfo.STRING_TYPE_INFO;
     }
 }

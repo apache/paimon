@@ -327,7 +327,7 @@ public class KafkaActionUtils {
             ConsumerRecords<String, String> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
             return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
-                    .map(r -> JsonSerdeUtil.addPrimaryKeysToJson(r.value(), pkNames, PK_NAMES_KEY))
+                    .map(r -> JsonSerdeUtil.putArrayToJsonString(r.value(), PK_NAMES_KEY, pkNames))
                     .collect(Collectors.toList());
         }
 
