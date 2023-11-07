@@ -22,7 +22,11 @@ import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
@@ -56,6 +60,7 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
+import static org.apache.paimon.flink.action.cdc.format.debezium.JsonPrimaryKeyDeserializationSchema.DEBEZIUM_RECORD_PAYLOAD_FIELD;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for Kafka Action. */
@@ -65,6 +70,16 @@ public class KafkaActionUtils {
 
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
+
+    public static final ConfigOption<Boolean> DEBEZIUM_JSON_INCLUDE_SCHEMA =
+            ConfigOptions.key("value.debezium-json.schema-include")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "When setting up a Debezium Kafka Connect, users can enable "
+                                    + "a Kafka configuration 'value.converter.schemas.enable' to include schema in the message. "
+                                    + "This option indicates the Debezium JSON data include the schema in the message or not. "
+                                    + "Default is false.");
 
     public static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
         validateKafkaConfig(kafkaConfig);
