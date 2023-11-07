@@ -233,6 +233,10 @@ public class TableSchema implements Serializable {
         return projectedLogicalRowType(primaryKeys());
     }
 
+    public List<DataField> primaryKeysFields() {
+        return projectedDataFields(primaryKeys());
+    }
+
     public List<DataField> trimmedPrimaryKeysFields() {
         return projectedDataFields(trimmedPrimaryKeys());
     }

@@ -251,4 +251,21 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         batchSql("INSERT INTO T_P VALUES (1, 1, 1, 1, '1')");
         assertThat(sql("SELECT k, c FROM T_P")).containsExactlyInAnyOrder(Row.of(1, "1"));
     }
+
+    @Test
+    public void testLocalMerge() {
+        sql(
+                "CREATE TABLE T1 ("
+                        + "k INT,"
+                        + "v INT,"
+                        + "d INT,"
+                        + "PRIMARY KEY (k, d) NOT ENFORCED) PARTITIONED BY (d) "
+                        + " WITH ('merge-engine'='partial-update', "
+                        + "'local-merge-buffer-size'='1m'"
+                        + ");");
+
+        sql("INSERT INTO T1 VALUES (1, CAST(NULL AS INT), 1), (2, 1, 1), (1, 2, 1)");
+        assertThat(batchSql("SELECT * FROM T1"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 1), Row.of(2, 1, 1));
+    }
 }

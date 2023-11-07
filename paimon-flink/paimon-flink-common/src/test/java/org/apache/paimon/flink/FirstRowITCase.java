@@ -88,4 +88,19 @@ public class FirstRowITCase extends CatalogITCaseBase {
         assertThat(iterator.collect(1))
                 .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, 8, 8, "8"));
     }
+
+    @Test
+    public void testLocalMerge() {
+        sql(
+                "CREATE TABLE IF NOT EXISTS T1 ("
+                        + "a INT, b INT, c STRING, PRIMARY KEY (a, b) NOT ENFORCED)"
+                        + " PARTITIONED BY (b) WITH ('merge-engine'='first-row', 'local-merge-buffer-size' = '1m',"
+                        + " 'file.format'='avro', 'changelog-producer' = 'lookup');");
+        batchSql("INSERT INTO T1 VALUES (1, 1, '1'), (1, 1, '2'), (2, 3, '3')");
+        List<Row> result = batchSql("SELECT * FROM T1");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, 1, "1"),
+                        Row.ofKind(RowKind.INSERT, 2, 3, "3"));
+    }
 }

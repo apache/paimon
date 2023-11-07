@@ -27,9 +27,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.SequenceGenerator;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
@@ -41,6 +43,8 @@ import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
+
+import java.util.List;
 
 /**
  * {@link AbstractStreamOperator} which buffer input record and apply merge function when the buffer
@@ -88,7 +92,25 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
         recordCount = 0;
         sequenceGenerator = SequenceGenerator.create(schema, options);
-        mergeFunction = PrimaryKeyTableUtils.createMergeFunctionFactory(schema).create();
+        mergeFunction =
+                PrimaryKeyTableUtils.createMergeFunctionFactory(
+                                schema,
+                                new KeyValueFieldsExtractor() {
+                                    private static final long serialVersionUID = 1L;
+
+                                    // At local merge operator, the key extractor should include
+                                    // partition fields.
+                                    @Override
+                                    public List<DataField> keyFields(TableSchema schema) {
+                                        return schema.primaryKeysFields();
+                                    }
+
+                                    @Override
+                                    public List<DataField> valueFields(TableSchema schema) {
+                                        return schema.fields();
+                                    }
+                                })
+                        .create();
 
         buffer =
                 new SortBufferWriteBuffer(
