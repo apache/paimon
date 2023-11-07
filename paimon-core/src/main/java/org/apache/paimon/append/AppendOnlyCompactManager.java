@@ -59,7 +59,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
 
     private List<DataFileMeta> compacting;
 
-    private final CompactionMetrics metrics;
+    @Nullable private final CompactionMetrics metrics;
 
     public AppendOnlyCompactManager(
             ExecutorService executor,

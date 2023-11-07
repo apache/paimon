@@ -30,7 +30,6 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
-import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Restorable;
 
@@ -157,9 +156,8 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public TableWrite withMetricRegistry(MetricRegistry registry, BinaryRow partition, int bucket) {
-        write.withMetrics(
-                new CompactionMetrics(registry, tableName, getPartitionString(partition), bucket));
+    public TableWrite withMetricRegistry(MetricRegistry metricRegistry) {
+        write.withMetricRegistry(metricRegistry);
         return this;
     }
 

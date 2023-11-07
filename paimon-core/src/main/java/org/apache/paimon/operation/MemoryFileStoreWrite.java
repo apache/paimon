@@ -24,6 +24,7 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -57,8 +58,10 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            @Nullable IndexMaintainer.Factory<T> indexFactory) {
-        super(commitUser, snapshotManager, scan, indexFactory);
+            @Nullable IndexMaintainer.Factory<T> indexFactory,
+            String tableName,
+            FileStorePathFactory pathFactory) {
+        super(commitUser, snapshotManager, scan, indexFactory, tableName, pathFactory);
         this.options = options;
         this.cacheManager =
                 new CacheManager(

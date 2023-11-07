@@ -43,6 +43,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     private final RowType bucketKeyType;
     private final RowType rowType;
+    private final String tableName;
 
     public AppendOnlyFileStore(
             FileIO fileIO,
@@ -51,10 +52,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
             CoreOptions options,
             RowType partitionType,
             RowType bucketKeyType,
-            RowType rowType) {
+            RowType rowType,
+            String tableName) {
         super(fileIO, schemaManager, schemaId, options, partitionType);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
+        this.tableName = tableName;
     }
 
     @Override
@@ -95,7 +98,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 pathFactory(),
                 snapshotManager(),
                 newScan(true).withManifestCacheFilter(manifestFilter),
-                options);
+                options,
+                tableName);
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite) {
