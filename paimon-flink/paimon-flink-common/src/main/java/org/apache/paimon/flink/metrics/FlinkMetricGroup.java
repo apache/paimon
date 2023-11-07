@@ -48,6 +48,7 @@ public class FlinkMetricGroup implements MetricGroup {
             wrapped = wrapped.addGroup(entry.getKey(), entry.getValue());
         }
         wrapped = wrapped.addGroup(groupName);
+
         this.wrapped = wrapped;
         this.groupName = groupName;
         this.variables = variables;

@@ -33,7 +33,7 @@ public interface InnerTableScan extends TableScan {
     }
 
     default InnerTableScan withMetricsRegistry(MetricRegistry metricRegistry) {
-        throw new UnsupportedOperationException(
-                "InnerTableScan doesn't support registering metrics by default.");
+        // do nothing, should implement this if need
+        return this;
     }
 }

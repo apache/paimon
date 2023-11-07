@@ -117,12 +117,8 @@ public class LogHybridSourceFactory
                 StreamTableScan scan = readBuilder.newStreamScan();
                 // register scan metrics
                 if (context.metricGroup() != null) {
-                    try {
-                        ((InnerStreamTableScan) scan)
-                                .withMetricsRegistry(
-                                        new FlinkMetricRegistry(context.metricGroup()));
-                    } catch (UnsupportedOperationException ignore) {
-                    }
+                    ((InnerStreamTableScan) scan)
+                            .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
                 }
                 splits = splitGenerator.createSplits(scan.plan());
                 Long nextSnapshotId = scan.checkpoint();
