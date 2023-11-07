@@ -35,11 +35,14 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializerProvider;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ser.std.StdSerializer;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -217,6 +220,39 @@ public class JsonSerdeUtil {
      */
     public static <T> JsonNode toTree(T value) {
         return OBJECT_MAPPER_INSTANCE.valueToTree(value);
+    }
+
+    /**
+     * Adds an array of values to a JSON string under the specified key.
+     *
+     * @param origin The original JSON string.
+     * @param key The key under which the values will be added as an array.
+     * @param values A list of values to be added to the JSON string.
+     * @return The JSON string with the added array. If the JSON string is not a valid JSON object,
+     *     or if the list of values is empty or null, the original JSON string will be returned.
+     * @throws RuntimeException If an error occurs while parsing the JSON string or adding the
+     *     values.
+     */
+    public static String putArrayToJsonString(String origin, String key, List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return origin;
+        }
+
+        try {
+            JsonNode jsonNode = OBJECT_MAPPER_INSTANCE.readTree(origin);
+            if (jsonNode.isObject()) {
+                ObjectNode objectNode = (ObjectNode) jsonNode;
+                ArrayNode arrayNode = objectNode.putArray(key);
+                for (String value : values) {
+                    arrayNode.add(value);
+                }
+                return OBJECT_MAPPER_INSTANCE.writeValueAsString(objectNode);
+            } else {
+                return origin;
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to add array to JSON", e);
+        }
     }
 
     public static boolean isNull(JsonNode jsonNode) {
