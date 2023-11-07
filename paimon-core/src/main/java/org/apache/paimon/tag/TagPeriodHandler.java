@@ -141,6 +141,7 @@ public interface TagPeriodHandler {
 
         @Override
         public LocalDateTime tagToTime(String tag) {
+            tag = tag.split(" ")[0];
             return LocalDate.parse(tag, formatter()).atStartOfDay();
         }
     }
