@@ -1,6 +1,7 @@
 package org.apache.paimon.flink.widetable.reduce;
 
 import org.apache.flink.api.common.functions.ReduceFunction;
+import org.apache.paimon.flink.widetable.msg.Message;
 
 import java.util.ArrayList;
 import java.util.HashMap;

@@ -77,7 +77,7 @@ public class WideTableAction extends ActionBase {
                 messageDataStream
                         // 开启窗口计算逻辑
                         .keyBy(t -> t.getHash_pk())
-                        //.window(TumblingProcessingTimeWindows.of(Time.milliseconds(windowSize)))
+                        .window(TumblingProcessingTimeWindows.of(Time.milliseconds(10000)))
                         .reduce(new DimensionWindowReduceFunction())
                         // end
                         .map(new MessageMysqlSinkMapFunction())
