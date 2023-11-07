@@ -78,7 +78,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
                                         workerOperator.prepareCommit(false, Long.MAX_VALUE));
 
                                 Long now = System.currentTimeMillis();
-                                if (timeStart - now > timeout && committables.size() != 4) {
+                                if (now - timeStart > timeout && committables.size() != 4) {
                                     throw new RuntimeException(
                                             "Timeout waiting for compaction, maybe some error happens in "
                                                     + AppendOnlyTableCompactionWorkerOperator.class
